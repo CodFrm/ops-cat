@@ -29,7 +29,25 @@ func TestClaudeEventParser(t *testing.T) {
 			events, done := parser.ParseLine(`{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","name":"Bash","id":"tool_1"}}}`)
 			So(done, ShouldBeFalse)
 			So(events, ShouldHaveLength, 1)
-			So(events[0].Content, ShouldContainSubstring, "Bash")
+			So(events[0].Type, ShouldEqual, "tool_start")
+			So(events[0].ToolName, ShouldEqual, "Bash")
+		})
+
+		Convey("解析 input_json_delta 累积工具输入", func() {
+			// 开始 tool_use
+			parser.ParseLine(`{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","name":"Bash","id":"tool_1"}}}`)
+
+			// 输入 delta
+			events, _ := parser.ParseLine(`{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","text":"{\"command\":\"ls -la\"}"}}}`)
+			So(events, ShouldBeEmpty) // delta 不直接产生事件
+
+			// content_block_stop → 发送带 input 的 tool_start
+			events, done := parser.ParseLine(`{"type":"stream_event","event":{"type":"content_block_stop","index":1}}`)
+			So(done, ShouldBeFalse)
+			So(events, ShouldHaveLength, 1)
+			So(events[0].Type, ShouldEqual, "tool_start")
+			So(events[0].ToolName, ShouldEqual, "Bash")
+			So(events[0].ToolInput, ShouldEqual, "ls -la")
 		})
 
 		Convey("解析 result 事件标记完成", func() {
@@ -38,11 +56,10 @@ func TestClaudeEventParser(t *testing.T) {
 			So(done, ShouldBeTrue)
 		})
 
-		Convey("解析 assistant 消息", func() {
+		Convey("解析 assistant 消息不重复发送", func() {
 			events, done := parser.ParseLine(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"服务器分析结果"}]}}`)
 			So(done, ShouldBeFalse)
-			So(events, ShouldHaveLength, 1)
-			So(events[0].Content, ShouldEqual, "服务器分析结果")
+			So(events, ShouldBeEmpty)
 		})
 
 		Convey("空行不报错", func() {

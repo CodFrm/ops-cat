@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"ops-cat/internal/model/entity/asset_entity"
+	"ops-cat/internal/model/entity/conversation_entity"
 	"ops-cat/internal/model/entity/group_entity"
 	"ops-cat/internal/model/entity/ssh_key_entity"
 
@@ -65,6 +66,21 @@ func RunMigrations(db *gorm.DB) error {
 			},
 			Rollback: func(tx *gorm.DB) error {
 				return tx.Migrator().DropColumn("ssh_keys", "comment")
+			},
+		},
+		{
+			ID: "202603230001",
+			Migrate: func(tx *gorm.DB) error {
+				if err := tx.AutoMigrate(&conversation_entity.Conversation{}); err != nil {
+					return err
+				}
+				return tx.AutoMigrate(&conversation_entity.Message{})
+			},
+			Rollback: func(tx *gorm.DB) error {
+				if err := tx.Migrator().DropTable("conversation_messages"); err != nil {
+					return err
+				}
+				return tx.Migrator().DropTable("conversations")
 			},
 		},
 	})

@@ -13,12 +13,14 @@ import (
 
 	"ops-cat/internal/ai"
 	"ops-cat/internal/model/entity/asset_entity"
+	"ops-cat/internal/model/entity/conversation_entity"
 	"ops-cat/internal/model/entity/group_entity"
 	"ops-cat/internal/model/entity/ssh_key_entity"
 	"ops-cat/internal/repository/asset_repo"
 	"ops-cat/internal/repository/group_repo"
 	"ops-cat/internal/service/asset_svc"
 	"ops-cat/internal/service/backup_svc"
+	"ops-cat/internal/service/conversation_svc"
 	"ops-cat/internal/service/credential_svc"
 	"ops-cat/internal/service/import_svc"
 	"ops-cat/internal/service/sftp_svc"
@@ -32,14 +34,18 @@ import (
 
 // App Wails应用主结构体，替代controller层
 type App struct {
-	ctx              context.Context
-	lang             string
-	sshManager       *ssh_svc.Manager
-	sftpService      *sftp_svc.Service
-	aiAgent          *ai.Agent
-	aiProvider       ai.Provider // 保留 provider 引用，用于权限回调注入
-	githubAuthCancel context.CancelFunc
-	permissionChan   chan ai.PermissionResponse // 前端权限响应 channel
+	ctx                   context.Context
+	lang                  string
+	sshManager            *ssh_svc.Manager
+	sftpService           *sftp_svc.Service
+	aiAgent               *ai.Agent
+	aiProvider            ai.Provider // 保留 provider 引用，用于权限回调注入
+	mcpServer             *ai.MCPServer
+	githubAuthCancel      context.CancelFunc
+	permissionChan        chan ai.PermissionResponse // 前端权限响应 channel
+	currentConversationID int64                      // 当前活跃会话ID
+	aiProviderType        string                     // 当前 provider 类型
+	aiModel               string                     // 当前模型
 }
 
 // NewApp 创建App实例
@@ -55,6 +61,11 @@ func NewApp() *App {
 
 // SetAIProvider 设置 AI provider 并创建 agent
 func (a *App) SetAIProvider(providerType, apiBase, apiKey, model string) {
+	// 停止旧的 MCP Server
+	a.stopMCPServer()
+	a.aiProviderType = providerType
+	a.aiModel = model
+
 	var provider ai.Provider
 	switch providerType {
 	case "openai":
@@ -67,6 +78,25 @@ func (a *App) SetAIProvider(providerType, apiBase, apiKey, model string) {
 			wailsRuntime.EventsEmit(a.ctx, "ai:permission", req)
 			return <-a.permissionChan
 		}
+		// 启动 MCP Server（使用应用数据目录作为默认配置目录）
+		mcpSrv := ai.NewMCPServer()
+		if err := mcpSrv.Start(a.ctx, appDataDir()); err != nil {
+			fmt.Printf("MCP Server 启动失败: %v\n", err)
+		} else {
+			a.mcpServer = mcpSrv
+			// 如果有当前会话的工作目录，写入 MCP 配置
+			if a.currentConversationID > 0 {
+				conv, err := conversation_svc.Conversation().Get(a.langCtx(), a.currentConversationID)
+				if err == nil && conv.WorkDir != "" {
+					_ = mcpSrv.WriteConfigToDir(conv.WorkDir)
+					cliProvider.SetMCPWorkDir(conv.WorkDir)
+				} else {
+					cliProvider.SetMCPWorkDir(mcpSrv.ConfigDir())
+				}
+			} else {
+				cliProvider.SetMCPWorkDir(mcpSrv.ConfigDir())
+			}
+		}
 		a.aiProvider = cliProvider
 		a.aiAgent = ai.NewAgent(cliProvider, nil)
 		return
@@ -74,6 +104,14 @@ func (a *App) SetAIProvider(providerType, apiBase, apiKey, model string) {
 		provider = ai.NewOpenAIProvider(providerType, apiBase, apiKey, model)
 	}
 	a.aiAgent = ai.NewAgent(provider, ai.NewDefaultToolExecutor())
+}
+
+// stopMCPServer 停止 MCP Server 并清理
+func (a *App) stopMCPServer() {
+	if a.mcpServer != nil {
+		a.mcpServer.Stop()
+		a.mcpServer = nil
+	}
 }
 
 // startup Wails启动回调
@@ -591,34 +629,220 @@ func parseLocalSSHKey(path string) (*LocalSSHKeyInfo, error) {
 
 // --- AI 操作 ---
 
+// ConversationDisplayMessage 返回给前端的会话消息（用于恢复显示）
+type ConversationDisplayMessage struct {
+	Role    string                          `json:"role"`
+	Content string                          `json:"content"`
+	Blocks  []conversation_entity.ContentBlock `json:"blocks"`
+}
+
+// CreateConversation 创建新会话
+func (a *App) CreateConversation() (*conversation_entity.Conversation, error) {
+	if a.aiAgent == nil {
+		return nil, fmt.Errorf("请先配置 AI Provider")
+	}
+
+	ctx := a.langCtx()
+	conv := &conversation_entity.Conversation{
+		Title:        "新对话",
+		ProviderType: a.aiProviderType,
+		Model:        a.aiModel,
+	}
+
+	// 本地 CLI 模式创建工作目录
+	if a.aiProviderType == "local_cli" {
+		workDir := filepath.Join(appDataDir(), "workspaces", fmt.Sprintf("conv-%d", time.Now().UnixMilli()))
+		conv.WorkDir = workDir
+	}
+
+	if err := conversation_svc.Conversation().Create(ctx, conv); err != nil {
+		return nil, err
+	}
+
+	// 如果有工作目录，更新路径为带 ID 的稳定路径
+	if conv.WorkDir != "" {
+		stableDir := filepath.Join(appDataDir(), "workspaces", fmt.Sprintf("%d", conv.ID))
+		if err := os.Rename(conv.WorkDir, stableDir); err == nil {
+			conv.WorkDir = stableDir
+			_ = conversation_svc.Conversation().Update(ctx, conv)
+		}
+	}
+
+	// 切换到新会话
+	a.switchToConversation(conv)
+
+	return conv, nil
+}
+
+// ListConversations 获取会话列表
+func (a *App) ListConversations() ([]*conversation_entity.Conversation, error) {
+	return conversation_svc.Conversation().List(a.langCtx())
+}
+
+// SwitchConversation 切换到指定会话，返回显示消息
+func (a *App) SwitchConversation(id int64) ([]ConversationDisplayMessage, error) {
+	ctx := a.langCtx()
+	conv, err := conversation_svc.Conversation().Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("会话不存在: %w", err)
+	}
+
+	a.switchToConversation(conv)
+
+	// 加载消息用于前端显示
+	msgs, err := conversation_svc.Conversation().LoadMessages(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	var displayMsgs []ConversationDisplayMessage
+	for _, msg := range msgs {
+		blocks, _ := msg.GetBlocks()
+		displayMsgs = append(displayMsgs, ConversationDisplayMessage{
+			Role:    msg.Role,
+			Content: msg.Content,
+			Blocks:  blocks,
+		})
+	}
+	return displayMsgs, nil
+}
+
+// switchToConversation 内部切换会话逻辑
+func (a *App) switchToConversation(conv *conversation_entity.Conversation) {
+	a.currentConversationID = conv.ID
+
+	if p, ok := a.aiProvider.(*ai.LocalCLIProvider); ok {
+		// 恢复 CLI session
+		info, err := conv.GetSessionInfo()
+		if err == nil && info.SessionID != "" {
+			p.SetSessionID(info.SessionID)
+		} else {
+			p.SetSessionID("")
+		}
+
+		// 切换工作目录
+		if conv.WorkDir != "" {
+			if a.mcpServer != nil {
+				_ = a.mcpServer.WriteConfigToDir(conv.WorkDir)
+			}
+			p.SetMCPWorkDir(conv.WorkDir)
+		}
+	}
+}
+
+// DeleteConversation 删除会话
+func (a *App) DeleteConversation(id int64) error {
+	err := conversation_svc.Conversation().Delete(a.langCtx(), id)
+	if err != nil {
+		return err
+	}
+	// 如果删的是当前会话，清空当前会话ID
+	if a.currentConversationID == id {
+		a.currentConversationID = 0
+	}
+	return nil
+}
+
 // SendAIMessage 发送 AI 消息，通过 Wails Events 流式返回
-func (a *App) SendAIMessage(conversationID string, messages []ai.Message) error {
+func (a *App) SendAIMessage(messages []ai.Message) error {
 	if a.aiAgent == nil {
 		return fmt.Errorf("请先配置 AI Provider")
 	}
+
+	ctx := a.langCtx()
+
+	// 自动创建会话（首次发消息时）
+	if a.currentConversationID == 0 {
+		conv, err := a.CreateConversation()
+		if err != nil {
+			return fmt.Errorf("创建会话失败: %w", err)
+		}
+		// 用首条用户消息作为标题
+		for _, msg := range messages {
+			if msg.Role == ai.RoleUser {
+				title := string(msg.Content)
+				if len([]rune(title)) > 50 {
+					title = string([]rune(title)[:50])
+				}
+				conv.Title = title
+				_ = conversation_svc.Conversation().Update(ctx, conv)
+				break
+			}
+		}
+	}
+
+	convID := a.currentConversationID
+	eventName := fmt.Sprintf("ai:event:%d", convID)
 
 	// 添加系统提示
 	fullMessages := []ai.Message{
 		{
 			Role:    ai.RoleSystem,
-			Content: "你是 Ops Cat 的 AI 助手，帮助用户管理IT资产。你可以列出资产、查看详情、添加资产、在SSH服务器上执行命令。请用中文回复。",
+			Content: "You are the Ops Cat AI assistant, helping users manage IT assets. You can list assets, view details, add assets, and run commands on SSH servers. Respond in the same language the user uses.",
 		},
 	}
 	fullMessages = append(fullMessages, messages...)
 
 	go func() {
 		err := a.aiAgent.Chat(a.ctx, fullMessages, func(event ai.StreamEvent) {
-			wailsRuntime.EventsEmit(a.ctx, "ai:event:"+conversationID, event)
+			wailsRuntime.EventsEmit(a.ctx, eventName, event)
 		})
 		if err != nil {
-			wailsRuntime.EventsEmit(a.ctx, "ai:event:"+conversationID, ai.StreamEvent{
+			wailsRuntime.EventsEmit(a.ctx, eventName, ai.StreamEvent{
 				Type:  "error",
 				Error: err.Error(),
 			})
 		}
+
+		// 消息完成后持久化
+		a.persistConversationState(convID, messages)
 	}()
 
 	return nil
+}
+
+// persistConversationState 持久化会话状态（消息+session）
+func (a *App) persistConversationState(convID int64, messages []ai.Message) {
+	ctx := a.langCtx()
+
+	// 保存 local CLI session ID
+	if p, ok := a.aiProvider.(*ai.LocalCLIProvider); ok {
+		conv, err := conversation_svc.Conversation().Get(ctx, convID)
+		if err == nil {
+			sessionID := p.GetSessionID()
+			_ = conv.SetSessionInfo(&conversation_entity.SessionInfo{
+				SessionID: sessionID,
+			})
+			conv.Updatetime = time.Now().Unix()
+			_ = conversation_svc.Conversation().Update(ctx, conv)
+		}
+	}
+}
+
+// SaveConversationMessages 前端调用，保存显示消息到数据库
+func (a *App) SaveConversationMessages(displayMsgs []ConversationDisplayMessage) error {
+	if a.currentConversationID == 0 {
+		return nil
+	}
+	ctx := a.langCtx()
+	var msgs []*conversation_entity.Message
+	for i, dm := range displayMsgs {
+		msg := &conversation_entity.Message{
+			ConversationID: a.currentConversationID,
+			Role:           dm.Role,
+			Content:        dm.Content,
+			SortOrder:      i,
+			Createtime:     time.Now().Unix(),
+		}
+		_ = msg.SetBlocks(dm.Blocks)
+		msgs = append(msgs, msg)
+	}
+	return conversation_svc.Conversation().SaveMessages(ctx, a.currentConversationID, msgs)
+}
+
+// GetCurrentConversationID 获取当前会话ID
+func (a *App) GetCurrentConversationID() int64 {
+	return a.currentConversationID
 }
 
 // DetectLocalCLIs 检测本地 AI CLI 工具
@@ -634,11 +858,12 @@ func (a *App) RespondPermission(behavior, message string) {
 	}
 }
 
-// ResetAISession 重置 AI 会话（前端清空聊天时调用）
+// ResetAISession 重置 AI 会话（创建新会话）
 func (a *App) ResetAISession() {
 	if p, ok := a.aiProvider.(*ai.LocalCLIProvider); ok {
 		p.ResetSession()
 	}
+	a.currentConversationID = 0
 }
 
 // GetInitContext 获取 /init 命令的资产上下文信息

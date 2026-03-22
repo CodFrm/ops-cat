@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -25,6 +25,12 @@ function App() {
   const [aiPanelCollapsed, setAiPanelCollapsed] = useState(
     () => localStorage.getItem("ai_panel_collapsed") === "true"
   );
+  const [assetTreeWidth, setAssetTreeWidth] = useState(() => {
+    const saved = localStorage.getItem("asset_tree_width");
+    return saved ? Math.max(160, Math.min(480, Number(saved))) : 224; // 14rem = 224px
+  });
+  const [assetTreeResizing, setAssetTreeResizing] = useState(false);
+  const assetTreeWidthRef = useRef(assetTreeWidth);
 
   const toggleAIPanel = useCallback(() => {
     setAiPanelCollapsed((prev) => {
@@ -38,6 +44,29 @@ function App() {
       localStorage.setItem("sidebar_collapsed", String(!prev));
       return !prev;
     });
+  }, []);
+
+  const handleAssetTreeResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setAssetTreeResizing(true);
+    const startX = e.clientX;
+    const startWidth = assetTreeWidthRef.current;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const newWidth = Math.max(160, Math.min(480, startWidth + ev.clientX - startX));
+      assetTreeWidthRef.current = newWidth;
+      setAssetTreeWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      setAssetTreeResizing(false);
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      localStorage.setItem("asset_tree_width", String(assetTreeWidthRef.current));
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
   }, []);
 
   useKeyboardShortcuts({ onToggleAIPanel: toggleAIPanel, onToggleSidebar: toggleSidebar });
@@ -113,8 +142,8 @@ const { assets, selectedAssetId, selectAsset, deleteAsset, getAsset, getAssetPat
             onToggleSidebar={toggleSidebar}
           />
           <div
-            className="overflow-hidden shrink-0 transition-[width] duration-200"
-            style={{ width: assetTreeCollapsed ? 0 : "14rem" }}
+            className="relative overflow-hidden shrink-0 transition-[width] duration-200"
+            style={{ width: assetTreeCollapsed ? 0 : assetTreeWidth }}
           >
             <AssetTree
               collapsed={false}
@@ -132,7 +161,15 @@ const { assets, selectedAssetId, selectAsset, deleteAsset, getAsset, getAssetPat
               onConnectAsset={handleConnectAsset}
               onSelectAsset={handleSelectAsset}
             />
+            {/* Resize handle */}
+            {!assetTreeCollapsed && (
+              <div
+                className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize z-10 hover:bg-primary/20 active:bg-primary/30 transition-colors"
+                onMouseDown={handleAssetTreeResizeStart}
+              />
+            )}
           </div>
+          {assetTreeResizing && <div className="fixed inset-0 z-50 cursor-col-resize" />}
           <MainPanel
             activePage={activePage}
             selectedAsset={selectedAsset}

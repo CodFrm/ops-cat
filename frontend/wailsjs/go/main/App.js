@@ -14,12 +14,20 @@ export function CreateAsset(arg1) {
   return window['go']['main']['App']['CreateAsset'](arg1);
 }
 
+export function CreateConversation() {
+  return window['go']['main']['App']['CreateConversation']();
+}
+
 export function CreateGroup(arg1) {
   return window['go']['main']['App']['CreateGroup'](arg1);
 }
 
 export function DeleteAsset(arg1) {
   return window['go']['main']['App']['DeleteAsset'](arg1);
+}
+
+export function DeleteConversation(arg1) {
+  return window['go']['main']['App']['DeleteConversation'](arg1);
 }
 
 export function DeleteGroup(arg1, arg2) {
@@ -60,6 +68,10 @@ export function GenerateSSHKey(arg1, arg2, arg3, arg4) {
 
 export function GetAsset(arg1) {
   return window['go']['main']['App']['GetAsset'](arg1);
+}
+
+export function GetCurrentConversationID() {
+  return window['go']['main']['App']['GetCurrentConversationID']();
 }
 
 export function GetGitHubUser(arg1) {
@@ -104,6 +116,10 @@ export function ListAssets(arg1, arg2) {
 
 export function ListBackupGists(arg1) {
   return window['go']['main']['App']['ListBackupGists'](arg1);
+}
+
+export function ListConversations() {
+  return window['go']['main']['App']['ListConversations']();
 }
 
 export function ListGroups() {
@@ -166,6 +182,10 @@ export function SFTPUploadDir(arg1, arg2) {
   return window['go']['main']['App']['SFTPUploadDir'](arg1, arg2);
 }
 
+export function SaveConversationMessages(arg1) {
+  return window['go']['main']['App']['SaveConversationMessages'](arg1);
+}
+
 export function SaveCredential(arg1) {
   return window['go']['main']['App']['SaveCredential'](arg1);
 }
@@ -178,8 +198,8 @@ export function SelectSSHKeyFile() {
   return window['go']['main']['App']['SelectSSHKeyFile']();
 }
 
-export function SendAIMessage(arg1, arg2) {
-  return window['go']['main']['App']['SendAIMessage'](arg1, arg2);
+export function SendAIMessage(arg1) {
+  return window['go']['main']['App']['SendAIMessage'](arg1);
 }
 
 export function SetAIProvider(arg1, arg2, arg3, arg4) {
@@ -192,6 +212,10 @@ export function SetLanguage(arg1) {
 
 export function StartGitHubDeviceFlow() {
   return window['go']['main']['App']['StartGitHubDeviceFlow']();
+}
+
+export function SwitchConversation(arg1) {
+  return window['go']['main']['App']['SwitchConversation'](arg1);
 }
 
 export function UpdateAsset(arg1) {

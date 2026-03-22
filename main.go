@@ -9,6 +9,7 @@ import (
 	"runtime"
 
 	"ops-cat/internal/repository/asset_repo"
+	"ops-cat/internal/repository/conversation_repo"
 	"ops-cat/internal/repository/group_repo"
 	"ops-cat/internal/repository/ssh_key_repo"
 	"ops-cat/internal/service/credential_svc"
@@ -84,6 +85,7 @@ func main() {
 
 	// 注册 Repository
 	asset_repo.RegisterAsset(asset_repo.NewAsset())
+	conversation_repo.RegisterConversation(conversation_repo.NewConversation())
 	group_repo.RegisterGroup(group_repo.NewGroup())
 	ssh_key_repo.RegisterSSHKey(ssh_key_repo.NewSSHKey())
 

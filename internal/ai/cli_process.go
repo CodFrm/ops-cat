@@ -20,9 +20,12 @@ type CLIProcess struct {
 	mu     sync.Mutex
 }
 
-// StartCLIProcess 启动 CLI 子进程
-func StartCLIProcess(ctx context.Context, cliPath string, args []string) (*CLIProcess, error) {
+// StartCLIProcess 启动 CLI 子进程，workDir 为可选工作目录
+func StartCLIProcess(ctx context.Context, cliPath string, args []string, workDir string) (*CLIProcess, error) {
 	cmd := exec.CommandContext(ctx, cliPath, args...)
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("获取 stdin 失败: %w", err)

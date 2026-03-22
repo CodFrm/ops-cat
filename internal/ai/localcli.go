@@ -29,11 +29,19 @@ type LocalCLIProvider struct {
 	sessionID string // Claude session ID，跨调用保持
 	mu        sync.Mutex
 
+	// MCP 工作目录，包含 .mcp.json 和 .codex/config.toml
+	mcpWorkDir string
+
 	// Codex app-server 实例
 	codexServer *CodexAppServer
 
 	// OnPermissionRequest 权限确认回调，由外部注入
 	OnPermissionRequest func(req PermissionRequest) PermissionResponse
+}
+
+// SetMCPWorkDir 设置 MCP 配置所在的工作目录
+func (p *LocalCLIProvider) SetMCPWorkDir(dir string) {
+	p.mcpWorkDir = dir
 }
 
 // NewLocalCLIProvider 创建本地 CLI provider
@@ -69,8 +77,8 @@ func (p *LocalCLIProvider) chatClaude(ctx context.Context, messages []Message) (
 	// 构建 CLI 参数
 	args := p.buildClaudeArgs(userMsg, systemPrompt)
 
-	// 启动 CLI 进程
-	proc, err := StartCLIProcess(ctx, p.cliPath, args)
+	// 启动 CLI 进程（在 MCP 工作目录下，让 CLI 自动发现 .mcp.json）
+	proc, err := StartCLIProcess(ctx, p.cliPath, args, p.mcpWorkDir)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +162,7 @@ func (p *LocalCLIProvider) chatCodex(ctx context.Context, messages []Message) (<
 	// 懒启动 app-server
 	if p.codexServer == nil {
 		server := NewCodexAppServer()
-		if err := server.Start(ctx, p.cliPath); err != nil {
+		if err := server.Start(ctx, p.cliPath, p.mcpWorkDir); err != nil {
 			return nil, fmt.Errorf("启动 Codex app-server 失败: %w", err)
 		}
 		p.codexServer = server
@@ -190,6 +198,20 @@ func extractLastUserAndSystem(messages []Message) (userMsg, systemPrompt string)
 		}
 	}
 	return
+}
+
+// GetSessionID 获取当前 Claude CLI sessionID
+func (p *LocalCLIProvider) GetSessionID() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.sessionID
+}
+
+// SetSessionID 恢复 Claude CLI sessionID（切换会话时使用）
+func (p *LocalCLIProvider) SetSessionID(id string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.sessionID = id
 }
 
 // ResetSession 重置会话（用户清空聊天时调用）

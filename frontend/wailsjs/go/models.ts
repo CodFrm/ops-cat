@@ -186,6 +186,59 @@ export namespace backup_svc {
 
 }
 
+export namespace conversation_entity {
+	
+	export class ContentBlock {
+	    type: string;
+	    content: string;
+	    toolName?: string;
+	    toolInput?: string;
+	    status?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ContentBlock(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.content = source["content"];
+	        this.toolName = source["toolName"];
+	        this.toolInput = source["toolInput"];
+	        this.status = source["status"];
+	    }
+	}
+	export class Conversation {
+	    ID: number;
+	    Title: string;
+	    ProviderType: string;
+	    Model: string;
+	    SessionData: string;
+	    WorkDir: string;
+	    Status: number;
+	    Createtime: number;
+	    Updatetime: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Conversation(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.Title = source["Title"];
+	        this.ProviderType = source["ProviderType"];
+	        this.Model = source["Model"];
+	        this.SessionData = source["SessionData"];
+	        this.WorkDir = source["WorkDir"];
+	        this.Status = source["Status"];
+	        this.Createtime = source["Createtime"];
+	        this.Updatetime = source["Updatetime"];
+	    }
+	}
+
+}
+
 export namespace group_entity {
 	
 	export class Group {
@@ -346,6 +399,40 @@ export namespace import_svc {
 
 export namespace main {
 	
+	export class ConversationDisplayMessage {
+	    role: string;
+	    content: string;
+	    blocks: conversation_entity.ContentBlock[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ConversationDisplayMessage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.role = source["role"];
+	        this.content = source["content"];
+	        this.blocks = this.convertValues(source["blocks"], conversation_entity.ContentBlock);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ImportFileInfo {
 	    filePath: string;
 	    encrypted: boolean;

@@ -27,6 +27,7 @@ type codexRPCError struct {
 
 // CodexAppServer 管理与 codex app-server 的通信
 type CodexAppServer struct {
+	cliPath  string
 	proc     *CLIProcess
 	threadID string
 	nextID   atomic.Int64
@@ -51,10 +52,11 @@ func NewCodexAppServer() *CodexAppServer {
 }
 
 // Start 启动 codex app-server 进程并完成初始化握手
-func (s *CodexAppServer) Start(ctx context.Context, cliPath string) error {
+func (s *CodexAppServer) Start(ctx context.Context, cliPath, workDir string) error {
 	s.ctx, s.cancel = context.WithCancel(ctx)
+	s.cliPath = cliPath
 
-	proc, err := StartCLIProcess(s.ctx, cliPath, []string{"app-server"})
+	proc, err := StartCLIProcess(s.ctx, cliPath, []string{"app-server"}, workDir)
 	if err != nil {
 		return err
 	}
@@ -107,10 +109,11 @@ func (s *CodexAppServer) readLoop() {
 
 // initialize 发送 initialize 请求和 initialized 通知
 func (s *CodexAppServer) initialize() error {
+	version := getCLIVersion(s.cliPath)
 	initParams := map[string]any{
 		"clientInfo": map[string]any{
 			"name":    "codex-cli",
-			"version": "1.0.0",
+			"version": version,
 		},
 	}
 	_, err := s.sendRequest("initialize", initParams)
@@ -182,43 +185,95 @@ func (s *CodexAppServer) SendTurn(ctx context.Context, text string, onEvent func
 	}
 }
 
+// codexItem Codex item 通用结构（camelCase 类型名）
+type codexItem struct {
+	Type     string          `json:"type"`
+	ID       string          `json:"id"`
+	Command  string          `json:"command"`          // commandExecution
+	Path     string          `json:"path"`             // fileRead / fileWrite
+	Output   string          `json:"output"`           // commandExecution completed
+	Content  json.RawMessage `json:"content"`          // 可能是 string 或 array
+	ExitCode *int            `json:"exitCode"`         // commandExecution completed
+	Text     string          `json:"text"`             // agentMessage completed
+}
+
+// contentString 安全提取 content 字段为字符串
+func (item *codexItem) contentString() string {
+	if item.Content == nil {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(item.Content, &s); err == nil {
+		return s
+	}
+	return ""
+}
+
 // handleNotification 处理 Codex 通知事件
 func (s *CodexAppServer) handleNotification(method string, params json.RawMessage, onEvent func(StreamEvent)) bool {
 	switch method {
-	case "item/agentMessage/delta":
+	// ── 文本流式输出 ──
+	case "codex/event/agent_message_delta":
 		var p struct {
-			Delta string `json:"delta"`
+			Msg struct {
+				Delta string `json:"delta"`
+			} `json:"msg"`
 		}
-		if err := json.Unmarshal(params, &p); err == nil && p.Delta != "" {
-			onEvent(StreamEvent{Type: "content", Content: p.Delta})
+		if err := json.Unmarshal(params, &p); err == nil && p.Msg.Delta != "" {
+			onEvent(StreamEvent{Type: "content", Content: p.Msg.Delta})
 		}
 
-	case "item/started":
+	// ── 命令执行 ──
+	case "codex/event/exec_command_begin":
 		var p struct {
-			Item struct {
-				Type    string `json:"type"`
+			Msg struct {
 				Command string `json:"command"`
-			} `json:"item"`
+			} `json:"msg"`
+		}
+		if err := json.Unmarshal(params, &p); err == nil && p.Msg.Command != "" {
+			onEvent(StreamEvent{Type: "tool_start", ToolName: "Bash", ToolInput: p.Msg.Command})
+		}
+
+	case "codex/event/exec_command_end":
+		var p struct {
+			Msg struct {
+				ExitCode int    `json:"exit_code"`
+				Stdout   string `json:"stdout"`
+				Stderr   string `json:"stderr"`
+			} `json:"msg"`
 		}
 		if err := json.Unmarshal(params, &p); err == nil {
-			if p.Item.Type == "command_execution" && p.Item.Command != "" {
-				onEvent(StreamEvent{Type: "content", Content: fmt.Sprintf("\n🔧 %s\n", p.Item.Command)})
+			result := p.Msg.Stdout
+			if p.Msg.Stderr != "" {
+				if result != "" {
+					result += "\n"
+				}
+				result += p.Msg.Stderr
 			}
+			if p.Msg.ExitCode != 0 {
+				result = fmt.Sprintf("exit code %d\n%s", p.Msg.ExitCode, result)
+			}
+			onEvent(StreamEvent{Type: "tool_result", ToolName: "Bash", Content: truncateOutput(result, 20)})
+		}
+
+	// ── item 事件（camelCase 类型名）──
+	case "item/started":
+		var p struct {
+			Item codexItem `json:"item"`
+		}
+		if err := json.Unmarshal(params, &p); err == nil {
+			s.handleItemStarted(&p.Item, onEvent)
 		}
 
 	case "item/completed":
 		var p struct {
-			Item struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"item"`
+			Item codexItem `json:"item"`
 		}
 		if err := json.Unmarshal(params, &p); err == nil {
-			if p.Item.Type == "agent_message" && p.Item.Text != "" {
-				onEvent(StreamEvent{Type: "content", Content: p.Item.Text})
-			}
+			s.handleItemCompleted(&p.Item, onEvent)
 		}
 
+	// ── turn 生命周期 ──
 	case "turn/completed":
 		return true
 
@@ -230,9 +285,85 @@ func (s *CodexAppServer) handleNotification(method string, params json.RawMessag
 			onEvent(StreamEvent{Type: "error", Error: p.Error})
 		}
 		return true
+
+	// ── 静默忽略的事件 ──
+	case "codex/event/agent_message_content_delta",
+		"codex/event/agent_message",
+		"codex/event/item_started",
+		"codex/event/item_completed",
+		"codex/event/token_count",
+		"codex/event/task_started",
+		"codex/event/task_complete",
+		"codex/event/user_message",
+		"codex/event/mcp_startup_complete",
+		"item/agentMessage/delta",
+		"thread/started",
+		"thread/status/changed",
+		"thread/tokenUsage/updated",
+		"account/rateLimits/updated",
+		"turn/started",
+		"configWarning":
+		// 忽略
 	}
 
 	return false
+}
+
+func (s *CodexAppServer) handleItemStarted(item *codexItem, onEvent func(StreamEvent)) {
+	switch item.Type {
+	case "commandExecution":
+		if item.Command != "" {
+			onEvent(StreamEvent{Type: "tool_start", ToolName: "Bash", ToolInput: item.Command})
+		}
+	case "fileRead":
+		if item.Path != "" {
+			onEvent(StreamEvent{Type: "tool_start", ToolName: "Read", ToolInput: item.Path})
+		}
+	case "fileWrite":
+		if item.Path != "" {
+			onEvent(StreamEvent{Type: "tool_start", ToolName: "Write", ToolInput: item.Path})
+		}
+	// agentMessage, userMessage, reasoning: 忽略
+	}
+}
+
+func (s *CodexAppServer) handleItemCompleted(item *codexItem, onEvent func(StreamEvent)) {
+	switch item.Type {
+	case "commandExecution":
+		result := item.Output
+		if item.ExitCode != nil && *item.ExitCode != 0 {
+			result = fmt.Sprintf("exit code %d\n%s", *item.ExitCode, result)
+		}
+		onEvent(StreamEvent{Type: "tool_result", ToolName: "Bash", Content: result})
+	case "fileRead":
+		onEvent(StreamEvent{Type: "tool_result", ToolName: "Read", Content: truncateOutput(item.contentString(), 20)})
+	case "fileWrite":
+		onEvent(StreamEvent{Type: "tool_result", ToolName: "Write", Content: item.Path})
+	// agentMessage: 忽略，delta 已经发送过
+	}
+}
+
+// truncateOutput 截断长输出
+func truncateOutput(s string, maxLines int) string {
+	lines := 0
+	for i, ch := range s {
+		if ch == '\n' {
+			lines++
+			if lines >= maxLines {
+				remaining := 0
+				for _, c := range s[i+1:] {
+					if c == '\n' {
+						remaining++
+					}
+				}
+				if remaining > 0 {
+					return s[:i] + fmt.Sprintf("\n... (%d more lines)", remaining)
+				}
+				return s
+			}
+		}
+	}
+	return s
 }
 
 // sendRequest 发送 JSON-RPC 请求并等待响应
