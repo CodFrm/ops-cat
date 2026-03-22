@@ -49,8 +49,12 @@ import { ImportDialog } from "@/components/settings/ImportDialog";
 import {
   Bot, Palette, Check, HardDrive, Download, Upload, Import,
   Github, LogOut, Loader2, Copy, ExternalLink, Eye, EyeOff, Shuffle, Keyboard,
+  Plus, Pencil, Trash2, MonitorDot,
 } from "lucide-react";
 import { ShortcutSettings } from "@/components/settings/ShortcutSettings";
+import { TerminalThemeEditor } from "@/components/settings/TerminalThemeEditor";
+import { useTerminalThemeStore } from "@/stores/terminalThemeStore";
+import { builtinThemes, TerminalTheme } from "@/data/terminalThemes";
 import { toast } from "sonner";
 import { BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
 import { cn } from "@/lib/utils";
@@ -145,6 +149,15 @@ export function SettingsPage() {
   const [gistPassword, setGistPassword] = useState("");
   const [gistPullPasswordOpen, setGistPullPasswordOpen] = useState(false);
   const [gistPullPassword, setGistPullPassword] = useState("");
+
+  // 终端主题
+  const {
+    selectedThemeId, setSelectedThemeId,
+    fontSize, setFontSize,
+    customThemes, addCustomTheme, updateCustomTheme, removeCustomTheme,
+  } = useTerminalThemeStore();
+  const [themeEditorOpen, setThemeEditorOpen] = useState(false);
+  const [editingTheme, setEditingTheme] = useState<TerminalTheme | undefined>(undefined);
 
   useEffect(() => { detectCLIs(); }, [detectCLIs]);
 
@@ -390,9 +403,13 @@ export function SettingsPage() {
               <Keyboard className="h-3.5 w-3.5" />
               {t("shortcut.title")}
             </TabsTrigger>
+            <TabsTrigger value="terminal" className="gap-1">
+              <MonitorDot className="h-3.5 w-3.5" />
+              {t("terminal.title")}
+            </TabsTrigger>
             <TabsTrigger value="appearance" className="gap-1">
               <Palette className="h-3.5 w-3.5" />
-              {t("nav.settings")}
+              {t("nav.appearance")}
             </TabsTrigger>
           </TabsList>
 
@@ -573,6 +590,157 @@ export function SettingsPage() {
             </Card>
           </TabsContent>
 
+          {/* 终端 */}
+          <TabsContent value="terminal" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">{t("terminal.title")}</CardTitle>
+                <CardDescription>{t("terminal.desc")}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* 字体大小 */}
+                <div className="grid gap-2">
+                  <Label>{t("terminal.fontSize")}</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={8}
+                      max={32}
+                      value={fontSize}
+                      onChange={(e) => setFontSize(Number(e.target.value))}
+                      className="w-24"
+                    />
+                    <span className="text-sm text-muted-foreground">px</span>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* 配色方案 */}
+                <div className="space-y-2">
+                  <Label>{t("terminal.builtinThemes")}</Label>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                    {/* 默认（无主题） */}
+                    <button
+                      onClick={() => setSelectedThemeId("default")}
+                      className={cn(
+                        "rounded-md border p-2 text-left transition-all hover:ring-2 hover:ring-primary/50",
+                        selectedThemeId === "default" && "ring-2 ring-primary"
+                      )}
+                    >
+                      <div className="rounded h-10 mb-1.5 flex items-center justify-center bg-black">
+                        <span className="text-white text-xs font-mono">&gt;_</span>
+                      </div>
+                      <div className="text-xs truncate font-medium">{t("terminal.default")}</div>
+                    </button>
+                    {builtinThemes.map((bt) => (
+                      <button
+                        key={bt.id}
+                        onClick={() => setSelectedThemeId(bt.id)}
+                        className={cn(
+                          "rounded-md border p-2 text-left transition-all hover:ring-2 hover:ring-primary/50",
+                          selectedThemeId === bt.id && "ring-2 ring-primary"
+                        )}
+                      >
+                        {/* 色块预览 */}
+                        <div
+                          className="rounded h-10 mb-1.5 flex items-end p-1 gap-0.5"
+                          style={{ background: bt.background }}
+                        >
+                          {[bt.red, bt.green, bt.yellow, bt.blue, bt.magenta, bt.cyan].map(
+                            (c, i) => (
+                              <div
+                                key={i}
+                                className="w-2 h-3 rounded-sm"
+                                style={{ background: c }}
+                              />
+                            )
+                          )}
+                        </div>
+                        <div className="text-xs truncate font-medium">{bt.name}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* 自定义配色 */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>{t("terminal.customThemes")}</Label>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1"
+                      onClick={() => {
+                        setEditingTheme(undefined);
+                        setThemeEditorOpen(true);
+                      }}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      {t("terminal.newTheme")}
+                    </Button>
+                  </div>
+                  {customThemes.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">{t("terminal.noCustomThemes")}</p>
+                  ) : (
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                      {customThemes.map((ct) => (
+                        <div
+                          key={ct.id}
+                          className={cn(
+                            "group relative rounded-md border p-2 text-left transition-all hover:ring-2 hover:ring-primary/50 cursor-pointer",
+                            selectedThemeId === ct.id && "ring-2 ring-primary"
+                          )}
+                          onClick={() => setSelectedThemeId(ct.id)}
+                        >
+                          <div
+                            className="rounded h-10 mb-1.5 flex items-end p-1 gap-0.5"
+                            style={{ background: ct.background }}
+                          >
+                            {[ct.red, ct.green, ct.yellow, ct.blue, ct.magenta, ct.cyan].map(
+                              (c, i) => (
+                                <div
+                                  key={i}
+                                  className="w-2 h-3 rounded-sm"
+                                  style={{ background: c }}
+                                />
+                              )
+                            )}
+                          </div>
+                          <div className="text-xs truncate font-medium">{ct.name}</div>
+                          {/* 编辑/删除 */}
+                          <div className="absolute top-1 right-1 hidden group-hover:flex gap-0.5">
+                            <button
+                              className="rounded p-0.5 bg-background/80 hover:bg-muted"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingTheme(ct);
+                                setThemeEditorOpen(true);
+                              }}
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                            <button
+                              className="rounded p-0.5 bg-background/80 hover:bg-destructive/20"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeCustomTheme(ct.id);
+                              }}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           {/* 外观和语言 */}
           <TabsContent value="appearance" className="space-y-4">
             <Card>
@@ -737,6 +905,21 @@ export function SettingsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 终端主题编辑器 */}
+      <TerminalThemeEditor
+        open={themeEditorOpen}
+        onOpenChange={setThemeEditorOpen}
+        theme={editingTheme}
+        onSave={(theme) => {
+          if (editingTheme) {
+            updateCustomTheme(theme);
+          } else {
+            addCustomTheme(theme);
+          }
+          setSelectedThemeId(theme.id);
+        }}
+      />
     </div>
   );
 }

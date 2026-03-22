@@ -3,6 +3,7 @@ package ai
 import (
 	"bytes"
 	"fmt"
+	"time"
 
 	"ops-cat/internal/model/entity/asset_entity"
 
@@ -23,6 +24,7 @@ func executeSSHCommand(cfg *asset_entity.SSHConfig, password string, command str
 		User:            cfg.Username,
 		Auth:            authMethods,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         30 * time.Second,
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)

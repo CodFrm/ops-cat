@@ -7,7 +7,8 @@
   "nav": {
     "home": "Home",
     "sshKeys": "SSH Keys",
-    "settings": "Settings"
+    "settings": "Settings",
+    "appearance": "Appearance"
   },
   "action": {
     "confirm": "Confirm",
@@ -210,5 +211,50 @@
   },
   "panel": {
     "toggleSidebar": "Toggle Sidebar"
+  },
+  "terminal": {
+    "title": "Terminal",
+    "desc": "Terminal color scheme and font settings",
+    "fontSize": "Font Size",
+    "default": "Default",
+    "builtinThemes": "Built-in Themes",
+    "customThemes": "Custom Themes",
+    "newTheme": "New Theme",
+    "editTheme": "Edit Theme",
+    "noCustomThemes": "No custom themes yet",
+    "themeName": "Theme Name",
+    "themeNamePlaceholder": "Enter theme name",
+    "nameRequired": "Please enter a theme name",
+    "baseColors": "Base Colors",
+    "normalColors": "Normal Colors",
+    "brightColors": "Bright Colors",
+    "importJson": "Import from Clipboard",
+    "exportJson": "Copy to Clipboard",
+    "importedFromClipboard": "Imported from clipboard",
+    "exportedToClipboard": "Copied to clipboard",
+    "invalidThemeJson": "Clipboard content is not a valid theme JSON",
+    "color": {
+      "background": "Background",
+      "foreground": "Foreground",
+      "cursor": "Cursor",
+      "cursorAccent": "Cursor Accent",
+      "selection": "Selection",
+      "black": "Black",
+      "red": "Red",
+      "green": "Green",
+      "yellow": "Yellow",
+      "blue": "Blue",
+      "magenta": "Magenta",
+      "cyan": "Cyan",
+      "white": "White",
+      "brightBlack": "Bright Black",
+      "brightRed": "Bright Red",
+      "brightGreen": "Bright Green",
+      "brightYellow": "Bright Yellow",
+      "brightBlue": "Bright Blue",
+      "brightMagenta": "Bright Magenta",
+      "brightCyan": "Bright Cyan",
+      "brightWhite": "Bright White"
+    }
   }
 }

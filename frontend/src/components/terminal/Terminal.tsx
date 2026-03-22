@@ -1,10 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Terminal as XTerminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { WriteSSH, ResizeSSH } from "../../../wailsjs/go/main/App";
 import { EventsOn, EventsOff } from "../../../wailsjs/runtime/runtime";
 import { useShortcutStore, matchShortcut } from "@/stores/shortcutStore";
+import { useTerminalThemeStore, toXtermTheme } from "@/stores/terminalThemeStore";
+import { builtinThemes } from "@/data/terminalThemes";
 
 interface TerminalProps {
   sessionId: string;
@@ -16,19 +18,25 @@ export function Terminal({ sessionId, active }: TerminalProps) {
   const termRef = useRef<XTerminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const activeRef = useRef(active);
+  const fontSize = useTerminalThemeStore((s) => s.fontSize);
+  const selectedThemeId = useTerminalThemeStore((s) => s.selectedThemeId);
+  const customThemes = useTerminalThemeStore((s) => s.customThemes);
+  const xtermTheme = useMemo(() => {
+    if (selectedThemeId === "default") return undefined;
+    const theme =
+      builtinThemes.find((t) => t.id === selectedThemeId) ||
+      customThemes.find((t) => t.id === selectedThemeId);
+    return theme ? toXtermTheme(theme) : undefined;
+  }, [selectedThemeId, customThemes]);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
     const term = new XTerminal({
       cursorBlink: true,
-      fontSize: 14,
+      fontSize,
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
-      theme: {
-        background: "var(--terminal-bg, #1a1b26)",
-        foreground: "var(--terminal-fg, #a9b1d6)",
-        cursor: "var(--terminal-cursor, #c0caf5)",
-      },
+      theme: xtermTheme,
     });
 
     const fitAddon = new FitAddon();
@@ -100,6 +108,14 @@ export function Terminal({ sessionId, active }: TerminalProps) {
       fitAddonRef.current = null;
     };
   }, [sessionId]);
+
+  // 主题或字体变更时实时刷新终端
+  useEffect(() => {
+    if (!termRef.current) return;
+    termRef.current.options.theme = xtermTheme;
+    termRef.current.options.fontSize = fontSize;
+    fitAddonRef.current?.fit();
+  }, [xtermTheme, fontSize]);
 
   // 同步 active 状态到 ref，供 ResizeObserver 闭包读取
   useEffect(() => {

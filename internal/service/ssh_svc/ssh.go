@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"ops-cat/internal/model/entity/asset_entity"
 
@@ -130,6 +131,7 @@ func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
 		User:            cfg.Username,
 		Auth:            authMethods,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         30 * time.Second,
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
@@ -279,6 +281,7 @@ func (m *Manager) dialViaJumpHosts(cfg ConnectConfig, targetConfig *ssh.ClientCo
 		User:            firstJump.Username,
 		Auth:            firstAuth,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         30 * time.Second,
 	}
 
 	var currentClient *ssh.Client
@@ -320,6 +323,7 @@ func (m *Manager) dialViaJumpHosts(cfg ConnectConfig, targetConfig *ssh.ClientCo
 			User:            jump.Username,
 			Auth:            jumpAuth,
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			Timeout:         30 * time.Second,
 		}
 
 		conn, err := currentClient.Dial("tcp", jumpAddr)

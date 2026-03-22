@@ -35,43 +35,20 @@ export function MainPanel({
     />
   );
 
-  if (activePage === "settings") {
-    return (
-      <div className="flex flex-1 flex-col min-w-0">
-        {dragRegion}
-        <SettingsPage />
-      </div>
-    );
-  }
-
-  if (activePage === "sshkeys") {
-    return (
-      <div className="flex flex-1 flex-col min-w-0">
-        {dragRegion}
-        <div className="flex flex-col h-full">
-          <div className="px-4 py-3 border-b">
-            <h2 className="font-semibold">{t("nav.sshKeys")}</h2>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4">
-            <div className="max-w-4xl mx-auto">
-              <SSHKeyManager />
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const showTerminal = activeTabId && tabs.some((tab) => tab.id === activeTabId);
+  const isHome = activePage === "home";
+  const showTerminal = isHome && activeTabId && tabs.some((tab) => tab.id === activeTabId);
 
   return (
     <div className="flex flex-1 flex-col min-w-0">
       {/* Drag region for frameless window */}
       {dragRegion}
 
-      {/* Tab bar */}
+      {/* Tab bar — always rendered so terminals stay mounted */}
       {tabs.length > 0 && (
-        <div className="flex items-center border-b overflow-x-auto bg-background">
+        <div
+          className="flex items-center border-b overflow-x-auto bg-background"
+          style={{ display: isHome ? undefined : "none" }}
+        >
           {selectedAsset && (
             <button
               className={cn(
@@ -126,8 +103,13 @@ export function MainPanel({
         </div>
       )}
 
-      {/* Content */}
-      <div className="flex-1 relative">
+      {/* Terminal content — always mounted, use visibility to preserve xterm state */}
+      <div
+        className="flex-1 relative"
+        style={{
+          display: isHome ? undefined : "none",
+        }}
+      >
         {tabs.map((tab) => (
           <div
             key={tab.id}
@@ -179,6 +161,23 @@ export function MainPanel({
           </div>
         )}
       </div>
+
+      {/* Settings page */}
+      {activePage === "settings" && <SettingsPage />}
+
+      {/* SSH Keys page */}
+      {activePage === "sshkeys" && (
+        <div className="flex flex-col flex-1">
+          <div className="px-4 py-3 border-b">
+            <h2 className="font-semibold">{t("nav.sshKeys")}</h2>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4">
+            <div className="max-w-4xl mx-auto">
+              <SSHKeyManager />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

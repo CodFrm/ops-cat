@@ -7,7 +7,8 @@
   "nav": {
     "home": "首页",
     "sshKeys": "SSH 密钥",
-    "settings": "设置"
+    "settings": "设置",
+    "appearance": "外观"
   },
   "action": {
     "confirm": "确认",
@@ -210,5 +211,50 @@
   },
   "panel": {
     "toggleSidebar": "切换资产列表"
+  },
+  "terminal": {
+    "title": "终端",
+    "desc": "终端配色与字体设置",
+    "fontSize": "字体大小",
+    "default": "默认",
+    "builtinThemes": "预置配色",
+    "customThemes": "自定义配色",
+    "newTheme": "新建配色",
+    "editTheme": "编辑配色",
+    "noCustomThemes": "暂无自定义配色",
+    "themeName": "配色名称",
+    "themeNamePlaceholder": "输入配色名称",
+    "nameRequired": "请输入配色名称",
+    "baseColors": "基础色",
+    "normalColors": "标准色",
+    "brightColors": "亮色",
+    "importJson": "从剪贴板导入",
+    "exportJson": "复制到剪贴板",
+    "importedFromClipboard": "已从剪贴板导入",
+    "exportedToClipboard": "已复制到剪贴板",
+    "invalidThemeJson": "剪贴板内容不是有效的配色 JSON",
+    "color": {
+      "background": "背景",
+      "foreground": "前景",
+      "cursor": "光标",
+      "cursorAccent": "光标强调",
+      "selection": "选区",
+      "black": "黑",
+      "red": "红",
+      "green": "绿",
+      "yellow": "黄",
+      "blue": "蓝",
+      "magenta": "品红",
+      "cyan": "青",
+      "white": "白",
+      "brightBlack": "亮黑",
+      "brightRed": "亮红",
+      "brightGreen": "亮绿",
+      "brightYellow": "亮黄",
+      "brightBlue": "亮蓝",
+      "brightMagenta": "亮品红",
+      "brightCyan": "亮青",
+      "brightWhite": "亮白"
+    }
   }
 }

@@ -67,6 +67,7 @@ const { assets, selectedAssetId, selectAsset, deleteAsset, getAssetPath } = useA
 
   const handleSelectAsset = (asset: asset_entity.Asset) => {
     selectAsset(asset.ID);
+    setActivePage("home");
   };
 
   const handleDeleteAsset = async (id: number) => {

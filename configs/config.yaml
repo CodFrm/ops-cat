@@ -1,14 +1,7 @@
-broker:
-    type: eventbus
-cache:
-    type: memory
 db:
     debug: false
     driver: sqlite
     dsn: ops-cat.db
 debug: true
 env: DEV
-logger:
-    disableConsole: false
-    level: debug
 source: file

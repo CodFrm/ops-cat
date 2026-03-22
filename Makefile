@@ -19,7 +19,12 @@ run: build
 
 # 构建生产版本
 build:
-	wails build
+	wails build -ldflags="-s -w"
+
+# 构建生产版本（UPX 压缩，需要安装 upx）
+build-upx:
+	wails build -ldflags="-s -w"
+	upx --best --force-macos $(BIN_PATH)
 
 # 安装前端依赖
 install:
