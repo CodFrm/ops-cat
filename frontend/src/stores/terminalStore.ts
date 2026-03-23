@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   ConnectSSH,
   DisconnectSSH,
+  SplitSSH,
 } from "../../wailsjs/go/main/App";
 import { main } from "../../wailsjs/go/models";
 
@@ -262,16 +263,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       };
     });
 
-    // Step 2: Connect SSH in background
-    const req = new main.SSHConnectRequest({
-      assetId: tab.assetId,
-      password: "",
-      key: "",
-      cols: 80,
-      rows: 24,
-    });
-
-    ConnectSSH(req)
+    // Step 2: 在已有连接上创建新会话
+    SplitSSH(tab.activePaneId, 80, 24)
       .then((sessionId) => {
         // Step 3: Replace pending with real terminal
         set((state) => {

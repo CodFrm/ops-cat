@@ -214,6 +214,10 @@ export function SetLanguage(arg1) {
   return window['go']['main']['App']['SetLanguage'](arg1);
 }
 
+export function SplitSSH(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SplitSSH'](arg1, arg2, arg3);
+}
+
 export function StartGitHubDeviceFlow() {
   return window['go']['main']['App']['StartGitHubDeviceFlow']();
 }

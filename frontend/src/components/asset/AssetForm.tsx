@@ -115,13 +115,6 @@ export function AssetForm({
 
   // Collapsible sections
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [showCmdPolicy, setShowCmdPolicy] = useState(false);
-
-  // Command policy
-  const [allowList, setAllowList] = useState<string[]>([]);
-  const [denyList, setDenyList] = useState<string[]>([]);
-  const [allowInput, setAllowInput] = useState("");
-  const [denyInput, setDenyInput] = useState("");
 
   // SSH assets for jump host selection (exclude self)
   const sshAssets = assets.filter(
@@ -251,18 +244,6 @@ export function AssetForm({
             !!(cfg.forwarded_ports && cfg.forwarded_ports.length > 0)
           );
 
-          // Load command policy
-          try {
-            const policy = JSON.parse(editAsset.CmdPolicy || "{}");
-            setAllowList(policy.allow_list || []);
-            setDenyList(policy.deny_list || []);
-          } catch {
-            setAllowList([]);
-            setDenyList([]);
-          }
-          setShowCmdPolicy(
-            !!(editAsset.CmdPolicy && editAsset.CmdPolicy !== "{}")
-          );
         } catch {
           resetSSHFields();
         }
@@ -296,11 +277,6 @@ export function AssetForm({
     setProxyUsername("");
     setProxyPassword("");
     setShowAdvanced(false);
-    setShowCmdPolicy(false);
-    setAllowList([]);
-    setDenyList([]);
-    setAllowInput("");
-    setDenyInput("");
   };
 
   const handleSubmit = async () => {
@@ -353,15 +329,6 @@ export function AssetForm({
 
     const config = JSON.stringify(sshConfig);
 
-    // Build command policy JSON
-    let cmdPolicy = "";
-    if (allowList.length > 0 || denyList.length > 0) {
-      cmdPolicy = JSON.stringify({
-        allow_list: allowList.length > 0 ? allowList : undefined,
-        deny_list: denyList.length > 0 ? denyList : undefined,
-      });
-    }
-
     const asset = new asset_entity.Asset({
       ...(editAsset || {}),
       Name: name,
@@ -370,7 +337,6 @@ export function AssetForm({
       Icon: icon,
       Description: description,
       Config: config,
-      CmdPolicy: cmdPolicy,
     });
 
     setSaving(true);
@@ -837,97 +803,6 @@ export function AssetForm({
                   </div>
                 ))}
               </div>
-            </div>
-          )}
-          {/* Command Policy section */}
-          <button
-            type="button"
-            className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-            onClick={() => setShowCmdPolicy(!showCmdPolicy)}
-          >
-            {showCmdPolicy ? (
-              <ChevronDown className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5" />
-            )}
-            {t("asset.cmdPolicy")}
-          </button>
-
-          {showCmdPolicy && (
-            <div className="grid gap-4 border rounded-lg p-3">
-              {/* Allow list */}
-              <div className="grid gap-2">
-                <Label className="text-xs">{t("asset.cmdPolicyAllowList")}</Label>
-                <div className="flex flex-wrap gap-1.5 min-h-[28px]">
-                  {allowList.map((cmd, i) => (
-                    <span
-                      key={i}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-green-500/10 text-green-600 text-xs font-mono"
-                    >
-                      {cmd}
-                      <button
-                        type="button"
-                        className="hover:text-destructive"
-                        onClick={() => setAllowList(allowList.filter((_, idx) => idx !== i))}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-                <Input
-                  className="h-7 text-xs font-mono"
-                  value={allowInput}
-                  onChange={(e) => setAllowInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && allowInput.trim()) {
-                      e.preventDefault();
-                      setAllowList([...allowList, allowInput.trim()]);
-                      setAllowInput("");
-                    }
-                  }}
-                  placeholder={t("asset.cmdPolicyPlaceholder")}
-                />
-              </div>
-
-              {/* Deny list */}
-              <div className="grid gap-2">
-                <Label className="text-xs">{t("asset.cmdPolicyDenyList")}</Label>
-                <div className="flex flex-wrap gap-1.5 min-h-[28px]">
-                  {denyList.map((cmd, i) => (
-                    <span
-                      key={i}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-500/10 text-red-600 text-xs font-mono"
-                    >
-                      {cmd}
-                      <button
-                        type="button"
-                        className="hover:text-destructive"
-                        onClick={() => setDenyList(denyList.filter((_, idx) => idx !== i))}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-                <Input
-                  className="h-7 text-xs font-mono"
-                  value={denyInput}
-                  onChange={(e) => setDenyInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && denyInput.trim()) {
-                      e.preventDefault();
-                      setDenyList([...denyList, denyInput.trim()]);
-                      setDenyInput("");
-                    }
-                  }}
-                  placeholder={t("asset.cmdPolicyPlaceholder")}
-                />
-              </div>
-
-              <p className="text-xs text-muted-foreground">
-                {t("asset.cmdPolicyHint")}
-              </p>
             </div>
           )}
         </div>

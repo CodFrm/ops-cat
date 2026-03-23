@@ -2,17 +2,19 @@ import { useTranslation } from "react-i18next";
 import { X, TerminalSquare, Cat } from "lucide-react";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { AssetDetail } from "@/components/asset/AssetDetail";
+import { GroupDetail } from "@/components/asset/GroupDetail";
 import { SplitPane } from "@/components/terminal/SplitPane";
 import { TerminalToolbar } from "@/components/terminal/TerminalToolbar";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 import { SSHKeyManager } from "@/components/settings/SSHKeyManager";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { cn } from "@/lib/utils";
-import { asset_entity } from "../../../wailsjs/go/models";
+import { asset_entity, group_entity } from "../../../wailsjs/go/models";
 
 interface MainPanelProps {
   activePage: string;
   selectedAsset: asset_entity.Asset | null;
+  selectedGroup: group_entity.Group | null;
   onEditAsset: (asset: asset_entity.Asset) => void;
   onDeleteAsset: (id: number) => void;
   onConnectAsset: (asset: asset_entity.Asset) => void;
@@ -21,6 +23,7 @@ interface MainPanelProps {
 export function MainPanel({
   activePage,
   selectedAsset,
+  selectedGroup,
   onEditAsset,
   onDeleteAsset,
   onConnectAsset,
@@ -39,6 +42,7 @@ export function MainPanel({
   const isHome = activePage === "home";
   const showTerminal = isHome && activeTabId && tabs.some((tab) => tab.id === activeTabId);
   const showAssetInfo = isHome && !showTerminal && assetInfoOpen && selectedAsset;
+  const showGroupInfo = isHome && !showTerminal && !showAssetInfo && assetInfoOpen && selectedGroup;
 
   return (
     <div className="flex flex-1 flex-col min-w-0">
@@ -51,6 +55,31 @@ export function MainPanel({
           className="flex items-center border-b overflow-x-auto bg-background"
           style={{ display: isHome ? undefined : "none" }}
         >
+          {assetInfoOpen && selectedGroup && !selectedAsset && (
+            <div
+              className={cn(
+                "relative flex items-center gap-1.5 px-3 py-2 text-sm shrink-0 cursor-pointer transition-colors duration-150",
+                showGroupInfo
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              )}
+              onClick={() => openAssetInfo()}
+            >
+              {selectedGroup.Name}
+              <button
+                className="ml-1.5 rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors duration-150"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeAssetInfo();
+                }}
+              >
+                <X className="h-3 w-3" />
+              </button>
+              {showGroupInfo && (
+                <span className="absolute bottom-0 left-1 right-1 h-0.5 rounded-full bg-primary" />
+              )}
+            </div>
+          )}
           {assetInfoOpen && selectedAsset && (
             <div
               className={cn(
@@ -160,7 +189,11 @@ export function MainPanel({
             />
           )}
 
-          {!showTerminal && !showAssetInfo && (
+          {showGroupInfo && (
+            <GroupDetail group={selectedGroup!} />
+          )}
+
+          {!showTerminal && !showAssetInfo && !showGroupInfo && (
             <div className="flex items-center justify-center h-full bg-gradient-to-br from-background via-background to-primary/5">
               <div className="text-center space-y-4">
                 <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">

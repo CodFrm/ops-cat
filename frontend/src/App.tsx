@@ -10,7 +10,6 @@ import { AIPanel } from "@/components/layout/AIPanel";
 import { WindowControls } from "@/components/layout/WindowControls";
 import { AssetForm } from "@/components/asset/AssetForm";
 import { GroupDialog } from "@/components/asset/GroupDialog";
-import { GroupDetailDialog } from "@/components/asset/GroupDetailDialog";
 import { PermissionDialog } from "@/components/ai/PermissionDialog";
 
 import { useAssetStore } from "@/stores/assetStore";
@@ -80,12 +79,10 @@ function App() {
   // 分组对话框
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<group_entity.Group | null>(null);
-  const [groupDetailOpen, setGroupDetailOpen] = useState(false);
-  const [detailGroup, setDetailGroup] = useState<group_entity.Group | null>(null);
-
-const { assets, selectedAssetId, selectAsset, deleteAsset, getAsset, getAssetPath } = useAssetStore();
+const { assets, groups, selectedAssetId, selectedGroupId, selectAsset, selectGroup, deleteAsset, getAsset, getAssetPath } = useAssetStore();
   const { connect, openAssetInfo } = useTerminalStore();
   const selectedAsset = assets.find((a) => a.ID === selectedAssetId) || null;
+  const selectedGroup = groups.find((g) => g.ID === selectedGroupId) || null;
 
   const handleAddAsset = (groupId?: number) => {
     setEditingAsset(null);
@@ -160,8 +157,10 @@ const { assets, selectedAssetId, selectAsset, deleteAsset, getAsset, getAssetPat
                 setGroupDialogOpen(true);
               }}
               onGroupDetail={(group) => {
-                setDetailGroup(group);
-                setGroupDetailOpen(true);
+                selectGroup(group.ID);
+                selectAsset(null);
+                setActivePage("home");
+                openAssetInfo();
               }}
               onEditAsset={handleEditAsset}
               onCopyAsset={handleCopyAsset}
@@ -180,6 +179,7 @@ const { assets, selectedAssetId, selectAsset, deleteAsset, getAsset, getAssetPat
           <MainPanel
             activePage={activePage}
             selectedAsset={selectedAsset}
+            selectedGroup={selectedGroup}
             onEditAsset={handleEditAsset}
             onDeleteAsset={handleDeleteAsset}
             onConnectAsset={handleConnectAsset}
@@ -200,11 +200,6 @@ const { assets, selectedAssetId, selectAsset, deleteAsset, getAsset, getAssetPat
           open={groupDialogOpen}
           onOpenChange={setGroupDialogOpen}
           editGroup={editingGroup}
-        />
-        <GroupDetailDialog
-          open={groupDetailOpen}
-          onOpenChange={setGroupDetailOpen}
-          group={detailGroup}
         />
 <PermissionDialog />
 <Toaster richColors />

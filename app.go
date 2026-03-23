@@ -95,6 +95,7 @@ func (a *App) SetAIProvider(providerType, apiBase, apiKey, model string) {
 		} else {
 			a.mcpServer = mcpSrv
 			// 如果有当前会话的工作目录，写入 MCP 配置
+			cliProvider.SetMCPServerURL(mcpSrv.URL())
 			if a.currentConversationID > 0 {
 				conv, err := conversation_svc.Conversation().Get(a.langCtx(), a.currentConversationID)
 				if err == nil && conv.WorkDir != "" {
@@ -353,6 +354,18 @@ func (a *App) ResizeSSH(sessionID string, cols int, rows int) error {
 		return fmt.Errorf("会话不存在: %s", sessionID)
 	}
 	return sess.Resize(cols, rows)
+}
+
+// SplitSSH 在已有会话的连接上创建新会话（分割窗格复用连接）
+func (a *App) SplitSSH(existingSessionID string, cols, rows int) (string, error) {
+	return a.sshManager.NewSessionFrom(existingSessionID, cols, rows,
+		func(sid string, data []byte) {
+			wailsRuntime.EventsEmit(a.ctx, "ssh:data:"+sid, base64.StdEncoding.EncodeToString(data))
+		},
+		func(sid string) {
+			wailsRuntime.EventsEmit(a.ctx, "ssh:closed:"+sid, nil)
+		},
+	)
 }
 
 // DisconnectSSH 断开 SSH 连接
@@ -862,8 +875,16 @@ func (a *App) DetectLocalCLIs() []ai.CLIInfo {
 
 // RespondPermission 前端响应权限确认请求（CLI 工具用）
 func (a *App) RespondPermission(behavior, message string) {
+	resp := ai.PermissionResponse{Behavior: behavior, Message: message}
+	// Codex MCP 工具确认走 confirmCh
+	if p, ok := a.aiProvider.(*ai.LocalCLIProvider); ok {
+		if srv := p.GetCodexServer(); srv != nil {
+			srv.RespondConfirm(resp)
+			return
+		}
+	}
 	select {
-	case a.permissionChan <- ai.PermissionResponse{Behavior: behavior, Message: message}:
+	case a.permissionChan <- resp:
 	default:
 	}
 }
@@ -905,6 +926,14 @@ func (a *App) makeCommandConfirmFunc() ai.CommandConfirmFunc {
 
 // RespondCommandConfirm 前端响应 run_command 确认请求
 func (a *App) RespondCommandConfirm(confirmID, behavior string) {
+	// 先检查 Codex MCP 工具确认
+	if p, ok := a.aiProvider.(*ai.LocalCLIProvider); ok {
+		if srv := p.GetCodexServer(); srv != nil {
+			srv.RespondConfirm(ai.PermissionResponse{Behavior: behavior})
+			return
+		}
+	}
+	// 普通命令确认
 	if v, ok := a.pendingConfirms.Load(confirmID); ok {
 		ch := v.(chan ConfirmResponse)
 		select {

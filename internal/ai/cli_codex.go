@@ -42,22 +42,34 @@ type CodexAppServer struct {
 	notifyCh chan codexJSONRPC // 后台 reader 将通知事件发到这里
 	ctx      context.Context
 	cancel   context.CancelFunc
+
+	// OnPermissionRequest MCP 工具调用权限确认回调
+	OnPermissionRequest func(req PermissionRequest) PermissionResponse
+
+	// MCP 工具确认响应 channel（会话内审批用）
+	confirmCh chan PermissionResponse
 }
 
 // NewCodexAppServer 创建 Codex App Server 客户端
 func NewCodexAppServer() *CodexAppServer {
 	return &CodexAppServer{
-		pending:  make(map[int64]chan codexJSONRPC),
-		notifyCh: make(chan codexJSONRPC, 128),
+		pending:   make(map[int64]chan codexJSONRPC),
+		notifyCh:  make(chan codexJSONRPC, 128),
+		confirmCh: make(chan PermissionResponse, 1),
 	}
 }
 
 // Start 启动 codex app-server 进程并完成初始化握手
-func (s *CodexAppServer) Start(ctx context.Context, cliPath, workDir string) error {
+// mcpServerURL 不为空时通过 -c 参数注入 MCP server 配置
+func (s *CodexAppServer) Start(ctx context.Context, cliPath, workDir, mcpServerURL string) error {
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.cliPath = cliPath
 
-	proc, err := StartCLIProcess(s.ctx, cliPath, []string{"app-server"}, workDir)
+	args := []string{"app-server"}
+	if mcpServerURL != "" {
+		args = append(args, "-c", fmt.Sprintf("mcp_servers.ops-cat.url=%q", mcpServerURL))
+	}
+	proc, err := StartCLIProcess(s.ctx, cliPath, args, workDir)
 	if err != nil {
 		return err
 	}
@@ -274,6 +286,13 @@ func (s *CodexAppServer) handleNotification(method string, params json.RawMessag
 			s.handleItemCompleted(&p.Item, onEvent)
 		}
 
+	// ── MCP 工具权限确认（只处理一种格式，避免弹两次）──
+	case "item/tool/requestUserInput":
+		s.handleUserInputRequest(params, onEvent)
+
+	case "codex/event/request_user_input":
+		// 与 item/tool/requestUserInput 重复，忽略
+
 	// ── turn 生命周期 ──
 	case "turn/completed":
 		return true
@@ -297,7 +316,7 @@ func (s *CodexAppServer) handleNotification(method string, params json.RawMessag
 		"codex/event/task_complete",
 		"codex/event/user_message",
 		"codex/event/mcp_startup_complete":
-		log.Printf("[MCP] Codex mcp_startup_complete received: %s", string(params))
+		// MCP 启动完成，静默忽略
 
 	case
 		"item/agentMessage/delta",
@@ -371,6 +390,76 @@ func truncateOutput(s string, maxLines int) string {
 		}
 	}
 	return s
+}
+
+// RespondConfirm 发送工具确认响应（前端调用）
+func (s *CodexAppServer) RespondConfirm(resp PermissionResponse) {
+	select {
+	case s.confirmCh <- resp:
+	default:
+	}
+}
+
+// codexUserInputQuestion Codex 用户输入请求的问题结构
+type codexUserInputQuestion struct {
+	ID       string `json:"id"`
+	Header   string `json:"header"`
+	Question string `json:"question"`
+	Options  []struct {
+		Label       string `json:"label"`
+		Description string `json:"description"`
+	} `json:"options"`
+}
+
+// handleUserInputRequest 处理 Codex MCP 工具权限确认请求
+// 通过 onEvent 发送 tool_confirm 到会话流，阻塞等待前端响应
+func (s *CodexAppServer) handleUserInputRequest(params json.RawMessage, onEvent func(StreamEvent)) {
+	var req struct {
+		ThreadID  string                   `json:"threadId"`
+		TurnID    string                   `json:"turnId"`
+		ItemID    string                   `json:"itemId"`
+		Questions []codexUserInputQuestion `json:"questions"`
+	}
+	if err := json.Unmarshal(params, &req); err != nil || len(req.Questions) == 0 {
+		return
+	}
+
+	q := req.Questions[0]
+
+	// 发送 tool_confirm 事件到会话流，前端内联显示
+	onEvent(StreamEvent{
+		Type:      "tool_confirm",
+		ToolName:  q.Header,
+		ToolInput: q.Question,
+		ConfirmID: q.ID,
+	})
+
+	// 阻塞等待前端响应
+	var resp PermissionResponse
+	select {
+	case resp = <-s.confirmCh:
+	case <-s.ctx.Done():
+		return
+	}
+
+	// 映射到 Codex 选项
+	answer := "Deny"
+	switch resp.Behavior {
+	case "allow":
+		answer = "Approve Once"
+	case "allowAll":
+		answer = "Approve this Session"
+	}
+
+	// 回复 Codex
+	s.sendNotification("item/tool/resolveUserInput", map[string]any{
+		"threadId": req.ThreadID,
+		"turnId":   req.TurnID,
+		"itemId":   req.ItemID,
+		"answers": []map[string]any{
+			{"id": q.ID, "value": answer},
+		},
+	})
 }
 
 // sendRequest 发送 JSON-RPC 请求并等待响应

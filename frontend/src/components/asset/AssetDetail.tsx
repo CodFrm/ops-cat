@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Server, Pencil, Trash2, TerminalSquare, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -53,8 +56,47 @@ interface AssetDetailProps {
 
 export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }: AssetDetailProps) {
   const { t } = useTranslation();
-  const { assets } = useAssetStore();
+  const { assets, updateAsset } = useAssetStore();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Command policy inline editing
+  const [allowList, setAllowList] = useState<string[]>([]);
+  const [denyList, setDenyList] = useState<string[]>([]);
+  const [allowInput, setAllowInput] = useState("");
+  const [denyInput, setDenyInput] = useState("");
+  const [savingPolicy, setSavingPolicy] = useState(false);
+
+  useEffect(() => {
+    try {
+      const policy = JSON.parse(asset.CmdPolicy || "{}");
+      setAllowList(policy.allow_list || []);
+      setDenyList(policy.deny_list || []);
+    } catch {
+      setAllowList([]);
+      setDenyList([]);
+    }
+    setAllowInput("");
+    setDenyInput("");
+  }, [asset.ID, asset.CmdPolicy]);
+
+  const handleSavePolicy = async (newAllowList: string[], newDenyList: string[]) => {
+    let cmdPolicy = "";
+    if (newAllowList.length > 0 || newDenyList.length > 0) {
+      cmdPolicy = JSON.stringify({
+        allow_list: newAllowList.length > 0 ? newAllowList : undefined,
+        deny_list: newDenyList.length > 0 ? newDenyList : undefined,
+      });
+    }
+    const updated = new asset_entity.Asset({ ...asset, CmdPolicy: cmdPolicy });
+    setSavingPolicy(true);
+    try {
+      await updateAsset(updated);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setSavingPolicy(false);
+    }
+  };
 
   let sshConfig: SSHConfig | null = null;
   try {
@@ -208,46 +250,98 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
           </div>
         )}
 
-        {/* Command Policy */}
-        {(() => {
-          try {
-            const policy = JSON.parse(asset.CmdPolicy || "{}");
-            const hasAllow = policy.allow_list?.length > 0;
-            const hasDeny = policy.deny_list?.length > 0;
-            if (!hasAllow && !hasDeny) return null;
-            return (
-              <div className="rounded-xl border bg-card p-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-                  {t("asset.cmdPolicy")}
-                </h3>
-                {hasAllow && (
-                  <div className="mb-2">
-                    <span className="text-xs text-muted-foreground">{t("asset.cmdPolicyAllowList")}</span>
-                    <div className="flex flex-wrap gap-1.5 mt-1">
-                      {policy.allow_list.map((cmd: string, i: number) => (
-                        <span key={i} className="px-2 py-0.5 rounded-md bg-green-500/10 text-green-600 text-xs font-mono">
-                          {cmd}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {hasDeny && (
-                  <div>
-                    <span className="text-xs text-muted-foreground">{t("asset.cmdPolicyDenyList")}</span>
-                    <div className="flex flex-wrap gap-1.5 mt-1">
-                      {policy.deny_list.map((cmd: string, i: number) => (
-                        <span key={i} className="px-2 py-0.5 rounded-md bg-red-500/10 text-red-600 text-xs font-mono">
-                          {cmd}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          } catch { return null; }
-        })()}
+        {/* Command Policy — inline editing */}
+        <div className="rounded-xl border bg-card p-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+            {t("asset.cmdPolicy")}
+          </h3>
+
+          {/* Allow list */}
+          <div className="grid gap-2 mb-3">
+            <Label className="text-xs">{t("asset.cmdPolicyAllowList")}</Label>
+            <div className="flex flex-wrap gap-1.5 min-h-[24px]">
+              {allowList.map((cmd, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-green-500/10 text-green-600 text-xs font-mono"
+                >
+                  {cmd}
+                  <button
+                    type="button"
+                    className="hover:text-destructive"
+                    onClick={() => {
+                      const next = allowList.filter((_, idx) => idx !== i);
+                      setAllowList(next);
+                      handleSavePolicy(next, denyList);
+                    }}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+            <Input
+              className="h-7 text-xs font-mono"
+              value={allowInput}
+              onChange={(e) => setAllowInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && allowInput.trim()) {
+                  e.preventDefault();
+                  const next = [...allowList, allowInput.trim()];
+                  setAllowList(next);
+                  setAllowInput("");
+                  handleSavePolicy(next, denyList);
+                }
+              }}
+              placeholder={t("asset.cmdPolicyPlaceholder")}
+            />
+          </div>
+
+          {/* Deny list */}
+          <div className="grid gap-2 mb-3">
+            <Label className="text-xs">{t("asset.cmdPolicyDenyList")}</Label>
+            <div className="flex flex-wrap gap-1.5 min-h-[24px]">
+              {denyList.map((cmd, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-500/10 text-red-600 text-xs font-mono"
+                >
+                  {cmd}
+                  <button
+                    type="button"
+                    className="hover:text-destructive"
+                    onClick={() => {
+                      const next = denyList.filter((_, idx) => idx !== i);
+                      setDenyList(next);
+                      handleSavePolicy(allowList, next);
+                    }}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+            <Input
+              className="h-7 text-xs font-mono"
+              value={denyInput}
+              onChange={(e) => setDenyInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && denyInput.trim()) {
+                  e.preventDefault();
+                  const next = [...denyList, denyInput.trim()];
+                  setDenyList(next);
+                  setDenyInput("");
+                  handleSavePolicy(allowList, next);
+                }
+              }}
+              placeholder={t("asset.cmdPolicyPlaceholder")}
+            />
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            {savingPolicy ? t("settings.saved") + "..." : t("asset.cmdPolicyHint")}
+          </p>
+        </div>
 
         {asset.Description && (
           <>

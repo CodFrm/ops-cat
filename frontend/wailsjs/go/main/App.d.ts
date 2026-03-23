@@ -116,6 +116,8 @@ export function SetAIProvider(arg1:string,arg2:string,arg3:string,arg4:string):P
 
 export function SetLanguage(arg1:string):Promise<void>;
 
+export function SplitSSH(arg1:string,arg2:number,arg3:number):Promise<string>;
+
 export function StartGitHubDeviceFlow():Promise<backup_svc.DeviceFlowInfo>;
 
 export function SwitchConversation(arg1:number):Promise<Array<main.ConversationDisplayMessage>>;

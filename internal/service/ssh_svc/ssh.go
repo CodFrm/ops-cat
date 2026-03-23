@@ -14,11 +14,47 @@ import (
 	"golang.org/x/net/proxy"
 )
 
+// sharedClient 封装 SSH 连接，支持引用计数共享
+type sharedClient struct {
+	client   *ssh.Client
+	mu       sync.Mutex
+	refCount int
+	closers  []io.Closer // 跳板机 client 等额外资源
+	closed   bool
+}
+
+func newSharedClient(client *ssh.Client, closers []io.Closer) *sharedClient {
+	return &sharedClient{
+		client:   client,
+		refCount: 1,
+		closers:  closers,
+	}
+}
+
+func (sc *sharedClient) acquire() {
+	sc.mu.Lock()
+	sc.refCount++
+	sc.mu.Unlock()
+}
+
+func (sc *sharedClient) release() {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	sc.refCount--
+	if sc.refCount <= 0 && !sc.closed {
+		sc.closed = true
+		sc.client.Close()
+		for _, c := range sc.closers {
+			c.Close()
+		}
+	}
+}
+
 // Session 表示一个活跃的 SSH 终端会话
 type Session struct {
 	ID       string
 	AssetID  int64
-	client   *ssh.Client
+	shared   *sharedClient
 	session  *ssh.Session
 	stdin    io.WriteCloser
 	stdout   io.Reader
@@ -26,8 +62,6 @@ type Session struct {
 	closed   bool
 	onData   func(data []byte)     // 终端输出回调
 	onClosed func(sessionID string) // 会话关闭回调
-	// 需要额外关闭的资源（跳板机 client 等）
-	closers []io.Closer
 }
 
 // Write 向终端写入数据（用户输入）
@@ -60,10 +94,7 @@ func (s *Session) Close() {
 	}
 	s.closed = true
 	s.session.Close()
-	s.client.Close()
-	for _, c := range s.closers {
-		c.Close()
-	}
+	s.shared.release()
 	if s.onClosed != nil {
 		go s.onClosed(s.ID)
 	}
@@ -71,7 +102,7 @@ func (s *Session) Close() {
 
 // Client 返回底层 SSH Client（用于 SFTP 等）
 func (s *Session) Client() *ssh.Client {
-	return s.client
+	return s.shared.client
 }
 
 // IsClosed 检查是否已关闭
@@ -142,29 +173,34 @@ func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 
 	// 建立连接（可能经过代理和跳板机链）
-	var closers []io.Closer
 	client, extraClosers, err := m.dial(cfg, sshConfig, addr)
 	if err != nil {
 		return "", err
 	}
-	closers = append(closers, extraClosers...)
 
-	// 创建会话
-	session, err := client.NewSession()
+	shared := newSharedClient(client, extraClosers)
+
+	sessionID, err := m.createSession(shared, cfg.AssetID, cfg.Cols, cfg.Rows, cfg.OnData, cfg.OnClosed)
 	if err != nil {
-		client.Close()
-		for _, c := range closers {
-			c.Close()
-		}
+		shared.release()
+		return "", err
+	}
+
+	return sessionID, nil
+}
+
+// createSession 在 sharedClient 上创建新的 SSH 会话（PTY + shell）
+func (m *Manager) createSession(shared *sharedClient, assetID int64, cols, rows int,
+	onData func(string, []byte), onClosed func(string)) (string, error) {
+
+	session, err := shared.client.NewSession()
+	if err != nil {
 		return "", fmt.Errorf("创建会话失败: %w", err)
 	}
 
-	// 请求 PTY
-	cols := cfg.Cols
 	if cols <= 0 {
 		cols = 80
 	}
-	rows := cfg.Rows
 	if rows <= 0 {
 		rows = 24
 	}
@@ -174,44 +210,26 @@ func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
 		ssh.TTY_OP_OSPEED: 14400,
 	}); err != nil {
 		session.Close()
-		client.Close()
-		for _, c := range closers {
-			c.Close()
-		}
 		return "", fmt.Errorf("请求PTY失败: %w", err)
 	}
 
 	stdin, err := session.StdinPipe()
 	if err != nil {
 		session.Close()
-		client.Close()
-		for _, c := range closers {
-			c.Close()
-		}
 		return "", fmt.Errorf("获取stdin失败: %w", err)
 	}
 
 	stdout, err := session.StdoutPipe()
 	if err != nil {
 		session.Close()
-		client.Close()
-		for _, c := range closers {
-			c.Close()
-		}
 		return "", fmt.Errorf("获取stdout失败: %w", err)
 	}
 
-	// 启动 shell
 	if err := session.Shell(); err != nil {
 		session.Close()
-		client.Close()
-		for _, c := range closers {
-			c.Close()
-		}
 		return "", fmt.Errorf("启动shell失败: %w", err)
 	}
 
-	// 生成会话 ID
 	m.mu.Lock()
 	m.counter++
 	sessionID := fmt.Sprintf("ssh-%d", m.counter)
@@ -219,20 +237,40 @@ func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
 
 	sess := &Session{
 		ID:       sessionID,
-		AssetID:  cfg.AssetID,
-		client:   client,
+		AssetID:  assetID,
+		shared:   shared,
 		session:  session,
 		stdin:    stdin,
 		stdout:   stdout,
-		onData:   func(data []byte) { cfg.OnData(sessionID, data) },
-		onClosed: cfg.OnClosed,
-		closers:  closers,
+		onData:   func(data []byte) { onData(sessionID, data) },
+		onClosed: onClosed,
 	}
 
 	m.sessions.Store(sessionID, sess)
-
-	// 启动输出读取 goroutine
 	go m.readOutput(sess)
+
+	return sessionID, nil
+}
+
+// NewSessionFrom 在已有会话的连接上创建新会话（用于分割窗格）
+func (m *Manager) NewSessionFrom(existingSessionID string, cols, rows int,
+	onData func(string, []byte), onClosed func(string)) (string, error) {
+
+	existing, ok := m.GetSession(existingSessionID)
+	if !ok {
+		return "", fmt.Errorf("会话不存在: %s", existingSessionID)
+	}
+	if existing.IsClosed() {
+		return "", fmt.Errorf("会话已关闭: %s", existingSessionID)
+	}
+
+	existing.shared.acquire()
+
+	sessionID, err := m.createSession(existing.shared, existing.AssetID, cols, rows, onData, onClosed)
+	if err != nil {
+		existing.shared.release()
+		return "", err
+	}
 
 	return sessionID, nil
 }

@@ -29,8 +29,11 @@ type LocalCLIProvider struct {
 	sessionID string // Claude session ID，跨调用保持
 	mu        sync.Mutex
 
-	// MCP 工作目录，包含 .mcp.json 和 .codex/config.toml
+	// MCP 工作目录，包含 .mcp.json（Claude CLI 用）
 	mcpWorkDir string
+
+	// MCP Server URL（Codex 通过 -c 参数传入）
+	mcpServerURL string
 
 	// Codex app-server 实例
 	codexServer *CodexAppServer
@@ -42,6 +45,16 @@ type LocalCLIProvider struct {
 // SetMCPWorkDir 设置 MCP 配置所在的工作目录
 func (p *LocalCLIProvider) SetMCPWorkDir(dir string) {
 	p.mcpWorkDir = dir
+}
+
+// SetMCPServerURL 设置 MCP Server URL（Codex 通过 -c 参数传入）
+func (p *LocalCLIProvider) SetMCPServerURL(url string) {
+	p.mcpServerURL = url
+}
+
+// GetCodexServer 返回 Codex app-server 实例（用于转发确认响应）
+func (p *LocalCLIProvider) GetCodexServer() *CodexAppServer {
+	return p.codexServer
 }
 
 // NewLocalCLIProvider 创建本地 CLI provider
@@ -162,7 +175,8 @@ func (p *LocalCLIProvider) chatCodex(ctx context.Context, messages []Message) (<
 	// 懒启动 app-server
 	if p.codexServer == nil {
 		server := NewCodexAppServer()
-		if err := server.Start(ctx, p.cliPath, p.mcpWorkDir); err != nil {
+		server.OnPermissionRequest = p.OnPermissionRequest
+		if err := server.Start(ctx, p.cliPath, p.mcpWorkDir, p.mcpServerURL); err != nil {
 			return nil, fmt.Errorf("启动 Codex app-server 失败: %w", err)
 		}
 		p.codexServer = server
