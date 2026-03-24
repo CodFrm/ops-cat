@@ -23,18 +23,38 @@ export type SplitNode =
       second: SplitNode;
     };
 
+export interface ForwardedPortConfig {
+  type: string;       // "local" | "remote" | "dynamic"
+  localHost: string;
+  localPort: number;
+  remoteHost: string;
+  remotePort: number;
+}
+
 export interface TerminalPane {
   sessionId: string;
   connected: boolean;
+  connectedAt: number;
 }
 
 export interface TerminalTab {
   id: string; // tab id (connectionId initially, then sessionId)
   assetId: number;
   assetName: string;
+  host: string;
+  port: number;
+  username: string;
+  forwardedPorts: ForwardedPortConfig[];
   splitTree: SplitNode;
   activePaneId: string;
   panes: Record<string, TerminalPane>;
+}
+
+export interface SSHConnectMetadata {
+  host: string;
+  port: number;
+  username: string;
+  forwardedPorts: ForwardedPortConfig[];
 }
 
 export interface ConnectionLogEntry {
@@ -135,8 +155,10 @@ interface TerminalState {
     assetName: string,
     password: string,
     cols: number,
-    rows: number
+    rows: number,
+    metadata?: SSHConnectMetadata
   ) => Promise<string>;
+  reconnect: (tabId: string) => void;
   disconnect: (sessionId: string) => void;
   setActiveTab: (id: string | null) => void;
   removeTab: (id: string) => void;
@@ -166,7 +188,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   connectingAssetIds: new Set(),
   connections: {},
 
-  connect: async (assetId, assetName, password, cols, rows) => {
+  connect: async (assetId, assetName, password, cols, rows, metadata) => {
     // 如果已有正在连接或连接失败的 tab，直接切换过去
     const existingTab = get().tabs.find((t) => {
       if (t.assetId !== assetId) return false;
@@ -199,6 +221,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         id: connectionId,
         assetId,
         assetName,
+        host: metadata?.host || "",
+        port: metadata?.port || 22,
+        username: metadata?.username || "",
+        forwardedPorts: metadata?.forwardedPorts || [],
         splitTree: { type: "connecting", connectionId },
         activePaneId: connectionId,
         panes: {},
@@ -277,7 +303,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
                       id: sessionId,
                       splitTree: newTree,
                       activePaneId: sessionId,
-                      panes: { [sessionId]: { sessionId, connected: true } },
+                      panes: { [sessionId]: { sessionId, connected: true, connectedAt: Date.now() } },
                     }
                   : t
               );
@@ -373,9 +399,185 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }
   },
 
+  reconnect: (tabId) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+
+    const sessionId = tab.activePaneId;
+    const pane = tab.panes[sessionId];
+
+    // 断开旧会话（如果还连着的话）
+    if (pane?.connected) {
+      DisconnectSSH(sessionId);
+    }
+
+    // 发起新的异步连接
+    const req = new main.SSHConnectRequest({
+      assetId: tab.assetId,
+      password: "",
+      key: "",
+      cols: 80,
+      rows: 24,
+    });
+
+    ConnectSSHAsync(req).then((connectionId) => {
+      // 替换活跃 pane 为 connecting 节点
+      set((s) => {
+        const t = s.tabs.find((t) => t.id === tabId);
+        if (!t) return s;
+
+        const newTree = replaceNode(t.splitTree, sessionId, {
+          type: "connecting",
+          connectionId,
+        });
+
+        const newPanes = { ...t.panes };
+        delete newPanes[sessionId];
+
+        return {
+          tabs: s.tabs.map((tab) =>
+            tab.id === tabId
+              ? { ...tab, splitTree: newTree, activePaneId: connectionId, panes: newPanes }
+              : tab
+          ),
+          connections: {
+            ...s.connections,
+            [connectionId]: {
+              connectionId,
+              assetId: t.assetId,
+              assetName: t.assetName,
+              password: "",
+              logs: [],
+              status: "connecting" as const,
+              currentStep: "resolve" as const,
+            },
+          },
+        };
+      });
+
+      // 监听连接进度事件
+      const eventName = `ssh:connect:${connectionId}`;
+      EventsOn(eventName, (event: {
+        type: string;
+        step?: string;
+        message?: string;
+        sessionId?: string;
+        error?: string;
+        authFailed?: boolean;
+        challengeId?: string;
+        prompts?: string[];
+        echo?: boolean[];
+      }) => {
+        const state = get();
+        const conn = state.connections[connectionId];
+        if (!conn) return;
+
+        switch (event.type) {
+          case "progress":
+            set((s) => ({
+              connections: {
+                ...s.connections,
+                [connectionId]: {
+                  ...s.connections[connectionId],
+                  currentStep: (event.step as ConnectionStep) || s.connections[connectionId].currentStep,
+                  logs: [
+                    ...s.connections[connectionId].logs,
+                    { message: event.message || "", timestamp: Date.now(), type: "info" as const },
+                  ],
+                },
+              },
+            }));
+            break;
+
+          case "connected": {
+            const newSessionId = event.sessionId!;
+            set((s) => {
+              const t = s.tabs.find((t) => t.id === tabId);
+              if (!t) return s;
+
+              const newTree = replaceNode(t.splitTree, connectionId, {
+                type: "terminal",
+                sessionId: newSessionId,
+              });
+
+              const newPanes = {
+                ...t.panes,
+                [newSessionId]: { sessionId: newSessionId, connected: true, connectedAt: Date.now() },
+              };
+
+              const newConnections = { ...s.connections };
+              delete newConnections[connectionId];
+
+              return {
+                tabs: s.tabs.map((tab) =>
+                  tab.id === tabId
+                    ? { ...tab, splitTree: newTree, activePaneId: newSessionId, panes: newPanes }
+                    : tab
+                ),
+                connections: newConnections,
+              };
+            });
+            EventsOff(eventName);
+            break;
+          }
+
+          case "error":
+            set((s) => ({
+              connections: {
+                ...s.connections,
+                [connectionId]: {
+                  ...s.connections[connectionId],
+                  status: "error",
+                  error: event.error,
+                  authFailed: event.authFailed,
+                  logs: [
+                    ...s.connections[connectionId].logs,
+                    { message: event.error || "连接失败", timestamp: Date.now(), type: "error" as const },
+                  ],
+                },
+              },
+            }));
+            break;
+
+          case "auth_challenge":
+            set((s) => ({
+              connections: {
+                ...s.connections,
+                [connectionId]: {
+                  ...s.connections[connectionId],
+                  status: "auth_challenge",
+                  challenge: {
+                    challengeId: event.challengeId!,
+                    prompts: event.prompts || [],
+                    echo: event.echo || [],
+                  },
+                  logs: [
+                    ...s.connections[connectionId].logs,
+                    { message: "等待用户输入认证信息...", timestamp: Date.now(), type: "info" as const },
+                  ],
+                },
+              },
+            }));
+            break;
+        }
+      });
+    }).catch((err) => {
+      console.error("Reconnect failed:", err);
+    });
+  },
+
   retryConnect: (connectionId, password) => {
     const conn = get().connections[connectionId];
     if (!conn) return;
+
+    // 获取旧 tab 的元数据
+    const oldTab = get().tabs.find((t) => t.id === connectionId);
+    const metadata: SSHConnectMetadata | undefined = oldTab ? {
+      host: oldTab.host,
+      port: oldTab.port,
+      username: oldTab.username,
+      forwardedPorts: oldTab.forwardedPorts,
+    } : undefined;
 
     // 清理旧的事件监听和连接状态
     EventsOff(`ssh:connect:${connectionId}`);
@@ -394,7 +596,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
     // 重新连接
     const newPassword = password !== undefined ? password : conn.password;
-    get().connect(conn.assetId, conn.assetName, newPassword, 80, 24);
+    get().connect(conn.assetId, conn.assetName, newPassword, 80, 24, metadata);
 
     // 如果提供了新密码，保存到资产
     if (password && password !== conn.password) {
@@ -579,7 +781,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
                     activePaneId: sessionId,
                     panes: {
                       ...t.panes,
-                      [sessionId]: { sessionId, connected: true },
+                      [sessionId]: { sessionId, connected: true, connectedAt: Date.now() },
                     },
                   }
                 : t

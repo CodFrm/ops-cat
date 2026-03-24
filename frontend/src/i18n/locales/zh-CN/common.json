@@ -186,6 +186,14 @@
         "auth": "认证",
         "shell": "终端"
       }
+    },
+    "session": {
+      "reconnect": "重新连接",
+      "disconnect": "断开连接",
+      "splitH": "水平分割",
+      "splitV": "垂直分割",
+      "connected": "已连接",
+      "disconnected": "已断开"
     }
   },
   "settings": {
@@ -420,7 +428,14 @@
     "response": "响应",
     "error": "错误",
     "empty": "暂无审计日志",
-    "total": "共 {{total}} 条"
+    "total": "共 {{total}} 条",
+    "tabLogs": "审计日志",
+    "tabPool": "连接池",
+    "poolAsset": "资产 ID",
+    "poolRefCount": "活跃会话",
+    "poolLastUsed": "最后使用",
+    "poolEmpty": "暂无活跃连接",
+    "poolRefresh": "刷新"
   },
   "sftp": {
     "upload": "上传文件",

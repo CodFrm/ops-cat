@@ -167,6 +167,24 @@ func emitProgress(cfg *ConnectConfig, step, message string) {
 	}
 }
 
+// Dial 仅建立 SSH 连接（不创建 PTY/Session），用于连接池等场景
+func (m *Manager) Dial(cfg ConnectConfig) (*ssh.Client, []io.Closer, error) {
+	authMethods, err := buildAuthMethods(cfg.AuthType, cfg.Password, cfg.Key, cfg.PrivateKeys, cfg.OnAuthChallenge)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	sshConfig := &ssh.ClientConfig{
+		User:            cfg.Username,
+		Auth:            authMethods,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         30 * time.Second,
+	}
+
+	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	return m.dial(cfg, sshConfig, addr)
+}
+
 // Connect 建立 SSH 连接并启动 PTY 会话
 func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
 	// 构建目标认证方式

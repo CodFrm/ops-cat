@@ -7,6 +7,7 @@ import {group_entity} from '../models';
 import {ai} from '../models';
 import {backup_svc} from '../models';
 import {ssh_key_entity} from '../models';
+import {sshpool} from '../models';
 import {import_svc} from '../models';
 import {sftp_svc} from '../models';
 
@@ -67,6 +68,8 @@ export function GetOpsctlInstallDir():Promise<string>;
 export function GetSSHKeyPublicKey(arg1:number):Promise<string>;
 
 export function GetSSHKeyUsage(arg1:number):Promise<Array<string>>;
+
+export function GetSSHPoolConnections():Promise<Array<sshpool.PoolEntryInfo>>;
 
 export function GetSkillPreview():Promise<string>;
 

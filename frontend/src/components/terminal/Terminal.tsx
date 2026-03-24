@@ -5,6 +5,7 @@ import "@xterm/xterm/css/xterm.css";
 import { WriteSSH, ResizeSSH } from "../../../wailsjs/go/main/App";
 import { EventsOn, EventsOff } from "../../../wailsjs/runtime/runtime";
 import { useShortcutStore, matchShortcut } from "@/stores/shortcutStore";
+import { useTerminalStore } from "@/stores/terminalStore";
 import { useTerminalThemeStore, toXtermTheme } from "@/stores/terminalThemeStore";
 import { builtinThemes } from "@/data/terminalThemes";
 
@@ -79,6 +80,7 @@ export function Terminal({ sessionId, active }: TerminalProps) {
     const closedEvent = "ssh:closed:" + sessionId;
     EventsOn(closedEvent, () => {
       term.write("\r\n\x1b[31m[Connection closed]\x1b[0m\r\n");
+      useTerminalStore.getState().markClosed(sessionId);
     });
 
     // 窗口尺寸变化（debounce 避免过渡动画期间密集 refit）

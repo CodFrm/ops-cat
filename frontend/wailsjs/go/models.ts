@@ -655,3 +655,24 @@ export namespace ssh_key_entity {
 
 }
 
+export namespace sshpool {
+	
+	export class PoolEntryInfo {
+	    asset_id: number;
+	    ref_count: number;
+	    last_used: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PoolEntryInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.asset_id = source["asset_id"];
+	        this.ref_count = source["ref_count"];
+	        this.last_used = source["last_used"];
+	    }
+	}
+
+}
+

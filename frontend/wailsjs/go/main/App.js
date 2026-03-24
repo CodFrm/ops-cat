@@ -118,6 +118,10 @@ export function GetSSHKeyUsage(arg1) {
   return window['go']['main']['App']['GetSSHKeyUsage'](arg1);
 }
 
+export function GetSSHPoolConnections() {
+  return window['go']['main']['App']['GetSSHPoolConnections']();
+}
+
 export function GetSkillPreview() {
   return window['go']['main']['App']['GetSkillPreview']();
 }

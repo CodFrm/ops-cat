@@ -255,6 +255,43 @@ func argInt(args map[string]any, key string) int {
 
 // --- 工具 handler 实现 ---
 
+// safeAssetView 返回不含敏感信息的资产视图
+type safeAssetView struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	GroupID     int64  `json:"group_id"`
+	Description string `json:"description,omitempty"`
+	SortOrder   int    `json:"sort_order"`
+	Createtime  int64  `json:"createtime"`
+	Updatetime  int64  `json:"updatetime"`
+	// SSH 连接信息（不含密码/密钥）
+	Host     string `json:"host,omitempty"`
+	Port     int    `json:"port,omitempty"`
+	Username string `json:"username,omitempty"`
+	AuthType string `json:"auth_type,omitempty"`
+}
+
+func toSafeView(a *asset_entity.Asset) safeAssetView {
+	v := safeAssetView{
+		ID:          a.ID,
+		Name:        a.Name,
+		Type:        a.Type,
+		GroupID:     a.GroupID,
+		Description: a.Description,
+		SortOrder:   a.SortOrder,
+		Createtime:  a.Createtime,
+		Updatetime:  a.Updatetime,
+	}
+	if cfg, err := a.GetSSHConfig(); err == nil && cfg != nil {
+		v.Host = cfg.Host
+		v.Port = cfg.Port
+		v.Username = cfg.Username
+		v.AuthType = cfg.AuthType
+	}
+	return v
+}
+
 func handleListAssets(ctx context.Context, args map[string]any) (string, error) {
 	assetType := argString(args, "asset_type")
 	groupID := argInt64(args, "group_id")
@@ -262,7 +299,11 @@ func handleListAssets(ctx context.Context, args map[string]any) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	data, _ := json.Marshal(assets)
+	views := make([]safeAssetView, len(assets))
+	for i, a := range assets {
+		views[i] = toSafeView(a)
+	}
+	data, _ := json.Marshal(views)
 	return string(data), nil
 }
 
@@ -275,7 +316,7 @@ func handleGetAsset(ctx context.Context, args map[string]any) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("资产不存在: %w", err)
 	}
-	data, _ := json.Marshal(asset)
+	data, _ := json.Marshal(toSafeView(asset))
 	return string(data), nil
 }
 

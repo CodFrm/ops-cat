@@ -4,6 +4,7 @@ import { useFullscreen } from "@/hooks/useFullscreen";
 import { AssetDetail } from "@/components/asset/AssetDetail";
 import { GroupDetail } from "@/components/asset/GroupDetail";
 import { SplitPane } from "@/components/terminal/SplitPane";
+import { SessionToolbar } from "@/components/terminal/SessionToolbar";
 import { TerminalToolbar } from "@/components/terminal/TerminalToolbar";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 import { SSHKeyManager } from "@/components/settings/SSHKeyManager";
@@ -267,6 +268,7 @@ export function MainPanel({
                   pointerEvents: isActive ? "auto" : "none",
                 }}
               >
+                <SessionToolbar tabId={tab.id} />
                 <div className="flex-1 min-h-0 overflow-hidden">
                   <SplitPane
                     node={tab.splitTree}

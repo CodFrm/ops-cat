@@ -186,6 +186,14 @@
         "auth": "Auth",
         "shell": "Shell"
       }
+    },
+    "session": {
+      "reconnect": "Reconnect",
+      "disconnect": "Disconnect",
+      "splitH": "Split Horizontal",
+      "splitV": "Split Vertical",
+      "connected": "Connected",
+      "disconnected": "Disconnected"
     }
   },
   "settings": {
@@ -420,7 +428,14 @@
     "response": "Response",
     "error": "Error",
     "empty": "No audit logs yet",
-    "total": "{{total}} record(s)"
+    "total": "{{total}} record(s)",
+    "tabLogs": "Audit Log",
+    "tabPool": "Connection Pool",
+    "poolAsset": "Asset ID",
+    "poolRefCount": "Active Sessions",
+    "poolLastUsed": "Last Used",
+    "poolEmpty": "No active connections",
+    "poolRefresh": "Refresh"
   },
   "sftp": {
     "upload": "Upload File",

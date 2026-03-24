@@ -190,8 +190,24 @@ const { assets, groups, selectedAssetId, selectedGroupId, selectAsset, selectGro
 
   const handleConnectAsset = async (asset: asset_entity.Asset) => {
     const assetPath = getAssetPath(asset);
+    let metadata: { host: string; port: number; username: string; forwardedPorts: { type: string; localHost: string; localPort: number; remoteHost: string; remotePort: number }[] } | undefined;
     try {
-      await connect(asset.ID, assetPath, "", 80, 24);
+      const cfg = JSON.parse(asset.Config || "{}");
+      metadata = {
+        host: cfg.host || "",
+        port: cfg.port || 22,
+        username: cfg.username || "",
+        forwardedPorts: (cfg.forwarded_ports || []).map((p: { type?: string; local_host?: string; local_port?: number; remote_host?: string; remote_port?: number }) => ({
+          type: p.type || "local",
+          localHost: p.local_host || "",
+          localPort: p.local_port || 0,
+          remoteHost: p.remote_host || "",
+          remotePort: p.remote_port || 0,
+        })),
+      };
+    } catch { /* ignore parse errors */ }
+    try {
+      await connect(asset.ID, assetPath, "", 80, 24, metadata);
       setActivePageTab(null);
     } catch (e) {
       toast.error(`${assetPath}: ${String(e)}`);

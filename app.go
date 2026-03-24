@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -37,6 +38,7 @@ import (
 	"ops-cat/internal/service/sftp_svc"
 	"ops-cat/internal/service/ssh_key_svc"
 	"ops-cat/internal/service/ssh_svc"
+	"ops-cat/internal/sshpool"
 
 	"github.com/cago-frame/cago/pkg/i18n"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -81,6 +83,8 @@ type App struct {
 	pendingApprovals      sync.Map                   // map[string]chan bool（opsctl 审批用）
 	approvalServer        *approval.Server           // opsctl 审批 Unix socket 服务
 	approvedSessions      sync.Map                   // map[string]bool（已批准的 session）
+	sshPool               *sshpool.Pool              // opsctl SSH 连接池
+	sshProxyServer        *sshpool.Server            // SSH 连接池 Unix socket 服务
 	pendingAuthResponses  sync.Map                   // map[string]chan []string（keyboard-interactive 认证响应用）
 	pendingConnections    sync.Map                   // map[string]context.CancelFunc（异步连接取消用）
 	mu                    sync.Mutex                 // 保护 connCounter
@@ -146,6 +150,7 @@ func (a *App) SetAIProvider(providerType, apiBase, apiKey, model string) error {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.startApprovalServer()
+	a.startSSHPoolServer()
 }
 
 // startApprovalServer 启动 opsctl 审批 Unix socket 服务
@@ -198,6 +203,133 @@ func (a *App) startApprovalServer() {
 		return
 	}
 	a.approvalServer = srv
+}
+
+// startSSHPoolServer 启动 SSH 连接池 proxy 服务
+func (a *App) startSSHPoolServer() {
+	dialer := &appPoolDialer{app: a}
+	a.sshPool = sshpool.NewPool(dialer, 5*time.Minute)
+	a.sshProxyServer = sshpool.NewServer(a.sshPool)
+	sockPath := sshpool.SocketPath(bootstrap.AppDataDir())
+	if err := a.sshProxyServer.Start(sockPath); err != nil {
+		log.Printf("SSH pool server failed to start: %v", err)
+		return
+	}
+}
+
+// appPoolDialer 实现 sshpool.PoolDialer，复用 app 的凭据解析和跳板机逻辑
+type appPoolDialer struct {
+	app *App
+}
+
+func (d *appPoolDialer) DialAsset(ctx context.Context, assetID int64) (*ssh.Client, []io.Closer, error) {
+	asset, err := asset_svc.Asset().Get(d.app.langCtx(), assetID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("资产不存在: %w", err)
+	}
+	if !asset.IsSSH() {
+		return nil, nil, fmt.Errorf("资产不是SSH类型")
+	}
+	sshCfg, err := asset.GetSSHConfig()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// 解析凭证
+	password, key := "", ""
+	if sshCfg.AuthType == "password" && sshCfg.Password != "" {
+		decrypted, err := credential_svc.Default().Decrypt(sshCfg.Password)
+		if err == nil {
+			password = decrypted
+		}
+	}
+	if sshCfg.AuthType == "key" && sshCfg.KeySource == "managed" && sshCfg.KeyID > 0 {
+		privKey, err := ssh_key_svc.GetPrivateKey(d.app.langCtx(), sshCfg.KeyID)
+		if err == nil {
+			key = privKey
+		}
+	}
+
+	cfg := ssh_svc.ConnectConfig{
+		Host:        sshCfg.Host,
+		Port:        sshCfg.Port,
+		Username:    sshCfg.Username,
+		AuthType:    sshCfg.AuthType,
+		Password:    password,
+		Key:         key,
+		PrivateKeys: sshCfg.PrivateKeys,
+		AssetID:     assetID,
+		Proxy:       sshCfg.Proxy,
+	}
+
+	// 解析跳板机链（含凭据）
+	if sshCfg.JumpHostID > 0 {
+		jumpHosts, err := d.app.resolveJumpHostsWithCredentials(sshCfg.JumpHostID, 5)
+		if err != nil {
+			return nil, nil, fmt.Errorf("解析跳板机失败: %w", err)
+		}
+		cfg.JumpHosts = jumpHosts
+	}
+
+	return d.app.sshManager.Dial(cfg)
+}
+
+// resolveJumpHostsWithCredentials 递归解析跳板机链（含凭据解密）
+func (a *App) resolveJumpHostsWithCredentials(jumpHostID int64, maxDepth int) ([]ssh_svc.JumpHostEntry, error) {
+	if maxDepth <= 0 {
+		return nil, fmt.Errorf("跳板机链过深，可能存在循环引用")
+	}
+
+	jumpAsset, err := asset_svc.Asset().Get(a.langCtx(), jumpHostID)
+	if err != nil {
+		return nil, fmt.Errorf("跳板机资产不存在(ID=%d): %w", jumpHostID, err)
+	}
+	jumpCfg, err := jumpAsset.GetSSHConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	// 解析跳板机凭证
+	password, key := "", ""
+	if jumpCfg.AuthType == "password" && jumpCfg.Password != "" {
+		decrypted, err := credential_svc.Default().Decrypt(jumpCfg.Password)
+		if err == nil {
+			password = decrypted
+		}
+	}
+	if jumpCfg.AuthType == "key" && jumpCfg.KeySource == "managed" && jumpCfg.KeyID > 0 {
+		privKey, err := ssh_key_svc.GetPrivateKey(a.langCtx(), jumpCfg.KeyID)
+		if err == nil {
+			key = privKey
+		}
+	}
+
+	entry := ssh_svc.JumpHostEntry{
+		Host:     jumpCfg.Host,
+		Port:     jumpCfg.Port,
+		Username: jumpCfg.Username,
+		AuthType: jumpCfg.AuthType,
+		Password: password,
+		Key:      key,
+	}
+
+	if jumpCfg.JumpHostID > 0 {
+		parentHosts, err := a.resolveJumpHostsWithCredentials(jumpCfg.JumpHostID, maxDepth-1)
+		if err != nil {
+			return nil, err
+		}
+		return append(parentHosts, entry), nil
+	}
+
+	return []ssh_svc.JumpHostEntry{entry}, nil
+}
+
+// GetSSHPoolConnections 返回连接池中的活跃连接信息（供前端展示）
+func (a *App) GetSSHPoolConnections() []sshpool.PoolEntryInfo {
+	if a.sshPool == nil {
+		return nil
+	}
+	return a.sshPool.List()
 }
 
 // handlePlanApproval 处理批量计划审批
@@ -295,6 +427,12 @@ func (a *App) RespondOpsctlApprovalSession(confirmID string, approved bool, appr
 
 // cleanup 关闭审批服务等资源
 func (a *App) cleanup() {
+	if a.sshProxyServer != nil {
+		a.sshProxyServer.Stop()
+	}
+	if a.sshPool != nil {
+		a.sshPool.Close()
+	}
 	if a.approvalServer != nil {
 		a.approvalServer.Stop()
 	}
