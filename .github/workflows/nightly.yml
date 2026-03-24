@@ -1,17 +1,62 @@
-name: Release
+name: Nightly
 
 on:
+  schedule:
+    - cron: "0 18 * * *" # UTC 18:00 = 北京时间凌晨 2:00
   push:
-    tags:
-      - "v*"
+    branches:
+      - nightly
 
-env:
-  VERSION: ${{ github.ref_name }}
+concurrency:
+  group: nightly
+  cancel-in-progress: true
 
 jobs:
+  sync:
+    name: Sync from main
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: nightly
+          fetch-depth: 0
+
+      - name: Merge main into nightly
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git merge origin/main --no-edit
+          git push
+
+  prepare:
+    name: Prepare version
+    needs: [sync]
+    if: always() && (needs.sync.result == 'success' || needs.sync.result == 'skipped')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      sha: ${{ steps.ver.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: nightly
+
+      - name: Compute version
+        id: ver
+        run: |
+          SHA=$(git rev-parse HEAD)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          VERSION="nightly-$(date -u +%Y%m%d)-${SHORT_SHA}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "sha=${SHA}" >> $GITHUB_OUTPUT
+
   build-desktop:
     name: Desktop (${{ matrix.platform }})
+    needs: [prepare]
     runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
     strategy:
       matrix:
         include:
@@ -33,6 +78,8 @@ jobs:
             platform: windows-amd64
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: nightly
 
       - uses: actions/setup-go@v5
         with:
@@ -78,12 +125,15 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: release-ops-cat-${{ matrix.platform }}
+          name: nightly-ops-cat-${{ matrix.platform }}
           path: ops-cat-${{ matrix.platform }}.*
 
   build-opsctl:
     name: opsctl (${{ matrix.goos }}-${{ matrix.goarch }})
+    needs: [prepare]
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
     strategy:
       matrix:
         include:
@@ -104,6 +154,8 @@ jobs:
             ext: ".exe"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: nightly
 
       - uses: actions/setup-go@v5
         with:
@@ -126,12 +178,12 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: release-opsctl-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: nightly-opsctl-${{ matrix.goos }}-${{ matrix.goarch }}
           path: opsctl-${{ matrix.goos }}-${{ matrix.goarch }}.*
 
   release:
-    name: Create Release
-    needs: [build-desktop, build-opsctl]
+    name: Update Nightly Release
+    needs: [prepare, build-desktop, build-opsctl]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -141,25 +193,21 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: release-*
+          pattern: nightly-*
           merge-multiple: true
 
       - name: Generate checksums
         run: cd artifacts && sha256sum * > SHA256SUMS.txt
 
-      - name: Determine prerelease
-        id: prerelease
-        run: |
-          if [[ "${{ github.ref_name }}" == *-beta* ]] || [[ "${{ github.ref_name }}" == *-rc* ]]; then
-            echo "flag=--prerelease" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Create GitHub Release
+      - name: Update nightly release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create ${{ github.ref_name }} \
-            --title "${{ github.ref_name }}" \
-            --generate-notes \
-            ${{ steps.prerelease.outputs.flag }} \
+          gh release delete nightly -y --cleanup-tag 2>/dev/null || true
+          gh release create nightly --prerelease \
+            --target ${{ needs.prepare.outputs.sha }} \
+            --title "${{ needs.prepare.outputs.version }}" \
+            --notes "Nightly build from \`nightly\` branch
+          Commit: ${{ needs.prepare.outputs.sha }}
+          Date: $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             artifacts/*

@@ -173,6 +173,73 @@ func CheckPolicyOnly(ctx context.Context, assetID int64, command string) CheckRe
 	return CheckResult{Decision: NeedConfirm}
 }
 
+// CheckForAsset 按资产类型分发权限检查
+func (c *CommandPolicyChecker) CheckForAsset(ctx context.Context, assetID int64, assetType, command string) CheckResult {
+	switch assetType {
+	case asset_entity.AssetTypeSSH:
+		return c.Check(ctx, assetID, command)
+
+	case asset_entity.AssetTypeDatabase:
+		stmts, err := ClassifyStatements(command)
+		if err != nil {
+			return CheckResult{Decision: Deny, Message: fmt.Sprintf("SQL 解析失败，拒绝执行: %v", err)}
+		}
+		asset, _ := asset_svc.Asset().Get(ctx, assetID)
+		var policy *asset_entity.QueryPolicy
+		if asset != nil {
+			policy, _ = asset.GetQueryPolicy()
+		}
+		result := CheckQueryPolicy(policy, stmts)
+		if result.Decision == NeedConfirm {
+			return c.handleConfirm(ctx, assetID, asset, command)
+		}
+		return result
+
+	case asset_entity.AssetTypeRedis:
+		asset, _ := asset_svc.Asset().Get(ctx, assetID)
+		var policy *asset_entity.RedisPolicy
+		if asset != nil {
+			policy, _ = asset.GetRedisPolicy()
+		}
+		result := CheckRedisPolicy(policy, command)
+		if result.Decision == NeedConfirm {
+			return c.handleConfirm(ctx, assetID, asset, command)
+		}
+		return result
+	}
+	return CheckResult{Decision: NeedConfirm}
+}
+
+// handleConfirm 处理需要用户确认的情况
+func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64, asset *asset_entity.Asset, command string) CheckResult {
+	// 检查会话级白名单
+	c.mu.Lock()
+	sessionOK := containsStr(c.sessionAllowed, command)
+	c.mu.Unlock()
+	if sessionOK {
+		return CheckResult{Decision: Allow}
+	}
+
+	if c.confirmFunc == nil {
+		return CheckResult{Decision: Deny, Message: "命令未授权且无确认机制"}
+	}
+
+	assetName := ""
+	if asset != nil {
+		assetName = asset.Name
+	}
+	allowed, alwaysAllow := c.confirmFunc(assetName, command)
+	if !allowed {
+		return CheckResult{Decision: Deny, Message: fmt.Sprintf("用户拒绝执行: %s", command)}
+	}
+	if alwaysAllow {
+		c.mu.Lock()
+		c.sessionAllowed = append(c.sessionAllowed, command)
+		c.mu.Unlock()
+	}
+	return CheckResult{Decision: Allow}
+}
+
 // --- context 注入 ---
 
 type policyCheckerKeyType struct{}

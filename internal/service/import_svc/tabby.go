@@ -312,14 +312,6 @@ func ImportTabbySelected(ctx context.Context, data []byte, selectedIndexes []int
 			}
 		}
 
-		var forwardedPorts []asset_entity.ForwardedPort
-		for _, fp := range profile.Options.ForwardedPorts {
-			forwardedPorts = append(forwardedPorts, asset_entity.ForwardedPort{
-				Type: fp.Type, LocalHost: fp.Host, LocalPort: fp.Port,
-				RemoteHost: fp.TargetHost, RemotePort: fp.TargetPort,
-			})
-		}
-
 		var proxyCfg *asset_entity.ProxyConfig
 		if profile.Options.SocksProxyHost != "" {
 			proxyPort := profile.Options.SocksProxyPort
@@ -331,7 +323,7 @@ func ImportTabbySelected(ctx context.Context, data []byte, selectedIndexes []int
 
 		sshCfg := &asset_entity.SSHConfig{
 			Host: host, Port: port, Username: username, AuthType: authType,
-			PrivateKeys: privateKeys, ForwardedPorts: forwardedPorts, Proxy: proxyCfg,
+			PrivateKeys: privateKeys, Proxy: proxyCfg,
 		}
 		if len(privateKeys) > 0 {
 			sshCfg.KeySource = "file"

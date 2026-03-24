@@ -5,6 +5,7 @@ import (
 	"ops-cat/internal/model/entity/audit_entity"
 	"ops-cat/internal/model/entity/conversation_entity"
 	"ops-cat/internal/model/entity/group_entity"
+	"ops-cat/internal/model/entity/forward_entity"
 	"ops-cat/internal/model/entity/plan_entity"
 	"ops-cat/internal/model/entity/ssh_key_entity"
 
@@ -119,6 +120,21 @@ func RunMigrations(db *gorm.DB) error {
 					return err
 				}
 				return tx.Migrator().DropTable("audit_logs")
+			},
+		},
+		{
+			ID: "202603250001",
+			Migrate: func(tx *gorm.DB) error {
+				if err := tx.AutoMigrate(&forward_entity.ForwardConfig{}); err != nil {
+					return err
+				}
+				return tx.AutoMigrate(&forward_entity.ForwardRule{})
+			},
+			Rollback: func(tx *gorm.DB) error {
+				if err := tx.Migrator().DropTable("forward_rules"); err != nil {
+					return err
+				}
+				return tx.Migrator().DropTable("forward_configs")
 			},
 		},
 	})

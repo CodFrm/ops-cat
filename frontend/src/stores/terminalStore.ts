@@ -23,14 +23,6 @@ export type SplitNode =
       second: SplitNode;
     };
 
-export interface ForwardedPortConfig {
-  type: string;       // "local" | "remote" | "dynamic"
-  localHost: string;
-  localPort: number;
-  remoteHost: string;
-  remotePort: number;
-}
-
 export interface TerminalPane {
   sessionId: string;
   connected: boolean;
@@ -44,7 +36,6 @@ export interface TerminalTab {
   host: string;
   port: number;
   username: string;
-  forwardedPorts: ForwardedPortConfig[];
   splitTree: SplitNode;
   activePaneId: string;
   panes: Record<string, TerminalPane>;
@@ -54,7 +45,6 @@ export interface SSHConnectMetadata {
   host: string;
   port: number;
   username: string;
-  forwardedPorts: ForwardedPortConfig[];
 }
 
 export interface ConnectionLogEntry {
@@ -224,7 +214,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         host: metadata?.host || "",
         port: metadata?.port || 22,
         username: metadata?.username || "",
-        forwardedPorts: metadata?.forwardedPorts || [],
         splitTree: { type: "connecting", connectionId },
         activePaneId: connectionId,
         panes: {},
@@ -576,7 +565,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       host: oldTab.host,
       port: oldTab.port,
       username: oldTab.username,
-      forwardedPorts: oldTab.forwardedPorts,
     } : undefined;
 
     // 清理旧的事件监听和连接状态

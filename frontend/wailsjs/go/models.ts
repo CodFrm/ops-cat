@@ -282,6 +282,55 @@ export namespace conversation_entity {
 
 }
 
+export namespace forward_entity {
+	
+	export class ForwardConfig {
+	    id: number;
+	    name: string;
+	    assetId: number;
+	    createtime: number;
+	    updatetime: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ForwardConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.assetId = source["assetId"];
+	        this.createtime = source["createtime"];
+	        this.updatetime = source["updatetime"];
+	    }
+	}
+	export class ForwardRule {
+	    id: number;
+	    configId: number;
+	    type: string;
+	    localHost: string;
+	    localPort: number;
+	    remoteHost: string;
+	    remotePort: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ForwardRule(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.configId = source["configId"];
+	        this.type = source["type"];
+	        this.localHost = source["localHost"];
+	        this.localPort = source["localPort"];
+	        this.remoteHost = source["remoteHost"];
+	        this.remotePort = source["remotePort"];
+	    }
+	}
+
+}
+
 export namespace group_entity {
 	
 	export class Group {
@@ -514,6 +563,78 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class RuleWithStatus {
+	    id: number;
+	    configId: number;
+	    type: string;
+	    localHost: string;
+	    localPort: number;
+	    remoteHost: string;
+	    remotePort: number;
+	    status: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new RuleWithStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.configId = source["configId"];
+	        this.type = source["type"];
+	        this.localHost = source["localHost"];
+	        this.localPort = source["localPort"];
+	        this.remoteHost = source["remoteHost"];
+	        this.remotePort = source["remotePort"];
+	        this.status = source["status"];
+	        this.error = source["error"];
+	    }
+	}
+	export class ForwardConfigWithStatus {
+	    id: number;
+	    name: string;
+	    assetId: number;
+	    createtime: number;
+	    updatetime: number;
+	    assetName: string;
+	    rules: RuleWithStatus[];
+	    status: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ForwardConfigWithStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.assetId = source["assetId"];
+	        this.createtime = source["createtime"];
+	        this.updatetime = source["updatetime"];
+	        this.assetName = source["assetName"];
+	        this.rules = this.convertValues(source["rules"], RuleWithStatus);
+	        this.status = source["status"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ImportFileInfo {
 	    filePath: string;
 	    encrypted: boolean;
@@ -562,28 +683,7 @@ export namespace main {
 	        this.embedded = source["embedded"];
 	    }
 	}
-	export class PortForwardRequest {
-	    sessionId: string;
-	    type: string;
-	    localHost: string;
-	    localPort: number;
-	    remoteHost: string;
-	    remotePort: number;
 	
-	    static createFrom(source: any = {}) {
-	        return new PortForwardRequest(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.sessionId = source["sessionId"];
-	        this.type = source["type"];
-	        this.localHost = source["localHost"];
-	        this.localPort = source["localPort"];
-	        this.remoteHost = source["remoteHost"];
-	        this.remotePort = source["remotePort"];
-	    }
-	}
 	export class SSHConnectRequest {
 	    assetId: number;
 	    password: string;
@@ -672,35 +772,6 @@ export namespace ssh_key_entity {
 	        this.fingerprint = source["fingerprint"];
 	        this.createtime = source["createtime"];
 	        this.updatetime = source["updatetime"];
-	    }
-	}
-
-}
-
-export namespace ssh_svc {
-	
-	export class PortForwardInfo {
-	    id: string;
-	    type: string;
-	    localHost: string;
-	    localPort: number;
-	    remoteHost: string;
-	    remotePort: number;
-	    error?: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new PortForwardInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.type = source["type"];
-	        this.localHost = source["localHost"];
-	        this.localPort = source["localPort"];
-	        this.remoteHost = source["remoteHost"];
-	        this.remotePort = source["remotePort"];
-	        this.error = source["error"];
 	    }
 	}
 

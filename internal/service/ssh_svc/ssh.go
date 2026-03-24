@@ -20,8 +20,7 @@ type sharedClient struct {
 	mu       sync.Mutex
 	refCount int
 	closers  []io.Closer // 跳板机 client 等额外资源
-	closed   bool
-	onClose  func(*sharedClient) // 连接完全关闭时的回调
+	closed bool
 }
 
 func newSharedClient(client *ssh.Client, closers []io.Closer) *sharedClient {
@@ -47,9 +46,6 @@ func (sc *sharedClient) release() {
 		_ = sc.client.Close()
 		for _, c := range sc.closers {
 			_ = c.Close()
-		}
-		if sc.onClose != nil {
-			sc.onClose(sc)
 		}
 	}
 }
@@ -118,9 +114,8 @@ func (s *Session) IsClosed() bool {
 
 // Manager 管理所有 SSH 会话
 type Manager struct {
-	sessions     sync.Map // map[string]*Session
-	portForwards sync.Map // map[string]*portForward
-	counter      int64
+	sessions sync.Map // map[string]*Session
+	counter  int64
 	mu           sync.Mutex
 }
 
@@ -216,9 +211,6 @@ func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
 	}
 
 	shared := newSharedClient(client, extraClosers)
-	shared.onClose = func(sc *sharedClient) {
-		m.cleanupForwards(sc)
-	}
 
 	emitProgress(&cfg, "shell", "正在启动终端...")
 

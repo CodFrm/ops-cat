@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { Columns2, Rows2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTerminalStore } from "@/stores/terminalStore";
-import { PortForwardPopover } from "./PortForwardPopover";
 
 interface SessionToolbarProps {
   tabId: string;
@@ -87,12 +86,6 @@ export function SessionToolbar({ tabId }: SessionToolbarProps) {
       )}
 
       <div className="flex-1" />
-
-      {/* 端口转发 */}
-      <PortForwardPopover
-        sessionId={activePane?.sessionId}
-        disabled={!anyConnected}
-      />
 
       {/* 分割窗格按钮 */}
       <Button

@@ -77,6 +77,7 @@ type App struct {
 	lang                  string
 	sshManager            *ssh_svc.Manager
 	sftpService           *sftp_svc.Service
+	forwardManager        *ForwardManager
 	aiAgent               *ai.Agent
 	aiProvider            ai.Provider // 保留 provider 引用，用于权限回调注入
 	githubAuthCancel      context.CancelFunc
@@ -99,12 +100,14 @@ type App struct {
 // NewApp 创建App实例
 func NewApp() *App {
 	mgr := ssh_svc.NewManager()
-	return &App{
+	a := &App{
 		lang:           "zh-cn",
 		sshManager:     mgr,
 		sftpService:    sftp_svc.NewService(mgr),
 		permissionChan: make(chan ai.PermissionResponse, 1),
 	}
+	a.forwardManager = NewForwardManager(a)
+	return a
 }
 
 // SetAIProvider 设置 AI provider 并创建 agent
@@ -852,17 +855,6 @@ func (a *App) ConnectSSHAsync(req SSHConnectRequest) (string, error) {
 			return
 		}
 
-		// 自动启动资产配置中的端口转发
-		for _, fp := range sshCfg.ForwardedPorts {
-			a.sshManager.AddPortForward(sessionID, ssh_svc.PortForwardConfig{
-				Type:       fp.Type,
-				LocalHost:  fp.LocalHost,
-				LocalPort:  fp.LocalPort,
-				RemoteHost: fp.RemoteHost,
-				RemotePort: fp.RemotePort,
-			})
-		}
-
 		emitEvent(SSHConnectEvent{Type: "connected", SessionID: sessionID})
 	}()
 
@@ -1033,37 +1025,6 @@ func (a *App) DisconnectSSH(sessionID string) {
 	a.sshManager.Disconnect(sessionID)
 }
 
-// PortForwardRequest 端口转发请求
-type PortForwardRequest struct {
-	SessionID  string `json:"sessionId"`
-	Type       string `json:"type"` // "local" | "remote"
-	LocalHost  string `json:"localHost"`
-	LocalPort  int    `json:"localPort"`
-	RemoteHost string `json:"remoteHost"`
-	RemotePort int    `json:"remotePort"`
-}
-
-// AddPortForward 添加端口转发
-func (a *App) AddPortForward(req PortForwardRequest) *ssh_svc.PortForwardInfo {
-	return a.sshManager.AddPortForward(req.SessionID, ssh_svc.PortForwardConfig{
-		Type:       req.Type,
-		LocalHost:  req.LocalHost,
-		LocalPort:  req.LocalPort,
-		RemoteHost: req.RemoteHost,
-		RemotePort: req.RemotePort,
-	})
-}
-
-// RemovePortForward 移除端口转发
-func (a *App) RemovePortForward(forwardID string) {
-	a.sshManager.RemovePortForward(forwardID)
-}
-
-// ListPortForwards 列出会话关联的端口转发
-func (a *App) ListPortForwards(sessionID string) []ssh_svc.PortForwardInfo {
-	return a.sshManager.ListPortForwards(sessionID)
-}
-
 // --- SFTP 文件传输 ---
 
 // SFTPGetwd 获取远程工作目录（用户 home）
@@ -1223,6 +1184,48 @@ func (a *App) SFTPDownloadDir(sessionID, remotePath string) (string, error) {
 			Status:     "done",
 		})
 	}()
+	return transferID, nil
+}
+
+// SFTPUploadFile 直接上传本地文件或目录（不弹对话框，用于拖拽上传）
+func (a *App) SFTPUploadFile(sessionID, localPath, remotePath string) (string, error) {
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return "", fmt.Errorf("stat %s: %w", localPath, err)
+	}
+
+	transferID := a.sftpService.GenerateTransferID()
+	emitProgress := func(p sftp_svc.TransferProgress) {
+		wailsRuntime.EventsEmit(a.ctx, "sftp:progress:"+transferID, p)
+	}
+	emitDone := func(err error) {
+		if err != nil {
+			emitProgress(sftp_svc.TransferProgress{TransferID: transferID, Status: "error", Error: err.Error()})
+			return
+		}
+		emitProgress(sftp_svc.TransferProgress{TransferID: transferID, Status: "done"})
+	}
+
+	if info.IsDir() {
+		dirRemotePath := remotePath
+		if strings.HasSuffix(dirRemotePath, "/") {
+			dirRemotePath += filepath.Base(localPath)
+		} else {
+			dirRemotePath += "/" + filepath.Base(localPath)
+		}
+		go func() {
+			emitDone(a.sftpService.UploadDir(a.ctx, transferID, sessionID, localPath, dirRemotePath, emitProgress))
+		}()
+	} else {
+		fileRemotePath := remotePath
+		if strings.HasSuffix(fileRemotePath, "/") {
+			fileRemotePath += filepath.Base(localPath)
+		}
+		go func() {
+			emitDone(a.sftpService.Upload(a.ctx, transferID, sessionID, localPath, fileRemotePath, emitProgress))
+		}()
+	}
+
 	return transferID, nil
 }
 
@@ -2265,15 +2268,31 @@ func (a *App) GetAppVersion() string {
 	return configs.Version
 }
 
+// GetUpdateChannel 获取当前更新通道
+func (a *App) GetUpdateChannel() string {
+	cfg := bootstrap.GetConfig()
+	if cfg == nil || cfg.UpdateChannel == "" {
+		return update_svc.ChannelStable
+	}
+	return cfg.UpdateChannel
+}
+
+// SetUpdateChannel 设置更新通道
+func (a *App) SetUpdateChannel(channel string) error {
+	cfg := bootstrap.GetConfig()
+	cfg.UpdateChannel = channel
+	return bootstrap.SaveConfig(cfg)
+}
+
 // CheckForUpdate 检查是否有新版本
 func (a *App) CheckForUpdate() (*update_svc.UpdateInfo, error) {
-	return update_svc.CheckForUpdate()
+	return update_svc.CheckForUpdate(a.GetUpdateChannel())
 }
 
 // DownloadAndInstallUpdate 下载并安装更新
 // 更新完成后需要用户重启应用
 func (a *App) DownloadAndInstallUpdate() error {
-	err := update_svc.DownloadAndUpdate(func(downloaded, total int64) {
+	err := update_svc.DownloadAndUpdate(a.GetUpdateChannel(), func(downloaded, total int64) {
 		wailsRuntime.EventsEmit(a.ctx, "update:progress", map[string]int64{
 			"downloaded": downloaded,
 			"total":      total,

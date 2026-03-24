@@ -9,6 +9,7 @@ import (
 	"ops-cat/internal/repository/asset_repo"
 	"ops-cat/internal/repository/audit_repo"
 	"ops-cat/internal/repository/conversation_repo"
+	"ops-cat/internal/repository/forward_repo"
 	"ops-cat/internal/repository/group_repo"
 	"ops-cat/internal/repository/plan_repo"
 	"ops-cat/internal/repository/ssh_key_repo"
@@ -83,6 +84,7 @@ func Init(ctx context.Context, opts Options) error {
 	group_repo.RegisterGroup(group_repo.NewGroup())
 	plan_repo.RegisterPlan(plan_repo.NewPlan())
 	ssh_key_repo.RegisterSSHKey(ssh_key_repo.NewSSHKey())
+	forward_repo.RegisterForward(forward_repo.NewForward())
 
 	if err := migrations.RunMigrations(db.Default()); err != nil {
 		return err

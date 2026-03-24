@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,8 +19,15 @@ import (
 )
 
 const (
-	githubRepo   = "CodFrm/ops-cat"
-	apiLatestURL = "https://api.github.com/repos/" + githubRepo + "/releases/latest"
+	githubRepo = "CodFrm/ops-cat"
+	apiBaseURL = "https://api.github.com/repos/" + githubRepo
+
+	// ChannelStable 稳定版更新通道
+	ChannelStable = "stable"
+	// ChannelBeta 测试版更新通道
+	ChannelBeta = "beta"
+	// ChannelNightly 每日构建更新通道
+	ChannelNightly = "nightly"
 )
 
 // ReleaseAsset GitHub release 资产
@@ -49,16 +57,28 @@ type UpdateInfo struct {
 	PublishedAt    string `json:"publishedAt"`
 }
 
-// CheckForUpdate 检查 GitHub 最新 release
-func CheckForUpdate() (*UpdateInfo, error) {
+// fetchRelease 根据通道获取对应的 release 信息
+func fetchRelease(channel string) (*ReleaseInfo, error) {
+	switch channel {
+	case ChannelNightly:
+		return fetchReleaseFromURL(apiBaseURL + "/releases/tags/nightly")
+	case ChannelBeta:
+		return fetchLatestBetaRelease()
+	default:
+		return fetchReleaseFromURL(apiBaseURL + "/releases/latest")
+	}
+}
+
+// fetchReleaseFromURL 从指定 URL 获取单个 release
+func fetchReleaseFromURL(url string) (*ReleaseInfo, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequest("GET", apiLatestURL, nil)
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request failed: %w", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 
-	resp, err := client.Do(req) //nolint:gosec // request to constant GitHub API URL
+	resp, err := client.Do(req) //nolint:gosec // request to GitHub API URL
 	if err != nil {
 		return nil, fmt.Errorf("request GitHub API failed: %w", err)
 	}
@@ -72,9 +92,58 @@ func CheckForUpdate() (*UpdateInfo, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
 		return nil, fmt.Errorf("decode response failed: %w", err)
 	}
+	return &release, nil
+}
+
+// fetchLatestBetaRelease 获取最新的 beta 或 stable release（排除 nightly）
+func fetchLatestBetaRelease() (*ReleaseInfo, error) {
+	url := apiBaseURL + "/releases?per_page=20"
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request failed: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := client.Do(req) //nolint:gosec // request to GitHub API URL
+	if err != nil {
+		return nil, fmt.Errorf("request GitHub API failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+	}
+
+	var releases []ReleaseInfo
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+		return nil, fmt.Errorf("decode response failed: %w", err)
+	}
+
+	for i := range releases {
+		if releases[i].TagName != "nightly" {
+			return &releases[i], nil
+		}
+	}
+	return nil, fmt.Errorf("no beta or stable release found")
+}
+
+// CheckForUpdate 检查指定通道的最新版本
+func CheckForUpdate(channel string) (*UpdateInfo, error) {
+	if channel == "" {
+		channel = ChannelStable
+	}
+
+	release, err := fetchRelease(channel)
+	if err != nil {
+		return nil, err
+	}
 
 	currentVersion := configs.Version
 	latestVersion := release.TagName
+	if channel == ChannelNightly {
+		latestVersion = release.Name // nightly 用 release title 作为版本号
+	}
 
 	info := &UpdateInfo{
 		CurrentVersion: currentVersion,
@@ -84,39 +153,44 @@ func CheckForUpdate() (*UpdateInfo, error) {
 		PublishedAt:    release.PublishedAt,
 	}
 
-	// 比较版本: 去掉 v 前缀后直接字符串比较
-	// 如果当前是 dev 版本，始终认为有更新
-	if currentVersion == "dev" || currentVersion == "" {
-		info.HasUpdate = true
-	} else {
-		cv := strings.TrimPrefix(currentVersion, "v")
-		lv := strings.TrimPrefix(latestVersion, "v")
-		info.HasUpdate = lv != cv && compareVersions(lv, cv) > 0
-	}
-
+	info.HasUpdate = hasUpdate(channel, currentVersion, latestVersion)
 	return info, nil
 }
 
-// DownloadAndUpdate 下载最新版本并替换当前二进制
-// onProgress 回调参数: 已下载字节数, 总字节数
-func DownloadAndUpdate(onProgress func(downloaded, total int64)) error {
-	// 获取最新 release 信息
-	client := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequest("GET", apiLatestURL, nil)
-	if err != nil {
-		return fmt.Errorf("create request failed: %w", err)
+// hasUpdate 判断是否有更新
+func hasUpdate(channel, currentVersion, latestVersion string) bool {
+	if currentVersion == "dev" || currentVersion == "" {
+		return true
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
 
-	resp, err := client.Do(req) //nolint:gosec // request to constant GitHub API URL
-	if err != nil {
-		return fmt.Errorf("request GitHub API failed: %w", err)
+	isCurrentNightly := strings.HasPrefix(currentVersion, "nightly-")
+
+	if channel == ChannelNightly {
+		if !isCurrentNightly {
+			return true // 从 stable/beta 切换到 nightly
+		}
+		return currentVersion != latestVersion
 	}
-	defer func() { _ = resp.Body.Close() }()
 
-	var release ReleaseInfo
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return fmt.Errorf("decode response failed: %w", err)
+	// stable 或 beta 通道
+	if isCurrentNightly {
+		return true // 从 nightly 切换到 stable/beta
+	}
+
+	cv := strings.TrimPrefix(currentVersion, "v")
+	lv := strings.TrimPrefix(latestVersion, "v")
+	return lv != cv && compareVersions(lv, cv) > 0
+}
+
+// DownloadAndUpdate 下载指定通道的最新版本并替换当前二进制
+func DownloadAndUpdate(channel string, onProgress func(downloaded, total int64)) error {
+	if channel == "" {
+		channel = ChannelStable
+	}
+
+	release, err := fetchRelease(channel)
+	if err != nil {
+		return err
 	}
 
 	// 找到当前平台的桌面端资产
@@ -438,9 +512,44 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// compareVersions 比较两个版本号 (如 "0.1.0" vs "0.2.0")
+// compareVersions 比较两个版本号，支持预发布后缀
+// 如 "1.0.0" vs "1.0.0-beta.1"，"1.0.0-beta.1" vs "1.0.0-beta.2"
 // 返回: >0 表示 a 更新, <0 表示 b 更新, 0 表示相同
 func compareVersions(a, b string) int {
+	aBase, aPre := splitPreRelease(a)
+	bBase, bPre := splitPreRelease(b)
+
+	result := compareBase(aBase, bBase)
+	if result != 0 {
+		return result
+	}
+
+	// 同基础版本: 无预发布 > 有预发布 (stable > beta)
+	if aPre == "" && bPre != "" {
+		return 1
+	}
+	if aPre != "" && bPre == "" {
+		return -1
+	}
+	if aPre == "" && bPre == "" {
+		return 0
+	}
+
+	return comparePreRelease(aPre, bPre)
+}
+
+// splitPreRelease 分离基础版本和预发布后缀
+// "1.0.0-beta.1" -> ("1.0.0", "beta.1")
+func splitPreRelease(v string) (string, string) {
+	idx := strings.Index(v, "-")
+	if idx < 0 {
+		return v, ""
+	}
+	return v[:idx], v[idx+1:]
+}
+
+// compareBase 比较基础版本号 (如 "1.0.0" vs "0.2.0")
+func compareBase(a, b string) int {
 	aParts := strings.Split(a, ".")
 	bParts := strings.Split(b, ".")
 
@@ -452,13 +561,46 @@ func compareVersions(a, b string) int {
 	for i := 0; i < maxLen; i++ {
 		var aNum, bNum int
 		if i < len(aParts) {
-			_, _ = fmt.Sscanf(aParts[i], "%d", &aNum)
+			aNum, _ = strconv.Atoi(aParts[i])
 		}
 		if i < len(bParts) {
-			_, _ = fmt.Sscanf(bParts[i], "%d", &bNum)
+			bNum, _ = strconv.Atoi(bParts[i])
 		}
 		if aNum != bNum {
 			return aNum - bNum
+		}
+	}
+	return 0
+}
+
+// comparePreRelease 比较预发布标识符
+// "beta.1" vs "beta.2", "beta.1" vs "rc.1"
+func comparePreRelease(a, b string) int {
+	aParts := strings.Split(a, ".")
+	bParts := strings.Split(b, ".")
+
+	maxLen := len(aParts)
+	if len(bParts) > maxLen {
+		maxLen = len(bParts)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		var ap, bp string
+		if i < len(aParts) {
+			ap = aParts[i]
+		}
+		if i < len(bParts) {
+			bp = bParts[i]
+		}
+
+		aNum, aErr := strconv.Atoi(ap)
+		bNum, bErr := strconv.Atoi(bp)
+		if aErr == nil && bErr == nil {
+			if aNum != bNum {
+				return aNum - bNum
+			}
+		} else if ap != bp {
+			return strings.Compare(ap, bp)
 		}
 	}
 	return 0

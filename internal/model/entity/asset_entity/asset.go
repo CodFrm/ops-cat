@@ -8,8 +8,30 @@ import (
 
 // 资产类型常量
 const (
-	AssetTypeSSH = "ssh"
+	AssetTypeSSH      = "ssh"
+	AssetTypeDatabase = "database"
+	AssetTypeRedis    = "redis"
 )
+
+// DatabaseDriver 数据库驱动类型
+type DatabaseDriver string
+
+const (
+	DriverMySQL      DatabaseDriver = "mysql"
+	DriverPostgreSQL DatabaseDriver = "postgresql"
+)
+
+// DefaultPort 返回驱动默认端口
+func (d DatabaseDriver) DefaultPort() int {
+	switch d {
+	case DriverMySQL:
+		return 3306
+	case DriverPostgreSQL:
+		return 5432
+	default:
+		return 0
+	}
+}
 
 // 认证方式常量
 const (
@@ -78,19 +100,10 @@ type SSHConfig struct {
 	KeySource      string          `json:"key_source,omitempty"` // "managed" | "file"
 	PrivateKeys    []string        `json:"private_keys,omitempty"`
 	JumpHostID     int64           `json:"jump_host_id,omitempty"`
-	ForwardedPorts []ForwardedPort `json:"forwarded_ports,omitempty"`
-	Proxy          *ProxyConfig    `json:"proxy,omitempty"`
+	Proxy *ProxyConfig `json:"proxy,omitempty"`
 	LastConnected  int64           `json:"last_connected,omitempty"`
 }
 
-// ForwardedPort 端口转发配置
-type ForwardedPort struct {
-	Type       string `json:"type"` // "local" | "remote" | "dynamic"
-	LocalHost  string `json:"local_host"`
-	LocalPort  int    `json:"local_port"`
-	RemoteHost string `json:"remote_host"`
-	RemotePort int    `json:"remote_port"`
-}
 
 // ProxyConfig 代理配置
 type ProxyConfig struct {
@@ -101,11 +114,89 @@ type ProxyConfig struct {
 	Password string `json:"password,omitempty"`
 }
 
+// DatabaseConfig 数据库类型的特定配置
+type DatabaseConfig struct {
+	Driver     DatabaseDriver `json:"driver"`
+	Host       string         `json:"host"`
+	Port       int            `json:"port"`
+	Username   string         `json:"username"`
+	Password   string         `json:"password,omitempty"`      // credential_svc 加密
+	Database   string         `json:"database,omitempty"`      // 默认数据库
+	SSLMode    string         `json:"ssl_mode,omitempty"`      // postgresql: disable/require/verify-full
+	Params     string         `json:"params,omitempty"`        // 额外连接参数
+	ReadOnly   bool           `json:"read_only,omitempty"`     // 连接级只读
+	SSHAssetID int64          `json:"ssh_asset_id,omitempty"`  // 0=直连, >0=SSH隧道
+}
+
+// RedisConfig Redis类型的特定配置
+type RedisConfig struct {
+	Host       string `json:"host"`
+	Port       int    `json:"port"`
+	Username   string `json:"username,omitempty"`
+	Password   string `json:"password,omitempty"`
+	Database   int    `json:"database,omitempty"`     // DB index
+	TLS        bool   `json:"tls,omitempty"`
+	SSHAssetID int64  `json:"ssh_asset_id,omitempty"`
+}
+
+// QueryPolicy SQL 权限策略（database 类型资产使用）
+type QueryPolicy struct {
+	AllowTypes []string `json:"allow_types"` // 允许的语句类型: SELECT, SHOW, DESCRIBE, EXPLAIN
+	DenyTypes  []string `json:"deny_types"`  // 拒绝的语句类型: DROP TABLE, TRUNCATE, ...
+	DenyFlags  []string `json:"deny_flags"`  // 拒绝的特征: no_where_delete, prepare, call
+}
+
+// DefaultQueryPolicy 返回默认 SQL 权限策略
+func DefaultQueryPolicy() *QueryPolicy {
+	return &QueryPolicy{
+		DenyTypes: []string{
+			"DROP TABLE", "DROP DATABASE", "TRUNCATE",
+			"GRANT", "REVOKE",
+			"CREATE USER", "DROP USER", "ALTER USER",
+		},
+		DenyFlags: []string{
+			"no_where_delete",
+			"no_where_update",
+			"prepare",
+		},
+	}
+}
+
+// RedisPolicy Redis 权限策略
+type RedisPolicy struct {
+	AllowList []string `json:"allow_list"` // 允许的命令模式
+	DenyList  []string `json:"deny_list"`  // 拒绝的命令模式
+}
+
+// DefaultRedisPolicy 返回默认 Redis 权限策略
+func DefaultRedisPolicy() *RedisPolicy {
+	return &RedisPolicy{
+		DenyList: []string{
+			"FLUSHDB", "FLUSHALL",
+			"CONFIG SET *", "CONFIG RESETSTAT",
+			"DEBUG *", "SHUTDOWN *",
+			"SLAVEOF *", "REPLICAOF *",
+			"ACL DELUSER *", "ACL SETUSER *",
+			"SCRIPT FLUSH", "CLUSTER RESET *",
+		},
+	}
+}
+
 // --- 充血模型方法 ---
 
 // IsSSH 判断是否SSH类型
 func (a *Asset) IsSSH() bool {
 	return a.Type == AssetTypeSSH
+}
+
+// IsDatabase 判断是否数据库类型
+func (a *Asset) IsDatabase() bool {
+	return a.Type == AssetTypeDatabase
+}
+
+// IsRedis 判断是否Redis类型
+func (a *Asset) IsRedis() bool {
+	return a.Type == AssetTypeRedis
 }
 
 // GetSSHConfig 解析SSH配置
@@ -133,6 +224,108 @@ func (a *Asset) SetSSHConfig(cfg *SSHConfig) error {
 	return nil
 }
 
+// GetDatabaseConfig 解析数据库配置
+func (a *Asset) GetDatabaseConfig() (*DatabaseConfig, error) {
+	if !a.IsDatabase() {
+		return nil, errors.New("资产不是数据库类型")
+	}
+	if a.Config == "" {
+		return nil, errors.New("数据库配置为空")
+	}
+	var cfg DatabaseConfig
+	if err := json.Unmarshal([]byte(a.Config), &cfg); err != nil {
+		return nil, fmt.Errorf("解析数据库配置失败: %w", err)
+	}
+	return &cfg, nil
+}
+
+// SetDatabaseConfig 序列化数据库配置到Config字段
+func (a *Asset) SetDatabaseConfig(cfg *DatabaseConfig) error {
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("序列化数据库配置失败: %w", err)
+	}
+	a.Config = string(data)
+	return nil
+}
+
+// GetRedisConfig 解析Redis配置
+func (a *Asset) GetRedisConfig() (*RedisConfig, error) {
+	if !a.IsRedis() {
+		return nil, errors.New("资产不是Redis类型")
+	}
+	if a.Config == "" {
+		return nil, errors.New("Redis配置为空")
+	}
+	var cfg RedisConfig
+	if err := json.Unmarshal([]byte(a.Config), &cfg); err != nil {
+		return nil, fmt.Errorf("解析Redis配置失败: %w", err)
+	}
+	return &cfg, nil
+}
+
+// SetRedisConfig 序列化Redis配置到Config字段
+func (a *Asset) SetRedisConfig(cfg *RedisConfig) error {
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("序列化Redis配置失败: %w", err)
+	}
+	a.Config = string(data)
+	return nil
+}
+
+// GetQueryPolicy 解析SQL权限策略（database类型）
+func (a *Asset) GetQueryPolicy() (*QueryPolicy, error) {
+	if a.CmdPolicy == "" {
+		return &QueryPolicy{}, nil
+	}
+	var p QueryPolicy
+	if err := json.Unmarshal([]byte(a.CmdPolicy), &p); err != nil {
+		return nil, fmt.Errorf("解析SQL权限策略失败: %w", err)
+	}
+	return &p, nil
+}
+
+// SetQueryPolicy 序列化SQL权限策略
+func (a *Asset) SetQueryPolicy(p *QueryPolicy) error {
+	if p == nil || (len(p.AllowTypes) == 0 && len(p.DenyTypes) == 0 && len(p.DenyFlags) == 0) {
+		a.CmdPolicy = ""
+		return nil
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return fmt.Errorf("序列化SQL权限策略失败: %w", err)
+	}
+	a.CmdPolicy = string(data)
+	return nil
+}
+
+// GetRedisPolicy 解析Redis权限策略
+func (a *Asset) GetRedisPolicy() (*RedisPolicy, error) {
+	if a.CmdPolicy == "" {
+		return &RedisPolicy{}, nil
+	}
+	var p RedisPolicy
+	if err := json.Unmarshal([]byte(a.CmdPolicy), &p); err != nil {
+		return nil, fmt.Errorf("解析Redis权限策略失败: %w", err)
+	}
+	return &p, nil
+}
+
+// SetRedisPolicy 序列化Redis权限策略
+func (a *Asset) SetRedisPolicy(p *RedisPolicy) error {
+	if p == nil || (len(p.AllowList) == 0 && len(p.DenyList) == 0) {
+		a.CmdPolicy = ""
+		return nil
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return fmt.Errorf("序列化Redis权限策略失败: %w", err)
+	}
+	a.CmdPolicy = string(data)
+	return nil
+}
+
 // Validate 校验资产必填字段和类型配置的完整性
 func (a *Asset) Validate() error {
 	if a.Name == "" {
@@ -146,6 +339,10 @@ func (a *Asset) Validate() error {
 	switch a.Type {
 	case AssetTypeSSH:
 		return a.validateSSH()
+	case AssetTypeDatabase:
+		return a.validateDatabase()
+	case AssetTypeRedis:
+		return a.validateRedis()
 	default:
 		return fmt.Errorf("无效的资产类型: %s", a.Type)
 	}
@@ -172,19 +369,73 @@ func (a *Asset) validateSSH() error {
 	return nil
 }
 
+// validateDatabase 校验数据库类型特定配置
+func (a *Asset) validateDatabase() error {
+	cfg, err := a.GetDatabaseConfig()
+	if err != nil {
+		return fmt.Errorf("数据库配置无效: %w", err)
+	}
+	if cfg.Driver == "" {
+		return errors.New("数据库驱动不能为空")
+	}
+	switch cfg.Driver {
+	case DriverMySQL, DriverPostgreSQL:
+	default:
+		return fmt.Errorf("不支持的数据库驱动: %s", cfg.Driver)
+	}
+	if cfg.Host == "" {
+		return errors.New("数据库主机地址不能为空")
+	}
+	if cfg.Port <= 0 {
+		return errors.New("数据库端口无效")
+	}
+	if cfg.Username == "" {
+		return errors.New("数据库用户名不能为空")
+	}
+	return nil
+}
+
+// validateRedis 校验Redis类型特定配置
+func (a *Asset) validateRedis() error {
+	cfg, err := a.GetRedisConfig()
+	if err != nil {
+		return fmt.Errorf("Redis配置无效: %w", err)
+	}
+	if cfg.Host == "" {
+		return errors.New("Redis主机地址不能为空")
+	}
+	if cfg.Port <= 0 {
+		return errors.New("Redis端口无效")
+	}
+	return nil
+}
+
 // CanConnect 判断资产是否处于可连接状态
 func (a *Asset) CanConnect() bool {
 	if a.Status != StatusActive {
 		return false
 	}
-	if !a.IsSSH() {
-		return false
+	switch a.Type {
+	case AssetTypeSSH:
+		cfg, err := a.GetSSHConfig()
+		if err != nil {
+			return false
+		}
+		return cfg.Host != "" && cfg.Port > 0
+	case AssetTypeDatabase:
+		cfg, err := a.GetDatabaseConfig()
+		if err != nil {
+			return false
+		}
+		return cfg.Host != "" && cfg.Port > 0
+	case AssetTypeRedis:
+		cfg, err := a.GetRedisConfig()
+		if err != nil {
+			return false
+		}
+		return cfg.Host != "" && cfg.Port > 0
 	}
-	cfg, err := a.GetSSHConfig()
-	if err != nil {
-		return false
-	}
-	return cfg.Host != "" && cfg.Port > 0
+	return false
 }
 
 // SSHAddress 返回 host:port 格式地址

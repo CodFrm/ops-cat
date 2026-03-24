@@ -73,15 +73,20 @@ func AllToolDefs() []ToolDef {
 		},
 		{
 			Name:        "add_asset",
-			Description: "Add a new SSH server to the asset inventory.",
+			Description: `Add a new asset to the inventory. Supports types: "ssh", "database", "redis". For database, specify driver ("mysql" or "postgresql").`,
 			Params: []ParamDef{
-				{Name: "name", Type: ParamString, Description: `Display name for the asset, e.g. "Production Web Server".`, Required: true},
-				{Name: "host", Type: ParamString, Description: "Server hostname or IP address.", Required: true},
-				{Name: "port", Type: ParamNumber, Description: "SSH port number, typically 22.", Required: true},
-				{Name: "username", Type: ParamString, Description: "SSH login username.", Required: true},
-				{Name: "auth_type", Type: ParamString, Description: `Authentication method: "password" or "key". Defaults to "password".`},
-				{Name: "group_id", Type: ParamNumber, Description: "Group ID to assign this asset to. Use list_groups to find available groups. Omit for ungrouped."},
-				{Name: "description", Type: ParamString, Description: "Optional description or notes for this asset."},
+				{Name: "name", Type: ParamString, Description: `Display name for the asset.`, Required: true},
+				{Name: "type", Type: ParamString, Description: `Asset type: "ssh" (default), "database", or "redis".`},
+				{Name: "host", Type: ParamString, Description: "Hostname or IP address.", Required: true},
+				{Name: "port", Type: ParamNumber, Description: "Port number (default: 22 for SSH, 3306 for MySQL, 5432 for PostgreSQL, 6379 for Redis).", Required: true},
+				{Name: "username", Type: ParamString, Description: "Login username.", Required: true},
+				{Name: "auth_type", Type: ParamString, Description: `SSH auth method: "password" or "key". Only for SSH type.`},
+				{Name: "driver", Type: ParamString, Description: `Database driver: "mysql" or "postgresql". Required for database type.`},
+				{Name: "database", Type: ParamString, Description: "Default database name. For database type."},
+				{Name: "read_only", Type: ParamString, Description: `Set to "true" to enable read-only mode. For database type.`},
+				{Name: "ssh_asset_id", Type: ParamNumber, Description: "SSH asset ID for tunnel connection. For database/redis types."},
+				{Name: "group_id", Type: ParamNumber, Description: "Group ID to assign this asset to."},
+				{Name: "description", Type: ParamString, Description: "Optional description or notes."},
 			},
 			Handler: handleAddAsset,
 		},
@@ -123,6 +128,25 @@ func AllToolDefs() []ToolDef {
 				{Name: "local_path", Type: ParamString, Description: "Absolute local path to save the file (including filename).", Required: true},
 			},
 			Handler: handleDownloadFile,
+		},
+		{
+			Name:        "exec_sql",
+			Description: "Execute SQL on a database asset (MySQL, PostgreSQL). Returns rows as JSON for queries (SELECT/SHOW/DESCRIBE/EXPLAIN), or affected row count for statements (INSERT/UPDATE/DELETE). Credentials are resolved automatically.",
+			Params: []ParamDef{
+				{Name: "asset_id", Type: ParamNumber, Description: "Database asset ID. Use list_assets with asset_type='database' to find.", Required: true},
+				{Name: "sql", Type: ParamString, Description: "SQL to execute.", Required: true},
+				{Name: "database", Type: ParamString, Description: "Override the default database for this execution."},
+			},
+			Handler: handleExecSQL,
+		},
+		{
+			Name:        "exec_redis",
+			Description: "Execute a Redis command on a Redis asset. Returns the result as JSON. Credentials are resolved automatically.",
+			Params: []ParamDef{
+				{Name: "asset_id", Type: ParamNumber, Description: "Redis asset ID. Use list_assets with asset_type='redis' to find.", Required: true},
+				{Name: "command", Type: ParamString, Description: "Redis command (e.g. 'GET mykey', 'HGETALL user:1', 'SET key value EX 3600').", Required: true},
+			},
+			Handler: handleExecRedis,
 		},
 	}
 }
@@ -265,11 +289,17 @@ type safeAssetView struct {
 	SortOrder   int    `json:"sort_order"`
 	Createtime  int64  `json:"createtime"`
 	Updatetime  int64  `json:"updatetime"`
-	// SSH 连接信息（不含密码/密钥）
+	// 连接信息（不含密码/密钥）
 	Host     string `json:"host,omitempty"`
 	Port     int    `json:"port,omitempty"`
 	Username string `json:"username,omitempty"`
 	AuthType string `json:"auth_type,omitempty"`
+	// Database 专属
+	Driver   string `json:"driver,omitempty"`
+	Database string `json:"database,omitempty"`
+	ReadOnly bool   `json:"read_only,omitempty"`
+	// Redis 专属
+	RedisDB int `json:"redis_db,omitempty"`
 }
 
 func toSafeView(a *asset_entity.Asset) safeAssetView {
@@ -283,11 +313,30 @@ func toSafeView(a *asset_entity.Asset) safeAssetView {
 		Createtime:  a.Createtime,
 		Updatetime:  a.Updatetime,
 	}
-	if cfg, err := a.GetSSHConfig(); err == nil && cfg != nil {
-		v.Host = cfg.Host
-		v.Port = cfg.Port
-		v.Username = cfg.Username
-		v.AuthType = cfg.AuthType
+	switch a.Type {
+	case asset_entity.AssetTypeSSH:
+		if cfg, err := a.GetSSHConfig(); err == nil && cfg != nil {
+			v.Host = cfg.Host
+			v.Port = cfg.Port
+			v.Username = cfg.Username
+			v.AuthType = cfg.AuthType
+		}
+	case asset_entity.AssetTypeDatabase:
+		if cfg, err := a.GetDatabaseConfig(); err == nil && cfg != nil {
+			v.Host = cfg.Host
+			v.Port = cfg.Port
+			v.Username = cfg.Username
+			v.Driver = string(cfg.Driver)
+			v.Database = cfg.Database
+			v.ReadOnly = cfg.ReadOnly
+		}
+	case asset_entity.AssetTypeRedis:
+		if cfg, err := a.GetRedisConfig(); err == nil && cfg != nil {
+			v.Host = cfg.Host
+			v.Port = cfg.Port
+			v.Username = cfg.Username
+			v.RedisDB = cfg.Database
+		}
 	}
 	return v
 }
@@ -394,25 +443,58 @@ func handleAddAsset(ctx context.Context, args map[string]any) (string, error) {
 		return "", fmt.Errorf("缺少必要参数 (name, host, port, username)")
 	}
 
-	authType := argString(args, "auth_type")
-	if authType == "" {
-		authType = "password"
+	assetType := argString(args, "type")
+	if assetType == "" {
+		assetType = asset_entity.AssetTypeSSH
 	}
 	groupID := argInt64(args, "group_id")
 	description := argString(args, "description")
 
 	asset := &asset_entity.Asset{
 		Name:        name,
-		Type:        "ssh",
+		Type:        assetType,
 		GroupID:     groupID,
 		Description: description,
 	}
-	_ = asset.SetSSHConfig(&asset_entity.SSHConfig{
-		Host:     host,
-		Port:     port,
-		Username: username,
-		AuthType: authType,
-	})
+
+	switch assetType {
+	case asset_entity.AssetTypeSSH:
+		authType := argString(args, "auth_type")
+		if authType == "" {
+			authType = "password"
+		}
+		_ = asset.SetSSHConfig(&asset_entity.SSHConfig{
+			Host:     host,
+			Port:     port,
+			Username: username,
+			AuthType: authType,
+		})
+	case asset_entity.AssetTypeDatabase:
+		driver := asset_entity.DatabaseDriver(argString(args, "driver"))
+		if driver == "" {
+			return "", fmt.Errorf("数据库类型必须指定 driver (mysql 或 postgresql)")
+		}
+		dbCfg := &asset_entity.DatabaseConfig{
+			Driver:     driver,
+			Host:       host,
+			Port:       port,
+			Username:   username,
+			Database:   argString(args, "database"),
+			ReadOnly:   argString(args, "read_only") == "true",
+			SSHAssetID: argInt64(args, "ssh_asset_id"),
+		}
+		_ = asset.SetDatabaseConfig(dbCfg)
+	case asset_entity.AssetTypeRedis:
+		redisCfg := &asset_entity.RedisConfig{
+			Host:       host,
+			Port:       port,
+			Username:   username,
+			SSHAssetID: argInt64(args, "ssh_asset_id"),
+		}
+		_ = asset.SetRedisConfig(redisCfg)
+	default:
+		return "", fmt.Errorf("不支持的资产类型: %s", assetType)
+	}
 
 	if err := asset_svc.Asset().Create(ctx, asset); err != nil {
 		return "", fmt.Errorf("创建资产失败: %w", err)
@@ -441,7 +523,8 @@ func handleUpdateAsset(ctx context.Context, args map[string]any) (string, error)
 		asset.GroupID = argInt64(args, "group_id")
 	}
 
-	if asset.IsSSH() {
+	switch asset.Type {
+	case asset_entity.AssetTypeSSH:
 		sshCfg, _ := asset.GetSSHConfig()
 		if sshCfg != nil {
 			if host := argString(args, "host"); host != "" {
@@ -454,6 +537,37 @@ func handleUpdateAsset(ctx context.Context, args map[string]any) (string, error)
 				sshCfg.Username = username
 			}
 			_ = asset.SetSSHConfig(sshCfg)
+		}
+	case asset_entity.AssetTypeDatabase:
+		dbCfg, _ := asset.GetDatabaseConfig()
+		if dbCfg != nil {
+			if host := argString(args, "host"); host != "" {
+				dbCfg.Host = host
+			}
+			if port := argInt(args, "port"); port > 0 {
+				dbCfg.Port = port
+			}
+			if username := argString(args, "username"); username != "" {
+				dbCfg.Username = username
+			}
+			if db := argString(args, "database"); db != "" {
+				dbCfg.Database = db
+			}
+			_ = asset.SetDatabaseConfig(dbCfg)
+		}
+	case asset_entity.AssetTypeRedis:
+		redisCfg, _ := asset.GetRedisConfig()
+		if redisCfg != nil {
+			if host := argString(args, "host"); host != "" {
+				redisCfg.Host = host
+			}
+			if port := argInt(args, "port"); port > 0 {
+				redisCfg.Port = port
+			}
+			if username := argString(args, "username"); username != "" {
+				redisCfg.Username = username
+			}
+			_ = asset.SetRedisConfig(redisCfg)
 		}
 	}
 

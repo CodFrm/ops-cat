@@ -1,17 +1,20 @@
 import { useTranslation } from "react-i18next";
-import { X, TerminalSquare, Cat, Settings, KeyRound, MessageSquare, ScrollText } from "lucide-react";
+import { X, TerminalSquare, Cat, Settings, KeyRound, MessageSquare, ScrollText, ArrowRightLeft } from "lucide-react";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { AssetDetail } from "@/components/asset/AssetDetail";
 import { GroupDetail } from "@/components/asset/GroupDetail";
 import { SplitPane } from "@/components/terminal/SplitPane";
 import { SessionToolbar } from "@/components/terminal/SessionToolbar";
 import { TerminalToolbar } from "@/components/terminal/TerminalToolbar";
+import { FileManagerPanel } from "@/components/terminal/FileManagerPanel";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 import { SSHKeyManager } from "@/components/settings/SSHKeyManager";
 import { AuditLogPage } from "@/components/audit/AuditLogPage";
+import { PortForwardPage } from "@/components/forward/PortForwardPage";
 import { AIChatContent } from "@/components/ai/AIChatContent";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useAIStore } from "@/stores/aiStore";
+import { useSFTPStore } from "@/stores/sftpStore";
 import { cn } from "@/lib/utils";
 import { asset_entity, group_entity } from "../../../wailsjs/go/models";
 
@@ -19,6 +22,7 @@ const AI_TAB_PREFIX = "ai:";
 
 const pageTabMeta: Record<string, { icon: typeof Settings; labelKey: string }> = {
   settings: { icon: Settings, labelKey: "nav.settings" },
+  forward: { icon: ArrowRightLeft, labelKey: "nav.forward" },
   sshkeys: { icon: KeyRound, labelKey: "nav.sshKeys" },
   audit: { icon: ScrollText, labelKey: "nav.audit" },
 };
@@ -53,6 +57,7 @@ export function MainPanel({
   const { t } = useTranslation();
   const isFullscreen = useFullscreen();
   const { tabs, activeTabId, assetInfoOpen, setActiveTab, removeTab, closeAssetInfo, openAssetInfo, connectingAssetIds } = useTerminalStore();
+  const { fileManagerOpenTabs, fileManagerWidth, setFileManagerWidth } = useSFTPStore();
   const aiOpenTabs = useAIStore((s) => s.openTabs);
 
   const noTabStyle = { "--wails-draggable": "no-drag" } as React.CSSProperties;
@@ -269,15 +274,25 @@ export function MainPanel({
                 }}
               >
                 <SessionToolbar tabId={tab.id} />
-                <div className="flex-1 min-h-0 overflow-hidden">
-                  <SplitPane
-                    node={tab.splitTree}
-                    tabId={tab.id}
-                    isTabActive={isActive}
-                    activePaneId={tab.activePaneId}
-                    showFocusRing={tab.splitTree.type === "split"}
-                    path={[]}
-                  />
+                <div className="flex-1 min-h-0 overflow-hidden flex">
+                  <div className="flex-1 min-w-0 overflow-hidden">
+                    <SplitPane
+                      node={tab.splitTree}
+                      tabId={tab.id}
+                      isTabActive={isActive}
+                      activePaneId={tab.activePaneId}
+                      showFocusRing={tab.splitTree.type === "split"}
+                      path={[]}
+                    />
+                  </div>
+                  {fileManagerOpenTabs[tab.id] && tab.activePaneId && (
+                    <FileManagerPanel
+                      tabId={tab.id}
+                      sessionId={tab.activePaneId}
+                      width={fileManagerWidth}
+                      onWidthChange={setFileManagerWidth}
+                    />
+                  )}
                 </div>
                 <TerminalToolbar tabId={tab.id} />
               </div>
@@ -358,6 +373,11 @@ export function MainPanel({
         {activePageTab === "audit" && (
           <div className="absolute inset-0 bg-background">
             <AuditLogPage />
+          </div>
+        )}
+        {activePageTab === "forward" && (
+          <div className="absolute inset-0 bg-background">
+            <PortForwardPage />
           </div>
         )}
       </div>

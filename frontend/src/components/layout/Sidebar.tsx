@@ -1,4 +1,4 @@
-import { Home, Settings, KeyRound, PanelLeftClose, PanelLeftOpen, EyeOff, Bot, ScrollText } from "lucide-react";
+import { Home, Settings, KeyRound, PanelLeftClose, PanelLeftOpen, EyeOff, Bot, ScrollText, ArrowRightLeft } from "lucide-react";
 import logoLight from "@/assets/images/logo.png";
 import logoDark from "@/assets/images/logo-dark.png";
 import { useTranslation } from "react-i18next";
@@ -27,6 +27,7 @@ export function Sidebar({ activePage, onPageChange, sidebarCollapsed, onToggleSi
 
   const navItems = [
     { id: "home", icon: Home, label: t("nav.home") },
+    { id: "forward", icon: ArrowRightLeft, label: t("nav.forward") },
     { id: "sshkeys", icon: KeyRound, label: t("nav.sshKeys") },
     { id: "audit", icon: ScrollText, label: t("nav.audit") },
   ];

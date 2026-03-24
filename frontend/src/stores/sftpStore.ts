@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   SFTPUpload,
   SFTPUploadDir,
+  SFTPUploadFile,
   SFTPDownload,
   SFTPDownloadDir,
   SFTPCancelTransfer,
@@ -22,17 +23,30 @@ export interface SFTPTransfer {
   error?: string;
 }
 
+const DEFAULT_FILE_MANAGER_WIDTH = 280;
+const MIN_FILE_MANAGER_WIDTH = 200;
+const MAX_FILE_MANAGER_WIDTH = 600;
+
 interface SFTPState {
   transfers: Record<string, SFTPTransfer>;
 
+  // File manager panel state
+  fileManagerOpenTabs: Record<string, boolean>;
+  fileManagerWidth: number;
+
   startUpload: (sessionId: string, remotePath: string) => Promise<string | null>;
   startUploadDir: (sessionId: string, remotePath: string) => Promise<string | null>;
+  startUploadFile: (sessionId: string, localPath: string, remotePath: string) => Promise<string | null>;
   startDownload: (sessionId: string, remotePath: string) => Promise<string | null>;
   startDownloadDir: (sessionId: string, remotePath: string) => Promise<string | null>;
   cancelTransfer: (transferId: string) => void;
   clearTransfer: (transferId: string) => void;
   clearCompleted: () => void;
   getSessionTransfers: (sessionId: string) => SFTPTransfer[];
+
+  toggleFileManager: (tabId: string) => void;
+  setFileManagerWidth: (width: number) => void;
+  isFileManagerOpen: (tabId: string) => boolean;
 }
 
 function subscribeProgress(
@@ -137,6 +151,8 @@ function subscribeProgress(
 
 export const useSFTPStore = create<SFTPState>((set, get) => ({
   transfers: {},
+  fileManagerOpenTabs: {},
+  fileManagerWidth: DEFAULT_FILE_MANAGER_WIDTH,
 
   startUpload: async (sessionId, remotePath) => {
     const transferId = await SFTPUpload(sessionId, remotePath);
@@ -147,6 +163,13 @@ export const useSFTPStore = create<SFTPState>((set, get) => ({
 
   startUploadDir: async (sessionId, remotePath) => {
     const transferId = await SFTPUploadDir(sessionId, remotePath);
+    if (!transferId) return null;
+    subscribeProgress(transferId, sessionId, "upload", set, get);
+    return transferId;
+  },
+
+  startUploadFile: async (sessionId, localPath, remotePath) => {
+    const transferId = await SFTPUploadFile(sessionId, localPath, remotePath);
     if (!transferId) return null;
     subscribeProgress(transferId, sessionId, "upload", set, get);
     return transferId;
@@ -193,5 +216,27 @@ export const useSFTPStore = create<SFTPState>((set, get) => ({
     return Object.values(get().transfers).filter(
       (t) => t.sessionId === sessionId
     );
+  },
+
+  toggleFileManager: (tabId) => {
+    set((state) => ({
+      fileManagerOpenTabs: {
+        ...state.fileManagerOpenTabs,
+        [tabId]: !state.fileManagerOpenTabs[tabId],
+      },
+    }));
+  },
+
+  setFileManagerWidth: (width) => {
+    set({
+      fileManagerWidth: Math.max(
+        MIN_FILE_MANAGER_WIDTH,
+        Math.min(MAX_FILE_MANAGER_WIDTH, width)
+      ),
+    });
+  },
+
+  isFileManagerOpen: (tabId) => {
+    return !!get().fileManagerOpenTabs[tabId];
   },
 }));

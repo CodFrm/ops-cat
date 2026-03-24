@@ -9,6 +9,7 @@ import (
 
 // AppConfig 应用持久化配置（config.json）
 type AppConfig struct {
+	UpdateChannel string `json:"update_channel,omitempty"` // stable, beta, nightly
 }
 
 var (

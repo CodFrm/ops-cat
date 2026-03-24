@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
-import { Plus, Trash2, ChevronDown, ChevronRight, Eye, EyeOff, FolderOpen, Loader2, Folder, Server, PlugZap } from "lucide-react";
+import { Trash2, Eye, EyeOff, FolderOpen, Loader2, Folder, Server, PlugZap } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -41,14 +41,6 @@ interface AssetFormProps {
   defaultGroupId?: number;
 }
 
-interface ForwardedPort {
-  type: string;
-  local_host: string;
-  local_port: number;
-  remote_host: string;
-  remote_port: number;
-}
-
 interface ProxyConfig {
   type: string;
   host: string;
@@ -67,7 +59,6 @@ interface SSHConfig {
   key_source?: string;
   private_keys?: string[];
   jump_host_id?: number;
-  forwarded_ports?: ForwardedPort[];
   proxy?: ProxyConfig | null;
 }
 
@@ -108,15 +99,11 @@ export function AssetForm({
   const [selectedKeyPaths, setSelectedKeyPaths] = useState<string[]>([]);
   const [scanningKeys, setScanningKeys] = useState(false);
   const [jumpHostId, setJumpHostId] = useState(0);
-  const [forwardedPorts, setForwardedPorts] = useState<ForwardedPort[]>([]);
   const [proxyType, setProxyType] = useState("socks5");
   const [proxyHost, setProxyHost] = useState("");
   const [proxyPort, setProxyPort] = useState(1080);
   const [proxyUsername, setProxyUsername] = useState("");
   const [proxyPassword, setProxyPassword] = useState("");
-
-  // Collapsible sections
-  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // SSH assets for jump host selection (exclude self)
   const sshAssets = assets.filter(
@@ -216,7 +203,6 @@ export function AssetForm({
 
           setSelectedKeyPaths(cfg.private_keys || []);
           setJumpHostId(cfg.jump_host_id || 0);
-          setForwardedPorts(cfg.forwarded_ports || []);
 
           // Derive connection type
           if (cfg.jump_host_id) {
@@ -240,11 +226,6 @@ export function AssetForm({
             setProxyUsername("");
             setProxyPassword("");
           }
-
-          // Show advanced if forwarded ports exist
-          setShowAdvanced(
-            !!(cfg.forwarded_ports && cfg.forwarded_ports.length > 0)
-          );
 
         } catch {
           resetSSHFields();
@@ -272,13 +253,11 @@ export function AssetForm({
     setSelectedKeyPaths([]);
     setConnectionType("direct");
     setJumpHostId(0);
-    setForwardedPorts([]);
     setProxyType("socks5");
     setProxyHost("");
     setProxyPort(1080);
     setProxyUsername("");
     setProxyPassword("");
-    setShowAdvanced(false);
   };
 
   const handleTestConnection = async () => {
@@ -354,8 +333,6 @@ export function AssetForm({
       };
     }
 
-    if (forwardedPorts.length > 0) sshConfig.forwarded_ports = forwardedPorts;
-
     const config = JSON.stringify(sshConfig);
 
     const asset = new asset_entity.Asset({
@@ -382,23 +359,6 @@ export function AssetForm({
     } finally {
       setSaving(false);
     }
-  };
-
-  const addForwardedPort = () => {
-    setForwardedPorts([
-      ...forwardedPorts,
-      { type: "local", local_host: "127.0.0.1", local_port: 0, remote_host: "127.0.0.1", remote_port: 0 },
-    ]);
-  };
-
-  const removeForwardedPort = (index: number) => {
-    setForwardedPorts(forwardedPorts.filter((_, i) => i !== index));
-  };
-
-  const updateForwardedPort = (index: number, field: keyof ForwardedPort, value: string | number) => {
-    const updated = [...forwardedPorts];
-    updated[index] = { ...updated[index], [field]: value };
-    setForwardedPorts(updated);
   };
 
   return (
@@ -760,93 +720,6 @@ export function AssetForm({
             />
           </div>
 
-          {/* Advanced section - only forwarded ports */}
-          <button
-            type="button"
-            className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-            onClick={() => setShowAdvanced(!showAdvanced)}
-          >
-            {showAdvanced ? (
-              <ChevronDown className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5" />
-            )}
-            {t("asset.forwardedPorts")}
-          </button>
-
-          {showAdvanced && (
-            <div className="grid gap-4 border rounded-lg p-3">
-              {/* Forwarded Ports */}
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between">
-                  <Label>{t("asset.forwardedPorts")}</Label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 gap-1 text-xs"
-                    onClick={addForwardedPort}
-                  >
-                    <Plus className="h-3 w-3" />
-                    {t("asset.addForwardedPort")}
-                  </Button>
-                </div>
-                {forwardedPorts.map((fp, i) => (
-                  <div key={i} className="flex items-center gap-1.5">
-                    <Select
-                      value={fp.type}
-                      onValueChange={(v) => updateForwardedPort(i, "type", v)}
-                    >
-                      <SelectTrigger className="h-7 w-20 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="local">Local</SelectItem>
-                        <SelectItem value="remote">Remote</SelectItem>
-                        <SelectItem value="dynamic">Dynamic</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      className="h-7 text-xs w-20"
-                      value={fp.local_host}
-                      onChange={(e) => updateForwardedPort(i, "local_host", e.target.value)}
-                      placeholder="127.0.0.1"
-                    />
-                    <Input
-                      className="h-7 text-xs w-14 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                      type="number"
-                      value={fp.local_port || ""}
-                      onChange={(e) => updateForwardedPort(i, "local_port", Number(e.target.value))}
-                      placeholder="Port"
-                    />
-                    <span className="text-xs text-muted-foreground">→</span>
-                    <Input
-                      className="h-7 text-xs w-20"
-                      value={fp.remote_host}
-                      onChange={(e) => updateForwardedPort(i, "remote_host", e.target.value)}
-                      placeholder="127.0.0.1"
-                    />
-                    <Input
-                      className="h-7 text-xs w-14 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                      type="number"
-                      value={fp.remote_port || ""}
-                      onChange={(e) => updateForwardedPort(i, "remote_port", Number(e.target.value))}
-                      placeholder="Port"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 shrink-0"
-                      onClick={() => removeForwardedPort(i)}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>

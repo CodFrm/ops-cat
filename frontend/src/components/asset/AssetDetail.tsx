@@ -30,13 +30,6 @@ interface SSHConfig {
   key_source?: string;
   private_keys?: string[];
   jump_host_id?: number;
-  forwarded_ports?: {
-    type: string;
-    local_host: string;
-    local_port: number;
-    remote_host: string;
-    remote_port: number;
-  }[];
   proxy?: {
     type: string;
     host: string;
@@ -227,25 +220,6 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
               {sshConfig.proxy.username && (
                 <InfoItem label={t("asset.proxyUsername")} value={sshConfig.proxy.username} />
               )}
-            </div>
-          </div>
-        )}
-
-        {/* Forwarded Ports */}
-        {sshConfig?.forwarded_ports && sshConfig.forwarded_ports.length > 0 && (
-          <div className="rounded-xl border bg-card p-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-              {t("asset.forwardedPorts")}
-            </h3>
-            <div className="space-y-2">
-              {sshConfig.forwarded_ports.map((fp, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm font-mono">
-                  <span className="text-xs uppercase text-muted-foreground w-14">{fp.type}</span>
-                  <span>{fp.local_host}:{fp.local_port}</span>
-                  <span className="text-muted-foreground">→</span>
-                  <span>{fp.remote_host}:{fp.remote_port}</span>
-                </div>
-              ))}
             </div>
           </div>
         )}

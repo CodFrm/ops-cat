@@ -1,6 +1,6 @@
 ---
 name: opsctl
-description: "ops-cat CLI tool (opsctl) for server asset management and remote operations. Use when: (1) user asks about opsctl commands or usage, (2) user wants to manage assets, execute remote commands, transfer files, or SSH into servers via CLI, (3) user asks to write scripts or automation using opsctl, (4) user invokes /opsctl. Covers: list/get/create/update assets, exec, ssh, cp, session and plan approval workflow."
+description: "ops-cat CLI tool (opsctl) for server asset management and remote operations. Use when: (1) user asks about opsctl commands or usage, (2) user wants to manage assets, execute remote commands, transfer files, or SSH into servers via CLI, (3) user asks to write scripts or automation using opsctl, (4) user invokes /opsctl. Covers: list/get/create/update assets, exec, ssh, cp, sql, redis, session and plan approval workflow."
 ---
 
 # opsctl CLI Tool
@@ -24,13 +24,18 @@ Assets can be referenced by:
 
 | Command | Description |
 |---------|-------------|
-| `list assets [--type ssh] [--group-id N]` | List assets with optional filters |
+| `list assets [--type ssh\|database\|redis] [--group-id N]` | List assets with optional filters |
 | `list groups` | List all asset groups |
 | `get asset <asset>` | Get asset details (SSH config, etc.) |
-| `create asset --name X --host X --username X [--port N] [--auth-type key\|password] [--group-id N]` | Create asset (needs approval) |
+| `create asset --type ssh --name X --host X --username X [--port N] [--auth-type key\|password] [--group-id N]` | Create SSH asset (needs approval) |
+| `create asset --type database --driver mysql\|postgresql --name X --host X --username X [--port N] [--read-only] [--ssh-asset ID]` | Create database asset |
+| `create asset --type redis --name X --host X [--port N] [--ssh-asset ID]` | Create Redis asset |
 | `update asset <asset> [--name X] [--host X] [--port N] [--username X] [--group-id N]` | Update asset (needs approval) |
 | `ssh <asset>` | Interactive SSH terminal (no approval needed) |
 | `exec <asset> -- <command>` | Execute remote command (approval/policy checked) |
+| `sql <asset> "<SQL>"` | Execute SQL on database asset (approval/policy checked) |
+| `sql <asset> -f <file.sql>` | Execute SQL from file |
+| `redis <asset> "<command>"` | Execute Redis command (approval/policy checked) |
 | `cp <src> <dst>` | File transfer: local↔remote or remote↔remote (needs approval) |
 | `plan submit` | Submit batch plan from stdin JSON, returns session ID |
 | `session start` | Create a new approval session |
@@ -92,9 +97,22 @@ Auto-discover server environment via SSH and persist a structured description to
 
 ## Common Patterns
 
+**Query a database**:
+```bash
+opsctl sql prod-db "SELECT * FROM users LIMIT 10"
+opsctl sql prod-db -f migration.sql
+opsctl sql prod-db -d other_db "SHOW TABLES"
+```
+
+**Query Redis**:
+```bash
+opsctl redis cache "GET session:abc123"
+opsctl redis cache "HGETALL user:1"
+opsctl redis cache "SET key value EX 3600"
+```
+
 **Pipe data through remote command**:
 ```bash
-echo "SELECT 1;" | opsctl exec db -- mysql
 cat config.yml | opsctl exec web -- tee /etc/app/config.yml
 ```
 

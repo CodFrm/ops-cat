@@ -53,6 +53,8 @@ import {
   GetSkillPreview,
   GetDataDir,
   GetAppVersion,
+  GetUpdateChannel,
+  SetUpdateChannel,
   CheckForUpdate,
   DownloadAndInstallUpdate,
 } from "../../../wailsjs/go/main/App";
@@ -322,6 +324,7 @@ function IntegrationSection() {
 function UpdateSection() {
   const { t } = useTranslation();
   const [currentVersion, setCurrentVersion] = useState("");
+  const [channel, setChannel] = useState("stable");
   const [checking, setChecking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<{
     hasUpdate: boolean;
@@ -336,7 +339,18 @@ function UpdateSection() {
 
   useEffect(() => {
     GetAppVersion().then(setCurrentVersion).catch(() => {});
+    GetUpdateChannel().then(setChannel).catch(() => {});
   }, []);
+
+  const handleChannelChange = async (value: string) => {
+    setChannel(value);
+    setUpdateInfo(null);
+    try {
+      await SetUpdateChannel(value);
+    } catch (e: any) {
+      toast.error(String(e?.message || e));
+    }
+  };
 
   useEffect(() => {
     const cancelProgress = EventsOn("update:progress", (data: { downloaded: number; total: number }) => {
@@ -394,6 +408,26 @@ function UpdateSection() {
           <span className="text-muted-foreground">{t("appUpdate.currentVersion")}</span>
           <span className="font-mono text-xs">{currentVersion || "dev"}</span>
         </div>
+
+        <div className="flex justify-between items-center text-sm">
+          <span className="text-muted-foreground">{t("appUpdate.updateChannel")}</span>
+          <Select value={channel} onValueChange={handleChannelChange}>
+            <SelectTrigger className="w-[160px] h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="stable">{t("appUpdate.channelStable")}</SelectItem>
+              <SelectItem value="beta">{t("appUpdate.channelBeta")}</SelectItem>
+              <SelectItem value="nightly">{t("appUpdate.channelNightly")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {channel === "nightly" && (
+          <p className="text-xs text-muted-foreground">{t("appUpdate.nightlyWarning")}</p>
+        )}
+        {channel === "beta" && (
+          <p className="text-xs text-muted-foreground">{t("appUpdate.betaWarning")}</p>
+        )}
 
         <div className="flex gap-2">
           <Button onClick={handleCheck} disabled={checking || updating} size="sm" variant="outline">
