@@ -7,11 +7,13 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/cago-frame/cago/pkg/logger"
 	"github.com/zalando/go-keyring"
+	"go.uber.org/zap"
 )
 
 const (
-	keychainService = "ops-cat"
+	keychainService = "opskat"
 	keychainAccount = "master-key"
 	masterKeyLen    = 32 // 256-bit
 	masterKeyFile   = "master.key"
@@ -40,7 +42,9 @@ func ResolveMasterKey(explicit string, dataDir string) (string, error) {
 	if err == nil && len(data) > 0 {
 		key = string(data)
 		// 尝试同步到 Keychain（best-effort）
-		_ = keyring.Set(keychainService, keychainAccount, key)
+		if err := keyring.Set(keychainService, keychainAccount, key); err != nil {
+			logger.Default().Warn("sync master key to keychain", zap.Error(err))
+		}
 		return key, nil
 	}
 

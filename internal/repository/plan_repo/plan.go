@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"ops-cat/internal/model/entity/plan_entity"
+	"github.com/opskat/opskat/internal/model/entity/plan_entity"
 
 	"github.com/cago-frame/cago/database/db"
 )
@@ -15,7 +15,10 @@ type PlanRepo interface {
 	GetSession(ctx context.Context, id string) (*plan_entity.PlanSession, error)
 	UpdateSessionStatus(ctx context.Context, id string, status int) error
 	CreateItems(ctx context.Context, items []*plan_entity.PlanItem) error
+	UpdateItems(ctx context.Context, sessionID string, items []*plan_entity.PlanItem) error
 	ListItems(ctx context.Context, sessionID string) ([]*plan_entity.PlanItem, error)
+	// ListApprovedItems 获取某个会话下所有已批准 plan 的 items
+	ListApprovedItems(ctx context.Context, sessionID string) ([]*plan_entity.PlanItem, error)
 	// ConsumeItem 原子消费一个匹配的 plan item，返回是否成功消费
 	ConsumeItem(ctx context.Context, sessionID, toolName string, assetID int64, command string, auditLogID int64) (bool, error)
 }
@@ -72,6 +75,30 @@ func (r *planRepo) ListItems(ctx context.Context, sessionID string) ([]*plan_ent
 	var items []*plan_entity.PlanItem
 	if err := db.Ctx(ctx).Where("plan_session_id = ?", sessionID).
 		Order("item_index ASC").Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *planRepo) UpdateItems(ctx context.Context, sessionID string, items []*plan_entity.PlanItem) error {
+	// 删除旧 items 并重建
+	if err := db.Ctx(ctx).Where("plan_session_id = ?", sessionID).Delete(&plan_entity.PlanItem{}).Error; err != nil {
+		return err
+	}
+	if len(items) > 0 {
+		return db.Ctx(ctx).Create(items).Error
+	}
+	return nil
+}
+
+func (r *planRepo) ListApprovedItems(ctx context.Context, sessionID string) ([]*plan_entity.PlanItem, error) {
+	var items []*plan_entity.PlanItem
+	// 查找该 sessionID 关联的所有已批准 plan 的 items
+	if err := db.Ctx(ctx).
+		Joins("JOIN plan_sessions ON plan_sessions.id = plan_items.plan_session_id").
+		Where("plan_sessions.status = ? AND plan_items.plan_session_id = ?",
+			plan_entity.PlanStatusApproved, sessionID).
+		Find(&items).Error; err != nil {
 		return nil, err
 	}
 	return items, nil

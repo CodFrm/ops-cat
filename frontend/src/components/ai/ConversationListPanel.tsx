@@ -14,6 +14,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useAIStore } from "@/stores/aiStore";
+import { useTabStore, type AITabMeta } from "@/stores/tabStore";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { cn } from "@/lib/utils";
 
@@ -47,7 +48,6 @@ export function ConversationListPanel({
   const isFullscreen = useFullscreen();
   const {
     conversations,
-    openTabs,
     configured,
     fetchConversations,
     openConversationTab,
@@ -55,6 +55,7 @@ export function ConversationListPanel({
     deleteConversation,
     tabStates,
   } = useAIStore();
+  const aiTabs = useTabStore((s) => s.tabs.filter((t) => t.type === "ai"));
 
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
 
@@ -121,7 +122,7 @@ export function ConversationListPanel({
 
   // 仅在该会话的 tab 正在发送时阻止删除
   const isConvSending = (convId: number) => {
-    const tab = openTabs.find((t) => t.conversationId === convId);
+    const tab = aiTabs.find((t) => (t.meta as AITabMeta).conversationId === convId);
     if (!tab) return false;
     return tabStates[tab.id]?.sending || false;
   };
@@ -141,7 +142,7 @@ export function ConversationListPanel({
 
   // 已打开的会话 ID 集合
   const openConversationIds = new Set(
-    openTabs.filter((t) => t.conversationId).map((t) => t.conversationId)
+    aiTabs.map((t) => (t.meta as AITabMeta).conversationId).filter(Boolean)
   );
 
   return (

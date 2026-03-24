@@ -1,14 +1,14 @@
 package migrations
 
 import (
-	"ops-cat/internal/model/entity/asset_entity"
-	"ops-cat/internal/model/entity/audit_entity"
-	"ops-cat/internal/model/entity/conversation_entity"
-	"ops-cat/internal/model/entity/credential_entity"
-	"ops-cat/internal/model/entity/forward_entity"
-	"ops-cat/internal/model/entity/group_entity"
-	"ops-cat/internal/model/entity/plan_entity"
-	"ops-cat/internal/model/entity/ssh_key_entity"
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/model/entity/audit_entity"
+	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
+	"github.com/opskat/opskat/internal/model/entity/credential_entity"
+	"github.com/opskat/opskat/internal/model/entity/forward_entity"
+	"github.com/opskat/opskat/internal/model/entity/group_entity"
+	"github.com/opskat/opskat/internal/model/entity/plan_entity"
+	"github.com/opskat/opskat/internal/model/entity/ssh_key_entity"
 
 	"github.com/go-gormigrate/gormigrate/v2"
 	"gorm.io/gorm"

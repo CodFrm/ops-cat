@@ -79,7 +79,7 @@ func EncryptBackup(plainJSON []byte, password string) ([]byte, error) {
 
 	// 构建信封
 	envelope := EncryptedBackup{
-		Format:  "ops-cat-encrypted-backup",
+		Format:  "opskat-encrypted-backup",
 		Version: 1,
 		KDF: KDFParams{
 			Algorithm: "argon2id",
@@ -155,5 +155,5 @@ func IsEncryptedBackup(data []byte) bool {
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return false
 	}
-	return probe.Format == "ops-cat-encrypted-backup"
+	return probe.Format == "opskat-encrypted-backup"
 }

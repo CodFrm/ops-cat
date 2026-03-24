@@ -282,7 +282,7 @@ function IntegrationSection() {
                   variant="link"
                   size="sm"
                   className="h-auto p-0 text-xs"
-                  onClick={() => BrowserOpenURL("https://github.com/CodFrm/ops-cat/release")}
+                  onClick={() => BrowserOpenURL("https://github.com/opskat/opskat/release")}
                 >
                   <ExternalLink className="h-3 w-3 mr-1" />
                   GitHub Releases
@@ -934,18 +934,24 @@ export function SettingsPage() {
                 {providerType === "local_cli" && (
                   <>
                     <div className="grid gap-2">
-                      <Label>{t("settings.cliPath")}</Label>
-                      <Input value={apiBase} onChange={(e) => setApiBase(e.target.value)} placeholder="/usr/local/bin/claude" />
-                    </div>
-                    <div className="grid gap-2">
                       <Label>{t("settings.cliType")}</Label>
-                      <Select value={model} onValueChange={setModel}>
+                      <Select value={model} onValueChange={(v) => {
+                        setModel(v);
+                        // 切换类型时，如果用户没有手动指定路径，自动填充检测到的路径
+                        const detected = localCLIs.find((c) => c.type === v);
+                        setApiBase(detected ? detected.path : "");
+                      }}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="claude">Claude Code</SelectItem>
                           <SelectItem value="codex">Codex</SelectItem>
                         </SelectContent>
                       </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>{t("settings.cliPath")}</Label>
+                      <Input value={apiBase} onChange={(e) => setApiBase(e.target.value)} placeholder={localCLIs.find((c) => c.type === model)?.path || t("settings.cliPathHint")} />
+                      <p className="text-xs text-muted-foreground">{t("settings.cliPathHint")}</p>
                     </div>
                     {localCLIs.length > 0 && (
                       <div className="text-sm text-muted-foreground">

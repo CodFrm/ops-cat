@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Ops Cat",
+    "title": "OpsKat",
     "subtitle": "AI 驱动的智能运维平台",
     "hint": "从左侧选择一个资产开始"
   },
@@ -303,8 +303,9 @@
   "settings": {
     "providerType": "Provider 类型",
     "model": "模型",
-    "cliPath": "CLI 路径",
+    "cliPath": "CLI 路径（可选）",
     "cliType": "CLI 类型",
+    "cliPathHint": "留空则自动从 PATH 中检测",
     "detectedCLIs": "检测到本地 CLI",
     "configured": "已配置",
     "saved": "已保存"
@@ -540,15 +541,20 @@
     "patternHint": "后续匹配此模式的命令将自动放行"
   },
   "planApproval": {
-    "title": "批量计划审批",
-    "description": "opsctl 正在请求批准以下批量计划：",
-    "approveAll": "全部允许",
+    "title": "权限审批",
+    "description": "正在请求以下命令权限，批准后匹配的命令将自动放行：",
+    "approveAll": "批准",
     "deny": "拒绝",
     "typeExec": "执行",
     "typeCp": "传输",
     "typeCreate": "创建",
     "typeUpdate": "更新",
-    "itemCount": "共 {{count}} 项操作"
+    "itemCount": "共 {{count}} 项操作",
+    "commandsPlaceholder": "命令模式，一行一个，支持 * 通配符",
+    "editHint": "可编辑命令模式后批准，一行一个，支持 * 通配符匹配",
+    "scopeAsset": "资产",
+    "scopeGroup": "资产组",
+    "scopeAll": "所有资产"
   },
   "audit": {
     "title": "审计日志",

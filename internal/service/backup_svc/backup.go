@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"time"
 
-	"ops-cat/internal/model/entity/asset_entity"
-	"ops-cat/internal/model/entity/group_entity"
-	"ops-cat/internal/repository/asset_repo"
-	"ops-cat/internal/repository/group_repo"
-
 	"github.com/cago-frame/cago/database/db"
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
+
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/model/entity/group_entity"
+	"github.com/opskat/opskat/internal/repository/asset_repo"
+	"github.com/opskat/opskat/internal/repository/group_repo"
 )
 
 // BackupData 备份数据结构
@@ -94,7 +96,9 @@ func Import(ctx context.Context, data *BackupData) error {
 				if err == nil && cfg.JumpHostID > 0 {
 					oldJumpHostID = cfg.JumpHostID
 					cfg.JumpHostID = 0
-					_ = a.SetSSHConfig(cfg)
+					if err := a.SetSSHConfig(cfg); err != nil {
+						logger.Default().Warn("clear jump host in backup restore", zap.Error(err))
+					}
 				}
 			}
 

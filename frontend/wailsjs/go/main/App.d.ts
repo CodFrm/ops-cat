@@ -154,9 +154,9 @@ export function RespondOpsctlApprovalSession(arg1:string,arg2:boolean,arg3:strin
 
 export function RespondPermission(arg1:string,arg2:string):Promise<void>;
 
-export function RespondPermissionRequest(arg1:string,arg2:boolean,arg3:string):Promise<void>;
-
 export function RespondPlanApproval(arg1:string,arg2:boolean):Promise<void>;
+
+export function RespondPlanApprovalWithEdits(arg1:string,arg2:boolean,arg3:Array<main.PlanItemEdit>):Promise<void>;
 
 export function SFTPCancelTransfer(arg1:string):Promise<void>;
 

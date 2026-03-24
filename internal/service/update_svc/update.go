@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	githubRepo = "CodFrm/ops-cat"
+	githubRepo = "opskat/opskat"
 	apiBaseURL = "https://api.github.com/repos/" + githubRepo
 
 	// ChannelStable 稳定版更新通道
@@ -205,7 +205,7 @@ func DownloadAndUpdate(channel string, onProgress func(downloaded, total int64))
 
 	// 找到当前平台的桌面端资产
 	platform := runtime.GOOS + "-" + runtime.GOARCH
-	assetName := fmt.Sprintf("ops-cat-%s", platform)
+	assetName := fmt.Sprintf("opskat-%s", platform)
 
 	var downloadURL string
 	var assetSize int64
@@ -241,7 +241,7 @@ func DownloadAndUpdate(channel string, onProgress func(downloaded, total int64))
 	}
 
 	// 下载到临时文件
-	tmpFile, err := os.CreateTemp("", "ops-cat-update-*")
+	tmpFile, err := os.CreateTemp("", "opskat-update-*")
 	if err != nil {
 		return fmt.Errorf("create temp file failed: %w", err)
 	}
@@ -290,7 +290,7 @@ func DownloadAndUpdate(channel string, onProgress func(downloaded, total int64))
 
 // updateMacOS 更新 macOS .app bundle
 func updateMacOS(archivePath, execPath string) error {
-	// execPath 类似 /path/to/ops-cat.app/Contents/MacOS/ops-cat
+	// execPath 类似 /path/to/opskat.app/Contents/MacOS/opskat
 	// 需要找到 .app 目录
 	appDir := execPath
 	for !strings.HasSuffix(appDir, ".app") && appDir != "/" {
@@ -304,7 +304,7 @@ func updateMacOS(archivePath, execPath string) error {
 	parentDir := filepath.Dir(appDir)
 
 	// 解压 tar.gz 到临时目录
-	tmpExtractDir, err := os.MkdirTemp("", "ops-cat-extract-*")
+	tmpExtractDir, err := os.MkdirTemp("", "opskat-extract-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir failed: %w", err)
 	}
@@ -319,7 +319,7 @@ func updateMacOS(archivePath, execPath string) error {
 	}
 
 	// 找到解压出的 .app 目录
-	newAppDir := filepath.Join(tmpExtractDir, "ops-cat.app")
+	newAppDir := filepath.Join(tmpExtractDir, "opskat.app")
 	if _, err := os.Stat(newAppDir); err != nil {
 		return fmt.Errorf("extracted app not found: %w", err)
 	}
@@ -334,7 +334,7 @@ func updateMacOS(archivePath, execPath string) error {
 	}
 
 	// 移动新的 .app 到原位置
-	if err := os.Rename(newAppDir, filepath.Join(parentDir, "ops-cat.app")); err != nil {
+	if err := os.Rename(newAppDir, filepath.Join(parentDir, "opskat.app")); err != nil {
 		// 恢复备份
 		if renameErr := os.Rename(backupDir, appDir); renameErr != nil {
 			logger.Default().Error("restore backup after failed install", zap.Error(renameErr))
@@ -351,7 +351,7 @@ func updateMacOS(archivePath, execPath string) error {
 // updateLinux 更新 Linux 二进制
 func updateLinux(archivePath, execPath string) error {
 	// 解压 tar.gz
-	tmpExtractDir, err := os.MkdirTemp("", "ops-cat-extract-*")
+	tmpExtractDir, err := os.MkdirTemp("", "opskat-extract-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir failed: %w", err)
 	}
@@ -365,7 +365,7 @@ func updateLinux(archivePath, execPath string) error {
 		return fmt.Errorf("extract failed: %w", err)
 	}
 
-	newBin := filepath.Join(tmpExtractDir, "ops-cat")
+	newBin := filepath.Join(tmpExtractDir, "opskat")
 	if _, err := os.Stat(newBin); err != nil {
 		return fmt.Errorf("extracted binary not found: %w", err)
 	}
@@ -395,7 +395,7 @@ func updateLinux(archivePath, execPath string) error {
 // updateWindows 更新 Windows 二进制
 func updateWindows(archivePath, execPath string) error {
 	// 解压 zip
-	tmpExtractDir, err := os.MkdirTemp("", "ops-cat-extract-*")
+	tmpExtractDir, err := os.MkdirTemp("", "opskat-extract-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir failed: %w", err)
 	}
@@ -409,7 +409,7 @@ func updateWindows(archivePath, execPath string) error {
 		return fmt.Errorf("extract failed: %w", err)
 	}
 
-	newBin := filepath.Join(tmpExtractDir, "ops-cat.exe")
+	newBin := filepath.Join(tmpExtractDir, "opskat.exe")
 	if _, err := os.Stat(newBin); err != nil {
 		return fmt.Errorf("extracted binary not found: %w", err)
 	}

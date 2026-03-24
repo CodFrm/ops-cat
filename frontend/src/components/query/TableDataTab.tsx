@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, Save, Undo2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useQueryStore } from "@/stores/queryStore";
+import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { ExecuteSQL } from "../../../wailsjs/go/main/App";
 import { QueryResultTable, CellEdit } from "./QueryResultTable";
 import { toast } from "sonner";
@@ -38,7 +38,8 @@ function quoteIdent(name: string, driver?: string): string {
 
 export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
   const { t } = useTranslation();
-  const { openTabs } = useQueryStore();
+  const tab = useTabStore((s) => s.tabs.find((t) => t.id === tabId));
+  const queryMeta = tab?.meta as QueryTabMeta | undefined;
 
   const [columns, setColumns] = useState<string[]>([]);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
@@ -49,9 +50,8 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
   const [edits, setEdits] = useState<Map<string, unknown>>(new Map());
   const [submitting, setSubmitting] = useState(false);
 
-  const queryTab = openTabs.find((t) => t.id === tabId);
-  const driver = queryTab?.driver;
-  const assetId = queryTab?.assetId ?? 0;
+  const driver = queryMeta?.driver;
+  const assetId = queryMeta?.assetId ?? 0;
 
   const fetchData = useCallback(
     async (pageNum: number) => {

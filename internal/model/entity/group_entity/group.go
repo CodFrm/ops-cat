@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"ops-cat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/model/entity/policy"
 )
 
 // Group 资产分组实体
@@ -40,11 +40,11 @@ func (g *Group) IsRoot() bool {
 }
 
 // GetCommandPolicy 解析命令权限策略
-func (g *Group) GetCommandPolicy() (*asset_entity.CommandPolicy, error) {
+func (g *Group) GetCommandPolicy() (*policy.CommandPolicy, error) {
 	if g.CmdPolicy == "" {
-		return &asset_entity.CommandPolicy{}, nil
+		return &policy.CommandPolicy{}, nil
 	}
-	var p asset_entity.CommandPolicy
+	var p policy.CommandPolicy
 	if err := json.Unmarshal([]byte(g.CmdPolicy), &p); err != nil {
 		return nil, fmt.Errorf("解析命令权限策略失败: %w", err)
 	}
@@ -52,7 +52,7 @@ func (g *Group) GetCommandPolicy() (*asset_entity.CommandPolicy, error) {
 }
 
 // SetCommandPolicy 序列化命令权限策略
-func (g *Group) SetCommandPolicy(p *asset_entity.CommandPolicy) error {
+func (g *Group) SetCommandPolicy(p *policy.CommandPolicy) error {
 	if p == nil || (len(p.AllowList) == 0 && len(p.DenyList) == 0) {
 		g.CmdPolicy = ""
 		return nil

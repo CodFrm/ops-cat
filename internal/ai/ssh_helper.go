@@ -5,64 +5,18 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-
 	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 
-	"ops-cat/internal/model/entity/asset_entity"
-	"ops-cat/internal/model/entity/credential_entity"
-	"ops-cat/internal/service/asset_svc"
-	"ops-cat/internal/service/credential_mgr_svc"
-	"ops-cat/internal/service/credential_svc"
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/service/asset_svc"
+	"github.com/opskat/opskat/internal/service/credential_resolver"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
-
-// resolveAssetCredentials 从资产配置中解析凭据（自动解密密码/获取密钥）
-func resolveAssetCredentials(ctx context.Context, cfg *asset_entity.SSHConfig) (password, key string, err error) {
-	// 优先使用统一凭证
-	if cfg.CredentialID > 0 {
-		cred, err := credential_mgr_svc.Get(ctx, cfg.CredentialID)
-		if err != nil {
-			return "", "", fmt.Errorf("获取凭证失败: %w", err)
-		}
-		switch cred.Type {
-		case credential_entity.TypePassword:
-			decrypted, err := credential_svc.Default().Decrypt(cred.Password)
-			if err != nil {
-				return "", "", fmt.Errorf("解密密码失败: %w", err)
-			}
-			return decrypted, "", nil
-		case credential_entity.TypeSSHKey:
-			privKey, err := credential_mgr_svc.GetDecryptedPrivateKey(ctx, cfg.CredentialID)
-			if err != nil {
-				return "", "", fmt.Errorf("获取密钥失败: %w", err)
-			}
-			return "", privKey, nil
-		}
-	}
-	// 向后兼容：内联密码
-	if cfg.AuthType == "password" && cfg.Password != "" {
-		decrypted, err := credential_svc.Default().Decrypt(cfg.Password)
-		if err != nil {
-			return "", "", fmt.Errorf("解密密码失败: %w", err)
-		}
-		return decrypted, "", nil
-	}
-	// 向后兼容：本地密钥文件
-	if cfg.AuthType == "key" && len(cfg.PrivateKeys) > 0 {
-		data, err := os.ReadFile(cfg.PrivateKeys[0])
-		if err != nil {
-			return "", "", fmt.Errorf("读取私钥文件失败: %w", err)
-		}
-		return "", string(data), nil
-	}
-	return "", "", nil
-}
 
 // createSSHClient 创建 SSH 客户端，支持 password 和 key 认证
 func createSSHClient(cfg *asset_entity.SSHConfig, password, key string) (*ssh.Client, error) {
@@ -98,6 +52,26 @@ func createSSHClient(cfg *asset_entity.SSHConfig, password, key string) (*ssh.Cl
 		return nil, fmt.Errorf("SSH连接失败: %w", err)
 	}
 	return client, nil
+}
+
+// resolveAssetSSH 根据资产 ID 解析 SSH 连接所需信息（内部使用 credential_resolver）
+func resolveAssetSSH(ctx context.Context, assetID int64) (*asset_entity.Asset, *asset_entity.SSHConfig, string, string, error) {
+	asset, err := asset_svc.Asset().Get(ctx, assetID)
+	if err != nil {
+		return nil, nil, "", "", fmt.Errorf("资产不存在: %w", err)
+	}
+	if !asset.IsSSH() {
+		return nil, nil, "", "", fmt.Errorf("资产不是SSH类型")
+	}
+	sshCfg, err := asset.GetSSHConfig()
+	if err != nil {
+		return nil, nil, "", "", fmt.Errorf("获取SSH配置失败: %w", err)
+	}
+	password, key, err := credential_resolver.Default().ResolveSSHCredentials(ctx, sshCfg)
+	if err != nil {
+		return nil, nil, "", "", fmt.Errorf("解析凭据失败: %w", err)
+	}
+	return asset, sshCfg, password, key, nil
 }
 
 // executeSSHCommand 执行一次性 SSH 命令并返回输出（每次新建连接）
@@ -218,18 +192,16 @@ func ExecWithStdio(ctx context.Context, assetID int64, command string, stdin io.
 // CopyBetweenAssets 在两个资产间直接传输文件（SFTP 流式，不经本地磁盘）
 func CopyBetweenAssets(ctx context.Context, srcAssetID int64, srcPath string, dstAssetID int64, dstPath string) error {
 	// 解析源资产凭证
-	srcAsset, srcCfg, srcPassword, srcKey, err := resolveAssetSSH(ctx, srcAssetID)
+	_, srcCfg, srcPassword, srcKey, err := resolveAssetSSH(ctx, srcAssetID)
 	if err != nil {
 		return fmt.Errorf("源资产解析失败: %w", err)
 	}
-	_ = srcAsset
 
 	// 解析目标资产凭证
-	dstAsset, dstCfg, dstPassword, dstKey, err := resolveAssetSSH(ctx, dstAssetID)
+	_, dstCfg, dstPassword, dstKey, err := resolveAssetSSH(ctx, dstAssetID)
 	if err != nil {
 		return fmt.Errorf("目标资产解析失败: %w", err)
 	}
-	_ = dstAsset
 
 	// 创建 SSH 客户端
 	srcClient, err := createSSHClient(srcCfg, srcPassword, srcKey)
@@ -301,22 +273,11 @@ func CopyBetweenAssets(ctx context.Context, srcAssetID int64, srcPath string, ds
 	return nil
 }
 
-// AIPoolDialer 实现 sshpool.PoolDialer，使用 AI 模块的凭据解析逻辑
+// AIPoolDialer 实现 sshpool.PoolDialer，使用 credential_resolver 解析凭据
 type AIPoolDialer struct{}
 
 func (d *AIPoolDialer) DialAsset(ctx context.Context, assetID int64) (*ssh.Client, []io.Closer, error) {
-	asset, err := asset_svc.Asset().Get(ctx, assetID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("资产不存在: %w", err)
-	}
-	if !asset.IsSSH() {
-		return nil, nil, fmt.Errorf("资产不是SSH类型")
-	}
-	sshCfg, err := asset.GetSSHConfig()
-	if err != nil {
-		return nil, nil, err
-	}
-	password, key, err := resolveAssetCredentials(ctx, sshCfg)
+	sshCfg, password, key, _, err := credential_resolver.Default().ResolveSSHConnectConfig(ctx, assetID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -325,24 +286,4 @@ func (d *AIPoolDialer) DialAsset(ctx context.Context, assetID int64) (*ssh.Clien
 		return nil, nil, err
 	}
 	return client, nil, nil
-}
-
-// resolveAssetSSHByID 根据资产 ID 解析 SSH 连接所需信息（导出版本）
-func ResolveAssetSSHByID(ctx context.Context, assetID int64) (*asset_entity.SSHConfig, string, string, error) {
-	asset, err := asset_svc.Asset().Get(ctx, assetID)
-	if err != nil {
-		return nil, "", "", fmt.Errorf("资产不存在: %w", err)
-	}
-	if !asset.IsSSH() {
-		return nil, "", "", fmt.Errorf("资产不是SSH类型")
-	}
-	sshCfg, err := asset.GetSSHConfig()
-	if err != nil {
-		return nil, "", "", fmt.Errorf("获取SSH配置失败: %w", err)
-	}
-	password, key, err := resolveAssetCredentials(ctx, sshCfg)
-	if err != nil {
-		return nil, "", "", fmt.Errorf("解析凭据失败: %w", err)
-	}
-	return sshCfg, password, key, nil
 }

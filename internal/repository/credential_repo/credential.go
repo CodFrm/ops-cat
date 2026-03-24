@@ -3,7 +3,7 @@ package credential_repo
 import (
 	"context"
 
-	"ops-cat/internal/model/entity/credential_entity"
+	"github.com/opskat/opskat/internal/model/entity/credential_entity"
 
 	"github.com/cago-frame/cago/database/db"
 )

@@ -755,6 +755,26 @@ export namespace main {
 	        this.embedded = source["embedded"];
 	    }
 	}
+	export class PlanItemEdit {
+	    asset_id: number;
+	    asset_name: string;
+	    group_id: number;
+	    group_name: string;
+	    command: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PlanItemEdit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.asset_id = source["asset_id"];
+	        this.asset_name = source["asset_name"];
+	        this.group_id = source["group_id"];
+	        this.group_name = source["group_name"];
+	        this.command = source["command"];
+	    }
+	}
 	
 	export class SSHConnectRequest {
 	    assetId: number;

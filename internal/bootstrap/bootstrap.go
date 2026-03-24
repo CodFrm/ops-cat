@@ -8,23 +8,23 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"ops-cat/internal/repository/asset_repo"
-	"ops-cat/internal/repository/audit_repo"
-	"ops-cat/internal/repository/conversation_repo"
-	"ops-cat/internal/repository/credential_repo"
-	"ops-cat/internal/repository/forward_repo"
-	"ops-cat/internal/repository/group_repo"
-	"ops-cat/internal/repository/plan_repo"
-	"ops-cat/internal/repository/ssh_key_repo"
-	"ops-cat/internal/service/credential_svc"
-	"ops-cat/migrations"
+	"github.com/opskat/opskat/internal/repository/asset_repo"
+	"github.com/opskat/opskat/internal/repository/audit_repo"
+	"github.com/opskat/opskat/internal/repository/conversation_repo"
+	"github.com/opskat/opskat/internal/repository/credential_repo"
+	"github.com/opskat/opskat/internal/repository/forward_repo"
+	"github.com/opskat/opskat/internal/repository/group_repo"
+	"github.com/opskat/opskat/internal/repository/plan_repo"
+	"github.com/opskat/opskat/internal/repository/ssh_key_repo"
+	"github.com/opskat/opskat/internal/service/credential_svc"
+	"github.com/opskat/opskat/migrations"
 
 	"github.com/cago-frame/cago"
 	"github.com/cago-frame/cago/configs"
 	"github.com/cago-frame/cago/configs/memory"
 	"github.com/cago-frame/cago/database/db"
 
-	_ "ops-cat/internal/pkg/code"
+	_ "github.com/opskat/opskat/internal/pkg/code"
 
 	_ "github.com/cago-frame/cago/database/db/sqlite"
 )
@@ -40,12 +40,12 @@ func AppDataDir() string {
 	switch runtime.GOOS {
 	case "darwin":
 		home, _ := os.UserHomeDir()
-		return filepath.Join(home, "Library", "Application Support", "ops-cat")
+		return filepath.Join(home, "Library", "Application Support", "opskat")
 	case "windows":
-		return filepath.Join(os.Getenv("APPDATA"), "ops-cat")
+		return filepath.Join(os.Getenv("APPDATA"), "opskat")
 	default:
 		home, _ := os.UserHomeDir()
-		return filepath.Join(home, ".config", "ops-cat")
+		return filepath.Join(home, ".config", "opskat")
 	}
 }
 
@@ -66,10 +66,10 @@ func Init(ctx context.Context, opts Options) error {
 		return fmt.Errorf("获取 master key 失败: %w", err)
 	}
 
-	cfg, err := configs.NewConfig("ops-cat", configs.WithSource(memory.NewSource(map[string]interface{}{
+	cfg, err := configs.NewConfig("opskat", configs.WithSource(memory.NewSource(map[string]interface{}{
 		"db": map[string]interface{}{
 			"driver": "sqlite",
-			"dsn":    filepath.Join(dataDir, "ops-cat.db"),
+			"dsn":    filepath.Join(dataDir, "opskat.db"),
 		},
 	})))
 	if err != nil {

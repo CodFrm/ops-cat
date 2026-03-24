@@ -10,12 +10,12 @@ interface TerminalToolbarProps {
 
 export function TerminalToolbar({ tabId }: TerminalToolbarProps) {
   const { t } = useTranslation();
-  const tab = useTerminalStore((s) => s.tabs.find((t) => t.id === tabId));
+  const tabData = useTerminalStore((s) => s.tabData[tabId]);
   const toggleFileManager = useSFTPStore((s) => s.toggleFileManager);
   const isOpen = useSFTPStore((s) => s.fileManagerOpenTabs[tabId]);
 
-  if (!tab) return null;
-  if (Object.keys(tab.panes).length === 0) return null;
+  if (!tabData) return null;
+  if (Object.keys(tabData.panes).length === 0) return null;
 
   const Icon = isOpen ? FolderOpen : Folder;
 

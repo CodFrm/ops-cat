@@ -8,7 +8,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cago-frame/cago/pkg/logger"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // PermissionRequest CLI 工具权限请求
@@ -66,6 +68,14 @@ func (p *LocalCLIProvider) GetCodexServer() *CodexAppServer {
 
 // NewLocalCLIProvider 创建本地 CLI provider
 func NewLocalCLIProvider(name, cliPath, cliType string) *LocalCLIProvider {
+	// cliPath 为空时根据 cliType 自动检测
+	if cliPath == "" {
+		var err error
+		cliPath, err = exec.LookPath(cliType)
+		if err != nil {
+			logger.Default().Warn("CLI not found in PATH", zap.String("cliType", cliType), zap.Error(err))
+		}
+	}
 	return &LocalCLIProvider{
 		name:            name,
 		cliPath:         cliPath,
@@ -95,7 +105,7 @@ func (p *LocalCLIProvider) buildEnv() map[string]string {
 
 	env := make(map[string]string)
 	if sid != "" {
-		env["OPS_CAT_SESSION_ID"] = sid
+		env["OPSKAT_SESSION_ID"] = sid
 	}
 	return env
 }
@@ -322,6 +332,10 @@ func getCLIVersion(path string) string {
 
 // CLIInfoJSON 序列化 CLIInfo 列表
 func CLIInfoJSON(infos []CLIInfo) string {
-	data, _ := json.Marshal(infos)
+	data, err := json.Marshal(infos)
+	if err != nil {
+		logger.Default().Error("marshal CLI info list", zap.Error(err))
+		return "[]"
+	}
 	return string(data)
 }

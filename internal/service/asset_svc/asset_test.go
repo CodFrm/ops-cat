@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"ops-cat/internal/model/entity/asset_entity"
-	"ops-cat/internal/repository/asset_repo"
-	"ops-cat/internal/repository/asset_repo/mock_asset_repo"
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/repository/asset_repo"
+	"github.com/opskat/opskat/internal/repository/asset_repo/mock_asset_repo"
 
 	"github.com/smartystreets/goconvey/convey"
 	"github.com/stretchr/testify/assert"

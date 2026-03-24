@@ -9,19 +9,23 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ops-cat/internal/model/entity/forward_entity"
-	"ops-cat/internal/repository/forward_repo"
-	"ops-cat/internal/service/asset_svc"
-	"ops-cat/internal/service/ssh_svc"
+	"github.com/opskat/opskat/internal/model/entity/forward_entity"
+	"github.com/opskat/opskat/internal/repository/forward_repo"
+	"github.com/opskat/opskat/internal/service/asset_svc"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 )
 
+// SSHDialer SSH 连接接口，供 ForwardManager 使用
+type SSHDialer interface {
+	DialAsset(ctx context.Context, assetID int64) (*ssh.Client, []io.Closer, error)
+}
+
 // ForwardManager 管理端口转发的运行时状态
 type ForwardManager struct {
-	app     *App
+	dialer  SSHDialer
 	mu      sync.Mutex
 	clients map[int64]*forwardClient  // assetID → SSH 连接
 	running map[int64]*runningForward // ruleID → 运行状态
@@ -64,9 +68,9 @@ type RuleWithStatus struct {
 	Error  string `json:"error,omitempty"`
 }
 
-func NewForwardManager(app *App) *ForwardManager {
+func NewForwardManager(dialer SSHDialer) *ForwardManager {
 	return &ForwardManager{
-		app:     app,
+		dialer:  dialer,
 		clients: make(map[int64]*forwardClient),
 		running: make(map[int64]*runningForward),
 	}
@@ -217,41 +221,9 @@ func (m *ForwardManager) getOrDialLocked(ctx context.Context, assetID int64) (*f
 		return fc, nil
 	}
 
-	asset, err := asset_svc.Asset().Get(ctx, assetID)
+	client, closers, err := m.dialer.DialAsset(ctx, assetID)
 	if err != nil {
-		return nil, fmt.Errorf("资产不存在: %w", err)
-	}
-	sshCfg, err := asset.GetSSHConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	// 解析凭证
-	password, key := m.app.resolveSSHCredentials(sshCfg)
-
-	dialCfg := ssh_svc.ConnectConfig{
-		Host:        sshCfg.Host,
-		Port:        sshCfg.Port,
-		Username:    sshCfg.Username,
-		AuthType:    sshCfg.AuthType,
-		Password:    password,
-		Key:         key,
-		PrivateKeys: sshCfg.PrivateKeys,
-		Proxy:       sshCfg.Proxy,
-	}
-
-	// 解析跳板机
-	if sshCfg.JumpHostID > 0 {
-		jumpHosts, err := m.app.resolveJumpHostsWithCredentials(sshCfg.JumpHostID, 5)
-		if err != nil {
-			return nil, fmt.Errorf("解析跳板机失败: %w", err)
-		}
-		dialCfg.JumpHosts = jumpHosts
-	}
-
-	client, closers, err := m.app.sshManager.Dial(dialCfg)
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("SSH 连接失败: %w", err)
 	}
 
 	fc := &forwardClient{client: client, closers: closers}
@@ -560,7 +532,9 @@ func (a *App) UpdateForwardConfig(id int64, name string, assetID int64, rules []
 	}
 
 	if wasRunning {
-		_ = a.forwardManager.StartConfig(ctx, id)
+		if err := a.forwardManager.StartConfig(ctx, id); err != nil {
+			logger.Default().Error("restart forward config after update", zap.Int64("id", id), zap.Error(err))
+		}
 	}
 
 	return config, nil

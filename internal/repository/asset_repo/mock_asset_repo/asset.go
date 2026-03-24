@@ -11,8 +11,8 @@ package mock_asset_repo
 
 import (
 	context "context"
-	asset_entity "ops-cat/internal/model/entity/asset_entity"
-	asset_repo "ops-cat/internal/repository/asset_repo"
+	asset_entity "github.com/opskat/opskat/internal/model/entity/asset_entity"
+	asset_repo "github.com/opskat/opskat/internal/repository/asset_repo"
 	reflect "reflect"
 
 	gomock "go.uber.org/mock/gomock"

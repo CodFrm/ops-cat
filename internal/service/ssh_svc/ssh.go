@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"ops-cat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"

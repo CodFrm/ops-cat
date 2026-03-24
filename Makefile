@@ -2,13 +2,13 @@
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-    BIN_PATH := ./build/bin/ops-cat.app/Contents/MacOS/ops-cat
+    BIN_PATH := ./build/bin/opskat.app/Contents/MacOS/opskat
     UPX_FLAGS := --best --force-macos
 else ifeq ($(UNAME_S),Linux)
-    BIN_PATH := ./build/bin/ops-cat
+    BIN_PATH := ./build/bin/opskat
     UPX_FLAGS := --best
 else
-    BIN_PATH := ./build/bin/ops-cat.exe
+    BIN_PATH := ./build/bin/opskat.exe
     UPX_FLAGS := --best
 endif
 

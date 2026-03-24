@@ -29,6 +29,8 @@ type PlanItem struct {
 	Type      string `json:"type"` // "exec", "cp", "create", "update"
 	AssetID   int64  `json:"asset_id"`
 	AssetName string `json:"asset_name"`
+	GroupID   int64  `json:"group_id"`
+	GroupName string `json:"group_name"`
 	Command   string `json:"command"`
 	Detail    string `json:"detail"`
 }
@@ -155,10 +157,12 @@ func (s *Server) handleConn(conn net.Conn) {
 // SendNotification sends a data-change notification to the desktop app (fire-and-forget).
 // resource indicates what changed, e.g. "asset".
 func SendNotification(socketPath string, resource string) {
-	_, _ = RequestApproval(socketPath, ApprovalRequest{
+	if _, err := RequestApproval(socketPath, ApprovalRequest{
 		Type:   "notify",
 		Detail: resource,
-	})
+	}); err != nil {
+		logger.Default().Warn("send notification", zap.String("resource", resource), zap.Error(err))
+	}
 }
 
 // RequestApproval connects to the Unix socket and sends an approval request.

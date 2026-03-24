@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"ops-cat/internal/model/entity/audit_entity"
-	"ops-cat/internal/repository/audit_repo"
+	"github.com/opskat/opskat/internal/model/entity/audit_entity"
+	"github.com/opskat/opskat/internal/repository/audit_repo"
 
 	"github.com/smartystreets/goconvey/convey"
 	"github.com/stretchr/testify/assert"
@@ -79,6 +79,51 @@ func TestContext_PlanSessionID(t *testing.T) {
 	})
 }
 
+func TestCheckResult_DecisionString(t *testing.T) {
+	convey.Convey("CheckResult.DecisionString", t, func() {
+		convey.Convey("Allow 返回 allow", func() {
+			r := CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
+			assert.Equal(t, "allow", r.DecisionString())
+		})
+
+		convey.Convey("Deny 返回 deny", func() {
+			r := CheckResult{Decision: Deny, DecisionSource: SourceUserDeny}
+			assert.Equal(t, "deny", r.DecisionString())
+		})
+
+		convey.Convey("NeedConfirm 返回空字符串", func() {
+			r := CheckResult{Decision: NeedConfirm}
+			assert.Equal(t, "", r.DecisionString())
+		})
+	})
+}
+
+func TestCheckResult_Context(t *testing.T) {
+	convey.Convey("CheckResult context 传递", t, func() {
+		convey.Convey("setCheckResult 填充占位指针", func() {
+			holder := &CheckResult{}
+			ctx := withCheckResult(context.Background(), holder)
+
+			setCheckResult(ctx, CheckResult{
+				Decision:       Allow,
+				DecisionSource: SourcePlanAllow,
+				MatchedPattern: "cat *",
+			})
+
+			assert.Equal(t, Allow, holder.Decision)
+			assert.Equal(t, SourcePlanAllow, holder.DecisionSource)
+			assert.Equal(t, "cat *", holder.MatchedPattern)
+		})
+
+		convey.Convey("无占位指针时 setCheckResult 不 panic", func() {
+			ctx := context.Background()
+			assert.NotPanics(t, func() {
+				setCheckResult(ctx, CheckResult{Decision: Allow})
+			})
+		})
+	})
+}
+
 func TestExtractCommandForAudit(t *testing.T) {
 	convey.Convey("从工具参数提取命令", t, func() {
 		convey.Convey("run_command 提取 command 字段", func() {
@@ -105,6 +150,30 @@ func TestExtractCommandForAudit(t *testing.T) {
 				"local_path":  "./app.log",
 			})
 			assert.Equal(t, "download /var/log/app.log → ./app.log", cmd)
+		})
+
+		convey.Convey("exec (opsctl) 提取 command 字段", func() {
+			cmd := ExtractCommandForAudit("exec", map[string]any{
+				"asset_id": float64(1),
+				"command":  "df -h",
+			})
+			assert.Equal(t, "df -h", cmd)
+		})
+
+		convey.Convey("exec_sql 提取 sql 字段", func() {
+			cmd := ExtractCommandForAudit("exec_sql", map[string]any{
+				"asset_id": float64(1),
+				"sql":      "SELECT * FROM users LIMIT 10",
+			})
+			assert.Equal(t, "SELECT * FROM users LIMIT 10", cmd)
+		})
+
+		convey.Convey("exec_redis 提取 command 字段", func() {
+			cmd := ExtractCommandForAudit("exec_redis", map[string]any{
+				"asset_id": float64(1),
+				"command":  "GET mykey",
+			})
+			assert.Equal(t, "GET mykey", cmd)
 		})
 
 		convey.Convey("其他工具返回空字符串", func() {
@@ -154,7 +223,8 @@ func TestAuditingExecutor(t *testing.T) {
 				"list_assets": `[{"ID":1}]`,
 			},
 		}
-		executor := NewAuditingExecutor(inner)
+		writer := NewDefaultAuditWriter()
+		executor := NewAuditingExecutor(inner, writer)
 
 		convey.Convey("代理到 inner 并记录审计日志", func() {
 			ctx := WithAuditSource(context.Background(), "ai")
@@ -171,7 +241,7 @@ func TestAuditingExecutor(t *testing.T) {
 
 		convey.Convey("inner 报错时仍记录审计日志", func() {
 			failingInner := &failingExecutor{err: errors.New("connection refused")}
-			failExec := NewAuditingExecutor(failingInner)
+			failExec := NewAuditingExecutor(failingInner, writer)
 
 			ctx := WithAuditSource(context.Background(), "ai")
 			result, err := failExec.Execute(ctx, "run_command", `{"asset_id":1,"command":"uptime"}`)

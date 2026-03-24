@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"ops-cat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 )
 
 // redisMultiWordCmds 多词 Redis 命令的前缀
@@ -76,8 +76,10 @@ func CheckRedisPolicy(policy *asset_entity.RedisPolicy, cmd string) CheckResult 
 	for _, rule := range merged.DenyList {
 		if MatchRedisRule(rule, cmd) {
 			return CheckResult{
-				Decision: Deny,
-				Message:  fmt.Sprintf("Redis 命令被策略禁止: %s", cmd),
+				Decision:       Deny,
+				Message:        fmt.Sprintf("Redis 命令被策略禁止: %s", cmd),
+				DecisionSource: SourcePolicyDeny,
+				MatchedPattern: rule,
 			}
 		}
 	}
@@ -85,12 +87,12 @@ func CheckRedisPolicy(policy *asset_entity.RedisPolicy, cmd string) CheckResult 
 	if len(merged.AllowList) > 0 {
 		for _, rule := range merged.AllowList {
 			if MatchRedisRule(rule, cmd) {
-				return CheckResult{Decision: Allow}
+				return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
 			}
 		}
 		return CheckResult{Decision: NeedConfirm}
 	}
-	return CheckResult{Decision: Allow}
+	return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
 }
 
 func mergeRedisPolicy(custom, defaults *asset_entity.RedisPolicy) *asset_entity.RedisPolicy {

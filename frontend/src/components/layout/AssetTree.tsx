@@ -43,6 +43,7 @@ import {
 import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
+import { useTabStore, type TerminalTabMeta } from "@/stores/tabStore";
 import { MoveAsset, MoveGroup } from "../../../wailsjs/go/main/App";
 import { asset_entity, group_entity } from "../../../wailsjs/go/models";
 
@@ -79,7 +80,8 @@ export function AssetTree({
   const isFullscreen = useFullscreen();
   const { assets, groups, selectedAssetId, fetchAssets, fetchGroups, deleteAsset, deleteGroup, refresh } =
     useAssetStore();
-  const { tabs, connectingAssetIds } = useTerminalStore();
+  const { tabData, connectingAssetIds } = useTerminalStore();
+  const terminalTabs = useTabStore((s) => s.tabs.filter((t) => t.type === "terminal"));
   const [filter, setFilter] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<{
     id: number;
@@ -95,7 +97,12 @@ export function AssetTree({
   if (collapsed) return null;
 
   const connectedAssetIds = new Set(
-    tabs.filter((t) => Object.values(t.panes).some((p) => p.connected)).map((t) => t.assetId)
+    terminalTabs
+      .filter((t) => {
+        const d = tabData[t.id];
+        return d && Object.values(d.panes).some((p) => p.connected);
+      })
+      .map((t) => (t.meta as TerminalTabMeta).assetId)
   );
 
   const filteredAssets = filter

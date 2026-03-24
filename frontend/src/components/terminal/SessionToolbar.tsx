@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Columns2, Rows2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTerminalStore } from "@/stores/terminalStore";
+import { useTabStore, type TerminalTabMeta } from "@/stores/tabStore";
 
 interface SessionToolbarProps {
   tabId: string;
@@ -35,27 +36,32 @@ function useUptime(connectedAt: number | undefined, connected: boolean): string 
 
 export function SessionToolbar({ tabId }: SessionToolbarProps) {
   const { t } = useTranslation();
-  const tab = useTerminalStore((s) => s.tabs.find((t) => t.id === tabId));
+  const tabData = useTerminalStore((s) => s.tabData[tabId]);
   const splitPane = useTerminalStore((s) => s.splitPane);
   const reconnect = useTerminalStore((s) => s.reconnect);
 
   // hooks 必须在所有条件分支之前调用
-  const activePane = tab ? tab.panes[tab.activePaneId] : undefined;
+  const activePane = tabData ? tabData.panes[tabData.activePaneId] : undefined;
   const activeConnected = activePane?.connected ?? false;
   const uptime = useUptime(activePane?.connectedAt, activeConnected);
 
-  if (!tab) return null;
+  const tabMeta = useTabStore((s) => {
+    const t = s.tabs.find((t) => t.id === tabId);
+    return t?.meta as TerminalTabMeta | undefined;
+  });
+
+  if (!tabData) return null;
 
   // 连接中的 tab 没有有效的 pane，不显示工具栏
-  if (Object.keys(tab.panes).length === 0) return null;
+  if (Object.keys(tabData.panes).length === 0) return null;
 
-  const paneValues = Object.values(tab.panes);
+  const paneValues = Object.values(tabData.panes);
   const anyConnected = paneValues.some((p) => p.connected);
 
-  const hostInfo = tab.username && tab.host
-    ? `${tab.username}@${tab.host}${tab.port !== 22 ? `:${tab.port}` : ""}`
-    : tab.host
-      ? `${tab.host}${tab.port !== 22 ? `:${tab.port}` : ""}`
+  const hostInfo = tabMeta?.username && tabMeta?.host
+    ? `${tabMeta.username}@${tabMeta.host}${tabMeta.port !== 22 ? `:${tabMeta.port}` : ""}`
+    : tabMeta?.host
+      ? `${tabMeta.host}${tabMeta.port !== 22 ? `:${tabMeta.port}` : ""}`
       : "";
 
   return (

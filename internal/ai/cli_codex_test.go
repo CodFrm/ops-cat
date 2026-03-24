@@ -112,7 +112,7 @@ func TestHandleNotification(t *testing.T) {
 			onEvent, events := collectEvents()
 			msg := codexJSONRPC{
 				Method: "item/started",
-				Params: json.RawMessage(`{"item":{"type":"mcpToolCall","id":"call_123","server":"ops-cat","tool":"get_asset","arguments":{"id":7}}}`),
+				Params: json.RawMessage(`{"item":{"type":"mcpToolCall","id":"call_123","server":"opskat","tool":"get_asset","arguments":{"id":7}}}`),
 			}
 			done := s.handleNotification(msg, onEvent)
 			So(done, ShouldBeFalse)
@@ -126,7 +126,7 @@ func TestHandleNotification(t *testing.T) {
 			onEvent, events := collectEvents()
 			msg := codexJSONRPC{
 				Method: "item/completed",
-				Params: json.RawMessage(`{"item":{"type":"mcpToolCall","id":"call_123","server":"ops-cat","tool":"get_asset","result":{"content":[{"type":"text","text":"{\"ID\":7,\"Name\":\"server1\"}"}]}}}`),
+				Params: json.RawMessage(`{"item":{"type":"mcpToolCall","id":"call_123","server":"opskat","tool":"get_asset","result":{"content":[{"type":"text","text":"{\"ID\":7,\"Name\":\"server1\"}"}]}}}`),
 			}
 			done := s.handleNotification(msg, onEvent)
 			So(done, ShouldBeFalse)
@@ -165,7 +165,7 @@ func TestHandleNotification(t *testing.T) {
 			onEvent, events := collectEvents()
 			msg := codexJSONRPC{
 				Method: "codex/event/item_started",
-				Params: json.RawMessage(`{"item":{"type":"mcpToolCall","server":"ops-cat","tool":"run_command","arguments":{"asset_id":1}}}`),
+				Params: json.RawMessage(`{"item":{"type":"mcpToolCall","server":"opskat","tool":"run_command","arguments":{"asset_id":1}}}`),
 			}
 			done := s.handleNotification(msg, onEvent)
 			So(done, ShouldBeFalse)
@@ -178,7 +178,7 @@ func TestHandleNotification(t *testing.T) {
 			onEvent, events := collectEvents()
 			msg := codexJSONRPC{
 				Method: "codex/event/item_completed",
-				Params: json.RawMessage(`{"item":{"type":"mcpToolCall","server":"ops-cat","tool":"run_command","result":{"content":[{"type":"text","text":"success"}]}}}`),
+				Params: json.RawMessage(`{"item":{"type":"mcpToolCall","server":"opskat","tool":"run_command","result":{"content":[{"type":"text","text":"success"}]}}}`),
 			}
 			done := s.handleNotification(msg, onEvent)
 			So(done, ShouldBeFalse)
@@ -640,7 +640,7 @@ func TestHandleNotificationRealCodexData(t *testing.T) {
 			// item/started（真实格式）
 			started := codexJSONRPC{
 				Method: "item/started",
-				Params: json.RawMessage(`{"item":{"type":"mcpToolCall","id":"call_Udxr1k5eghPjvQFkkZBlJY09","server":"ops-cat","tool":"run_command","status":"inProgress","arguments":{"asset_id":7,"command":"ls -la"},"result":null,"error":null,"durationMs":null},"threadId":"019d19de-555a-7410-bcda-bcca3c13a188","turnId":"019d19e0-a0c9-7592-af35-f3495a5da0c5"}`),
+				Params: json.RawMessage(`{"item":{"type":"mcpToolCall","id":"call_Udxr1k5eghPjvQFkkZBlJY09","server":"opskat","tool":"run_command","status":"inProgress","arguments":{"asset_id":7,"command":"ls -la"},"result":null,"error":null,"durationMs":null},"threadId":"019d19de-555a-7410-bcda-bcca3c13a188","turnId":"019d19e0-a0c9-7592-af35-f3495a5da0c5"}`),
 			}
 			done := s.handleNotification(started, onEvent)
 			So(done, ShouldBeFalse)
@@ -652,7 +652,7 @@ func TestHandleNotificationRealCodexData(t *testing.T) {
 			// item/completed（真实格式）
 			completed := codexJSONRPC{
 				Method: "item/completed",
-				Params: json.RawMessage(`{"item":{"type":"mcpToolCall","id":"call_Udxr1k5eghPjvQFkkZBlJY09","server":"ops-cat","tool":"run_command","status":"completed","arguments":{"asset_id":7,"command":"ls -la"},"result":{"content":[{"type":"text","text":"total 8\ndrwxr-xr-x 2 root root 4096 Mar 23 file.txt\n"}],"structuredContent":null},"error":null,"durationMs":10199},"threadId":"019d19de-555a-7410-bcda-bcca3c13a188","turnId":"019d19e0-a0c9-7592-af35-f3495a5da0c5"}`),
+				Params: json.RawMessage(`{"item":{"type":"mcpToolCall","id":"call_Udxr1k5eghPjvQFkkZBlJY09","server":"opskat","tool":"run_command","status":"completed","arguments":{"asset_id":7,"command":"ls -la"},"result":{"content":[{"type":"text","text":"total 8\ndrwxr-xr-x 2 root root 4096 Mar 23 file.txt\n"}],"structuredContent":null},"error":null,"durationMs":10199},"threadId":"019d19de-555a-7410-bcda-bcca3c13a188","turnId":"019d19e0-a0c9-7592-af35-f3495a5da0c5"}`),
 			}
 			done = s.handleNotification(completed, onEvent)
 			So(done, ShouldBeFalse)

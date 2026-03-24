@@ -1,19 +1,5 @@
 package audit_entity
 
-// 决策来源常量
-const (
-	DecisionAllow = "allow"
-	DecisionDeny  = "deny"
-
-	SourcePolicyAllow  = "policy_allow"   // 命令策略白名单放行
-	SourcePolicyDeny   = "policy_deny"    // 命令策略黑名单拒绝
-	SourceSessionAllow = "session_allow"  // 会话级模式匹配放行
-	SourceUserAllow    = "user_allow"     // 用户手动允许
-	SourceUserDeny     = "user_deny"      // 用户手动拒绝
-	SourceAutoAllow    = "auto_allow"     // 无策略限制，直接放行
-	SourcePermRequest  = "perm_request"   // request_permission 权限申请
-)
-
 // AuditLog 审计日志实体
 type AuditLog struct {
 	ID             int64  `gorm:"column:id;primaryKey;autoIncrement"`

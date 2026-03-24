@@ -42,8 +42,8 @@ export function Sidebar({ activePage, onPageChange, sidebarCollapsed, onToggleSi
 
       {/* App logo */}
       <div className="mb-3 flex h-9 w-9 items-center justify-center">
-        <img src={logoLight} alt="ops-cat" className="h-8 w-8 rounded-lg dark:hidden" />
-        <img src={logoDark} alt="ops-cat" className="h-8 w-8 rounded-lg hidden dark:block" />
+        <img src={logoLight} alt="opskat" className="h-8 w-8 rounded-lg dark:hidden" />
+        <img src={logoDark} alt="opskat" className="h-8 w-8 rounded-lg hidden dark:block" />
       </div>
 
       {/* Navigation */}

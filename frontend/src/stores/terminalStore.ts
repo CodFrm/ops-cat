@@ -9,6 +9,7 @@ import {
 } from "../../wailsjs/go/main/App";
 import { main } from "../../wailsjs/go/models";
 import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
+import { useTabStore, registerTabCloseHook, type TerminalTabMeta } from "./tabStore";
 
 // Split tree types
 export type SplitNode =
@@ -29,14 +30,8 @@ export interface TerminalPane {
   connectedAt: number;
 }
 
-export interface TerminalTab {
-  id: string; // tab id (connectionId initially, then sessionId)
-  assetId: number;
-  assetName: string;
-  assetIcon: string;
-  host: string;
-  port: number;
-  username: string;
+// Business data per terminal tab (split tree, panes, connection state)
+export interface TerminalTabData {
   splitTree: SplitNode;
   activePaneId: string;
   panes: Record<string, TerminalPane>;
@@ -134,19 +129,9 @@ function setRatioAtPath(
   return tree;
 }
 
-export interface InfoTab {
-  id: string;
-  type: 'asset' | 'group';
-  targetId: number;
-  name: string;
-  icon?: string;
-}
-
 interface TerminalState {
-  tabs: TerminalTab[];
-  activeTabId: string | null;
-  assetInfoOpen: boolean;
-  infoTabs: InfoTab[];
+  // Business data keyed by tab id
+  tabData: Record<string, TerminalTabData>;
   connectingAssetIds: Set<number>;
   connections: Record<string, ConnectionState>;
 
@@ -161,17 +146,7 @@ interface TerminalState {
   ) => Promise<string>;
   reconnect: (tabId: string) => void;
   disconnect: (sessionId: string) => void;
-  setActiveTab: (id: string | null) => void;
-  removeTab: (id: string) => void;
-  removeOtherTabs: (id: string) => void;
-  removeLeftTabs: (id: string) => void;
-  removeRightTabs: (id: string) => void;
-  reorderTabs: (fromIndex: number, toIndex: number) => void;
-  markClosed: (id: string) => void;
-  openAssetInfo: () => void;
-  closeAssetInfo: () => void;
-  openInfoTab: (type: 'asset' | 'group', targetId: number, name: string, icon?: string) => void;
-  closeInfoTab: (id: string) => void;
+  markClosed: (sessionId: string) => void;
 
   // Connection progress actions
   retryConnect: (connectionId: string, password?: string) => void;
@@ -189,22 +164,23 @@ interface TerminalState {
 }
 
 export const useTerminalStore = create<TerminalState>((set, get) => ({
-  tabs: [],
-  activeTabId: null,
-  assetInfoOpen: false,
-  infoTabs: [],
+  tabData: {},
   connectingAssetIds: new Set(),
   connections: {},
 
   connect: async (assetId, assetName, assetIcon, password, cols, rows, metadata) => {
-    // 如果已有正在连接或连接失败的 tab，直接切换过去
-    const existingTab = get().tabs.find((t) => {
-      if (t.assetId !== assetId) return false;
+    const tabStore = useTabStore.getState();
+
+    // If there's already a connecting/error tab for this asset, switch to it
+    const existingTab = tabStore.tabs.find((t) => {
+      if (t.type !== "terminal") return false;
+      const m = t.meta as TerminalTabMeta;
+      if (m.assetId !== assetId) return false;
       const conn = get().connections[t.id];
       return conn && (conn.status === "connecting" || conn.status === "error" || conn.status === "auth_challenge");
     });
     if (existingTab) {
-      set({ activeTabId: existingTab.id });
+      tabStore.activateTab(existingTab.id);
       return existingTab.id;
     }
 
@@ -221,23 +197,18 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         rows,
       });
 
-      // 异步连接，立即返回 connectionId
       const connectionId = await ConnectSSHAsync(req);
 
-      // 立即创建 Tab（"connecting" 节点）
-      const tab: TerminalTab = {
+      // Create tab in tabStore
+      tabStore.openTab({
         id: connectionId,
-        assetId,
-        assetName,
-        assetIcon,
-        host: metadata?.host || "",
-        port: metadata?.port || 22,
-        username: metadata?.username || "",
-        splitTree: { type: "connecting", connectionId },
-        activePaneId: connectionId,
-        panes: {},
-      };
+        type: "terminal",
+        label: assetName,
+        icon: assetIcon || undefined,
+        meta: { type: "terminal", assetId, assetName, assetIcon: assetIcon || "", host: metadata?.host || "", port: metadata?.port || 22, username: metadata?.username || "" },
+      });
 
+      // Create business data
       const connState: ConnectionState = {
         connectionId,
         assetId,
@@ -249,12 +220,18 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       };
 
       set((state) => ({
-        tabs: [...state.tabs, tab],
-        activeTabId: connectionId,
+        tabData: {
+          ...state.tabData,
+          [connectionId]: {
+            splitTree: { type: "connecting", connectionId },
+            activePaneId: connectionId,
+            panes: {},
+          },
+        },
         connections: { ...state.connections, [connectionId]: connState },
       }));
 
-      // 监听连接进度事件
+      // Listen for connection progress
       const eventName = `ssh:connect:${connectionId}`;
       EventsOn(eventName, (event: {
         type: string;
@@ -281,11 +258,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
                   currentStep: (event.step as ConnectionStep) || s.connections[connectionId].currentStep,
                   logs: [
                     ...s.connections[connectionId].logs,
-                    {
-                      message: event.message || "",
-                      timestamp: Date.now(),
-                      type: "info" as const,
-                    },
+                    { message: event.message || "", timestamp: Date.now(), type: "info" as const },
                   ],
                 },
               },
@@ -294,43 +267,36 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
           case "connected": {
             const sessionId = event.sessionId!;
-            // 替换 connecting 节点为 terminal 节点
-            set((s) => {
-              const tab = s.tabs.find((t) => t.id === connectionId);
-              if (!tab) return s;
 
-              const newTree = replaceNode(tab.splitTree, connectionId, {
+            // Update business data: replace connecting node with terminal node
+            set((s) => {
+              const data = s.tabData[connectionId];
+              if (!data) return s;
+
+              const newTree = replaceNode(data.splitTree, connectionId, {
                 type: "terminal",
                 sessionId,
               });
 
-              const newTabs = s.tabs.map((t) =>
-                t.id === connectionId
-                  ? {
-                      ...t,
-                      id: sessionId,
-                      splitTree: newTree,
-                      activePaneId: sessionId,
-                      panes: { [sessionId]: { sessionId, connected: true, connectedAt: Date.now() } },
-                    }
-                  : t
-              );
+              const newTabData = { ...s.tabData };
+              delete newTabData[connectionId];
+              newTabData[sessionId] = {
+                splitTree: newTree,
+                activePaneId: sessionId,
+                panes: { [sessionId]: { sessionId, connected: true, connectedAt: Date.now() } },
+              };
 
               const newConnections = { ...s.connections };
               delete newConnections[connectionId];
 
-              return {
-                tabs: newTabs,
-                activeTabId:
-                  s.activeTabId === connectionId ? sessionId : s.activeTabId,
-                connections: newConnections,
-              };
+              return { tabData: newTabData, connections: newConnections };
             });
 
-            // 清理事件监听
+            // Update tab id in tabStore
+            tabStore.replaceTabId(connectionId, sessionId);
+
             EventsOff(eventName);
 
-            // 清理 connectingAssetIds
             set((s) => {
               const next = new Set(s.connectingAssetIds);
               next.delete(assetId);
@@ -350,17 +316,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
                   authFailed: event.authFailed,
                   logs: [
                     ...s.connections[connectionId].logs,
-                    {
-                      message: event.error || "连接失败",
-                      timestamp: Date.now(),
-                      type: "error" as const,
-                    },
+                    { message: event.error || "连接失败", timestamp: Date.now(), type: "error" as const },
                   ],
                 },
               },
             }));
 
-            // 清理 connectingAssetIds
             set((s) => {
               const next = new Set(s.connectingAssetIds);
               next.delete(assetId);
@@ -382,11 +343,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
                   },
                   logs: [
                     ...s.connections[connectionId].logs,
-                    {
-                      message: "等待用户输入认证信息...",
-                      timestamp: Date.now(),
-                      type: "info" as const,
-                    },
+                    { message: "等待用户输入认证信息...", timestamp: Date.now(), type: "info" as const },
                   ],
                 },
               },
@@ -397,7 +354,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
       return connectionId;
     } catch (e) {
-      // ConnectSSHAsync 本身的校验错误（资产不存在等）
       set((state) => {
         const next = new Set(state.connectingAssetIds);
         next.delete(assetId);
@@ -408,20 +364,23 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   reconnect: (tabId) => {
-    const tab = get().tabs.find((t) => t.id === tabId);
-    if (!tab) return;
+    const tabStore = useTabStore.getState();
+    const tab = tabStore.tabs.find((t) => t.id === tabId);
+    if (!tab || tab.type !== "terminal") return;
 
-    const sessionId = tab.activePaneId;
-    const pane = tab.panes[sessionId];
+    const data = get().tabData[tabId];
+    if (!data) return;
 
-    // 断开旧会话（如果还连着的话）
+    const sessionId = data.activePaneId;
+    const pane = data.panes[sessionId];
+
     if (pane?.connected) {
       DisconnectSSH(sessionId);
     }
 
-    // 发起新的异步连接
+    const meta = tab.meta as TerminalTabMeta;
     const req = new main.SSHConnectRequest({
-      assetId: tab.assetId,
+      assetId: meta.assetId,
       password: "",
       key: "",
       cols: 80,
@@ -429,31 +388,29 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     });
 
     ConnectSSHAsync(req).then((connectionId) => {
-      // 替换活跃 pane 为 connecting 节点
       set((s) => {
-        const t = s.tabs.find((t) => t.id === tabId);
-        if (!t) return s;
+        const d = s.tabData[tabId];
+        if (!d) return s;
 
-        const newTree = replaceNode(t.splitTree, sessionId, {
+        const newTree = replaceNode(d.splitTree, sessionId, {
           type: "connecting",
           connectionId,
         });
 
-        const newPanes = { ...t.panes };
+        const newPanes = { ...d.panes };
         delete newPanes[sessionId];
 
         return {
-          tabs: s.tabs.map((tab) =>
-            tab.id === tabId
-              ? { ...tab, splitTree: newTree, activePaneId: connectionId, panes: newPanes }
-              : tab
-          ),
+          tabData: {
+            ...s.tabData,
+            [tabId]: { ...d, splitTree: newTree, activePaneId: connectionId, panes: newPanes },
+          },
           connections: {
             ...s.connections,
             [connectionId]: {
               connectionId,
-              assetId: t.assetId,
-              assetName: t.assetName,
+              assetId: meta.assetId,
+              assetName: meta.assetName,
               password: "",
               logs: [],
               status: "connecting" as const,
@@ -463,7 +420,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         };
       });
 
-      // 监听连接进度事件
       const eventName = `ssh:connect:${connectionId}`;
       EventsOn(eventName, (event: {
         type: string;
@@ -500,16 +456,16 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           case "connected": {
             const newSessionId = event.sessionId!;
             set((s) => {
-              const t = s.tabs.find((t) => t.id === tabId);
-              if (!t) return s;
+              const d = s.tabData[tabId];
+              if (!d) return s;
 
-              const newTree = replaceNode(t.splitTree, connectionId, {
+              const newTree = replaceNode(d.splitTree, connectionId, {
                 type: "terminal",
                 sessionId: newSessionId,
               });
 
               const newPanes = {
-                ...t.panes,
+                ...d.panes,
                 [newSessionId]: { sessionId: newSessionId, connected: true, connectedAt: Date.now() },
               };
 
@@ -517,11 +473,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
               delete newConnections[connectionId];
 
               return {
-                tabs: s.tabs.map((tab) =>
-                  tab.id === tabId
-                    ? { ...tab, splitTree: newTree, activePaneId: newSessionId, panes: newPanes }
-                    : tab
-                ),
+                tabData: {
+                  ...s.tabData,
+                  [tabId]: { ...d, splitTree: newTree, activePaneId: newSessionId, panes: newPanes },
+                },
                 connections: newConnections,
               };
             });
@@ -578,35 +533,32 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const conn = get().connections[connectionId];
     if (!conn) return;
 
-    // 获取旧 tab 的元数据
-    const oldTab = get().tabs.find((t) => t.id === connectionId);
-    const metadata: SSHConnectMetadata | undefined = oldTab ? {
-      host: oldTab.host,
-      port: oldTab.port,
-      username: oldTab.username,
+    const tabStore = useTabStore.getState();
+    const tab = tabStore.tabs.find((t) => t.id === connectionId);
+    const meta = tab?.meta as TerminalTabMeta | undefined;
+    const metadata: SSHConnectMetadata | undefined = meta ? {
+      host: meta.host,
+      port: meta.port,
+      username: meta.username,
     } : undefined;
 
-    // 清理旧的事件监听和连接状态
+    // Clean up old event listeners and connection state
     EventsOff(`ssh:connect:${connectionId}`);
 
-    // 移除旧 tab
+    // Remove old tab and tabData
     set((s) => {
       const newConnections = { ...s.connections };
       delete newConnections[connectionId];
-      return {
-        tabs: s.tabs.filter((t) => t.id !== connectionId),
-        connections: newConnections,
-        activeTabId:
-          s.activeTabId === connectionId ? null : s.activeTabId,
-      };
+      const newTabData = { ...s.tabData };
+      delete newTabData[connectionId];
+      return { connections: newConnections, tabData: newTabData };
     });
+    tabStore.closeTab(connectionId);
 
-    // 重新连接：优先使用新密码，否则让后端从已保存凭证中解析
+    // Reconnect with new or empty password
     const newPassword = password !== undefined ? password : "";
-    const tab = get().tabs.find((t) => t.id === connectionId);
-    get().connect(conn.assetId, conn.assetName, tab?.assetIcon || "", newPassword, 80, 24, metadata);
+    get().connect(conn.assetId, conn.assetName, meta?.assetIcon || "", newPassword, 80, 24, metadata);
 
-    // 如果提供了新密码，保存到资产
     if (password) {
       UpdateAssetPassword(conn.assetId, password).catch(() => {});
     }
@@ -618,7 +570,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
     RespondAuthChallenge(conn.challenge.challengeId, answers);
 
-    // 恢复连接中状态
     set((s) => ({
       connections: {
         ...s.connections,
@@ -638,306 +589,241 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     CancelSSHConnect(connectionId);
     EventsOff(`ssh:connect:${connectionId}`);
 
-    // 清理 connectingAssetIds
     set((s) => {
       const next = new Set(s.connectingAssetIds);
       next.delete(conn.assetId);
       return { connectingAssetIds: next };
     });
 
-    // 移除 tab 和连接状态
-    get().removeTab(connectionId);
-
+    // Clean up tabData and connection
     set((s) => {
       const newConnections = { ...s.connections };
       delete newConnections[connectionId];
-      return { connections: newConnections };
+      const newTabData = { ...s.tabData };
+      delete newTabData[connectionId];
+      return { connections: newConnections, tabData: newTabData };
     });
+
+    // Close tab via tabStore
+    useTabStore.getState().closeTab(connectionId);
   },
 
   disconnect: (sessionId) => {
     DisconnectSSH(sessionId);
-    set((state) => ({
-      tabs: state.tabs.map((tab) => {
-        if (!tab.panes[sessionId]) return tab;
-        return {
-          ...tab,
-          panes: {
-            ...tab.panes,
-            [sessionId]: { ...tab.panes[sessionId], connected: false },
-          },
-        };
-      }),
-    }));
-  },
-
-  setActiveTab: (id) => set({ activeTabId: id }),
-
-  openAssetInfo: () => set({ assetInfoOpen: true, activeTabId: null }),
-
-  closeAssetInfo: () => {
-    const { tabs } = get();
-    set({
-      assetInfoOpen: false,
-      activeTabId: tabs.length > 0 ? tabs[0].id : null,
-    });
-  },
-
-  openInfoTab: (type, targetId, name, icon) => {
-    const { infoTabs } = get();
-    const existing = infoTabs.find((t) => t.type === type && t.targetId === targetId);
-    if (existing) {
-      set({ activeTabId: existing.id });
-      return;
-    }
-    const id = `info:${type}:${targetId}`;
-    set({
-      infoTabs: [...infoTabs, { id, type, targetId, name, icon }],
-      activeTabId: id,
-    });
-  },
-
-  closeInfoTab: (id) => {
-    const { infoTabs, activeTabId, tabs } = get();
-    const idx = infoTabs.findIndex((t) => t.id === id);
-    const newInfoTabs = infoTabs.filter((t) => t.id !== id);
-    let newActiveId = activeTabId;
-    if (activeTabId === id) {
-      // activate neighbor info tab, then terminal tab, then null
-      const neighbor = infoTabs[idx + 1] || infoTabs[idx - 1];
-      if (neighbor) {
-        newActiveId = neighbor.id;
-      } else if (tabs.length > 0) {
-        newActiveId = tabs[tabs.length - 1].id;
-      } else {
-        newActiveId = null;
-      }
-    }
-    set({ infoTabs: newInfoTabs, activeTabId: newActiveId });
-  },
-
-  removeTab: (id) => {
-    const tab = get().tabs.find((t) => t.id === id);
-    if (tab) {
-      // 如果是 connecting 状态，取消连接
-      const conn = get().connections[id];
-      if (conn) {
-        CancelSSHConnect(id);
-        EventsOff(`ssh:connect:${id}`);
-        set((s) => {
-          const next = new Set(s.connectingAssetIds);
-          next.delete(conn.assetId);
-          const newConnections = { ...s.connections };
-          delete newConnections[id];
-          return { connectingAssetIds: next, connections: newConnections };
-        });
-      }
-
-      for (const pane of Object.values(tab.panes)) {
-        if (pane.connected) {
-          DisconnectSSH(pane.sessionId);
+    set((state) => {
+      const newTabData = { ...state.tabData };
+      for (const [tabId, data] of Object.entries(newTabData)) {
+        if (data.panes[sessionId]) {
+          newTabData[tabId] = {
+            ...data,
+            panes: {
+              ...data.panes,
+              [sessionId]: { ...data.panes[sessionId], connected: false },
+            },
+          };
         }
       }
-    }
-    set((state) => {
-      const tabs = state.tabs.filter((t) => t.id !== id);
-      const activeTabId =
-        state.activeTabId === id
-          ? tabs.length > 0
-            ? tabs[tabs.length - 1].id
-            : null
-          : state.activeTabId;
-      return { tabs, activeTabId };
-    });
-  },
-
-  removeOtherTabs: (id) => {
-    const state = get();
-    const tabsToRemove = state.tabs.filter((t) => t.id !== id);
-    for (const tab of tabsToRemove) {
-      get().removeTab(tab.id);
-    }
-    set({ activeTabId: id });
-  },
-
-  removeLeftTabs: (id) => {
-    const state = get();
-    const idx = state.tabs.findIndex((t) => t.id === id);
-    if (idx <= 0) return;
-    const tabsToRemove = state.tabs.slice(0, idx);
-    for (const tab of tabsToRemove) {
-      get().removeTab(tab.id);
-    }
-  },
-
-  removeRightTabs: (id) => {
-    const state = get();
-    const idx = state.tabs.findIndex((t) => t.id === id);
-    if (idx < 0 || idx >= state.tabs.length - 1) return;
-    const tabsToRemove = state.tabs.slice(idx + 1);
-    for (const tab of tabsToRemove) {
-      get().removeTab(tab.id);
-    }
-  },
-
-  reorderTabs: (fromIndex, toIndex) => {
-    set((state) => {
-      if (fromIndex === toIndex) return state;
-      const newTabs = [...state.tabs];
-      const [moved] = newTabs.splice(fromIndex, 1);
-      newTabs.splice(toIndex, 0, moved);
-      return { tabs: newTabs };
+      return { tabData: newTabData };
     });
   },
 
   markClosed: (sessionId) => {
-    set((state) => ({
-      tabs: state.tabs.map((tab) => {
-        if (!tab.panes[sessionId]) return tab;
-        return {
-          ...tab,
-          panes: {
-            ...tab.panes,
-            [sessionId]: { ...tab.panes[sessionId], connected: false },
-          },
-        };
-      }),
-    }));
+    set((state) => {
+      const newTabData = { ...state.tabData };
+      for (const [tabId, data] of Object.entries(newTabData)) {
+        if (data.panes[sessionId]) {
+          newTabData[tabId] = {
+            ...data,
+            panes: {
+              ...data.panes,
+              [sessionId]: { ...data.panes[sessionId], connected: false },
+            },
+          };
+        }
+      }
+      return { tabData: newTabData };
+    });
   },
 
   setActivePaneId: (tabId, paneId) => {
-    set((state) => ({
-      tabs: state.tabs.map((tab) =>
-        tab.id === tabId ? { ...tab, activePaneId: paneId } : tab
-      ),
-    }));
+    set((state) => {
+      const data = state.tabData[tabId];
+      if (!data) return state;
+      return {
+        tabData: { ...state.tabData, [tabId]: { ...data, activePaneId: paneId } },
+      };
+    });
   },
 
   splitPane: (tabId, direction) => {
-    const tab = get().tabs.find((t) => t.id === tabId);
-    if (!tab) return;
+    const data = get().tabData[tabId];
+    if (!data) return;
 
     const pendingId = `pending-${Date.now()}`;
 
-    // Step 1: Immediately split UI with pending placeholder
+    // Step 1: Split UI with pending placeholder
     set((state) => {
-      const tab = state.tabs.find((t) => t.id === tabId);
-      if (!tab) return state;
+      const d = state.tabData[tabId];
+      if (!d) return state;
 
-      const newTree = replaceNode(tab.splitTree, tab.activePaneId, {
+      const newTree = replaceNode(d.splitTree, d.activePaneId, {
         type: "split",
         direction,
         ratio: 0.5,
-        first: { type: "terminal", sessionId: tab.activePaneId },
+        first: { type: "terminal", sessionId: d.activePaneId },
         second: { type: "pending", pendingId },
       });
 
       return {
-        tabs: state.tabs.map((t) =>
-          t.id === tabId ? { ...t, splitTree: newTree } : t
-        ),
+        tabData: { ...state.tabData, [tabId]: { ...d, splitTree: newTree } },
       };
     });
 
-    // Step 2: 在已有连接上创建新会话
-    SplitSSH(tab.activePaneId, 80, 24)
+    // Step 2: Create new session on existing connection
+    SplitSSH(data.activePaneId, 80, 24)
       .then((sessionId) => {
-        // Step 3: Replace pending with real terminal
         set((state) => {
-          const tab = state.tabs.find((t) => t.id === tabId);
-          if (!tab) return state;
+          const d = state.tabData[tabId];
+          if (!d) return state;
 
-          const newTree = replaceNode(tab.splitTree, pendingId, {
+          const newTree = replaceNode(d.splitTree, pendingId, {
             type: "terminal",
             sessionId,
           });
 
           return {
-            tabs: state.tabs.map((t) =>
-              t.id === tabId
-                ? {
-                    ...t,
-                    splitTree: newTree,
-                    activePaneId: sessionId,
-                    panes: {
-                      ...t.panes,
-                      [sessionId]: { sessionId, connected: true, connectedAt: Date.now() },
-                    },
-                  }
-                : t
-            ),
+            tabData: {
+              ...state.tabData,
+              [tabId]: {
+                ...d,
+                splitTree: newTree,
+                activePaneId: sessionId,
+                panes: {
+                  ...d.panes,
+                  [sessionId]: { sessionId, connected: true, connectedAt: Date.now() },
+                },
+              },
+            },
           };
         });
       })
       .catch((err) => {
         console.error("Split connection failed:", err);
-        // Step 4: Remove pending node, collapse back
         set((state) => {
-          const tab = state.tabs.find((t) => t.id === tabId);
-          if (!tab) return state;
+          const d = state.tabData[tabId];
+          if (!d) return state;
 
-          const newTree = removeNode(tab.splitTree, pendingId);
+          const newTree = removeNode(d.splitTree, pendingId);
           if (!newTree) return state;
 
           return {
-            tabs: state.tabs.map((t) =>
-              t.id === tabId ? { ...t, splitTree: newTree } : t
-            ),
+            tabData: { ...state.tabData, [tabId]: { ...d, splitTree: newTree } },
           };
         });
       });
   },
 
   closePane: (tabId, sessionId) => {
-    const tab = get().tabs.find((t) => t.id === tabId);
-    if (!tab) return;
+    const data = get().tabData[tabId];
+    if (!data) return;
 
-    const pane = tab.panes[sessionId];
+    const pane = data.panes[sessionId];
     if (pane?.connected) {
       DisconnectSSH(sessionId);
     }
 
-    // If only one pane, remove entire tab
-    const allSessions = getSessionIds(tab.splitTree);
+    // If only one pane, close entire tab
+    const allSessions = getSessionIds(data.splitTree);
     if (allSessions.length <= 1) {
-      get().removeTab(tabId);
+      useTabStore.getState().closeTab(tabId);
       return;
     }
 
-    const newTree = removeNode(tab.splitTree, sessionId);
+    const newTree = removeNode(data.splitTree, sessionId);
     if (!newTree) {
-      get().removeTab(tabId);
+      useTabStore.getState().closeTab(tabId);
       return;
     }
 
     const remaining = getSessionIds(newTree);
     const newActivePaneId =
-      tab.activePaneId === sessionId ? remaining[0] : tab.activePaneId;
+      data.activePaneId === sessionId ? remaining[0] : data.activePaneId;
 
-    const newPanes = { ...tab.panes };
+    const newPanes = { ...data.panes };
     delete newPanes[sessionId];
 
     set((state) => ({
-      tabs: state.tabs.map((t) =>
-        t.id === tabId
-          ? {
-              ...t,
-              splitTree: newTree,
-              activePaneId: newActivePaneId,
-              panes: newPanes,
-            }
-          : t
-      ),
+      tabData: {
+        ...state.tabData,
+        [tabId]: { splitTree: newTree, activePaneId: newActivePaneId, panes: newPanes },
+      },
     }));
   },
 
   setSplitRatio: (tabId, path, ratio) => {
-    set((state) => ({
-      tabs: state.tabs.map((t) =>
-        t.id === tabId
-          ? { ...t, splitTree: setRatioAtPath(t.splitTree, path, ratio) }
-          : t
-      ),
-    }));
+    set((state) => {
+      const data = state.tabData[tabId];
+      if (!data) return state;
+      return {
+        tabData: {
+          ...state.tabData,
+          [tabId]: { ...data, splitTree: setRatioAtPath(data.splitTree, path, ratio) },
+        },
+      };
+    });
   },
 }));
+
+// === Close Hook: clean up when tabStore closes a terminal tab ===
+
+registerTabCloseHook((tab) => {
+  if (tab.type !== "terminal") return;
+
+  const state = useTerminalStore.getState();
+  const data = state.tabData[tab.id];
+
+  // Cancel if still connecting
+  const conn = state.connections[tab.id];
+  if (conn) {
+    CancelSSHConnect(tab.id);
+    EventsOff(`ssh:connect:${tab.id}`);
+  }
+
+  // Disconnect all panes
+  if (data) {
+    for (const pane of Object.values(data.panes)) {
+      if (pane.connected) {
+        DisconnectSSH(pane.sessionId);
+      }
+    }
+  }
+
+  // Clean up state
+  useTerminalStore.setState((s) => {
+    const newTabData = { ...s.tabData };
+    delete newTabData[tab.id];
+    const newConnections = { ...s.connections };
+    delete newConnections[tab.id];
+    const next = new Set(s.connectingAssetIds);
+    if (conn) next.delete(conn.assetId);
+    return { tabData: newTabData, connections: newConnections, connectingAssetIds: next };
+  });
+});
+
+// === Restore terminal tabData for tabs already in tabStore ===
+
+(function _restoreTerminalTabData() {
+  const tabs = useTabStore.getState().tabs.filter((t) => t.type === "terminal");
+  if (tabs.length === 0) return;
+
+  const tabData: Record<string, TerminalTabData> = {};
+  for (const tab of tabs) {
+    // Restored terminal tabs start as disconnected
+    tabData[tab.id] = {
+      splitTree: { type: "terminal", sessionId: tab.id },
+      activePaneId: tab.id,
+      panes: { [tab.id]: { sessionId: tab.id, connected: false, connectedAt: 0 } },
+    };
+  }
+  useTerminalStore.setState({ tabData });
+})();

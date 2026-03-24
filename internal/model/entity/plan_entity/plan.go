@@ -29,6 +29,8 @@ type PlanItem struct {
 	ToolName      string `gorm:"column:tool_name;type:varchar(100);not null"` // "exec", "cp", "create", "update"
 	AssetID       int64  `gorm:"column:asset_id;default:0"`
 	AssetName     string `gorm:"column:asset_name;type:varchar(255)"`
+	GroupID       int64  `gorm:"column:group_id;default:0"`
+	GroupName     string `gorm:"column:group_name;type:varchar(255)"`
 	Command       string `gorm:"column:command;type:text"`
 	Detail        string `gorm:"column:detail;type:text"`
 	Consumed      int    `gorm:"column:consumed;default:0"` // 0=未消费, 1=已消费

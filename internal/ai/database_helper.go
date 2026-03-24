@@ -11,10 +11,10 @@ import (
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 
-	"ops-cat/internal/connpool"
-	"ops-cat/internal/model/entity/asset_entity"
-	"ops-cat/internal/service/asset_svc"
-	"ops-cat/internal/sshpool"
+	"github.com/opskat/opskat/internal/connpool"
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/service/asset_svc"
+	"github.com/opskat/opskat/internal/sshpool"
 )
 
 // --- Database 连接缓存 ---
@@ -94,6 +94,7 @@ func handleExecSQL(ctx context.Context, args map[string]any) (string, error) {
 	// 权限检查
 	if checker := GetPolicyChecker(ctx); checker != nil {
 		result := checker.CheckForAsset(ctx, assetID, asset_entity.AssetTypeDatabase, sqlText)
+		setCheckResult(ctx, result)
 		if result.Decision != Allow {
 			return result.Message, nil
 		}
@@ -221,10 +222,14 @@ func formatRowsJSON(rows *sql.Rows) (string, error) {
 		return "", err
 	}
 
-	data, _ := json.Marshal(map[string]any{
+	data, err := json.Marshal(map[string]any{
 		"columns": columns,
 		"rows":    resultRows,
 		"count":   len(resultRows),
 	})
+	if err != nil {
+		logger.Default().Error("marshal query result", zap.Error(err))
+		return "", fmt.Errorf("序列化查询结果失败: %w", err)
+	}
 	return string(data), nil
 }

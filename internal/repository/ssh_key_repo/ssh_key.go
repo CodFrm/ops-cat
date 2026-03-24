@@ -3,7 +3,7 @@ package ssh_key_repo
 import (
 	"context"
 
-	"ops-cat/internal/model/entity/ssh_key_entity"
+	"github.com/opskat/opskat/internal/model/entity/ssh_key_entity"
 
 	"github.com/cago-frame/cago/database/db"
 )

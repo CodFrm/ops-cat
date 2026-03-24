@@ -10,9 +10,9 @@ import (
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 
-	"ops-cat/internal/connpool"
-	"ops-cat/internal/model/entity/asset_entity"
-	"ops-cat/internal/service/asset_svc"
+	"github.com/opskat/opskat/internal/connpool"
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/service/asset_svc"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -78,6 +78,7 @@ func handleExecRedis(ctx context.Context, args map[string]any) (string, error) {
 	// 权限检查
 	if checker := GetPolicyChecker(ctx); checker != nil {
 		result := checker.CheckForAsset(ctx, assetID, asset_entity.AssetTypeRedis, command)
+		setCheckResult(ctx, result)
 		if result.Decision != Allow {
 			return result.Message, nil
 		}
@@ -201,6 +202,10 @@ func formatRedisResult(result any) (string, error) {
 	default:
 		out = map[string]any{"type": fmt.Sprintf("%T", v), "value": fmt.Sprint(v)}
 	}
-	data, _ := json.Marshal(out)
+	data, err := json.Marshal(out)
+	if err != nil {
+		logger.Default().Error("marshal redis result", zap.Error(err))
+		return "", fmt.Errorf("序列化 Redis 结果失败: %w", err)
+	}
 	return string(data), nil
 }

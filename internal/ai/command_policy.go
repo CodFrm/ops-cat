@@ -7,11 +7,15 @@ import (
 	"strings"
 	"sync"
 
-	"ops-cat/internal/model/entity/asset_entity"
-	"ops-cat/internal/model/entity/audit_entity"
-	"ops-cat/internal/model/entity/group_entity"
-	"ops-cat/internal/repository/group_repo"
-	"ops-cat/internal/service/asset_svc"
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
+
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/model/entity/group_entity"
+	"github.com/opskat/opskat/internal/model/entity/plan_entity"
+	"github.com/opskat/opskat/internal/repository/group_repo"
+	"github.com/opskat/opskat/internal/repository/plan_repo"
+	"github.com/opskat/opskat/internal/service/asset_svc"
 
 	"mvdan.cc/sh/v3/syntax"
 )
@@ -25,19 +29,70 @@ const (
 	NeedConfirm                 // 需要用户确认
 )
 
+// 决策来源常量
+const (
+	SourcePolicyAllow  = "policy_allow"  // 命令策略白名单放行
+	SourcePolicyDeny   = "policy_deny"   // 命令策略黑名单拒绝
+	SourceSessionAllow = "session_allow" // 会话级模式匹配放行
+	SourceUserAllow    = "user_allow"    // 用户手动允许
+	SourceUserDeny     = "user_deny"     // 用户手动拒绝
+	SourceAutoAllow    = "auto_allow"    // 无策略限制，直接放行
+	SourcePlanAllow    = "plan_allow"    // Plan 预批准匹配放行
+	SourcePlanDeny     = "plan_deny"     // Plan 权限申请被拒绝
+)
+
 // CheckResult 权限检查结果
 type CheckResult struct {
-	Decision  Decision
-	Message   string   // 返回给 AI 的消息
-	HintRules []string // 拒绝时的允许规则提示
+	Decision       Decision
+	Message        string   // 返回给 AI 的消息
+	HintRules      []string // 拒绝时的允许规则提示
+	DecisionSource string   // 决策来源（SourcePolicyAllow 等常量）
+	MatchedPattern string   // 匹配的命令模式
+}
+
+// DecisionString 返回决策的字符串表示（用于审计日志存储）
+func (r CheckResult) DecisionString() string {
+	switch r.Decision {
+	case Allow:
+		return "allow"
+	case Deny:
+		return "deny"
+	default:
+		return ""
+	}
+}
+
+// --- CheckResult context（供 AuditingExecutor 读取决策信息）---
+
+type checkResultKey struct{}
+
+// withCheckResult 注入 CheckResult 占位指针（由 AuditingExecutor 调用）
+func withCheckResult(ctx context.Context, r *CheckResult) context.Context {
+	return context.WithValue(ctx, checkResultKey{}, r)
+}
+
+// setCheckResult 在工具 handler 中设置决策结果
+func setCheckResult(ctx context.Context, result CheckResult) {
+	if r, ok := ctx.Value(checkResultKey{}).(*CheckResult); ok && r != nil {
+		*r = result
+	}
+}
+
+// getCheckResult 读取决策结果（由 AuditingExecutor 调用）
+func getCheckResult(ctx context.Context) *CheckResult {
+	if r, ok := ctx.Value(checkResultKey{}).(*CheckResult); ok {
+		return r
+	}
+	return nil
 }
 
 // CommandConfirmFunc 命令确认回调，阻塞等待用户响应
 type CommandConfirmFunc func(assetName, command string) (allowed, alwaysAllow bool)
 
-// PermissionRequestFunc 权限申请回调，用于 request_permission 工具
-// 返回 (approved, 用户可能编辑后的 pattern)
-type PermissionRequestFunc func(assetName string, assetID int64, commandPattern, reason string) (approved bool, finalPattern string)
+// PlanRequestFunc Plan 审批回调，创建 plan 并等待用户审批
+// patterns 为命令模式列表，用户可能在审批弹窗中编辑
+// 返回 (approved, 用户编辑后的 patterns)
+type PlanRequestFunc func(assetID int64, assetName string, patterns []string, reason string) (approved bool, finalPatterns []string)
 
 // ApprovedPattern 会话级已批准的命令模式
 type ApprovedPattern struct {
@@ -55,10 +110,10 @@ func (p *ApprovedPattern) Match(assetID int64, command string) bool {
 
 // CommandPolicyChecker 命令权限检查器，通过 context 注入到两条执行路径
 type CommandPolicyChecker struct {
-	confirmFunc       CommandConfirmFunc
-	permissionReqFunc PermissionRequestFunc
-	sessionAllowed    []ApprovedPattern // 会话级白名单（资产+命令模式）
-	mu                sync.Mutex
+	confirmFunc     CommandConfirmFunc
+	planRequestFunc PlanRequestFunc
+	sessionAllowed  []ApprovedPattern // 会话级白名单（资产+命令模式，exec 确认弹窗的「始终允许」）
+	mu              sync.Mutex
 }
 
 // NewCommandPolicyChecker 创建权限检查器
@@ -68,15 +123,15 @@ func NewCommandPolicyChecker(confirmFunc CommandConfirmFunc) *CommandPolicyCheck
 	}
 }
 
-// SetPermissionRequestFunc 设置权限申请回调
-func (c *CommandPolicyChecker) SetPermissionRequestFunc(fn PermissionRequestFunc) {
-	c.permissionReqFunc = fn
+// SetPlanRequestFunc 设置 Plan 审批回调
+func (c *CommandPolicyChecker) SetPlanRequestFunc(fn PlanRequestFunc) {
+	c.planRequestFunc = fn
 }
 
-// RequestPermission 主动申请权限（request_permission 工具调用）
-func (c *CommandPolicyChecker) RequestPermission(ctx context.Context, assetID int64, commandPattern, reason string) CheckResult {
-	if c.permissionReqFunc == nil {
-		return CheckResult{Decision: Deny, Message: "无权限申请机制"}
+// SubmitPlan 提交 plan 审批请求（request_permission 工具调用）
+func (c *CommandPolicyChecker) SubmitPlan(ctx context.Context, assetID int64, patterns []string, reason string) CheckResult {
+	if c.planRequestFunc == nil {
+		return CheckResult{Decision: Deny, Message: "无 Plan 审批机制"}
 	}
 
 	assetName := ""
@@ -86,25 +141,12 @@ func (c *CommandPolicyChecker) RequestPermission(ctx context.Context, assetID in
 		}
 	}
 
-	approved, finalPattern := c.permissionReqFunc(assetName, assetID, commandPattern, reason)
+	approved, finalPatterns := c.planRequestFunc(assetID, assetName, patterns, reason)
 	if !approved {
-		fillAuditRecord(ctx, audit_entity.DecisionDeny, audit_entity.SourcePermRequest, commandPattern)
-		return CheckResult{Decision: Deny, Message: "用户拒绝权限申请"}
+		return CheckResult{Decision: Deny, Message: "用户拒绝 Plan 审批", DecisionSource: SourcePlanDeny, MatchedPattern: strings.Join(patterns, "; ")}
 	}
 
-	if finalPattern == "" {
-		finalPattern = commandPattern
-	}
-
-	c.mu.Lock()
-	c.sessionAllowed = append(c.sessionAllowed, ApprovedPattern{
-		AssetID: assetID,
-		Pattern: finalPattern,
-	})
-	c.mu.Unlock()
-
-	fillAuditRecord(ctx, audit_entity.DecisionAllow, audit_entity.SourcePermRequest, finalPattern)
-	return CheckResult{Decision: Allow, Message: fmt.Sprintf("权限已批准: %s", finalPattern)}
+	return CheckResult{Decision: Allow, Message: fmt.Sprintf("Plan 已批准，共 %d 条模式", len(finalPatterns)), DecisionSource: SourcePlanAllow, MatchedPattern: strings.Join(finalPatterns, "; ")}
 }
 
 // AddApprovedPattern 添加已批准的模式（外部调用，如 opsctl 审批后）
@@ -117,13 +159,65 @@ func (c *CommandPolicyChecker) AddApprovedPattern(assetID int64, pattern string)
 	})
 }
 
-// fillAuditRecord 填充审计决策记录
-func fillAuditRecord(ctx context.Context, decision, source, pattern string) {
-	if r := GetAuditRecord(ctx); r != nil {
-		r.Decision = decision
-		r.DecisionSource = source
-		r.MatchedPattern = pattern
+// matchPlanPatterns 从 DB 中查找已批准 plan 的 items，用通配匹配命令
+// 返回首个匹配的 pattern，空字符串表示未匹配
+// groups 为资产所属的组链（组 → 父组 → ... → 根）
+func matchPlanPatterns(ctx context.Context, assetID int64, groups []*group_entity.Group, subCmds []string) string {
+	sessionID := GetSessionID(ctx)
+	if sessionID == "" {
+		return ""
 	}
+	repo := plan_repo.Plan()
+	if repo == nil {
+		return ""
+	}
+	items, err := repo.ListApprovedItems(ctx, sessionID)
+	if err != nil || len(items) == 0 {
+		return ""
+	}
+
+	// 构建资产所属的组 ID 集合，用于匹配 group 级 plan item
+	groupIDs := make(map[int64]bool, len(groups))
+	for _, g := range groups {
+		groupIDs[g.ID] = true
+	}
+
+	// 所有子命令都必须匹配某个 plan item
+	var firstPattern string
+	for _, cmd := range subCmds {
+		matched := false
+		for _, item := range items {
+			if !planItemMatchesTarget(item, assetID, groupIDs) {
+				continue
+			}
+			if MatchCommandRule(item.Command, cmd) {
+				matched = true
+				if firstPattern == "" {
+					firstPattern = item.Command
+				}
+				break
+			}
+		}
+		if !matched {
+			return ""
+		}
+	}
+	return firstPattern
+}
+
+// planItemMatchesTarget 检查 plan item 是否匹配目标资产
+// AssetID=0 且 GroupID=0 → 匹配所有资产
+// AssetID>0 → 精确匹配资产
+// GroupID>0 → 匹配组内资产（检查资产所属组链）
+func planItemMatchesTarget(item *plan_entity.PlanItem, assetID int64, groupIDs map[int64]bool) bool {
+	if item.AssetID != 0 {
+		return item.AssetID == assetID
+	}
+	if item.GroupID != 0 {
+		return groupIDs[item.GroupID]
+	}
+	// AssetID=0 且 GroupID=0，匹配所有资产
+	return true
 }
 
 // matchSessionPatterns 检查所有子命令是否都能被会话级模式匹配（调用方需持有 mu 锁）
@@ -189,33 +283,34 @@ func (c *CommandPolicyChecker) Check(ctx context.Context, assetID int64, command
 				}
 				hints := findHintRules(cmd, allAllowRules)
 				msg := formatDenyMessage(assetName, command, "命令被策略禁止执行", hints)
-				fillAuditRecord(ctx, audit_entity.DecisionDeny, audit_entity.SourcePolicyDeny, rule)
-				return CheckResult{Decision: Deny, Message: msg, HintRules: hints}
+				return CheckResult{Decision: Deny, Message: msg, HintRules: hints, DecisionSource: SourcePolicyDeny, MatchedPattern: rule}
 			}
 		}
 	}
 
 	// 4. 检查 allow list（所有子命令都匹配才放行）
 	if len(allAllowRules) > 0 && allSubCommandsAllowed(subCmds, allAllowRules) {
-		fillAuditRecord(ctx, audit_entity.DecisionAllow, audit_entity.SourcePolicyAllow, "")
-		return CheckResult{Decision: Allow}
+		return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
 	}
 
-	// 5. 检查会话级白名单（按 assetID + pattern 匹配）
+	// 5. 检查会话级白名单（按 assetID + pattern 匹配，exec 弹窗的「始终允许」）
 	c.mu.Lock()
 	sessionOK, matchedPattern := c.matchSessionPatterns(assetID, subCmds)
 	c.mu.Unlock()
 	if sessionOK {
-		fillAuditRecord(ctx, audit_entity.DecisionAllow, audit_entity.SourceSessionAllow, matchedPattern)
-		return CheckResult{Decision: Allow}
+		return CheckResult{Decision: Allow, DecisionSource: SourceSessionAllow, MatchedPattern: matchedPattern}
 	}
 
-	// 6. 请求用户确认
+	// 6. 检查 Plan 预批准（DB 中已批准的 plan items 做通配匹配）
+	if planPattern := matchPlanPatterns(ctx, assetID, groups, subCmds); planPattern != "" {
+		return CheckResult{Decision: Allow, DecisionSource: SourcePlanAllow, MatchedPattern: planPattern}
+	}
+
+	// 7. 请求用户确认
 	if c.confirmFunc == nil {
 		hints := findHintRules(subCmds[0], allAllowRules)
 		msg := formatDenyMessage("", command, "命令未授权且无确认机制", hints)
-		fillAuditRecord(ctx, audit_entity.DecisionDeny, audit_entity.SourcePolicyDeny, "")
-		return CheckResult{Decision: Deny, Message: msg, HintRules: hints}
+		return CheckResult{Decision: Deny, Message: msg, HintRules: hints, DecisionSource: SourcePolicyDeny}
 	}
 
 	assetName := ""
@@ -226,8 +321,7 @@ func (c *CommandPolicyChecker) Check(ctx context.Context, assetID int64, command
 	if !allowed {
 		hints := findHintRules(subCmds[0], allAllowRules)
 		msg := formatDenyMessage(assetName, command, "用户拒绝执行", hints)
-		fillAuditRecord(ctx, audit_entity.DecisionDeny, audit_entity.SourceUserDeny, "")
-		return CheckResult{Decision: Deny, Message: msg, HintRules: hints}
+		return CheckResult{Decision: Deny, Message: msg, HintRules: hints, DecisionSource: SourceUserDeny}
 	}
 
 	// "始终允许" → 每个子命令加入会话白名单（绑定资产ID）
@@ -242,8 +336,7 @@ func (c *CommandPolicyChecker) Check(ctx context.Context, assetID int64, command
 		c.mu.Unlock()
 	}
 
-	fillAuditRecord(ctx, audit_entity.DecisionAllow, audit_entity.SourceUserAllow, "")
-	return CheckResult{Decision: Allow}
+	return CheckResult{Decision: Allow, DecisionSource: SourceUserAllow}
 }
 
 // CheckPolicyOnly 只检查 allow/deny 列表，不触发确认回调。
@@ -274,14 +367,14 @@ func CheckPolicyOnly(ctx context.Context, assetID int64, command string) CheckRe
 				}
 				hints := findHintRules(cmd, allAllowRules)
 				msg := formatDenyMessage(assetName, command, "命令被策略禁止执行", hints)
-				return CheckResult{Decision: Deny, Message: msg, HintRules: hints}
+				return CheckResult{Decision: Deny, Message: msg, HintRules: hints, DecisionSource: SourcePolicyDeny, MatchedPattern: rule}
 			}
 		}
 	}
 
 	// Check allow list
 	if len(allAllowRules) > 0 && allSubCommandsAllowed(subCmds, allAllowRules) {
-		return CheckResult{Decision: Allow}
+		return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
 	}
 
 	return CheckResult{Decision: NeedConfirm}
@@ -298,10 +391,16 @@ func (c *CommandPolicyChecker) CheckForAsset(ctx context.Context, assetID int64,
 		if err != nil {
 			return CheckResult{Decision: Deny, Message: fmt.Sprintf("SQL 解析失败，拒绝执行: %v", err)}
 		}
-		asset, _ := asset_svc.Asset().Get(ctx, assetID)
+		asset, err := asset_svc.Asset().Get(ctx, assetID)
+		if err != nil {
+			logger.Default().Warn("get asset for query policy check", zap.Int64("assetID", assetID), zap.Error(err))
+		}
 		var policy *asset_entity.QueryPolicy
 		if asset != nil {
-			policy, _ = asset.GetQueryPolicy()
+			policy, err = asset.GetQueryPolicy()
+			if err != nil {
+				logger.Default().Warn("get query policy", zap.Int64("assetID", assetID), zap.Error(err))
+			}
 		}
 		result := CheckQueryPolicy(policy, stmts)
 		if result.Decision == NeedConfirm {
@@ -310,10 +409,16 @@ func (c *CommandPolicyChecker) CheckForAsset(ctx context.Context, assetID int64,
 		return result
 
 	case asset_entity.AssetTypeRedis:
-		asset, _ := asset_svc.Asset().Get(ctx, assetID)
+		asset, err := asset_svc.Asset().Get(ctx, assetID)
+		if err != nil {
+			logger.Default().Warn("get asset for redis policy check", zap.Int64("assetID", assetID), zap.Error(err))
+		}
 		var policy *asset_entity.RedisPolicy
 		if asset != nil {
-			policy, _ = asset.GetRedisPolicy()
+			policy, err = asset.GetRedisPolicy()
+			if err != nil {
+				logger.Default().Warn("get redis policy", zap.Int64("assetID", assetID), zap.Error(err))
+			}
 		}
 		result := CheckRedisPolicy(policy, command)
 		if result.Decision == NeedConfirm {
@@ -331,13 +436,11 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 	sessionOK, matchedPattern := c.matchSessionPatterns(assetID, []string{command})
 	c.mu.Unlock()
 	if sessionOK {
-		fillAuditRecord(ctx, audit_entity.DecisionAllow, audit_entity.SourceSessionAllow, matchedPattern)
-		return CheckResult{Decision: Allow}
+		return CheckResult{Decision: Allow, DecisionSource: SourceSessionAllow, MatchedPattern: matchedPattern}
 	}
 
 	if c.confirmFunc == nil {
-		fillAuditRecord(ctx, audit_entity.DecisionDeny, audit_entity.SourcePolicyDeny, "")
-		return CheckResult{Decision: Deny, Message: "命令未授权且无确认机制"}
+		return CheckResult{Decision: Deny, Message: "命令未授权且无确认机制", DecisionSource: SourcePolicyDeny}
 	}
 
 	assetName := ""
@@ -346,8 +449,7 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 	}
 	allowed, alwaysAllow := c.confirmFunc(assetName, command)
 	if !allowed {
-		fillAuditRecord(ctx, audit_entity.DecisionDeny, audit_entity.SourceUserDeny, "")
-		return CheckResult{Decision: Deny, Message: fmt.Sprintf("用户拒绝执行: %s", command)}
+		return CheckResult{Decision: Deny, Message: fmt.Sprintf("用户拒绝执行: %s", command), DecisionSource: SourceUserDeny}
 	}
 	if alwaysAllow {
 		c.mu.Lock()
@@ -357,8 +459,7 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 		})
 		c.mu.Unlock()
 	}
-	fillAuditRecord(ctx, audit_entity.DecisionAllow, audit_entity.SourceUserAllow, "")
-	return CheckResult{Decision: Allow}
+	return CheckResult{Decision: Allow, DecisionSource: SourceUserAllow}
 }
 
 // --- context 注入 ---
@@ -402,7 +503,9 @@ func ExtractSubCommands(command string) ([]string, error) {
 		default:
 			// CallExpr、其他命令类型 — 打印为字符串
 			var buf strings.Builder
-			_ = printer.Print(&buf, stmt.Cmd)
+			if err := printer.Print(&buf, stmt.Cmd); err != nil {
+				logger.Default().Warn("print shell statement", zap.Error(err))
+			}
 			cmdStr := strings.TrimSpace(buf.String())
 			if cmdStr != "" {
 				cmds = append(cmds, cmdStr)

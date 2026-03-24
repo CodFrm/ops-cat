@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ops-cat/internal/service/ssh_svc"
+	"github.com/opskat/opskat/internal/service/ssh_svc"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"github.com/pkg/sftp"

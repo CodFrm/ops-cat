@@ -1,30 +1,16 @@
 import { useEffect } from "react";
 import { useTerminalStore } from "@/stores/terminalStore";
-import { useAIStore } from "@/stores/aiStore";
+import { useTabStore } from "@/stores/tabStore";
 import { useShortcutStore, matchShortcut } from "@/stores/shortcutStore";
 
 interface ShortcutHandlers {
   onToggleAIPanel: () => void;
   onToggleSidebar: () => void;
-  onPageChange: (page: string) => void;
-  onClosePageTab: (page: string) => void;
-  openPageTabs: string[];
-  activePageTab: string | null;
 }
-
-// Virtual tab id: null = asset info, "page:xxx" = page tab, "ai:xxx" = AI tab, otherwise terminal tab id
-type VirtualTabId = string | null;
-
-const PAGE_PREFIX = "page:";
-const AI_PREFIX = "ai:";
 
 export function useKeyboardShortcuts({
   onToggleAIPanel,
   onToggleSidebar,
-  onPageChange,
-  onClosePageTab,
-  openPageTabs,
-  activePageTab,
 }: ShortcutHandlers) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -48,105 +34,62 @@ export function useKeyboardShortcuts({
       e.preventDefault();
       e.stopPropagation();
 
-      const { tabs, activeTabId, assetInfoOpen, setActiveTab, openAssetInfo, closeAssetInfo, splitPane, closePane } =
-        useTerminalStore.getState();
-      const aiStore = useAIStore.getState();
-
-      // Build virtual tab list: [asset info, ...terminal tabs, ...AI tabs, ...page tabs]
-      const allTabIds: VirtualTabId[] = [];
-      if (assetInfoOpen) allTabIds.push(null);
-      for (const tab of tabs) allTabIds.push(tab.id);
-      for (const aiTab of aiStore.openTabs) allTabIds.push(AI_PREFIX + aiTab.id);
-      for (const pageId of openPageTabs) allTabIds.push(PAGE_PREFIX + pageId);
-
-      // Determine current active virtual tab id
-      let currentId: VirtualTabId | undefined;
-      if (activePageTab) {
-        if (activePageTab.startsWith("ai:")) {
-          currentId = AI_PREFIX + activePageTab.slice(3);
-        } else {
-          currentId = PAGE_PREFIX + activePageTab;
-        }
-      } else if (activeTabId) {
-        currentId = activeTabId;
-      } else if (assetInfoOpen) {
-        currentId = null;
-      } else {
-        currentId = undefined;
-      }
-
-      const switchTo = (id: VirtualTabId) => {
-        if (id === null) {
-          onPageChange("home");
-          openAssetInfo();
-        } else if (id.startsWith(AI_PREFIX)) {
-          const aiTabId = id.slice(AI_PREFIX.length);
-          onPageChange("ai:" + aiTabId);
-        } else if (id.startsWith(PAGE_PREFIX)) {
-          onPageChange(id.slice(PAGE_PREFIX.length));
-        } else {
-          onPageChange("home");
-          setActiveTab(id);
-        }
-      };
+      const tabStore = useTabStore.getState();
+      const { tabs, activeTabId } = tabStore;
 
       // Tab switching: tab.1 ~ tab.9
       const tabMatch = action.match(/^tab\.(\d)$/);
       if (tabMatch) {
         const idx = parseInt(tabMatch[1]) - 1;
-        if (idx < allTabIds.length) {
-          switchTo(allTabIds[idx]);
+        if (idx < tabs.length) {
+          tabStore.activateTab(tabs[idx].id);
         }
         return;
       }
 
       switch (action) {
         case "tab.close": {
-          // Close AI tab
-          if (activePageTab?.startsWith("ai:")) {
-            onClosePageTab(activePageTab);
-            break;
-          }
-          // Close page tab
-          if (activePageTab) {
-            onClosePageTab(activePageTab);
-            break;
-          }
-          // Close asset info tab
-          if (currentId === null && assetInfoOpen) {
-            closeAssetInfo();
-            break;
-          }
-          // Close terminal pane
-          if (!activeTabId) break;
-          const tab = tabs.find((t) => t.id === activeTabId);
-          if (tab) {
-            closePane(activeTabId, tab.activePaneId);
+          if (activeTabId) {
+            const activeTab = tabs.find((t) => t.id === activeTabId);
+            if (activeTab?.type === "terminal") {
+              // Close terminal pane (not tab) if there are splits
+              const termStore = useTerminalStore.getState();
+              const data = termStore.tabData[activeTabId];
+              if (data) {
+                termStore.closePane(activeTabId, data.activePaneId);
+              }
+            } else {
+              tabStore.closeTab(activeTabId);
+            }
           }
           break;
         }
         case "tab.prev": {
-          if (allTabIds.length === 0) break;
-          const curIdx = currentId === undefined ? -1 : allTabIds.indexOf(currentId);
-          const prevIdx = curIdx <= 0 ? allTabIds.length - 1 : curIdx - 1;
-          switchTo(allTabIds[prevIdx]);
+          if (tabs.length === 0) break;
+          const curIdx = tabs.findIndex((t) => t.id === activeTabId);
+          const prevIdx = curIdx <= 0 ? tabs.length - 1 : curIdx - 1;
+          tabStore.activateTab(tabs[prevIdx].id);
           break;
         }
         case "tab.next": {
-          if (allTabIds.length === 0) break;
-          const curIdx = currentId === undefined ? -1 : allTabIds.indexOf(currentId);
-          const nextIdx = curIdx >= allTabIds.length - 1 ? 0 : curIdx + 1;
-          switchTo(allTabIds[nextIdx]);
+          if (tabs.length === 0) break;
+          const curIdx = tabs.findIndex((t) => t.id === activeTabId);
+          const nextIdx = curIdx >= tabs.length - 1 ? 0 : curIdx + 1;
+          tabStore.activateTab(tabs[nextIdx].id);
           break;
         }
         case "split.vertical": {
-          if (!activeTabId || activePageTab) break;
-          splitPane(activeTabId, "vertical");
+          const activeTab = tabs.find((t) => t.id === activeTabId);
+          if (activeTab?.type === "terminal") {
+            useTerminalStore.getState().splitPane(activeTabId!, "vertical");
+          }
           break;
         }
         case "split.horizontal": {
-          if (!activeTabId || activePageTab) break;
-          splitPane(activeTabId, "horizontal");
+          const activeTab = tabs.find((t) => t.id === activeTabId);
+          if (activeTab?.type === "terminal") {
+            useTerminalStore.getState().splitPane(activeTabId!, "horizontal");
+          }
           break;
         }
         case "panel.ai":
@@ -155,19 +98,43 @@ export function useKeyboardShortcuts({
         case "panel.sidebar":
           onToggleSidebar();
           break;
-        case "page.home":
-          onPageChange("home");
+        case "page.home": {
+          const homeTab = tabs.find((t) => t.type === "terminal" || t.type === "info");
+          if (homeTab) tabStore.activateTab(homeTab.id);
           break;
-        case "page.settings":
-          onPageChange("settings");
+        }
+        case "page.settings": {
+          const existing = tabs.find((t) => t.id === "settings");
+          if (existing) {
+            tabStore.activateTab("settings");
+          } else {
+            tabStore.openTab({
+              id: "settings",
+              type: "page",
+              label: "settings",
+              meta: { type: "page", pageId: "settings" },
+            });
+          }
           break;
-        case "page.sshkeys":
-          onPageChange("sshkeys");
+        }
+        case "page.sshkeys": {
+          const existing = tabs.find((t) => t.id === "sshkeys");
+          if (existing) {
+            tabStore.activateTab("sshkeys");
+          } else {
+            tabStore.openTab({
+              id: "sshkeys",
+              type: "page",
+              label: "sshkeys",
+              meta: { type: "page", pageId: "sshkeys" },
+            });
+          }
           break;
+        }
       }
     };
 
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [onToggleAIPanel, onToggleSidebar, onPageChange, onClosePageTab, openPageTabs, activePageTab]);
+  }, [onToggleAIPanel, onToggleSidebar]);
 }

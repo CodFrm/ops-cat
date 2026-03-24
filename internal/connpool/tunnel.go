@@ -6,7 +6,7 @@ import (
 	"net"
 	"time"
 
-	"ops-cat/internal/sshpool"
+	"github.com/opskat/opskat/internal/sshpool"
 )
 
 // noDeadlineConn 包装 net.Conn，忽略 SetDeadline 调用。

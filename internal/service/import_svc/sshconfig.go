@@ -9,11 +9,13 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"time"
 
-	"ops-cat/internal/model/entity/asset_entity"
-	"ops-cat/internal/repository/asset_repo"
-	"ops-cat/internal/repository/group_repo"
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
+
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/repository/group_repo"
+	"github.com/opskat/opskat/internal/service/asset_svc"
 )
 
 // sshConfigHost 解析后的 SSH Config Host 块
@@ -31,7 +33,7 @@ func PreviewSSHConfig(ctx context.Context, data []byte) (*PreviewResult, error) 
 	hosts := parseSSHConfig(string(data))
 
 	// 加载已有资产用于重复检测
-	existingAssets, err := asset_repo.Asset().List(ctx, asset_repo.ListOptions{Type: asset_entity.AssetTypeSSH})
+	existingAssets, err := asset_svc.Asset().List(ctx, asset_entity.AssetTypeSSH, 0)
 	if err != nil {
 		return nil, fmt.Errorf("查询已有资产失败: %w", err)
 	}
@@ -103,7 +105,7 @@ func ImportSSHConfigSelected(ctx context.Context, data []byte, selectedIndexes [
 	}
 
 	// 加载已有资产用于重复检测和覆盖
-	existingAssets, err := asset_repo.Asset().List(ctx, asset_repo.ListOptions{Type: asset_entity.AssetTypeSSH})
+	existingAssets, err := asset_svc.Asset().List(ctx, asset_entity.AssetTypeSSH, 0)
 	if err != nil {
 		return nil, fmt.Errorf("查询已有资产失败: %w", err)
 	}
@@ -183,8 +185,7 @@ func ImportSSHConfigSelected(ctx context.Context, data []byte, selectedIndexes [
 				result.Errors = append(result.Errors, ImportError{Name: name, Reason: fmt.Sprintf("序列化配置失败: %v", err)})
 				continue
 			}
-			existingAsset.Updatetime = time.Now().Unix()
-			if err := asset_repo.Asset().Update(ctx, existingAsset); err != nil {
+			if err := asset_svc.Asset().Update(ctx, existingAsset); err != nil {
 				result.Failed++
 				result.Errors = append(result.Errors, ImportError{Name: name, Reason: fmt.Sprintf("更新资产失败: %v", err)})
 				continue
@@ -197,7 +198,6 @@ func ImportSSHConfigSelected(ctx context.Context, data []byte, selectedIndexes [
 				Type:    asset_entity.AssetTypeSSH,
 				GroupID: groupID,
 				Icon:    "server",
-				Status:  asset_entity.StatusActive,
 			}
 			if err := asset.SetSSHConfig(sshCfg); err != nil {
 				result.Failed++
@@ -205,11 +205,7 @@ func ImportSSHConfigSelected(ctx context.Context, data []byte, selectedIndexes [
 				continue
 			}
 
-			now := time.Now().Unix()
-			asset.Createtime = now
-			asset.Updatetime = now
-
-			if err := asset_repo.Asset().Create(ctx, asset); err != nil {
+			if err := asset_svc.Asset().Create(ctx, asset); err != nil {
 				result.Failed++
 				result.Errors = append(result.Errors, ImportError{Name: name, Reason: fmt.Sprintf("创建资产失败: %v", err)})
 				continue
@@ -236,7 +232,7 @@ func ImportSSHConfigSelected(ctx context.Context, data []byte, selectedIndexes [
 		if jumpAssetID == 0 {
 			continue
 		}
-		asset, err := asset_repo.Asset().Find(ctx, p.assetID)
+		asset, err := asset_svc.Asset().Get(ctx, p.assetID)
 		if err != nil {
 			continue
 		}
@@ -248,8 +244,9 @@ func ImportSSHConfigSelected(ctx context.Context, data []byte, selectedIndexes [
 		if err := asset.SetSSHConfig(sshCfg); err != nil {
 			continue
 		}
-		asset.Updatetime = time.Now().Unix()
-		_ = asset_repo.Asset().Update(ctx, asset)
+		if err := asset_svc.Asset().Update(ctx, asset); err != nil {
+			logger.Default().Warn("update asset jump host after ssh config import", zap.Int64("assetID", asset.ID), zap.Error(err))
+		}
 	}
 
 	return result, nil

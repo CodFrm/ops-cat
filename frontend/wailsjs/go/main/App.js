@@ -282,12 +282,12 @@ export function RespondPermission(arg1, arg2) {
   return window['go']['main']['App']['RespondPermission'](arg1, arg2);
 }
 
-export function RespondPermissionRequest(arg1, arg2, arg3) {
-  return window['go']['main']['App']['RespondPermissionRequest'](arg1, arg2, arg3);
-}
-
 export function RespondPlanApproval(arg1, arg2) {
   return window['go']['main']['App']['RespondPlanApproval'](arg1, arg2);
+}
+
+export function RespondPlanApprovalWithEdits(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RespondPlanApprovalWithEdits'](arg1, arg2, arg3);
 }
 
 export function SFTPCancelTransfer(arg1) {

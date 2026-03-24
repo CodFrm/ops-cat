@@ -93,7 +93,10 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 				logger.Default().Warn("close HTTP response body", zap.Error(err))
 			}
 		}()
-		errBody, _ := io.ReadAll(resp.Body)
+		errBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			logger.Default().Warn("read error response body", zap.Error(readErr))
+		}
 		return nil, fmt.Errorf("API 错误 %d: %s", resp.StatusCode, string(errBody))
 	}
 

@@ -10,7 +10,10 @@ CLAUDE.md
 
 *.db
 
-ops-cat
-opsctl
+opskat
+
+/opsctl
 
 internal/embedded/opsctl_bin
+
+.opskat

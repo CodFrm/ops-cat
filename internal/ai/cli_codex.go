@@ -603,7 +603,7 @@ func (s *CodexAppServer) handleUserInputRequest(requestID *int64, params json.Ra
 			logger.Default().Error("codex resolveUserInput response write failed", zap.Error(err))
 		}
 	} else {
-		_ = s.sendNotification("item/tool/resolveUserInput", map[string]any{
+		if err := s.sendNotification("item/tool/resolveUserInput", map[string]any{
 			"threadId": req.ThreadID,
 			"turnId":   req.TurnID,
 			"itemId":   req.ItemID,
@@ -612,7 +612,9 @@ func (s *CodexAppServer) handleUserInputRequest(requestID *int64, params json.Ra
 					"answers": []string{answer},
 				},
 			},
-		})
+		}); err != nil {
+			logger.Default().Error("codex sendNotification resolveUserInput failed", zap.Error(err))
+		}
 	}
 }
 

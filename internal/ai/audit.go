@@ -9,9 +9,9 @@ import (
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 
-	"ops-cat/internal/model/entity/audit_entity"
-	"ops-cat/internal/repository/asset_repo"
-	"ops-cat/internal/repository/audit_repo"
+	"github.com/opskat/opskat/internal/model/entity/audit_entity"
+	"github.com/opskat/opskat/internal/repository/asset_repo"
+	"github.com/opskat/opskat/internal/repository/audit_repo"
 )
 
 // --- Context keys ---
@@ -20,14 +20,6 @@ type auditSourceKey struct{}
 type conversationIDKey struct{}
 type planSessionIDKey struct{}
 type sessionIDKey struct{}
-type auditRecordKey struct{}
-
-// AuditRecord 每次工具调用的审计决策记录（可变，通过 context 传递）
-type AuditRecord struct {
-	Decision       string // "allow" | "deny"
-	DecisionSource string // policy_allow, policy_deny, session_allow, user_allow, user_deny, auto_allow, perm_request
-	MatchedPattern string // 匹配的命令模式
-}
 
 // WithAuditSource 注入审计来源
 func WithAuditSource(ctx context.Context, source string) context.Context {
@@ -81,55 +73,36 @@ func GetSessionID(ctx context.Context) string {
 	return ""
 }
 
-// WithAuditRecord 注入审计记录（每次工具调用时由 AuditingExecutor 创建）
-func WithAuditRecord(ctx context.Context, record *AuditRecord) context.Context {
-	return context.WithValue(ctx, auditRecordKey{}, record)
+// --- AuditWriter 接口 ---
+
+// ToolCallInfo 一次工具调用的完整信息
+type ToolCallInfo struct {
+	ToolName string
+	ArgsJSON string
+	Result   string
+	Error    error
+	Decision *CheckResult // 可选，权限检查结果
 }
 
-// GetAuditRecord 获取当前审计记录
-func GetAuditRecord(ctx context.Context) *AuditRecord {
-	if v, ok := ctx.Value(auditRecordKey{}).(*AuditRecord); ok {
-		return v
-	}
-	return nil
+// AuditWriter 审计日志写入接口
+type AuditWriter interface {
+	WriteToolCall(ctx context.Context, info ToolCallInfo)
 }
 
-// --- AuditingExecutor ---
+// DefaultAuditWriter 默认审计日志写入实现
+type DefaultAuditWriter struct{}
 
-// AuditingExecutor 包装 ToolExecutor，自动记录审计日志
-type AuditingExecutor struct {
-	inner ToolExecutor
+// NewDefaultAuditWriter 创建默认审计写入器
+func NewDefaultAuditWriter() *DefaultAuditWriter {
+	return &DefaultAuditWriter{}
 }
 
-// NewAuditingExecutor 创建审计执行器
-func NewAuditingExecutor(inner ToolExecutor) *AuditingExecutor {
-	return &AuditingExecutor{inner: inner}
-}
-
-func (a *AuditingExecutor) Execute(ctx context.Context, name string, argsJSON string) (string, error) {
-	// 每次调用创建独立的 AuditRecord，policy checker 填充决策信息
-	record := &AuditRecord{}
-	callCtx := WithAuditRecord(ctx, record)
-
-	result, err := a.inner.Execute(callCtx, name, argsJSON)
-
-	// 写审计日志（fire-and-forget），携带 record 和原始 ctx（含 session/conversation 信息）
-	go a.writeAuditLog(ctx, name, argsJSON, result, err, record)
-
-	return result, err
-}
-
-// Close 代理到 inner
-func (a *AuditingExecutor) Close() error {
-	if closer, ok := a.inner.(io.Closer); ok {
-		return closer.Close()
-	}
-	return nil
-}
-
-func (a *AuditingExecutor) writeAuditLog(ctx context.Context, name string, argsJSON string, result string, execErr error, record *AuditRecord) {
+// WriteToolCall 写入一次工具调用的审计日志
+func (w *DefaultAuditWriter) WriteToolCall(ctx context.Context, info ToolCallInfo) {
 	var args map[string]any
-	_ = json.Unmarshal([]byte(argsJSON), &args)
+	if err := json.Unmarshal([]byte(info.ArgsJSON), &args); err != nil {
+		logger.Default().Warn("unmarshal audit args", zap.Error(err))
+	}
 
 	assetID := argInt64(args, "asset_id")
 	if assetID == 0 {
@@ -143,23 +116,23 @@ func (a *AuditingExecutor) writeAuditLog(ctx context.Context, name string, argsJ
 		}
 	}
 
-	command := ExtractCommandForAudit(name, args)
+	command := ExtractCommandForAudit(info.ToolName, args)
 
 	success := 1
 	errMsg := ""
-	if execErr != nil {
+	if info.Error != nil {
 		success = 0
-		errMsg = execErr.Error()
+		errMsg = info.Error.Error()
 	}
 
 	entry := &audit_entity.AuditLog{
 		Source:         GetAuditSource(ctx),
-		ToolName:       name,
+		ToolName:       info.ToolName,
 		AssetID:        assetID,
 		AssetName:      assetName,
 		Command:        command,
-		Request:        truncateString(argsJSON, 4096),
-		Result:         truncateString(result, 4096),
+		Request:        truncateString(info.ArgsJSON, 4096),
+		Result:         truncateString(info.Result, 4096),
 		Error:          errMsg,
 		Success:        success,
 		ConversationID: GetConversationID(ctx),
@@ -169,10 +142,10 @@ func (a *AuditingExecutor) writeAuditLog(ctx context.Context, name string, argsJ
 	}
 
 	// 填充决策信息
-	if record != nil {
-		entry.Decision = record.Decision
-		entry.DecisionSource = record.DecisionSource
-		entry.MatchedPattern = record.MatchedPattern
+	if info.Decision != nil && info.Decision.DecisionSource != "" {
+		entry.Decision = info.Decision.DecisionString()
+		entry.DecisionSource = info.Decision.DecisionSource
+		entry.MatchedPattern = info.Decision.MatchedPattern
 	}
 
 	if repo := audit_repo.Audit(); repo != nil {
@@ -182,32 +155,79 @@ func (a *AuditingExecutor) writeAuditLog(ctx context.Context, name string, argsJ
 	}
 }
 
-// extractCommandForAudit 从工具参数中提取命令信息
-func ExtractCommandForAudit(toolName string, args map[string]any) string {
-	switch toolName {
-	case "run_command":
-		if v, ok := args["command"].(string); ok {
-			return v
-		}
-	case "request_permission":
-		if v, ok := args["command_pattern"].(string); ok {
-			reason, _ := args["reason"].(string)
-			if reason != "" {
-				return "pattern: " + v + " reason: " + reason
+// --- AuditingExecutor ---
+
+// AuditingExecutor 包装 ToolExecutor，自动记录审计日志
+type AuditingExecutor struct {
+	inner  ToolExecutor
+	writer AuditWriter
+}
+
+// NewAuditingExecutor 创建审计执行器
+func NewAuditingExecutor(inner ToolExecutor, writer AuditWriter) *AuditingExecutor {
+	return &AuditingExecutor{inner: inner, writer: writer}
+}
+
+func (a *AuditingExecutor) Execute(ctx context.Context, name string, argsJSON string) (string, error) {
+	// 注入 CheckResult 占位指针，handler 在权限检查后通过 setCheckResult 填充
+	decision := &CheckResult{}
+	callCtx := withCheckResult(ctx, decision)
+
+	result, err := a.inner.Execute(callCtx, name, argsJSON)
+
+	// 写审计日志（fire-and-forget），携带原始 ctx（含 session/conversation 信息）
+	go a.writer.WriteToolCall(ctx, ToolCallInfo{
+		ToolName: name,
+		ArgsJSON: argsJSON,
+		Result:   result,
+		Error:    err,
+		Decision: decision,
+	})
+
+	return result, err
+}
+
+// Close 代理到 inner
+func (a *AuditingExecutor) Close() error {
+	if closer, ok := a.inner.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
+// --- 命令提取 ---
+
+// commandExtractors 从 AllToolDefs 构建的命令提取器映射（延迟初始化）
+var commandExtractors map[string]CommandExtractorFunc
+
+// getCommandExtractors 获取命令提取器映射（线程安全，AllToolDefs 返回固定值）
+func getCommandExtractors() map[string]CommandExtractorFunc {
+	if commandExtractors == nil {
+		m := make(map[string]CommandExtractorFunc)
+		for _, def := range AllToolDefs() {
+			if def.CommandExtractor != nil {
+				m[def.Name] = def.CommandExtractor
 			}
-			return "pattern: " + v
 		}
-	case "upload_file":
-		local, _ := args["local_path"].(string)
-		remote, _ := args["remote_path"].(string)
-		return "upload " + local + " → " + remote
-	case "download_file":
-		remote, _ := args["remote_path"].(string)
-		local, _ := args["local_path"].(string)
-		return "download " + remote + " → " + local
+		commandExtractors = m
+	}
+	return commandExtractors
+}
+
+// ExtractCommandForAudit 从工具参数中提取命令信息
+func ExtractCommandForAudit(toolName string, args map[string]any) string {
+	extractors := getCommandExtractors()
+	// 支持 opsctl 使用 "exec" 作为 tool name
+	if toolName == "exec" {
+		toolName = "run_command"
+	}
+	if fn, ok := extractors[toolName]; ok {
+		return fn(args)
 	}
 	return ""
 }
+
+// --- 辅助函数 ---
 
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
@@ -216,20 +236,3 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen]
 }
 
-// WriteAuditLog 供外部直接写入审计日志（opsctl 路径使用）
-func WriteAuditLog(ctx context.Context, entry *audit_entity.AuditLog) {
-	if entry.Createtime == 0 {
-		entry.Createtime = time.Now().Unix()
-	}
-	// 自动补全资产名称
-	if entry.AssetName == "" && entry.AssetID > 0 && asset_repo.Asset() != nil {
-		if a, err := asset_repo.Asset().Find(context.Background(), entry.AssetID); err == nil {
-			entry.AssetName = a.Name
-		}
-	}
-	if repo := audit_repo.Audit(); repo != nil {
-		if err := repo.Create(context.Background(), entry); err != nil {
-			logger.Default().Error("audit log write failed", zap.Error(err))
-		}
-	}
-}

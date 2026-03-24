@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"ops-cat/internal/model/entity/credential_entity"
-	"ops-cat/internal/repository/credential_repo"
-	"ops-cat/internal/service/credential_svc"
+	"github.com/opskat/opskat/internal/model/entity/credential_entity"
+	"github.com/opskat/opskat/internal/repository/credential_repo"
+	"github.com/opskat/opskat/internal/service/credential_svc"
 
 	gossh "golang.org/x/crypto/ssh"
 )

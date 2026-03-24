@@ -212,18 +212,12 @@ export function AISetupWizard() {
               )}
 
               <div className="grid gap-2">
-                <Label className="text-xs">{t("settings.cliPath")}</Label>
-                <Input
-                  value={cliPath}
-                  onChange={(e) => setCliPath(e.target.value)}
-                  placeholder="/usr/local/bin/claude"
-                  className="h-8 text-sm"
-                />
-              </div>
-
-              <div className="grid gap-2">
                 <Label className="text-xs">{t("settings.cliType")}</Label>
-                <Select value={cliType} onValueChange={setCliType}>
+                <Select value={cliType} onValueChange={(v) => {
+                  setCliType(v);
+                  const detected = localCLIs.find((c) => c.type === v);
+                  setCliPath(detected ? detected.path : "");
+                }}>
                   <SelectTrigger className="h-8 text-sm">
                     <SelectValue />
                   </SelectTrigger>
@@ -232,6 +226,17 @@ export function AISetupWizard() {
                     <SelectItem value="codex">Codex</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="grid gap-2">
+                <Label className="text-xs">{t("settings.cliPath")}</Label>
+                <Input
+                  value={cliPath}
+                  onChange={(e) => setCliPath(e.target.value)}
+                  placeholder={localCLIs.find((c) => c.type === cliType)?.path || t("settings.cliPathHint")}
+                  className="h-8 text-sm"
+                />
+                <p className="text-xs text-muted-foreground">{t("settings.cliPathHint")}</p>
               </div>
             </div>
 
@@ -302,7 +307,7 @@ export function AISetupWizard() {
 
             <Button
               onClick={handleComplete}
-              disabled={!cliPath.trim() || completing}
+              disabled={completing}
               className="w-full"
             >
               {completing ? (

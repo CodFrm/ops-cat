@@ -9,12 +9,15 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 )
 
 const (
 	githubClientID     = "Ov23li4zpB1UQXpx4h5r"
 	githubClientSecret = "1973fe43dd08301b332cc2e9bdc28b5695cfd84d" //nolint:gosec // OAuth app client secret, public by design
-	gistBackupFilename = "ops-cat-backup.encrypted.json"
+	gistBackupFilename = "opskat-backup.encrypted.json"
 )
 
 // DeviceFlowInfo Device Flow 初始化返回
@@ -54,7 +57,11 @@ func StartDeviceFlow() (*DeviceFlowInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("请求 GitHub Device Flow 失败: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logger.Default().Warn("close response body", zap.Error(err))
+		}
+	}()
 
 	var result struct {
 		DeviceCode      string `json:"device_code"`
@@ -121,7 +128,11 @@ func pollOnce(deviceCode string) (token string, done bool, err error) {
 	if err != nil {
 		return "", false, fmt.Errorf("请求 GitHub 失败: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logger.Default().Warn("close response body", zap.Error(err))
+		}
+	}()
 
 	if resp.StatusCode != 200 {
 		return "", false, fmt.Errorf("GitHub 返回 HTTP %d", resp.StatusCode)
@@ -165,7 +176,11 @@ func GetGitHubUser(token string) (*GitHubUser, error) {
 	if err != nil {
 		return nil, fmt.Errorf("请求 GitHub 失败: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logger.Default().Warn("close response body", zap.Error(err))
+		}
+	}()
 
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("GitHub API 错误: %d", resp.StatusCode)
@@ -186,7 +201,7 @@ func GetGitHubUser(token string) (*GitHubUser, error) {
 // gistID 为空时创建新 Gist，否则更新已有 Gist
 func CreateOrUpdateGist(token, gistID string, content []byte) (*GistInfo, error) {
 	body := map[string]interface{}{
-		"description": fmt.Sprintf("Ops Cat Backup - %s", time.Now().Format("2006-01-02 15:04")),
+		"description": fmt.Sprintf("OpsKat Backup - %s", time.Now().Format("2006-01-02 15:04")),
 		"public":      false,
 		"files": map[string]interface{}{
 			gistBackupFilename: map[string]string{
@@ -194,7 +209,10 @@ func CreateOrUpdateGist(token, gistID string, content []byte) (*GistInfo, error)
 			},
 		},
 	}
-	bodyJSON, _ := json.Marshal(body)
+	bodyJSON, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("序列化 Gist 请求失败: %w", err)
+	}
 
 	var method, apiURL string
 	if gistID == "" {
@@ -205,7 +223,10 @@ func CreateOrUpdateGist(token, gistID string, content []byte) (*GistInfo, error)
 		apiURL = fmt.Sprintf("https://api.github.com/gists/%s", gistID)
 	}
 
-	req, _ := http.NewRequest(method, apiURL, strings.NewReader(string(bodyJSON)))
+	req, err := http.NewRequest(method, apiURL, strings.NewReader(string(bodyJSON)))
+	if err != nil {
+		return nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)
+	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Content-Type", "application/json")
@@ -214,10 +235,17 @@ func CreateOrUpdateGist(token, gistID string, content []byte) (*GistInfo, error)
 	if err != nil {
 		return nil, fmt.Errorf("请求 GitHub 失败: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logger.Default().Warn("close response body", zap.Error(err))
+		}
+	}()
 
 	if resp.StatusCode != 200 && resp.StatusCode != 201 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			logger.Default().Warn("read GitHub error response body", zap.Error(readErr))
+		}
 		return nil, fmt.Errorf("GitHub API 错误 %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -252,7 +280,11 @@ func GetGistContent(token, gistID string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("请求 GitHub 失败: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logger.Default().Warn("close response body", zap.Error(err))
+		}
+	}()
 
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("GitHub API 错误: %d", resp.StatusCode)
@@ -275,7 +307,7 @@ func GetGistContent(token, gistID string) ([]byte, error) {
 	return []byte(file.Content), nil
 }
 
-// ListBackupGists 列出用户的 Ops Cat 备份 Gist
+// ListBackupGists 列出用户的 OpsKat 备份 Gist
 func ListBackupGists(token string) ([]*GistInfo, error) {
 	req, _ := http.NewRequest("GET", "https://api.github.com/gists?per_page=100", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -285,7 +317,11 @@ func ListBackupGists(token string) ([]*GistInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("请求 GitHub 失败: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logger.Default().Warn("close response body", zap.Error(err))
+		}
+	}()
 
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("GitHub API 错误: %d", resp.StatusCode)

@@ -3,7 +3,7 @@ package host_key_repo
 import (
 	"context"
 
-	"ops-cat/internal/model/entity/host_key_entity"
+	"github.com/opskat/opskat/internal/model/entity/host_key_entity"
 
 	"github.com/cago-frame/cago/database/db"
 )

@@ -1,4 +1,4 @@
-module ops-cat
+module github.com/opskat/opskat
 
 go 1.25.0
 

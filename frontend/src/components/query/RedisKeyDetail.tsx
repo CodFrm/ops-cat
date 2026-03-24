@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useQueryStore, RedisKeyInfo } from "@/stores/queryStore";
+import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { ExecuteRedis, ExecuteRedisArgs } from "../../../wailsjs/go/main/App";
 
 interface RedisKeyDetailProps {
@@ -239,9 +240,10 @@ function CollectionTable({ info, tabId, t }: {
   tabId: string;
   t: (key: string, opts?: Record<string, unknown>) => string;
 }) {
-  const { loadMoreValues, selectKey, redisStates, openTabs } = useQueryStore();
+  const { loadMoreValues, selectKey, redisStates } = useQueryStore();
   const state = redisStates[tabId];
-  const tab = openTabs.find((tb) => tb.id === tabId);
+  const tab = useTabStore((s) => s.tabs.find((tb) => tb.id === tabId));
+  const tabMeta = tab?.meta as QueryTabMeta | undefined;
   const scrollRef = useRef<HTMLDivElement>(null);
   const itemCount = getItemCount(info);
   const selectedKey = state?.selectedKey;
@@ -259,59 +261,59 @@ function CollectionTable({ info, tabId, t }: {
     : `${itemCount}`;
 
   const handleEditHash = async (field: string, newVal: string) => {
-    if (!tab || !selectedKey) return;
-    await ExecuteRedisArgs(tab.assetId, ["HSET", selectedKey, field, newVal], db);
+    if (!tabMeta || !selectedKey) return;
+    await ExecuteRedisArgs(tabMeta.assetId, ["HSET", selectedKey, field, newVal], db);
     selectKey(tabId, selectedKey);
   };
 
   const handleDeleteHash = async (field: string) => {
-    if (!tab || !selectedKey) return;
-    await ExecuteRedisArgs(tab.assetId, ["HDEL", selectedKey, field], db);
+    if (!tabMeta || !selectedKey) return;
+    await ExecuteRedisArgs(tabMeta.assetId, ["HDEL", selectedKey, field], db);
     selectKey(tabId, selectedKey);
   };
 
   const handleEditList = async (index: number, newVal: string) => {
-    if (!tab || !selectedKey) return;
-    await ExecuteRedisArgs(tab.assetId, ["LSET", selectedKey, String(index), newVal], db);
+    if (!tabMeta || !selectedKey) return;
+    await ExecuteRedisArgs(tabMeta.assetId, ["LSET", selectedKey, String(index), newVal], db);
     selectKey(tabId, selectedKey);
   };
 
   const handleDeleteList = async (index: number) => {
-    if (!tab || !selectedKey) return;
+    if (!tabMeta || !selectedKey) return;
     const sentinel = "__OPSCAT_DEL_" + Date.now() + "__";
-    await ExecuteRedisArgs(tab.assetId, ["LSET", selectedKey, String(index), sentinel], db);
-    await ExecuteRedisArgs(tab.assetId, ["LREM", selectedKey, "1", sentinel], db);
+    await ExecuteRedisArgs(tabMeta.assetId, ["LSET", selectedKey, String(index), sentinel], db);
+    await ExecuteRedisArgs(tabMeta.assetId, ["LREM", selectedKey, "1", sentinel], db);
     selectKey(tabId, selectedKey);
   };
 
   const handleDeleteSet = async (member: string) => {
-    if (!tab || !selectedKey) return;
-    await ExecuteRedisArgs(tab.assetId, ["SREM", selectedKey, member], db);
+    if (!tabMeta || !selectedKey) return;
+    await ExecuteRedisArgs(tabMeta.assetId, ["SREM", selectedKey, member], db);
     selectKey(tabId, selectedKey);
   };
 
   const handleEditZsetScore = async (member: string, newScore: string) => {
-    if (!tab || !selectedKey) return;
-    await ExecuteRedisArgs(tab.assetId, ["ZADD", selectedKey, newScore, member], db);
+    if (!tabMeta || !selectedKey) return;
+    await ExecuteRedisArgs(tabMeta.assetId, ["ZADD", selectedKey, newScore, member], db);
     selectKey(tabId, selectedKey);
   };
 
   const handleDeleteZset = async (member: string) => {
-    if (!tab || !selectedKey) return;
-    await ExecuteRedisArgs(tab.assetId, ["ZREM", selectedKey, member], db);
+    if (!tabMeta || !selectedKey) return;
+    await ExecuteRedisArgs(tabMeta.assetId, ["ZREM", selectedKey, member], db);
     selectKey(tabId, selectedKey);
   };
 
   const handleAdd = async (args: string[]) => {
-    if (!tab || !selectedKey) return;
+    if (!tabMeta || !selectedKey) return;
     if (info.type === "hash" && args.length === 2) {
-      await ExecuteRedisArgs(tab.assetId, ["HSET", selectedKey, args[0], args[1]], db);
+      await ExecuteRedisArgs(tabMeta.assetId, ["HSET", selectedKey, args[0], args[1]], db);
     } else if (info.type === "list" && args.length === 1) {
-      await ExecuteRedisArgs(tab.assetId, ["RPUSH", selectedKey, args[0]], db);
+      await ExecuteRedisArgs(tabMeta.assetId, ["RPUSH", selectedKey, args[0]], db);
     } else if (info.type === "set" && args.length === 1) {
-      await ExecuteRedisArgs(tab.assetId, ["SADD", selectedKey, args[0]], db);
+      await ExecuteRedisArgs(tabMeta.assetId, ["SADD", selectedKey, args[0]], db);
     } else if (info.type === "zset" && args.length === 2) {
-      await ExecuteRedisArgs(tab.assetId, ["ZADD", selectedKey, args[0], args[1]], db);
+      await ExecuteRedisArgs(tabMeta.assetId, ["ZADD", selectedKey, args[0], args[1]], db);
     }
     selectKey(tabId, selectedKey);
   };
@@ -462,14 +464,15 @@ function CollectionTable({ info, tabId, t }: {
 // --- String editor ---
 
 function StringEditor({ tabId, t }: { tabId: string; t: (key: string) => string }) {
-  const { redisStates, openTabs, selectKey } = useQueryStore();
+  const { redisStates, selectKey } = useQueryStore();
   const state = redisStates[tabId];
-  const tab = openTabs.find((tb) => tb.id === tabId);
+  const tab = useTabStore((s) => s.tabs.find((tb) => tb.id === tabId));
+  const tabMeta = tab?.meta as QueryTabMeta | undefined;
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState("");
   const [saving, setSaving] = useState(false);
 
-  if (!state?.keyInfo || !state.selectedKey || !tab) return null;
+  if (!state?.keyInfo || !state.selectedKey || !tabMeta) return null;
 
   const originalVal = String(state.keyInfo.value ?? "");
   const db = state.currentDb;
@@ -482,7 +485,7 @@ function StringEditor({ tabId, t }: { tabId: string; t: (key: string) => string 
   const save = async () => {
     setSaving(true);
     try {
-      await ExecuteRedisArgs(tab.assetId, ["SET", state.selectedKey!, editVal], db);
+      await ExecuteRedisArgs(tabMeta.assetId, ["SET", state.selectedKey!, editVal], db);
       selectKey(tabId, state.selectedKey!);
       setEditing(false);
     } catch { /* keep editing */ }
@@ -539,9 +542,10 @@ function StringEditor({ tabId, t }: { tabId: string; t: (key: string) => string 
 
 export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
   const { t } = useTranslation();
-  const { redisStates, openTabs, removeKey, loadDbKeyCounts } = useQueryStore();
+  const { redisStates, removeKey, loadDbKeyCounts } = useQueryStore();
   const state = redisStates[tabId];
-  const tab = openTabs.find((tb) => tb.id === tabId);
+  const tab = useTabStore((s) => s.tabs.find((tb) => tb.id === tabId));
+  const tabMeta = tab?.meta as QueryTabMeta | undefined;
 
   const [command, setCommand] = useState("");
   const [executing, setExecuting] = useState(false);
@@ -553,7 +557,7 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const executeCommand = useCallback(async () => {
-    if (!command.trim() || !tab || !state) return;
+    if (!command.trim() || !tabMeta || !state) return;
 
     setExecuting(true);
     setCmdResult(null);
@@ -566,7 +570,7 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
     setHistoryIdx(-1);
 
     try {
-      const result = await ExecuteRedis(tab.assetId, command.trim(), state.currentDb);
+      const result = await ExecuteRedis(tabMeta.assetId, command.trim(), state.currentDb);
       const parsed: RedisResult = JSON.parse(result);
       setCmdResult(formatResult(parsed));
     } catch (err) {
@@ -574,7 +578,7 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
     } finally {
       setExecuting(false);
     }
-  }, [command, tab, state]);
+  }, [command, tabMeta, state]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -607,15 +611,15 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
   );
 
   const handleDeleteKey = useCallback(async () => {
-    if (!tab || !state?.selectedKey) return;
+    if (!tabMeta || !state?.selectedKey) return;
     setDeleting(true);
     try {
-      await ExecuteRedisArgs(tab.assetId, ["DEL", state.selectedKey], state.currentDb);
+      await ExecuteRedisArgs(tabMeta.assetId, ["DEL", state.selectedKey], state.currentDb);
       removeKey(tabId, state.selectedKey);
       loadDbKeyCounts(tabId);
     } catch { /* ignore */ }
     setDeleting(false);
-  }, [tab, state, tabId, removeKey, loadDbKeyCounts]);
+  }, [tabMeta, state, tabId, removeKey, loadDbKeyCounts]);
 
   if (!state) return null;
 

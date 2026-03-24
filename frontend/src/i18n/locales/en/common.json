@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Ops Cat",
+    "title": "OpsKat",
     "subtitle": "AI-Powered Intelligent Ops Platform",
     "hint": "Select an asset from the sidebar to get started"
   },
@@ -303,8 +303,9 @@
   "settings": {
     "providerType": "Provider Type",
     "model": "Model",
-    "cliPath": "CLI Path",
+    "cliPath": "CLI Path (optional)",
     "cliType": "CLI Type",
+    "cliPathHint": "Leave empty to auto-detect from PATH",
     "detectedCLIs": "Detected local CLIs",
     "configured": "Configured",
     "saved": "Saved"
@@ -540,15 +541,20 @@
     "patternHint": "Future commands matching this pattern will be auto-approved"
   },
   "planApproval": {
-    "title": "Batch Plan Approval",
-    "description": "opsctl is requesting approval for the following batch plan:",
-    "approveAll": "Approve All",
+    "title": "Permission Approval",
+    "description": "Requesting the following command permissions. Matching commands will be auto-approved:",
+    "approveAll": "Approve",
     "deny": "Deny",
     "typeExec": "Execute",
     "typeCp": "Transfer",
     "typeCreate": "Create",
     "typeUpdate": "Update",
-    "itemCount": "{{count}} operation(s) total"
+    "itemCount": "{{count}} operation(s) total",
+    "commandsPlaceholder": "Command patterns, one per line, supports * wildcard",
+    "editHint": "You can edit patterns before approving. One per line, supports * wildcard.",
+    "scopeAsset": "Asset",
+    "scopeGroup": "Group",
+    "scopeAll": "All Assets"
   },
   "audit": {
     "title": "Audit Log",

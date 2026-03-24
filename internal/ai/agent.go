@@ -7,7 +7,7 @@ import (
 	"io"
 	"time"
 
-	"ops-cat/internal/sshpool"
+	"github.com/opskat/opskat/internal/sshpool"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"

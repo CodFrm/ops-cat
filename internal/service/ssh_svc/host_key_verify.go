@@ -7,8 +7,11 @@ import (
 	"net"
 	"time"
 
-	"ops-cat/internal/model/entity/host_key_entity"
-	"ops-cat/internal/repository/host_key_repo"
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
+
+	"github.com/opskat/opskat/internal/model/entity/host_key_entity"
+	"github.com/opskat/opskat/internal/repository/host_key_repo"
 
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
@@ -60,7 +63,9 @@ func MakeHostKeyCallback(host string, port int, verifyFn HostKeyVerifyFunc) ssh.
 			if stored.PublicKey == pubKeyBase64 {
 				// 密钥匹配，更新 last_seen
 				stored.LastSeen = now
-				_ = host_key_repo.HostKey().Upsert(ctx, stored)
+				if err := host_key_repo.HostKey().Upsert(ctx, stored); err != nil {
+					logger.Default().Warn("upsert host key", zap.String("host", host), zap.Int("port", port), zap.Error(err))
+				}
 				return nil
 			}
 
@@ -80,7 +85,9 @@ func MakeHostKeyCallback(host string, port int, verifyFn HostKeyVerifyFunc) ssh.
 				stored.PublicKey = pubKeyBase64
 				stored.Fingerprint = fingerprint
 				stored.LastSeen = now
-				_ = host_key_repo.HostKey().Upsert(ctx, stored)
+				if err := host_key_repo.HostKey().Upsert(ctx, stored); err != nil {
+					logger.Default().Warn("upsert host key", zap.String("host", host), zap.Int("port", port), zap.Error(err))
+				}
 				return nil
 			case HostKeyAcceptOnce:
 				return nil
@@ -109,7 +116,9 @@ func MakeHostKeyCallback(host string, port int, verifyFn HostKeyVerifyFunc) ssh.
 				FirstSeen:   now,
 				LastSeen:    now,
 			}
-			_ = host_key_repo.HostKey().Upsert(ctx, newKey)
+			if err := host_key_repo.HostKey().Upsert(ctx, newKey); err != nil {
+					logger.Default().Warn("upsert new host key", zap.String("host", host), zap.Int("port", port), zap.Error(err))
+				}
 			return nil
 		case HostKeyAcceptOnce:
 			return nil

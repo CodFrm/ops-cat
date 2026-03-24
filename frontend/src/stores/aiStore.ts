@@ -13,6 +13,7 @@ import {
 import { ai, conversation_entity, main } from "../../wailsjs/go/models";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import i18n from "../i18n";
+import { useTabStore, registerTabCloseHook, type AITabMeta } from "./tabStore";
 
 // 内容块：文本或工具调用
 export interface ContentBlock {
@@ -38,15 +39,6 @@ interface StreamEventData {
   tool_input?: string;
   confirm_id?: string;
   error?: string;
-}
-
-// === 多 Tab 类型 ===
-
-export interface AITab {
-  id: string; // "ai-{convId}" 或 "ai-new-{timestamp}"
-  conversationId: number | null;
-  title: string;
-  openedAt: number;
 }
 
 interface TabState {
@@ -152,20 +144,12 @@ function convertDisplayMessages(
 // === Store ===
 
 interface AIState {
-  // 多 Tab 状态
-  openTabs: AITab[];
-  activeAITabId: string | null;
   tabStates: Record<string, TabState>;
 
   // 全局状态
   conversations: conversation_entity.Conversation[];
   configured: boolean;
   localCLIs: ai.CLIInfo[];
-
-  // 向后兼容（指向活跃 tab，供旧组件过渡用）
-  messages: ChatMessage[];
-  sending: boolean;
-  currentConversationId: number | null;
 
   // 配置
   configure: (
@@ -180,12 +164,9 @@ interface AIState {
   send: (content: string) => Promise<void>;
   sendToTab: (tabId: string, content: string) => Promise<void>;
 
-  // Tab 管理
+  // Tab 管理 (delegates to tabStore)
   openConversationTab: (conversationId: number) => Promise<string>;
   openNewConversationTab: () => string;
-  closeConversationTab: (tabId: string) => void;
-  setActiveAITab: (tabId: string | null) => void;
-  reorderOpenTabs: (fromIndex: number, toIndex: number) => void;
   clear: () => void;
 
   // 会话管理
@@ -198,7 +179,6 @@ interface AIState {
 }
 
 export const useAIStore = create<AIState>((set, get) => {
-  // 更新指定 tab 的 state，并同步向后兼容字段
   function updateTab(
     tabId: string,
     updates: Partial<TabState>
@@ -209,48 +189,16 @@ export const useAIStore = create<AIState>((set, get) => {
         sending: false,
       };
       const newTabState = { ...current, ...updates };
-      const newTabStates = { ...state.tabStates, [tabId]: newTabState };
-
-      // 如果是活跃 tab，同步向后兼容字段
-      const compat =
-        state.activeAITabId === tabId
-          ? {
-              messages: newTabState.messages,
-              sending: newTabState.sending,
-            }
-          : {};
-
-      return { tabStates: newTabStates, ...compat };
-    });
-  }
-
-  // 同步向后兼容字段
-  function syncCompat(activeTabId: string | null) {
-    const state = get();
-    const tab = state.openTabs.find((t) => t.id === activeTabId);
-    const tabState = activeTabId
-      ? state.tabStates[activeTabId]
-      : null;
-    set({
-      messages: tabState?.messages || [],
-      sending: tabState?.sending || false,
-      currentConversationId: tab?.conversationId || null,
+      return { tabStates: { ...state.tabStates, [tabId]: newTabState } };
     });
   }
 
   return {
-    openTabs: [],
-    activeAITabId: null,
     tabStates: {},
 
     conversations: [],
     configured: false,
     localCLIs: [],
-
-    // 向后兼容
-    messages: [],
-    sending: false,
-    currentConversationId: null,
 
     configure: async (providerType, apiBase, apiKey, model) => {
       await SetAIProvider(providerType, apiBase, apiKey, model);
@@ -274,13 +222,13 @@ export const useAIStore = create<AIState>((set, get) => {
     deleteConversation: async (id: number) => {
       try {
         await DeleteConversation(id);
-        // 如果有打开的 tab 对应这个会话，关闭它
-        const state = get();
-        const tab = state.openTabs.find(
-          (t) => t.conversationId === id
+        // If there's an open tab for this conversation, close it
+        const tabStore = useTabStore.getState();
+        const tab = tabStore.tabs.find(
+          (t) => t.type === "ai" && (t.meta as AITabMeta).conversationId === id
         );
         if (tab) {
-          get().closeConversationTab(tab.id);
+          tabStore.closeTab(tab.id);
         }
         await get().fetchConversations();
       } catch (e) {
@@ -291,45 +239,43 @@ export const useAIStore = create<AIState>((set, get) => {
     // === Tab 管理 ===
 
     openConversationTab: async (conversationId: number) => {
-      const state = get();
-      // 如果已打开，直接切换
-      const existing = state.openTabs.find(
-        (t) => t.conversationId === conversationId
+      const tabStore = useTabStore.getState();
+
+      // If already open, activate
+      const existing = tabStore.tabs.find(
+        (t) => t.type === "ai" && (t.meta as AITabMeta).conversationId === conversationId
       );
       if (existing) {
-        get().setActiveAITab(existing.id);
+        tabStore.activateTab(existing.id);
         return existing.id;
       }
 
       const tabId = `ai-${conversationId}`;
+      const state = get();
       const conv = state.conversations.find(
         (c) => c.ID === conversationId
       );
       const title = conv?.Title || "对话";
 
-      // 加载消息
+      // Load messages
       try {
         const displayMsgs = await SwitchConversation(conversationId);
         const messages = convertDisplayMessages(displayMsgs);
 
-        const tab: AITab = {
+        // Open tab in tabStore
+        tabStore.openTab({
           id: tabId,
-          conversationId,
-          title,
-          openedAt: Date.now(),
-        };
+          type: "ai",
+          label: title,
+          meta: { type: "ai", conversationId, title },
+        });
 
+        // Set business data
         set((state) => ({
-          openTabs: [...state.openTabs, tab],
-          activeAITabId: tabId,
           tabStates: {
             ...state.tabStates,
             [tabId]: { messages, sending: false },
           },
-          // 同步向后兼容
-          messages,
-          sending: false,
-          currentConversationId: conversationId,
         }));
 
         return tabId;
@@ -341,105 +287,47 @@ export const useAIStore = create<AIState>((set, get) => {
 
     openNewConversationTab: () => {
       const tabId = `ai-new-${Date.now()}`;
-      const tab: AITab = {
+      const title = i18n.t("ai.newConversation", "新对话");
+
+      useTabStore.getState().openTab({
         id: tabId,
-        conversationId: null,
-        title: i18n.t("ai.newConversation", "新对话"),
-        openedAt: Date.now(),
-      };
+        type: "ai",
+        label: title,
+        meta: { type: "ai", conversationId: null, title },
+      });
 
       set((state) => ({
-        openTabs: [...state.openTabs, tab],
-        activeAITabId: tabId,
         tabStates: {
           ...state.tabStates,
           [tabId]: { messages: [], sending: false },
         },
-        // 同步向后兼容
-        messages: [],
-        sending: false,
-        currentConversationId: null,
       }));
 
       return tabId;
     },
 
-    closeConversationTab: (tabId: string) => {
-      const state = get();
-      const tab = state.openTabs.find((t) => t.id === tabId);
-      const tabState = state.tabStates[tabId];
-
-      // 保存消息（直接传 convID，无需先切换会话）
-      if (tab?.conversationId && tabState?.messages.length) {
-        SaveConversationMessages(
-          tab.conversationId,
-          toDisplayMessages(tabState.messages)
-        ).catch(() => {});
-      }
-
-      // 清理事件监听
-      cleanupListener(tabId);
-
-      // 移除 tab
-      set((state) => {
-        const newTabs = state.openTabs.filter((t) => t.id !== tabId);
-        const { [tabId]: _, ...newTabStates } = state.tabStates;
-
-        // 如果关闭的是活跃 tab，切换到最后一个
-        let newActiveId = state.activeAITabId;
-        if (state.activeAITabId === tabId) {
-          newActiveId =
-            newTabs.length > 0 ? newTabs[newTabs.length - 1].id : null;
-        }
-
-        const activeTabState = newActiveId
-          ? newTabStates[newActiveId]
-          : null;
-        const activeTab = newTabs.find((t) => t.id === newActiveId);
-
-        return {
-          openTabs: newTabs,
-          activeAITabId: newActiveId,
-          tabStates: newTabStates,
-          messages: activeTabState?.messages || [],
-          sending: activeTabState?.sending || false,
-          currentConversationId: activeTab?.conversationId || null,
-        };
-      });
-    },
-
-    setActiveAITab: (tabId: string | null) => {
-      set({ activeAITabId: tabId });
-      syncCompat(tabId);
-    },
-
-    reorderOpenTabs: (fromIndex: number, toIndex: number) => {
-      set((state) => {
-        if (fromIndex === toIndex) return state;
-        const newTabs = [...state.openTabs];
-        const [moved] = newTabs.splice(fromIndex, 1);
-        newTabs.splice(toIndex, 0, moved);
-        return { openTabs: newTabs };
-      });
-    },
-
     // === 向后兼容 ===
 
     send: async (content: string) => {
-      const { activeAITabId } = get();
-      if (!activeAITabId) {
-        // 自动创建新 tab
+      const tabStore = useTabStore.getState();
+      const activeTab = tabStore.tabs.find(
+        (t) => t.id === tabStore.activeTabId && t.type === "ai"
+      );
+      if (!activeTab) {
         const newTabId = get().openNewConversationTab();
         await get().sendToTab(newTabId, content);
         return;
       }
-      await get().sendToTab(activeAITabId, content);
+      await get().sendToTab(activeTab.id, content);
     },
 
     clear: () => {
-      const { activeAITabId } = get();
-      if (activeAITabId) {
-        get().closeConversationTab(activeAITabId);
+      const tabStore = useTabStore.getState();
+      const activeTab = tabStore.tabs.find(
+        (t) => t.id === tabStore.activeTabId && t.type === "ai"
+      );
+      if (activeTab) {
+        tabStore.closeTab(activeTab.id);
       }
       ResetAISession().catch(() => {});
     },
@@ -450,10 +338,8 @@ export const useAIStore = create<AIState>((set, get) => {
       const state = get();
       const tabState = state.tabStates[tabId];
       if (!tabState) return;
-      // 仅检查当前 tab 是否正在发送，不阻塞其他 tab
       if (tabState.sending) return;
 
-      // 添加用户消息
       const displayContent = content;
       const userMsg: ChatMessage = {
         role: "user",
@@ -463,20 +349,18 @@ export const useAIStore = create<AIState>((set, get) => {
       const newMessages = [...tabState.messages, userMsg];
       updateTab(tabId, { messages: newMessages, sending: true });
 
-      // 第一条消息作为会话标题
+      // First message becomes conversation title
       if (tabState.messages.length === 0) {
         const title =
           displayContent.length > 30
             ? displayContent.slice(0, 30) + "…"
             : displayContent;
-        set((state) => ({
-          openTabs: state.openTabs.map((t) =>
-            t.id === tabId ? { ...t, title } : t
-          ),
-        }));
+        useTabStore.getState().updateTab(tabId, {
+          label: title,
+          meta: { ...useTabStore.getState().tabs.find((t) => t.id === tabId)!.meta, title } as AITabMeta,
+        });
       }
 
-      // 添加空的 assistant 消息（用于流式填充）
       const assistantMsg: ChatMessage = {
         role: "assistant",
         content: "",
@@ -487,26 +371,19 @@ export const useAIStore = create<AIState>((set, get) => {
         messages: [...newMessages, assistantMsg],
       });
 
-      // 确保 tab 有会话 ID
-      let tab = get().openTabs.find((t) => t.id === tabId);
-      let convId = tab?.conversationId || null;
+      // Ensure tab has a conversation ID
+      const tabStore = useTabStore.getState();
+      const tab = tabStore.tabs.find((t) => t.id === tabId);
+      let convId = tab ? (tab.meta as AITabMeta).conversationId : null;
 
       if (!convId) {
         try {
           const conv = await CreateConversation();
           convId = conv.ID;
-          // 更新 tab 的 conversationId
-          set((state) => ({
-            openTabs: state.openTabs.map((t) =>
-              t.id === tabId
-                ? { ...t, conversationId: convId }
-                : t
-            ),
-            currentConversationId:
-              state.activeAITabId === tabId
-                ? convId
-                : state.currentConversationId,
-          }));
+          // Update tab meta with conversation ID
+          useTabStore.getState().updateTab(tabId, {
+            meta: { type: "ai", conversationId: convId, title: tab?.label || "对话" },
+          });
           get().fetchConversations();
         } catch {
           updateTab(tabId, { sending: false });
@@ -514,7 +391,7 @@ export const useAIStore = create<AIState>((set, get) => {
         }
       }
 
-      // 设置事件监听
+      // Set up event listener
       const listener = getOrCreateListener(tabId);
       listener.generation++;
       const myGeneration = listener.generation;
@@ -539,13 +416,9 @@ export const useAIStore = create<AIState>((set, get) => {
               const updated = updateLastAssistant(msgs, (msg) => ({
                 ...msg,
                 content: msg.content + (event.content || ""),
-                blocks: appendText(
-                  msg.blocks,
-                  event.content || ""
-                ),
+                blocks: appendText(msg.blocks, event.content || ""),
               }));
-              if (updated)
-                updateTab(tabId, { messages: updated });
+              if (updated) updateTab(tabId, { messages: updated });
               break;
             }
 
@@ -563,29 +436,21 @@ export const useAIStore = create<AIState>((set, get) => {
                   },
                 ],
               }));
-              if (updated)
-                updateTab(tabId, { messages: updated });
+              if (updated) updateTab(tabId, { messages: updated });
               break;
             }
 
             case "tool_result": {
               const updated = updateLastAssistant(msgs, (msg) => {
                 const newBlocks = [...msg.blocks];
-                // 先按 toolName 精确匹配
                 let matchIdx = -1;
                 for (let i = newBlocks.length - 1; i >= 0; i--) {
                   const b = newBlocks[i];
-                  if (
-                    b.type === "tool" &&
-                    b.status === "running" &&
-                    b.toolName === event.tool_name
-                  ) {
+                  if (b.type === "tool" && b.status === "running" && b.toolName === event.tool_name) {
                     matchIdx = i;
                     break;
                   }
                 }
-                // 匹配不到时 fallback 到最后一个 running 的 tool block
-                // （工具的 tool_start 和 tool_result 可能 toolName 不同）
                 if (matchIdx === -1) {
                   for (let i = newBlocks.length - 1; i >= 0; i--) {
                     const b = newBlocks[i];
@@ -596,16 +461,11 @@ export const useAIStore = create<AIState>((set, get) => {
                   }
                 }
                 if (matchIdx !== -1) {
-                  newBlocks[matchIdx] = {
-                    ...newBlocks[matchIdx],
-                    content: event.content || "",
-                    status: "completed",
-                  };
+                  newBlocks[matchIdx] = { ...newBlocks[matchIdx], content: event.content || "", status: "completed" };
                 }
                 return { ...msg, blocks: newBlocks };
               });
-              if (updated)
-                updateTab(tabId, { messages: updated });
+              if (updated) updateTab(tabId, { messages: updated });
               break;
             }
 
@@ -613,19 +473,14 @@ export const useAIStore = create<AIState>((set, get) => {
               const confirmName = event.tool_name || "run_command";
               const updated = updateLastAssistant(msgs, (msg) => {
                 const newBlocks = [...msg.blocks];
-                // Codex 顺序执行工具，tool_confirm 一定对应最后一个 running block
                 let existIdx = -1;
                 for (let i = newBlocks.length - 1; i >= 0; i--) {
-                  if (
-                    newBlocks[i].type === "tool" &&
-                    newBlocks[i].status === "running"
-                  ) {
+                  if (newBlocks[i].type === "tool" && newBlocks[i].status === "running") {
                     existIdx = i;
                     break;
                   }
                 }
                 if (existIdx !== -1) {
-                  // 复用已有 block，更新为 pending_confirm
                   newBlocks[existIdx] = {
                     ...newBlocks[existIdx],
                     toolName: confirmName,
@@ -634,7 +489,6 @@ export const useAIStore = create<AIState>((set, get) => {
                     confirmId: event.confirm_id,
                   };
                 } else {
-                  // 没有 running block（item/started 未触发），新建
                   newBlocks.push({
                     type: "tool" as const,
                     content: "",
@@ -646,29 +500,20 @@ export const useAIStore = create<AIState>((set, get) => {
                 }
                 return { ...msg, blocks: newBlocks };
               });
-              if (updated)
-                updateTab(tabId, { messages: updated });
+              if (updated) updateTab(tabId, { messages: updated });
               break;
             }
 
             case "tool_confirm_result": {
               const updated = updateLastAssistant(msgs, (msg) => {
                 const newBlocks = msg.blocks.map((b) =>
-                  b.confirmId === event.confirm_id &&
-                  b.status === "pending_confirm"
-                    ? {
-                        ...b,
-                        status:
-                          event.content === "deny"
-                            ? ("error" as const)
-                            : ("running" as const),
-                      }
+                  b.confirmId === event.confirm_id && b.status === "pending_confirm"
+                    ? { ...b, status: event.content === "deny" ? ("error" as const) : ("running" as const) }
                     : b
                 );
                 return { ...msg, blocks: newBlocks };
               });
-              if (updated)
-                updateTab(tabId, { messages: updated });
+              if (updated) updateTab(tabId, { messages: updated });
               break;
             }
 
@@ -679,48 +524,33 @@ export const useAIStore = create<AIState>((set, get) => {
                     ? { ...b, status: "completed" as const }
                     : b
                 );
-                return {
-                  ...msg,
-                  blocks: newBlocks,
-                  streaming: false,
-                };
+                return { ...msg, blocks: newBlocks, streaming: false };
               });
               if (updated) {
-                updateTab(tabId, {
-                  messages: updated,
-                  sending: false,
-                });
+                updateTab(tabId, { messages: updated, sending: false });
               } else {
                 updateTab(tabId, { sending: false });
               }
 
-              // 持久化消息
-              const finalMsgs =
-                get().tabStates[tabId]?.messages || [];
+              // Persist messages
+              const finalMsgs = get().tabStates[tabId]?.messages || [];
               if (convId) {
-                SaveConversationMessages(
-                  convId,
-                  toDisplayMessages(finalMsgs)
-                ).catch(() => {});
+                SaveConversationMessages(convId, toDisplayMessages(finalMsgs)).catch(() => {});
               }
-              // 刷新会话列表（标题可能更新），完成后同步 tab 标题
+              // Refresh conversations (title may have updated)
               get().fetchConversations().then(() => {
                 const convs = get().conversations;
-                const currentTab = get().openTabs.find(
-                  (t) => t.id === tabId
-                );
-                if (currentTab?.conversationId) {
-                  const conv = convs.find(
-                    (c) => c.ID === currentTab.conversationId
-                  );
-                  if (conv && conv.Title !== currentTab.title) {
-                    set((state) => ({
-                      openTabs: state.openTabs.map((t) =>
-                        t.id === tabId
-                          ? { ...t, title: conv.Title }
-                          : t
-                      ),
-                    }));
+                const currentTab = useTabStore.getState().tabs.find((t) => t.id === tabId);
+                if (currentTab) {
+                  const meta = currentTab.meta as AITabMeta;
+                  if (meta.conversationId) {
+                    const conv = convs.find((c) => c.ID === meta.conversationId);
+                    if (conv && conv.Title !== currentTab.label) {
+                      useTabStore.getState().updateTab(tabId, {
+                        label: conv.Title,
+                        meta: { ...meta, title: conv.Title },
+                      });
+                    }
                   }
                 }
               });
@@ -730,17 +560,11 @@ export const useAIStore = create<AIState>((set, get) => {
             case "error": {
               const updated = updateLastAssistant(msgs, (msg) => ({
                 ...msg,
-                blocks: appendText(
-                  msg.blocks,
-                  `\n\n**Error:** ${event.error}`
-                ),
+                blocks: appendText(msg.blocks, `\n\n**Error:** ${event.error}`),
                 streaming: false,
               }));
               if (updated) {
-                updateTab(tabId, {
-                  messages: updated,
-                  sending: false,
-                });
+                updateTab(tabId, { messages: updated, sending: false });
               } else {
                 updateTab(tabId, { sending: false });
               }
@@ -750,7 +574,6 @@ export const useAIStore = create<AIState>((set, get) => {
         }
       );
 
-      // 转换为后端消息格式
       const apiMessages = newMessages.map((m) => {
         return new ai.Message({
           role: m.role,
@@ -781,66 +604,35 @@ export const useAIStore = create<AIState>((set, get) => {
   };
 });
 
-// 持久化 AI 标签页状态
-let _aiTabsPersistReady = false;
+// === Close Hook: clean up when tabStore closes an AI tab ===
 
-useAIStore.subscribe((state, prevState) => {
-  if (!_aiTabsPersistReady) return;
-  if (state.openTabs !== prevState.openTabs || state.activeAITabId !== prevState.activeAITabId) {
-    const convIds = state.openTabs
-      .filter((t) => t.conversationId !== null)
-      .map((t) => t.conversationId);
-    localStorage.setItem("ai_open_tabs", JSON.stringify(convIds));
-    const activeTab = state.openTabs.find((t) => t.id === state.activeAITabId);
-    localStorage.setItem(
-      "ai_active_tab_conv",
-      activeTab?.conversationId ? String(activeTab.conversationId) : ""
-    );
+registerTabCloseHook((tab) => {
+  if (tab.type !== "ai") return;
+
+  const state = useAIStore.getState();
+  const tabState = state.tabStates[tab.id];
+  const meta = tab.meta as AITabMeta;
+
+  // Save messages
+  if (meta.conversationId && tabState?.messages.length) {
+    SaveConversationMessages(
+      meta.conversationId,
+      toDisplayMessages(tabState.messages)
+    ).catch(() => {});
   }
+
+  // Clean up event listener
+  cleanupListener(tab.id);
+
+  // Remove tab state
+  useAIStore.setState((s) => {
+    const { [tab.id]: _, ...newTabStates } = s.tabStates;
+    return { tabStates: newTabStates };
+  });
 });
 
-async function _restoreOrOpenAITabs() {
-  const store = useAIStore.getState();
-  const { conversations } = store;
+// === Startup: restore AI tab data for tabs already in tabStore ===
 
-  // 尝试恢复上次打开的标签页
-  const savedTabsJson = localStorage.getItem("ai_open_tabs");
-  let savedConvIds: number[] = [];
-  if (savedTabsJson) {
-    try {
-      savedConvIds = JSON.parse(savedTabsJson);
-    } catch {}
-  }
-  const savedActiveConv = Number(localStorage.getItem("ai_active_tab_conv")) || null;
-
-  // 只恢复仍然存在的会话
-  const validConvIds = savedConvIds.filter((id) =>
-    conversations.some((c) => c.ID === id)
-  );
-
-  if (validConvIds.length > 0) {
-    for (const convId of validConvIds) {
-      await store.openConversationTab(convId).catch(() => {});
-    }
-    // 激活上次活跃的标签页
-    if (savedActiveConv) {
-      const tab = useAIStore.getState().openTabs.find(
-        (t) => t.conversationId === savedActiveConv
-      );
-      if (tab) store.setActiveAITab(tab.id);
-    }
-    return;
-  }
-
-  // 无保存的标签页，使用默认行为
-  if (conversations.length > 0) {
-    store.openConversationTab(conversations[0].ID).catch(() => {});
-  } else {
-    store.openNewConversationTab();
-  }
-}
-
-// 应用启动时自动恢复 AI 配置并打开标签页
 const providerType = localStorage.getItem("ai_provider_type");
 if (providerType) {
   const apiBase = localStorage.getItem("ai_api_base") || "";
@@ -852,14 +644,54 @@ if (providerType) {
     .then(async () => {
       const store = useAIStore.getState();
       await store.fetchConversations();
-      await _restoreOrOpenAITabs();
+
+      const tabStore = useTabStore.getState();
+      const aiTabs = tabStore.tabs.filter((t) => t.type === "ai");
+
+      if (aiTabs.length > 0) {
+        // Load messages for existing AI tabs
+        const { conversations } = store;
+        for (const tab of aiTabs) {
+          const meta = tab.meta as AITabMeta;
+          if (meta.conversationId) {
+            // Verify conversation still exists
+            if (!conversations.some((c) => c.ID === meta.conversationId)) {
+              tabStore.closeTab(tab.id);
+              continue;
+            }
+            try {
+              const displayMsgs = await SwitchConversation(meta.conversationId);
+              const messages = convertDisplayMessages(displayMsgs);
+              useAIStore.setState((s) => ({
+                tabStates: { ...s.tabStates, [tab.id]: { messages, sending: false } },
+              }));
+              // Update label from conversation title
+              const conv = conversations.find((c) => c.ID === meta.conversationId);
+              if (conv && conv.Title !== tab.label) {
+                tabStore.updateTab(tab.id, { label: conv.Title, meta: { ...meta, title: conv.Title } });
+              }
+            } catch {
+              tabStore.closeTab(tab.id);
+            }
+          } else {
+            // New conversation tab (unsaved) — just initialize empty state
+            useAIStore.setState((s) => ({
+              tabStates: { ...s.tabStates, [tab.id]: { messages: [], sending: false } },
+            }));
+          }
+        }
+      } else {
+        // No saved AI tabs, open default
+        const { conversations: convs } = store;
+        if (convs.length > 0) {
+          store.openConversationTab(convs[0].ID).catch(() => {});
+        } else {
+          store.openNewConversationTab();
+        }
+      }
     })
-    .catch(() => {})
-    .finally(() => {
-      _aiTabsPersistReady = true;
-    });
+    .catch(() => {});
 } else {
-  // 未配置也打开一个新 tab（显示未配置提示）
+  // Not configured, open a new tab (shows setup prompt)
   useAIStore.getState().openNewConversationTab();
-  _aiTabsPersistReady = true;
 }

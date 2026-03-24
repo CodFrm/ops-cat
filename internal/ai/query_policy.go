@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"ops-cat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 
 	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tidb/pkg/parser/ast"
@@ -112,16 +112,20 @@ func CheckQueryPolicy(policy *asset_entity.QueryPolicy, stmts []StatementInfo) C
 		for _, denied := range merged.DenyTypes {
 			if strings.EqualFold(stmt.Type, denied) {
 				return CheckResult{
-					Decision: Deny,
-					Message:  fmt.Sprintf("SQL 语句类型 %s 被策略禁止", stmt.Type),
+					Decision:       Deny,
+					Message:        fmt.Sprintf("SQL 语句类型 %s 被策略禁止", stmt.Type),
+					DecisionSource: SourcePolicyDeny,
+					MatchedPattern: denied,
 				}
 			}
 		}
 		// deny_flags 检查
 		if stmt.Dangerous && containsStr(merged.DenyFlags, stmt.Reason) {
 			return CheckResult{
-				Decision: Deny,
-				Message:  fmt.Sprintf("SQL 语句被策略禁止: %s (%s)", stmt.Reason, stmt.Raw),
+				Decision:       Deny,
+				Message:        fmt.Sprintf("SQL 语句被策略禁止: %s (%s)", stmt.Reason, stmt.Raw),
+				DecisionSource: SourcePolicyDeny,
+				MatchedPattern: stmt.Reason,
 			}
 		}
 		// allow_types 白名单
@@ -129,7 +133,7 @@ func CheckQueryPolicy(policy *asset_entity.QueryPolicy, stmts []StatementInfo) C
 			return CheckResult{Decision: NeedConfirm}
 		}
 	}
-	return CheckResult{Decision: Allow}
+	return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
 }
 
 // CheckQueryPolicyOnly 只检查策略，不触发确认回调

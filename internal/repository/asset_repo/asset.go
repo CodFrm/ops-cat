@@ -3,7 +3,7 @@ package asset_repo
 import (
 	"context"
 
-	"ops-cat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 
 	"github.com/cago-frame/cago/database/db"
 )

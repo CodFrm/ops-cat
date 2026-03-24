@@ -7,9 +7,9 @@ import (
 	"io"
 	"net"
 
-	"ops-cat/internal/model/entity/asset_entity"
-	"ops-cat/internal/service/credential_svc"
-	"ops-cat/internal/sshpool"
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/service/credential_svc"
+	"github.com/opskat/opskat/internal/sshpool"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"github.com/redis/go-redis/v9"

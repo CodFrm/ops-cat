@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"ops-cat/internal/bootstrap"
+	"github.com/opskat/opskat/internal/bootstrap"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"github.com/wailsapp/wails/v2"
@@ -37,7 +37,7 @@ func main() {
 	logsDir := filepath.Join(dataDir, "logs")
 	zapLogger, err := logger.New(
 		logger.Level("info"),
-		logger.AppendCore(logger.NewFileCore(logger.ToLevel("info"), filepath.Join(logsDir, "ops-cat.log"))),
+		logger.AppendCore(logger.NewFileCore(logger.ToLevel("info"), filepath.Join(logsDir, "opskat.log"))),
 		logger.AppendCore(logger.NewFileCore(logger.ToLevel("error"), filepath.Join(logsDir, "error.log"))),
 	)
 	if err != nil {
@@ -49,7 +49,7 @@ func main() {
 	app := NewApp()
 
 	err = wails.Run(&options.App{
-		Title:     "Ops Cat",
+		Title:     "OpsKat",
 		Width:     1280,
 		Height:    800,
 		Frameless: runtime.GOOS == "windows",

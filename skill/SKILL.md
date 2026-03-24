@@ -1,21 +1,25 @@
 ---
 name: opsctl
-description: "ops-cat CLI tool (opsctl) for server asset management and remote operations. Use when: (1) user asks about opsctl commands or usage, (2) user wants to manage assets, execute remote commands, transfer files, or SSH into servers via CLI, (3) user asks to write scripts or automation using opsctl, (4) user invokes /opsctl. Covers: list/get/create/update assets, exec, ssh, cp, sql, redis, session and plan approval workflow."
+description: "opskat CLI tool (opsctl) for server asset management and remote operations. Use when: (1) user asks about opsctl commands or usage, (2) user wants to manage assets, execute remote commands, transfer files, or SSH into servers via CLI, (3) user asks to write scripts or automation using opsctl, (4) user invokes /opsctl. Covers: list/get/create/update assets, exec, ssh, cp, sql, redis, session and plan approval workflow."
 ---
 
 # opsctl CLI Tool
 
-ops-cat's standalone CLI for asset management and remote operations without the GUI.
+opskat's standalone CLI for asset management and remote operations without the GUI.
 
 ## Data Directory
 
-/Users/codfrm/Library/Application Support/ops-cat
+/Users/codfrm/Library/Application Support/opskat
+
+## Data Directory
+
+/Users/codfrm/Library/Application Support/opskat
 
 ## Global Flags
 
 - `--data-dir <path>` — Override app data directory (default: platform-specific)
-- `--master-key <key>` — Master encryption key (env: `OPS_CAT_MASTER_KEY`)
-- `--session <id>` — Session ID for batch approval (env: `OPS_CAT_SESSION_ID`)
+- `--master-key <key>` — Master encryption key (env: `OPSKAT_MASTER_KEY`)
+- `--session <id>` — Session ID for batch approval (env: `OPSKAT_SESSION_ID`)
 
 ## Asset Resolution
 
@@ -42,7 +46,7 @@ Assets can be referenced by:
 | `sql <asset> -f <file.sql>` | Execute SQL from file |
 | `redis <asset> "<command>"` | Execute Redis command (approval/policy checked) |
 | `cp <src> <dst>` | File transfer: local↔remote or remote↔remote (needs approval) |
-| `plan submit` | Submit batch plan from stdin JSON, returns session ID |
+| `plan submit [asset] [--group <name\|id>]` | Submit batch plan from stdin JSON, returns session ID. Optional asset/group sets default scope. |
 | `session start` | Create a new approval session |
 | `session end` | End the current active session |
 | `session status` | Show the current active session ID |
@@ -56,9 +60,15 @@ Most write operations require desktop app approval via Unix socket (`<data-dir>/
 
 **Exec approval flow**:
 1. Check asset's command policy (allow-list → execute, deny-list → reject)
-2. Check plan session if `--session` points to a plan
-3. Check if session is already approved → auto-allow
+2. Check plan items with pattern matching (approved plans → auto-allow matching commands)
+3. Check session remembered patterns → auto-allow
 4. Fall back to desktop app approval (blocks until response)
+
+**Permission pre-request flow** (`request_permission` tool):
+1. AI submits command patterns (one per line, supports `*` wildcard) for a target asset
+2. Desktop app shows permission approval dialog, user can edit patterns before approving
+3. Approved patterns are stored as plan items in database
+4. Subsequent commands matching any approved pattern auto-pass without further prompts
 
 ## User Rejected Approval — MUST STOP
 
@@ -67,7 +77,7 @@ Most write operations require desktop app approval via Unix socket (`<data-dir>/
 Scenarios that require an immediate stop:
 
 1. **User rejected execution approval** — The user denied the approval dialog. Output contains "用户拒绝执行".
-2. **User rejected permission request** — A `request_permission` call was rejected by the user. Output contains "用户拒绝权限申请".
+2. **User rejected permission request** — A `request_permission` plan was rejected by the user. Output contains "用户拒绝 Plan 审批".
 
 **Correct behavior**:
 - Stop the entire task immediately — do not execute any remaining steps.
@@ -87,7 +97,7 @@ For consecutive opsctl operations, create a session to avoid per-operation appro
 # Create session
 SESSION=$(opsctl session start)
 
-# Use --session flag (or OPS_CAT_SESSION_ID env var)
+# Use --session flag (or OPSKAT_SESSION_ID env var)
 opsctl --session $SESSION exec web-01 -- uptime
 opsctl --session $SESSION exec web-02 -- df -h
 opsctl --session $SESSION cp ./config.yml web-01:/etc/app/
@@ -96,16 +106,20 @@ opsctl --session $SESSION cp ./config.yml web-01:/etc/app/
 opsctl session end
 ```
 
-On the first operation, the user will be prompted to approve. If they choose **"Allow Session"**, all subsequent operations within the same session are auto-approved.
+On the first operation, the user will be prompted to approve. If they choose **"Remember"**, the command pattern is stored for auto-approval of matching commands.
 
 **Session ID resolution priority**:
 1. `--session <id>` global flag
-2. `OPS_CAT_SESSION_ID` environment variable
+2. `OPSKAT_SESSION_ID` environment variable
 3. Active session file (created by `opsctl session start`)
 
-**Batch plan workflow** — pre-approve specific operations:
+**Plan workflow** — pre-approve command patterns:
 ```bash
-SESSION=$(opsctl plan submit < plan.json)
+# Submit plan for a specific asset
+SESSION=$(opsctl plan submit web-01 < plan.json)
+# Submit plan for a group (applies to all assets in group)
+SESSION=$(opsctl plan submit --group production < plan.json)
+# Commands matching plan patterns auto-pass
 opsctl --session $SESSION exec web-01 -- systemctl restart app
 ```
 

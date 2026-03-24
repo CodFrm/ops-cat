@@ -5,8 +5,11 @@ import (
 	"os"
 	"time"
 
-	"ops-cat/internal/model/entity/conversation_entity"
-	"ops-cat/internal/repository/conversation_repo"
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
+
+	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
+	"github.com/opskat/opskat/internal/repository/conversation_repo"
 )
 
 // ConversationSvc 会话业务接口
@@ -73,11 +76,15 @@ func (s *conversationSvc) Delete(ctx context.Context, id int64) error {
 	}
 
 	// 删除消息
-	_ = conversation_repo.Conversation().DeleteMessages(ctx, id)
+	if err := conversation_repo.Conversation().DeleteMessages(ctx, id); err != nil {
+		logger.Default().Warn("delete conversation messages", zap.Int64("id", id), zap.Error(err))
+	}
 
 	// 清理工作目录
 	if conv.WorkDir != "" {
-		_ = os.RemoveAll(conv.WorkDir)
+		if err := os.RemoveAll(conv.WorkDir); err != nil {
+			logger.Default().Warn("remove conversation work dir", zap.String("dir", conv.WorkDir), zap.Error(err))
+		}
 	}
 
 	return nil

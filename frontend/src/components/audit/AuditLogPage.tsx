@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { CheckCircle2, XCircle, ChevronLeft, ChevronRight, Info, RefreshCw, Unplug } from "lucide-react";
+import { CheckCircle2, XCircle, ChevronLeft, ChevronRight, Info, RefreshCw, Unplug, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -28,15 +28,13 @@ import { audit_entity, audit_repo, sshpool } from "../../../wailsjs/go/models";
 
 const PAGE_SIZE = 20;
 
-// 时间范围选项（单位：秒）
-const TIME_RANGES = [
-  { value: "0", seconds: 0 },       // 全部
+// 时间范围预设
+const TIME_PRESETS = [
   { value: "1h", seconds: 3600 },
   { value: "3h", seconds: 10800 },
   { value: "6h", seconds: 21600 },
   { value: "1d", seconds: 86400 },
   { value: "7d", seconds: 604800 },
-  { value: "custom", seconds: -1 },  // 自定义
 ] as const;
 
 // 决策来源标签样式
@@ -54,8 +52,10 @@ function decisionSourceBadge(source: string): { label: string; className: string
       return { label: "user", className: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" };
     case "auto_allow":
       return { label: "auto", className: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" };
-    case "perm_request":
-      return { label: "perm", className: "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300" };
+    case "plan_allow":
+      return { label: "plan", className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" };
+    case "plan_deny":
+      return { label: "plan", className: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" };
     default:
       return { label: source || "-", className: "bg-muted" };
   }
@@ -79,6 +79,13 @@ function fromDatetimeLocal(s: string): number {
   return Math.floor(new Date(s).getTime() / 1000);
 }
 
+function formatDatetimeCompact(s: string): string {
+  if (!s) return "...";
+  const d = new Date(s);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export function AuditLogPage() {
   const { t } = useTranslation();
   const [logs, setLogs] = useState<audit_entity.AuditLog[]>([]);
@@ -88,6 +95,7 @@ export function AuditLogPage() {
   const [timeRange, setTimeRange] = useState("1d");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
+  const [timePickerOpen, setTimePickerOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [detailLog, setDetailLog] = useState<audit_entity.AuditLog | null>(null);
   const [activeTab, setActiveTab] = useState("logs");
@@ -99,9 +107,10 @@ export function AuditLogPage() {
     if (timeRange === "custom") {
       return fromDatetimeLocal(customStart);
     }
-    const range = TIME_RANGES.find((r) => r.value === timeRange);
-    return range && range.seconds > 0
-      ? Math.floor(Date.now() / 1000) - range.seconds
+    if (timeRange === "0") return 0; // 全部
+    const preset = TIME_PRESETS.find((r) => r.value === timeRange);
+    return preset
+      ? Math.floor(Date.now() / 1000) - preset.seconds
       : 0;
   }, [timeRange, customStart]);
 
@@ -246,52 +255,66 @@ export function AuditLogPage() {
               </SelectContent>
             </Select>
             {/* 时间范围 */}
-            <Popover>
-              <Select
-                value={timeRange}
-                onValueChange={(v) => {
-                  setTimeRange(v);
-                  setPage(0);
-                }}
-              >
-                <SelectTrigger className="w-32 h-8 text-sm">
-                  <SelectValue placeholder={t("audit.timeRange")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {TIME_RANGES.map((r) => (
-                    <SelectItem key={r.value || "all"} value={r.value || "all"}>
-                      {r.value === "custom" ? t("audit.timeCustom") : r.value ? t(`audit.time${r.value}`) : t("audit.timeAll")}
-                    </SelectItem>
+            <Popover open={timePickerOpen} onOpenChange={setTimePickerOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 font-normal">
+                  <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                  {timeRange === "custom"
+                    ? `${formatDatetimeCompact(customStart)} - ${formatDatetimeCompact(customEnd)}`
+                    : timeRange === "0"
+                      ? t("audit.timeAll")
+                      : t(`audit.time${timeRange}`)}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-3" align="end">
+                {/* 快捷预设 */}
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {[{ value: "0", label: t("audit.timeAll") }, ...TIME_PRESETS.map((p) => ({ value: p.value, label: t(`audit.time${p.value}`) }))].map((p) => (
+                    <Button
+                      key={p.value}
+                      variant={timeRange === p.value ? "default" : "outline"}
+                      size="sm"
+                      className="h-7 text-xs px-2.5"
+                      onClick={() => {
+                        setTimeRange(p.value);
+                        setPage(0);
+                        setTimePickerOpen(false);
+                      }}
+                    >
+                      {p.label}
+                    </Button>
                   ))}
-                </SelectContent>
-              </Select>
-              {timeRange === "custom" && (
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm" className="h-8 text-xs">
-                    {customStart
-                      ? `${new Date(customStart).toLocaleDateString()} - ${customEnd ? new Date(customEnd).toLocaleDateString() : "..."}`
-                      : t("audit.timeCustom")}
-                  </Button>
-                </PopoverTrigger>
-              )}
-              <PopoverContent className="w-auto p-3 space-y-2" align="end">
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-muted-foreground w-12">{t("audit.timeStart")}</label>
-                  <input
-                    type="datetime-local"
-                    value={customStart}
-                    onChange={(e) => { setCustomStart(e.target.value); setPage(0); }}
-                    className="text-xs border rounded px-2 py-1 bg-background"
-                  />
                 </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-muted-foreground w-12">{t("audit.timeEnd")}</label>
-                  <input
-                    type="datetime-local"
-                    value={customEnd}
-                    onChange={(e) => { setCustomEnd(e.target.value); setPage(0); }}
-                    className="text-xs border rounded px-2 py-1 bg-background"
-                  />
+                {/* 分隔线 */}
+                <div className="border-t mb-3" />
+                {/* 自定义时间 */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-muted-foreground shrink-0 w-10">{t("audit.timeStart")}</label>
+                    <input
+                      type="datetime-local"
+                      value={customStart}
+                      onChange={(e) => {
+                        setCustomStart(e.target.value);
+                        setTimeRange("custom");
+                        setPage(0);
+                      }}
+                      className="flex-1 text-xs border rounded-md px-2 py-1.5 bg-background outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-muted-foreground shrink-0 w-10">{t("audit.timeEnd")}</label>
+                    <input
+                      type="datetime-local"
+                      value={customEnd}
+                      onChange={(e) => {
+                        setCustomEnd(e.target.value);
+                        setTimeRange("custom");
+                        setPage(0);
+                      }}
+                      className="flex-1 text-xs border rounded-md px-2 py-1.5 bg-background outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  </div>
                 </div>
               </PopoverContent>
             </Popover>

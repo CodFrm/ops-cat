@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { ExecuteSQL, ExecuteRedis, ExecuteRedisArgs } from "../../wailsjs/go/main/App";
 import { asset_entity } from "../../wailsjs/go/models";
+import { useTabStore, registerTabCloseHook } from "./tabStore";
 
 // --- Types ---
 
@@ -55,13 +56,10 @@ export interface RedisTabState {
 }
 
 interface QueryState {
-  openTabs: QueryTab[];
   dbStates: Record<string, DatabaseTabState>;
   redisStates: Record<string, RedisTabState>;
 
   openQueryTab: (asset: asset_entity.Asset) => void;
-  closeQueryTab: (tabId: string) => void;
-  reorderTabs: (fromIdx: number, toIdx: number) => void;
 
   // Database actions
   loadDatabases: (tabId: string) => Promise<void>;
@@ -86,7 +84,7 @@ interface QueryState {
 // --- Helpers ---
 
 function makeTabId(assetId: number) {
-  return `query:${assetId}`;
+  return `query-${assetId}`;
 }
 
 function defaultDbState(): DatabaseTabState {
@@ -130,15 +128,35 @@ interface RedisResult {
 
 // --- Store ---
 
+// Helper: get query tab info from tabStore
+function getQueryTabFromTabStore(tabId: string): QueryTab | undefined {
+  const tab = useTabStore.getState().tabs.find((t) => t.id === tabId);
+  if (!tab || tab.type !== "query") return undefined;
+  const m = tab.meta as import("./tabStore").QueryTabMeta;
+  return {
+    id: tab.id,
+    assetId: m.assetId,
+    assetName: m.assetName,
+    assetIcon: m.assetIcon,
+    assetType: m.assetType,
+    driver: m.driver,
+    defaultDatabase: m.defaultDatabase,
+  };
+}
+
 export const useQueryStore = create<QueryState>((set, get) => ({
-  openTabs: [],
   dbStates: {},
   redisStates: {},
 
   openQueryTab: (asset) => {
     const tabId = makeTabId(asset.ID);
-    const { openTabs } = get();
-    if (openTabs.some((t) => t.id === tabId)) return;
+    const tabStore = useTabStore.getState();
+
+    // If already open, activate
+    if (tabStore.tabs.some((t) => t.id === tabId)) {
+      tabStore.activateTab(tabId);
+      return;
+    }
 
     let driver: string | undefined;
     let defaultDatabase: string | undefined;
@@ -148,56 +166,37 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       defaultDatabase = cfg.database;
     } catch { /* ignore */ }
 
-    const tab: QueryTab = {
+    tabStore.openTab({
       id: tabId,
-      assetId: asset.ID,
-      assetName: asset.Name,
-      assetIcon: asset.Icon || "",
-      assetType: asset.Type as "database" | "redis",
-      driver,
-      defaultDatabase,
-    };
+      type: "query",
+      label: asset.Name,
+      icon: asset.Icon || undefined,
+      meta: {
+        type: "query",
+        assetId: asset.ID,
+        assetName: asset.Name,
+        assetIcon: asset.Icon || "",
+        assetType: asset.Type as "database" | "redis",
+        driver,
+        defaultDatabase,
+      },
+    });
 
     if (asset.Type === "database") {
       set((s) => ({
-        openTabs: [...s.openTabs, tab],
         dbStates: { ...s.dbStates, [tabId]: defaultDbState() },
       }));
     } else {
       set((s) => ({
-        openTabs: [...s.openTabs, tab],
         redisStates: { ...s.redisStates, [tabId]: defaultRedisState() },
       }));
     }
   },
 
-  closeQueryTab: (tabId) => {
-    set((s) => {
-      const newDbStates = { ...s.dbStates };
-      delete newDbStates[tabId];
-      const newRedisStates = { ...s.redisStates };
-      delete newRedisStates[tabId];
-      return {
-        openTabs: s.openTabs.filter((t) => t.id !== tabId),
-        dbStates: newDbStates,
-        redisStates: newRedisStates,
-      };
-    });
-  },
-
-  reorderTabs: (fromIdx, toIdx) => {
-    set((s) => {
-      const tabs = [...s.openTabs];
-      const [moved] = tabs.splice(fromIdx, 1);
-      tabs.splice(toIdx, 0, moved);
-      return { openTabs: tabs };
-    });
-  },
-
   // --- Database ---
 
   loadDatabases: async (tabId) => {
-    const tab = get().openTabs.find((t) => t.id === tabId);
+    const tab = getQueryTabFromTabStore(tabId);
     if (!tab) return;
 
     set((s) => ({
@@ -235,7 +234,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
   },
 
   loadTables: async (tabId, database) => {
-    const tab = get().openTabs.find((t) => t.id === tabId);
+    const tab = getQueryTabFromTabStore(tabId);
     if (!tab) return;
 
     try {
@@ -376,7 +375,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
   // --- Redis ---
 
   scanKeys: async (tabId, reset) => {
-    const tab = get().openTabs.find((t) => t.id === tabId);
+    const tab = getQueryTabFromTabStore(tabId);
     const state = get().redisStates[tabId];
     if (!tab || !state) return;
 
@@ -431,7 +430,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
   },
 
   selectRedisDb: async (tabId, db) => {
-    const tab = get().openTabs.find((t) => t.id === tabId);
+    const tab = getQueryTabFromTabStore(tabId);
     if (!tab) return;
 
     const prev = get().redisStates[tabId];
@@ -451,7 +450,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
   },
 
   selectKey: async (tabId, key) => {
-    const tab = get().openTabs.find((t) => t.id === tabId);
+    const tab = getQueryTabFromTabStore(tabId);
     const state = get().redisStates[tabId];
     if (!tab || !state) return;
     const db = state.currentDb;
@@ -565,7 +564,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
   },
 
   loadMoreValues: async (tabId) => {
-    const tab = get().openTabs.find((t) => t.id === tabId);
+    const tab = getQueryTabFromTabStore(tabId);
     const state = get().redisStates[tabId];
     if (!tab || !state?.keyInfo || !state.selectedKey || !state.keyInfo.hasMoreValues) return;
 
@@ -670,7 +669,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
   },
 
   loadDbKeyCounts: async (tabId) => {
-    const tab = get().openTabs.find((t) => t.id === tabId);
+    const tab = getQueryTabFromTabStore(tabId);
     if (!tab) return;
 
     try {
@@ -716,3 +715,35 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     }));
   },
 }));
+
+// === Close Hook: clean up when tabStore closes a query tab ===
+
+registerTabCloseHook((tab) => {
+  if (tab.type !== "query") return;
+  useQueryStore.setState((s) => {
+    const newDbStates = { ...s.dbStates };
+    delete newDbStates[tab.id];
+    const newRedisStates = { ...s.redisStates };
+    delete newRedisStates[tab.id];
+    return { dbStates: newDbStates, redisStates: newRedisStates };
+  });
+});
+
+// === Restore query tab data for tabs already in tabStore ===
+
+(function _restoreQueryTabData() {
+  const tabs = useTabStore.getState().tabs.filter((t) => t.type === "query");
+  if (tabs.length === 0) return;
+
+  const dbStates: Record<string, DatabaseTabState> = {};
+  const redisStates: Record<string, RedisTabState> = {};
+  for (const tab of tabs) {
+    const m = tab.meta as import("./tabStore").QueryTabMeta;
+    if (m.assetType === "database") {
+      dbStates[tab.id] = defaultDbState();
+    } else {
+      redisStates[tab.id] = defaultRedisState();
+    }
+  }
+  useQueryStore.setState({ dbStates, redisStates });
+})();

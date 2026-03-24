@@ -117,7 +117,7 @@ func TestApprovalResponse_JSON(t *testing.T) {
 
 func TestSocketPath(t *testing.T) {
 	convey.Convey("SocketPath", t, func() {
-		path := SocketPath("/tmp/ops-cat")
-		assert.Equal(t, "/tmp/ops-cat/approval.sock", path)
+		path := SocketPath("/tmp/opskat")
+		assert.Equal(t, "/tmp/opskat/approval.sock", path)
 	})
 }

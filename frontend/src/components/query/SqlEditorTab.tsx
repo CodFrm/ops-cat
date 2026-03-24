@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useQueryStore } from "@/stores/queryStore";
+import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { ExecuteSQL } from "../../../wailsjs/go/main/App";
 import { QueryResultTable } from "./QueryResultTable";
 
@@ -27,12 +28,13 @@ interface SQLResult {
 
 export function SqlEditorTab({ tabId, innerTabId }: SqlEditorTabProps) {
   const { t } = useTranslation();
-  const { openTabs, dbStates, updateInnerTab } = useQueryStore();
+  const { dbStates, updateInnerTab } = useQueryStore();
+  const tab = useTabStore((s) => s.tabs.find((t) => t.id === tabId));
+  const queryMeta = tab?.meta as QueryTabMeta | undefined;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const queryTab = openTabs.find((tab) => tab.id === tabId);
   const dbState = dbStates[tabId];
-  const assetId = queryTab?.assetId ?? 0;
+  const assetId = queryMeta?.assetId ?? 0;
   const databases = dbState?.databases || [];
 
   // Restore persisted state from store
@@ -42,7 +44,7 @@ export function SqlEditorTab({ tabId, innerTabId }: SqlEditorTabProps) {
 
   const [sql, setSql] = useState(persistedSql || "");
   const [selectedDb, setSelectedDb] = useState(
-    persistedDb || queryTab?.defaultDatabase || ""
+    persistedDb || queryMeta?.defaultDatabase || ""
   );
   const [columns, setColumns] = useState<string[]>([]);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
@@ -53,9 +55,9 @@ export function SqlEditorTab({ tabId, innerTabId }: SqlEditorTabProps) {
   // Set default database when databases load
   useEffect(() => {
     if (!selectedDb && databases.length > 0) {
-      setSelectedDb(queryTab?.defaultDatabase || databases[0]);
+      setSelectedDb(queryMeta?.defaultDatabase || databases[0]);
     }
-  }, [databases, selectedDb, queryTab?.defaultDatabase]);
+  }, [databases, selectedDb, queryMeta?.defaultDatabase]);
 
   // Persist sql and selectedDb to store
   useEffect(() => {

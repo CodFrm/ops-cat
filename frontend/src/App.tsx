@@ -16,87 +16,13 @@ import { PlanApprovalDialog } from "@/components/approval/PlanApprovalDialog";
 
 import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
-import { useAIStore } from "@/stores/aiStore";
 import { useQueryStore } from "@/stores/queryStore";
+import { useTabStore } from "@/stores/tabStore";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { asset_entity, group_entity } from "../wailsjs/go/models";
 import { EventsOn, WindowToggleMaximise } from "../wailsjs/runtime/runtime";
 
-const AI_TAB_PREFIX = "ai:";
-const QUERY_TAB_PREFIX = "query:";
-
 function App() {
-  const suppressAIAutoActivation = useRef(false);
-  const startupTabSetting = useRef(localStorage.getItem("startup_tab") || "last");
-
-  const [openPageTabs, setOpenPageTabs] = useState<string[]>(() => {
-    if (startupTabSetting.current === "last") {
-      const saved = localStorage.getItem("open_page_tabs");
-      if (saved) {
-        try {
-          const tabs = JSON.parse(saved);
-          if (Array.isArray(tabs)) return tabs;
-        } catch {}
-      }
-    }
-    return [];
-  });
-  const [activePageTab, setActivePageTab] = useState<string | null>(() => {
-    if (startupTabSetting.current === "home") {
-      suppressAIAutoActivation.current = true;
-      return null;
-    }
-    const lastTab = localStorage.getItem("last_active_tab");
-    if (lastTab === null) return null;
-    if (lastTab === "") {
-      suppressAIAutoActivation.current = true;
-      return null;
-    }
-    if (lastTab.startsWith(AI_TAB_PREFIX)) return null;
-    if (lastTab.startsWith(QUERY_TAB_PREFIX)) return null;
-    return lastTab;
-  });
-
-  const activePage = activePageTab || "home";
-
-  const handlePageChange = useCallback((page: string) => {
-    if (page === "home") {
-      setActivePageTab(null);
-    } else if (page.startsWith(AI_TAB_PREFIX)) {
-      const aiTabId = page.slice(AI_TAB_PREFIX.length);
-      useAIStore.getState().setActiveAITab(aiTabId);
-      setActivePageTab(page);
-    } else {
-      if (!openPageTabs.includes(page)) {
-        setOpenPageTabs((prev) => [...prev, page]);
-      }
-      setActivePageTab(page);
-    }
-  }, [openPageTabs]);
-
-  const closePageTab = useCallback((pageId: string) => {
-    if (pageId.startsWith(AI_TAB_PREFIX)) {
-      const aiTabId = pageId.slice(AI_TAB_PREFIX.length);
-      useAIStore.getState().closeConversationTab(aiTabId);
-      setActivePageTab((prev) => (prev === pageId ? null : prev));
-    } else if (pageId.startsWith(QUERY_TAB_PREFIX)) {
-      const assetId = Number(pageId.slice(QUERY_TAB_PREFIX.length));
-      useQueryStore.getState().closeQueryTab(`query:${assetId}`);
-      setActivePageTab((prev) => (prev === pageId ? null : prev));
-    } else {
-      setOpenPageTabs((prev) => prev.filter((id) => id !== pageId));
-      setActivePageTab((prev) => (prev === pageId ? null : prev));
-    }
-  }, []);
-
-  const handleTerminalTabClick = useCallback(() => {
-    setActivePageTab(null);
-  }, []);
-
-  const handleOpenConversation = useCallback((tabId: string) => {
-    setActivePageTab(AI_TAB_PREFIX + tabId);
-  }, []);
-
   // 监听外部数据变更（opsctl 等），自动刷新 UI
   useEffect(() => {
     const cancel = EventsOn("data:changed", () => {
@@ -134,7 +60,7 @@ function App() {
   );
   const [assetTreeWidth, setAssetTreeWidth] = useState(() => {
     const saved = localStorage.getItem("asset_tree_width");
-    return saved ? Math.max(160, Math.min(480, Number(saved))) : 224; // 14rem = 224px
+    return saved ? Math.max(160, Math.min(480, Number(saved))) : 224;
   });
   const [assetTreeResizing, setAssetTreeResizing] = useState(false);
   const assetTreeWidthRef = useRef(assetTreeWidth);
@@ -186,30 +112,7 @@ function App() {
   useKeyboardShortcuts({
     onToggleAIPanel: toggleAIPanel,
     onToggleSidebar: toggleSidebar,
-    onPageChange: handlePageChange,
-    onClosePageTab: closePageTab,
-    openPageTabs,
-    activePageTab,
   });
-
-  // 持久化当前活动 tab
-  useEffect(() => {
-    localStorage.setItem("last_active_tab", activePageTab || "");
-  }, [activePageTab]);
-
-  // 持久化打开的页面标签
-  useEffect(() => {
-    localStorage.setItem("open_page_tabs", JSON.stringify(openPageTabs));
-  }, [openPageTabs]);
-
-  // 启动时自动激活 AI store 中已打开的第一个 tab
-  const aiActiveTabId = useAIStore((s) => s.activeAITabId);
-  useEffect(() => {
-    if (suppressAIAutoActivation.current) return;
-    if (aiActiveTabId && !activePageTab) {
-      setActivePageTab(AI_TAB_PREFIX + aiActiveTabId);
-    }
-  }, [aiActiveTabId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 资产表单
   const [assetFormOpen, setAssetFormOpen] = useState(false);
@@ -219,10 +122,9 @@ function App() {
   // 分组对话框
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<group_entity.Group | null>(null);
-const { assets, groups, selectedAssetId, selectedGroupId, selectAsset, selectGroup, deleteAsset, getAsset, getAssetPath } = useAssetStore();
-  const { connect, openAssetInfo } = useTerminalStore();
-  const selectedAsset = assets.find((a) => a.ID === selectedAssetId) || null;
-  const selectedGroup = groups.find((g) => g.ID === selectedGroupId) || null;
+
+  const { selectAsset, selectGroup, deleteAsset, getAsset, getAssetPath } = useAssetStore();
+  const { connect } = useTerminalStore();
 
   const handleAddAsset = (groupId?: number) => {
     setEditingAsset(null);
@@ -252,13 +154,37 @@ const { assets, groups, selectedAssetId, selectedGroupId, selectAsset, selectGro
 
   const handleSelectAsset = (asset: asset_entity.Asset) => {
     selectAsset(asset.ID);
-    setActivePageTab(null);
-    openAssetInfo();
+    const tabStore = useTabStore.getState();
+    const infoTabId = `info-asset-${asset.ID}`;
+    const existing = tabStore.tabs.find((t) => t.id === infoTabId);
+    if (existing) {
+      tabStore.activateTab(infoTabId);
+    } else {
+      tabStore.openTab({
+        id: infoTabId,
+        type: "info",
+        label: asset.Name,
+        icon: asset.Icon || undefined,
+        meta: { type: "info", targetType: "asset", targetId: asset.ID, name: asset.Name, icon: asset.Icon || undefined },
+      });
+    }
   };
 
   const handleOpenInfoTab = useCallback((type: 'asset' | 'group', id: number, name: string, icon?: string) => {
-    useTerminalStore.getState().openInfoTab(type, id, name, icon);
-    setActivePageTab(null);
+    const tabStore = useTabStore.getState();
+    const infoTabId = `info-${type}-${id}`;
+    const existing = tabStore.tabs.find((t) => t.id === infoTabId);
+    if (existing) {
+      tabStore.activateTab(infoTabId);
+    } else {
+      tabStore.openTab({
+        id: infoTabId,
+        type: "info",
+        label: name,
+        icon,
+        meta: { type: "info", targetType: type, targetId: id, name, icon },
+      });
+    }
   }, []);
 
   const handleDeleteAsset = async (id: number) => {
@@ -268,7 +194,6 @@ const { assets, groups, selectedAssetId, selectedGroupId, selectAsset, selectGro
   const handleConnectAsset = async (asset: asset_entity.Asset) => {
     if (asset.Type === "database" || asset.Type === "redis") {
       useQueryStore.getState().openQueryTab(asset);
-      setActivePageTab(QUERY_TAB_PREFIX + asset.ID);
       return;
     }
     if (asset.Type !== "ssh") return;
@@ -284,12 +209,44 @@ const { assets, groups, selectedAssetId, selectedGroupId, selectAsset, selectGro
     } catch { /* ignore parse errors */ }
     try {
       await connect(asset.ID, assetPath, asset.Icon || "", "", 80, 24, metadata);
-      setActivePageTab(null);
     } catch (e) {
       toast.error(`${assetPath}: ${String(e)}`);
     }
   };
 
+  // Sidebar page navigation
+  const handlePageChange = useCallback((page: string) => {
+    const tabStore = useTabStore.getState();
+    if (page === "home") {
+      // Activate first non-page tab, or deactivate
+      const homeTab = tabStore.tabs.find((t) => t.type === "terminal" || t.type === "info");
+      tabStore.activateTab(homeTab?.id || tabStore.tabs[0]?.id || "");
+      return;
+    }
+    // Page tabs: settings, forward, sshkeys, audit
+    const existing = tabStore.tabs.find((t) => t.id === page);
+    if (existing) {
+      tabStore.activateTab(page);
+    } else {
+      tabStore.openTab({
+        id: page,
+        type: "page",
+        label: page,
+        meta: { type: "page", pageId: page },
+      });
+    }
+  }, []);
+
+  const handleOpenConversation = useCallback((tabId: string) => {
+    useTabStore.getState().activateTab(tabId);
+  }, []);
+
+  // Derive active page for sidebar highlighting
+  const activeTab = useTabStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
+  const activePage = !activeTab ? "home"
+    : activeTab.type === "page" ? activeTab.id
+    : activeTab.type === "terminal" || activeTab.type === "info" ? "home"
+    : "other";
 
   return (
     <ThemeProvider defaultTheme="system">
@@ -327,8 +284,7 @@ const { assets, groups, selectedAssetId, selectedGroupId, selectAsset, selectGro
               onGroupDetail={(group) => {
                 selectGroup(group.ID);
                 selectAsset(null);
-                setActivePageTab(null);
-                openAssetInfo();
+                handleOpenInfoTab("group", group.ID, group.Name, group.Icon || undefined);
               }}
               onEditAsset={handleEditAsset}
               onCopyAsset={handleCopyAsset}
@@ -346,17 +302,9 @@ const { assets, groups, selectedAssetId, selectedGroupId, selectAsset, selectGro
           </div>
           {assetTreeResizing && <div className="fixed inset-0 z-50 cursor-col-resize" />}
           <MainPanel
-            activePage={activePage}
-            selectedAsset={selectedAsset}
-            selectedGroup={selectedGroup}
             onEditAsset={handleEditAsset}
             onDeleteAsset={handleDeleteAsset}
             onConnectAsset={handleConnectAsset}
-            openPageTabs={openPageTabs}
-            activePageTab={activePageTab}
-            onActivatePageTab={handlePageChange}
-            onClosePageTab={closePageTab}
-            onTerminalTabClick={handleTerminalTabClick}
           />
           <ConversationListPanel
             collapsed={aiPanelCollapsed}
@@ -376,10 +324,10 @@ const { assets, groups, selectedAssetId, selectedGroupId, selectAsset, selectGro
           onOpenChange={setGroupDialogOpen}
           editGroup={editingGroup}
         />
-<PermissionDialog />
-<OpsctlApprovalDialog />
-<PlanApprovalDialog />
-<Toaster richColors />
+        <PermissionDialog />
+        <OpsctlApprovalDialog />
+        <PlanApprovalDialog />
+        <Toaster richColors />
       </TooltipProvider>
     </ThemeProvider>
   );

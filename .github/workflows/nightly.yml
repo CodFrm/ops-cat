@@ -1,8 +1,9 @@
 name: Nightly
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: "0 18 */3 * *" # UTC 18:00 = 北京时间凌晨 2:00
+    - cron: "0 18 * * *" # UTC 18:00 = 北京时间凌晨 2:00
   push:
     branches:
       - nightly
@@ -113,77 +114,24 @@ jobs:
         if: matrix.goos != 'windows'
         run: |
           if [ "${{ matrix.goos }}" = "darwin" ]; then
-            tar -czf ops-cat-${{ matrix.platform }}.tar.gz -C build/bin ops-cat.app
+            tar -czf opskat-${{ matrix.platform }}.tar.gz -C build/bin opskat.app
           else
-            tar -czf ops-cat-${{ matrix.platform }}.tar.gz -C build/bin ops-cat
+            tar -czf opskat-${{ matrix.platform }}.tar.gz -C build/bin opskat
           fi
 
       - name: Package (Windows)
         if: matrix.goos == 'windows'
         shell: pwsh
-        run: Compress-Archive -Path build/bin/ops-cat.exe -DestinationPath ops-cat-${{ matrix.platform }}.zip
+        run: Compress-Archive -Path build/bin/opskat.exe -DestinationPath opskat-${{ matrix.platform }}.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nightly-ops-cat-${{ matrix.platform }}
-          path: ops-cat-${{ matrix.platform }}.*
-
-  build-opsctl:
-    name: opsctl (${{ matrix.goos }}-${{ matrix.goarch }})
-    needs: [prepare]
-    runs-on: ubuntu-latest
-    env:
-      VERSION: ${{ needs.prepare.outputs.version }}
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            ext: ""
-          - goos: linux
-            goarch: arm64
-            ext: ""
-          - goos: darwin
-            goarch: amd64
-            ext: ""
-          - goos: darwin
-            goarch: arm64
-            ext: ""
-          - goos: windows
-            goarch: amd64
-            ext: ".exe"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: nightly
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: Build
-        env:
-          CGO_ENABLED: "0"
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-        run: go build -ldflags="-s -w -X github.com/cago-frame/cago/configs.Version=${{ env.VERSION }}" -o opsctl${{ matrix.ext }} ./cmd/opsctl/
-
-      - name: Package (Unix)
-        if: matrix.goos != 'windows'
-        run: tar -czf opsctl-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz opsctl
-
-      - name: Package (Windows)
-        if: matrix.goos == 'windows'
-        run: zip opsctl-${{ matrix.goos }}-${{ matrix.goarch }}.zip opsctl.exe
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: nightly-opsctl-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: opsctl-${{ matrix.goos }}-${{ matrix.goarch }}.*
+          name: nightly-opskat-${{ matrix.platform }}
+          path: opskat-${{ matrix.platform }}.*
 
   release:
     name: Update Nightly Release
-    needs: [prepare, build-desktop, build-opsctl]
+    needs: [prepare, build-desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write

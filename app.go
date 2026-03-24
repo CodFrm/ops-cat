@@ -16,35 +16,38 @@ import (
 	"sync"
 	"time"
 
-	"ops-cat/internal/ai"
-	"ops-cat/internal/approval"
-	"ops-cat/internal/bootstrap"
-	"ops-cat/internal/connpool"
-	"ops-cat/internal/embedded"
-	"ops-cat/internal/model/entity/asset_entity"
-	"ops-cat/internal/model/entity/audit_entity"
-	"ops-cat/internal/model/entity/conversation_entity"
-	"ops-cat/internal/model/entity/group_entity"
-	"ops-cat/internal/model/entity/plan_entity"
-	"ops-cat/internal/model/entity/credential_entity"
-	"ops-cat/internal/repository/asset_repo"
-	"ops-cat/internal/repository/audit_repo"
-	"ops-cat/internal/repository/group_repo"
-	"ops-cat/internal/repository/plan_repo"
-	"ops-cat/internal/service/asset_svc"
-	"ops-cat/internal/service/backup_svc"
-	"ops-cat/internal/service/conversation_svc"
-	"ops-cat/internal/service/credential_mgr_svc"
-	"ops-cat/internal/service/credential_svc"
-	"ops-cat/internal/service/import_svc"
-	"ops-cat/internal/service/sftp_svc"
-	"ops-cat/internal/service/ssh_svc"
-	"ops-cat/internal/service/update_svc"
-	"ops-cat/internal/sshpool"
+	"github.com/opskat/opskat/internal/ai"
+	"github.com/opskat/opskat/internal/approval"
+	"github.com/opskat/opskat/internal/bootstrap"
+	"github.com/opskat/opskat/internal/connpool"
+	"github.com/opskat/opskat/internal/embedded"
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/model/entity/audit_entity"
+	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
+	"github.com/opskat/opskat/internal/model/entity/group_entity"
+	"github.com/opskat/opskat/internal/model/entity/plan_entity"
+	"github.com/opskat/opskat/internal/model/entity/credential_entity"
+	"github.com/opskat/opskat/internal/repository/asset_repo"
+	"github.com/opskat/opskat/internal/repository/audit_repo"
+	"github.com/opskat/opskat/internal/repository/plan_repo"
+	"github.com/opskat/opskat/internal/service/asset_svc"
+	"github.com/opskat/opskat/internal/service/backup_svc"
+	"github.com/opskat/opskat/internal/service/conversation_svc"
+	"github.com/opskat/opskat/internal/service/credential_mgr_svc"
+	"github.com/opskat/opskat/internal/service/credential_resolver"
+	"github.com/opskat/opskat/internal/service/credential_svc"
+	"github.com/opskat/opskat/internal/service/group_svc"
+	"github.com/opskat/opskat/internal/service/import_svc"
+	"github.com/opskat/opskat/internal/service/sftp_svc"
+	"github.com/opskat/opskat/internal/service/ssh_svc"
+	"github.com/opskat/opskat/internal/service/update_svc"
+	"github.com/opskat/opskat/internal/sshpool"
 
 	"github.com/cago-frame/cago/configs"
 	"github.com/cago-frame/cago/pkg/i18n"
+	"github.com/cago-frame/cago/pkg/logger"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -138,7 +141,7 @@ func NewApp() *App {
 		sftpService:    sftp_svc.NewService(mgr),
 		permissionChan: make(chan ai.PermissionResponse, 1),
 	}
-	a.forwardManager = NewForwardManager(a)
+	a.forwardManager = NewForwardManager(&appPoolDialer{sshManager: mgr})
 	return a
 }
 
@@ -149,8 +152,7 @@ func (a *App) SetAIProvider(providerType, apiBase, apiKey, model string) error {
 
 	// 创建共用的命令权限检查器
 	checker := ai.NewCommandPolicyChecker(a.makeCommandConfirmFunc())
-	checker.SetPermissionRequestFunc(a.makePermissionRequestFunc())
-
+	checker.SetPlanRequestFunc(a.makePlanRequestFunc())
 	var provider ai.Provider
 	switch providerType {
 	case "openai":
@@ -180,7 +182,7 @@ func (a *App) SetAIProvider(providerType, apiBase, apiKey, model string) error {
 	default:
 		provider = ai.NewOpenAIProvider(providerType, apiBase, apiKey, model)
 	}
-	a.aiAgent = ai.NewAgent(provider, ai.NewAuditingExecutor(ai.NewDefaultToolExecutor()), checker)
+	a.aiAgent = ai.NewAgent(provider, ai.NewAuditingExecutor(ai.NewDefaultToolExecutor(), ai.NewDefaultAuditWriter()), checker)
 	return nil
 }
 
@@ -256,7 +258,7 @@ func (a *App) startApprovalServer() {
 
 // startSSHPoolServer 启动 SSH 连接池 proxy 服务
 func (a *App) startSSHPoolServer() {
-	dialer := &appPoolDialer{app: a}
+	dialer := &appPoolDialer{sshManager: a.sshManager}
 	a.sshPool = sshpool.NewPool(dialer, 5*time.Minute)
 	a.sshProxyServer = sshpool.NewServer(a.sshPool)
 	sockPath := sshpool.SocketPath(bootstrap.AppDataDir())
@@ -266,26 +268,16 @@ func (a *App) startSSHPoolServer() {
 	}
 }
 
-// appPoolDialer 实现 sshpool.PoolDialer，复用 app 的凭据解析和跳板机逻辑
+// appPoolDialer 实现 sshpool.PoolDialer，使用 credential_resolver 解析凭据
 type appPoolDialer struct {
-	app *App
+	sshManager *ssh_svc.Manager
 }
 
 func (d *appPoolDialer) DialAsset(ctx context.Context, assetID int64) (*ssh.Client, []io.Closer, error) {
-	asset, err := asset_svc.Asset().Get(d.app.langCtx(), assetID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("资产不存在: %w", err)
-	}
-	if !asset.IsSSH() {
-		return nil, nil, fmt.Errorf("资产不是SSH类型")
-	}
-	sshCfg, err := asset.GetSSHConfig()
+	sshCfg, password, key, jumpHosts, err := credential_resolver.Default().ResolveSSHConnectConfig(ctx, assetID)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	// 解析凭证
-	password, key := d.app.resolveSSHCredentials(sshCfg)
 
 	cfg := ssh_svc.ConnectConfig{
 		Host:        sshCfg.Host,
@@ -297,103 +289,23 @@ func (d *appPoolDialer) DialAsset(ctx context.Context, assetID int64) (*ssh.Clie
 		PrivateKeys: sshCfg.PrivateKeys,
 		AssetID:     assetID,
 		Proxy:       sshCfg.Proxy,
+		JumpHosts:   jumpHosts,
 	}
 
-	// 解析跳板机链（含凭据）
-	if sshCfg.JumpHostID > 0 {
-		jumpHosts, err := d.app.resolveJumpHostsWithCredentials(sshCfg.JumpHostID, 5)
-		if err != nil {
-			return nil, nil, fmt.Errorf("解析跳板机失败: %w", err)
-		}
-		cfg.JumpHosts = jumpHosts
-	}
-
-	return d.app.sshManager.Dial(cfg)
+	return d.sshManager.Dial(cfg)
 }
 
-// resolveSSHCredentials 从 SSHConfig 解析凭据（统一凭证优先，兼容内联密码和本地密钥文件）
+// resolveSSHCredentials 从 SSHConfig 解析凭据（委托给 credential_resolver）
 func (a *App) resolveSSHCredentials(sshCfg *asset_entity.SSHConfig) (password, key string) {
-	ctx := a.langCtx()
-	// 优先使用统一凭证
-	if sshCfg.CredentialID > 0 {
-		cred, err := credential_mgr_svc.Get(ctx, sshCfg.CredentialID)
-		if err == nil {
-			switch cred.Type {
-			case credential_entity.TypePassword:
-				decrypted, err := credential_svc.Default().Decrypt(cred.Password)
-				if err == nil {
-					return decrypted, ""
-				}
-			case credential_entity.TypeSSHKey:
-				privKey, err := credential_mgr_svc.GetDecryptedPrivateKey(ctx, sshCfg.CredentialID)
-				if err == nil {
-					return "", privKey
-				}
-			}
-		}
-	}
-	// 向后兼容：内联密码
-	if sshCfg.AuthType == "password" && sshCfg.Password != "" {
-		decrypted, err := credential_svc.Default().Decrypt(sshCfg.Password)
-		if err == nil {
-			return decrypted, ""
-		}
-	}
-	return "", ""
+	p, k, _ := credential_resolver.Default().ResolveSSHCredentials(a.langCtx(), sshCfg)
+	return p, k
 }
 
-// decryptProxyPassword 解密代理配置中的密码，返回新的 ProxyConfig（不修改原始对象）
+// decryptProxyPassword 解密代理配置中的密码（委托给 credential_resolver）
 func (a *App) decryptProxyPassword(proxy *asset_entity.ProxyConfig) *asset_entity.ProxyConfig {
-	if proxy == nil || proxy.Password == "" {
-		return proxy
-	}
-	decrypted, err := credential_svc.Default().Decrypt(proxy.Password)
-	if err != nil {
-		// 解密失败，可能是明文（测试连接场景），原样返回
-		return proxy
-	}
-	cp := *proxy
-	cp.Password = decrypted
-	return &cp
+	return credential_resolver.Default().DecryptProxyPassword(proxy)
 }
 
-// resolveJumpHostsWithCredentials 递归解析跳板机链（含凭据解密）
-func (a *App) resolveJumpHostsWithCredentials(jumpHostID int64, maxDepth int) ([]ssh_svc.JumpHostEntry, error) {
-	if maxDepth <= 0 {
-		return nil, fmt.Errorf("跳板机链过深，可能存在循环引用")
-	}
-
-	jumpAsset, err := asset_svc.Asset().Get(a.langCtx(), jumpHostID)
-	if err != nil {
-		return nil, fmt.Errorf("跳板机资产不存在(ID=%d): %w", jumpHostID, err)
-	}
-	jumpCfg, err := jumpAsset.GetSSHConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	// 解析跳板机凭证
-	password, key := a.resolveSSHCredentials(jumpCfg)
-
-	entry := ssh_svc.JumpHostEntry{
-		Host:     jumpCfg.Host,
-		Port:     jumpCfg.Port,
-		Username: jumpCfg.Username,
-		AuthType: jumpCfg.AuthType,
-		Password: password,
-		Key:      key,
-	}
-
-	if jumpCfg.JumpHostID > 0 {
-		parentHosts, err := a.resolveJumpHostsWithCredentials(jumpCfg.JumpHostID, maxDepth-1)
-		if err != nil {
-			return nil, err
-		}
-		return append(parentHosts, entry), nil
-	}
-
-	return []ssh_svc.JumpHostEntry{entry}, nil
-}
 
 // GetSSHPoolConnections 返回连接池中的活跃连接信息（供前端展示）
 func (a *App) GetSSHPoolConnections() []sshpool.PoolEntryInfo {
@@ -427,6 +339,8 @@ func (a *App) handlePlanApproval(req approval.ApprovalRequest) approval.Approval
 			ToolName:      pi.Type,
 			AssetID:       pi.AssetID,
 			AssetName:     pi.AssetName,
+			GroupID:       pi.GroupID,
+			GroupName:     pi.GroupName,
 			Command:       pi.Command,
 			Detail:        pi.Detail,
 		})
@@ -442,6 +356,8 @@ func (a *App) handlePlanApproval(req approval.ApprovalRequest) approval.Approval
 			"type":       pi.Type,
 			"asset_id":   pi.AssetID,
 			"asset_name": pi.AssetName,
+			"group_id":   pi.GroupID,
+			"group_name": pi.GroupName,
 			"command":    pi.Command,
 			"detail":     pi.Detail,
 		})
@@ -461,13 +377,19 @@ func (a *App) handlePlanApproval(req approval.ApprovalRequest) approval.Approval
 	select {
 	case approved := <-ch:
 		if approved {
-			_ = plan_repo.Plan().UpdateSessionStatus(ctx, sessionID, plan_entity.PlanStatusApproved)
+			if err := plan_repo.Plan().UpdateSessionStatus(ctx, sessionID, plan_entity.PlanStatusApproved); err != nil {
+				logger.Default().Error("update plan session status to approved", zap.Error(err))
+			}
 			return approval.ApprovalResponse{Approved: true, SessionID: sessionID}
 		}
-		_ = plan_repo.Plan().UpdateSessionStatus(ctx, sessionID, plan_entity.PlanStatusRejected)
+		if err := plan_repo.Plan().UpdateSessionStatus(ctx, sessionID, plan_entity.PlanStatusRejected); err != nil {
+			logger.Default().Error("update plan session status to rejected", zap.Error(err))
+		}
 		return approval.ApprovalResponse{Approved: false, Reason: "user denied", SessionID: sessionID}
 	case <-a.ctx.Done():
-		_ = plan_repo.Plan().UpdateSessionStatus(ctx, sessionID, plan_entity.PlanStatusRejected)
+		if err := plan_repo.Plan().UpdateSessionStatus(ctx, sessionID, plan_entity.PlanStatusRejected); err != nil {
+			logger.Default().Error("update plan session status to rejected on shutdown", zap.Error(err))
+		}
 		return approval.ApprovalResponse{Approved: false, Reason: "app shutting down"}
 	}
 }
@@ -483,8 +405,51 @@ func (a *App) RespondOpsctlApproval(confirmID string, approved bool) {
 	}
 }
 
+// PlanItemEdit 前端编辑后的 plan item
+type PlanItemEdit struct {
+	AssetID   int64  `json:"asset_id"`
+	AssetName string `json:"asset_name"`
+	GroupID   int64  `json:"group_id"`
+	GroupName string `json:"group_name"`
+	Command   string `json:"command"`
+}
+
 // RespondPlanApproval 前端响应计划审批请求
 func (a *App) RespondPlanApproval(sessionID string, approved bool) {
+	a.RespondOpsctlApproval(sessionID, approved)
+}
+
+// RespondPlanApprovalWithEdits 前端响应计划审批请求并更新编辑后的 items
+func (a *App) RespondPlanApprovalWithEdits(sessionID string, approved bool, editedItems []PlanItemEdit) {
+	if approved && len(editedItems) > 0 {
+		// 更新 plan items
+		var items []*plan_entity.PlanItem
+		for i, edit := range editedItems {
+			// 支持一行多个命令（换行分隔）
+			lines := strings.Split(edit.Command, "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				items = append(items, &plan_entity.PlanItem{
+					PlanSessionID: sessionID,
+					ItemIndex:     i,
+					ToolName:      "exec",
+					AssetID:       edit.AssetID,
+					AssetName:     edit.AssetName,
+					GroupID:       edit.GroupID,
+					GroupName:     edit.GroupName,
+					Command:       line,
+				})
+			}
+		}
+		if len(items) > 0 {
+			if err := plan_repo.Plan().UpdateItems(a.langCtx(), sessionID, items); err != nil {
+				logger.Default().Error("update plan items", zap.Error(err))
+			}
+		}
+	}
 	a.RespondOpsctlApproval(sessionID, approved)
 }
 
@@ -555,159 +520,40 @@ func (a *App) DeleteAsset(id int64) error {
 
 // MoveAsset 移动资产排序（up/down/top）
 func (a *App) MoveAsset(id int64, direction string) error {
-	ctx := a.langCtx()
-	asset, err := asset_repo.Asset().Find(ctx, id)
-	if err != nil {
-		return err
-	}
-	// 获取同组所有资产（已按 sort_order ASC, id ASC 排序）
-	siblings, err := asset_repo.Asset().List(ctx, asset_repo.ListOptions{GroupID: asset.GroupID, ExactGroupID: true})
-	if err != nil {
-		return err
-	}
-	return moveItem(ctx, id, direction, siblings,
-		func(item *asset_entity.Asset) int64 { return item.ID },
-		func(item *asset_entity.Asset) int { return item.SortOrder },
-		func(itemID int64, order int) error {
-			return asset_repo.Asset().UpdateSortOrder(ctx, itemID, order)
-		},
-	)
+	return asset_svc.Asset().Move(a.langCtx(), id, direction)
 }
 
 // MoveGroup 移动分组排序（up/down/top）
 func (a *App) MoveGroup(id int64, direction string) error {
-	ctx := a.langCtx()
-	group, err := group_repo.Group().Find(ctx, id)
-	if err != nil {
-		return err
-	}
-	// 获取同级分组
-	allGroups, err := group_repo.Group().List(ctx)
-	if err != nil {
-		return err
-	}
-	var siblings []*group_entity.Group
-	for _, g := range allGroups {
-		if g.ParentID == group.ParentID {
-			siblings = append(siblings, g)
-		}
-	}
-	return moveItem(ctx, id, direction, siblings,
-		func(item *group_entity.Group) int64 { return item.ID },
-		func(item *group_entity.Group) int { return item.SortOrder },
-		func(itemID int64, order int) error {
-			return group_repo.Group().UpdateSortOrder(ctx, itemID, order)
-		},
-	)
-}
-
-// moveItem 通用排序移动逻辑
-func moveItem[T any](ctx context.Context, id int64, direction string, items []T,
-	getID func(T) int64, getOrder func(T) int, updateOrder func(int64, int) error,
-) error {
-	idx := -1
-	for i, item := range items {
-		if getID(item) == id {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return fmt.Errorf("item not found")
-	}
-
-	switch direction {
-	case "up":
-		if idx == 0 {
-			return nil
-		}
-		// 交换当前项和上一项的 sort_order
-		prevOrder := getOrder(items[idx-1])
-		curOrder := getOrder(items[idx])
-		if prevOrder == curOrder {
-			curOrder = prevOrder + 1
-		}
-		if err := updateOrder(getID(items[idx]), prevOrder); err != nil {
-			return err
-		}
-		return updateOrder(getID(items[idx-1]), curOrder)
-	case "down":
-		if idx == len(items)-1 {
-			return nil
-		}
-		nextOrder := getOrder(items[idx+1])
-		curOrder := getOrder(items[idx])
-		if nextOrder == curOrder {
-			nextOrder = curOrder + 1
-		}
-		if err := updateOrder(getID(items[idx]), nextOrder); err != nil {
-			return err
-		}
-		return updateOrder(getID(items[idx+1]), curOrder)
-	case "top":
-		if idx == 0 {
-			return nil
-		}
-		// 将目标项的 sort_order 设为比第一项更小
-		firstOrder := getOrder(items[0])
-		return updateOrder(id, firstOrder-1)
-	default:
-		return fmt.Errorf("invalid direction: %s", direction)
-	}
+	return group_svc.Group().Move(a.langCtx(), id, direction)
 }
 
 // --- 分组操作 ---
 
 // ListGroups 列出所有分组
 func (a *App) ListGroups() ([]*group_entity.Group, error) {
-	return group_repo.Group().List(a.langCtx())
+	return group_svc.Group().List(a.langCtx())
 }
 
 // GetGroup 获取单个分组详情
 func (a *App) GetGroup(id int64) (*group_entity.Group, error) {
-	return group_repo.Group().Find(a.langCtx(), id)
+	return group_svc.Group().Get(a.langCtx(), id)
 }
 
 // CreateGroup 创建分组
 func (a *App) CreateGroup(group *group_entity.Group) error {
-	if err := group.Validate(); err != nil {
-		return err
-	}
-	return group_repo.Group().Create(a.langCtx(), group)
+	return group_svc.Group().Create(a.langCtx(), group)
 }
 
 // UpdateGroup 更新分组
 func (a *App) UpdateGroup(group *group_entity.Group) error {
-	if err := group.Validate(); err != nil {
-		return err
-	}
-	return group_repo.Group().Update(a.langCtx(), group)
+	return group_svc.Group().Update(a.langCtx(), group)
 }
 
 // DeleteGroup 删除分组
 // deleteAssets: true 删除分组下的资产，false 移动到未分组
 func (a *App) DeleteGroup(id int64, deleteAssets bool) error {
-	ctx := a.langCtx()
-	// 获取分组信息，用于将子分组挂到父分组
-	group, err := group_repo.Group().Find(ctx, id)
-	if err != nil {
-		return err
-	}
-	// 子分组挂到被删分组的父级
-	if err := group_repo.Group().ReparentChildren(ctx, id, group.ParentID); err != nil {
-		return err
-	}
-	// 处理分组下的资产
-	if deleteAssets {
-		if err := asset_repo.Asset().DeleteByGroupID(ctx, id); err != nil {
-			return err
-		}
-	} else {
-		if err := asset_repo.Asset().MoveToGroup(ctx, id, 0); err != nil {
-			return err
-		}
-	}
-	return group_repo.Group().Delete(ctx, id)
+	return group_svc.Group().Delete(a.langCtx(), id, deleteAssets)
 }
 
 // --- SSH 操作 ---
@@ -964,39 +810,9 @@ func (a *App) UpdateAssetPassword(assetID int64, password string) error {
 	return asset_svc.Asset().Update(a.langCtx(), asset)
 }
 
-// resolveJumpHosts 递归解析跳板机链，返回从第一跳到最后一跳的顺序
+// resolveJumpHosts 递归解析跳板机链（委托给 credential_resolver，含凭据解密）
 func (a *App) resolveJumpHosts(jumpHostID int64, maxDepth int) ([]ssh_svc.JumpHostEntry, error) {
-	if maxDepth <= 0 {
-		return nil, fmt.Errorf("跳板机链过深，可能存在循环引用")
-	}
-
-	jumpAsset, err := asset_svc.Asset().Get(a.langCtx(), jumpHostID)
-	if err != nil {
-		return nil, fmt.Errorf("跳板机资产不存在(ID=%d): %w", jumpHostID, err)
-	}
-	jumpCfg, err := jumpAsset.GetSSHConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	entry := ssh_svc.JumpHostEntry{
-		Host:     jumpCfg.Host,
-		Port:     jumpCfg.Port,
-		Username: jumpCfg.Username,
-		AuthType: jumpCfg.AuthType,
-	}
-
-	// 如果跳板机自身也有跳板机，递归解析
-	if jumpCfg.JumpHostID > 0 {
-		parentHosts, err := a.resolveJumpHosts(jumpCfg.JumpHostID, maxDepth-1)
-		if err != nil {
-			return nil, err
-		}
-		// 父级跳板机在前，当前在后
-		return append(parentHosts, entry), nil
-	}
-
-	return []ssh_svc.JumpHostEntry{entry}, nil
+	return credential_resolver.Default().ResolveJumpHosts(a.langCtx(), jumpHostID, maxDepth)
 }
 
 // TestSSHConnection 测试 SSH 连接（不创建终端会话）
@@ -1581,7 +1397,9 @@ func (a *App) CreateConversation() (*conversation_entity.Conversation, error) {
 		stableDir := filepath.Join(bootstrap.AppDataDir(), "workspaces", fmt.Sprintf("%d", conv.ID))
 		if err := os.Rename(conv.WorkDir, stableDir); err == nil {
 			conv.WorkDir = stableDir
-			_ = conversation_svc.Conversation().Update(ctx, conv)
+			if err := conversation_svc.Conversation().Update(ctx, conv); err != nil {
+				logger.Default().Error("update conversation work dir", zap.Error(err))
+			}
 		}
 	}
 
@@ -1684,7 +1502,9 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message) error {
 					title = string([]rune(title)[:50])
 				}
 				conv.Title = title
-				_ = conversation_svc.Conversation().Update(ctx, conv)
+				if err := conversation_svc.Conversation().Update(ctx, conv); err != nil {
+					logger.Default().Error("update conversation title", zap.Error(err))
+				}
 				break
 			}
 		}
@@ -1696,7 +1516,7 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message) error {
 	fullMessages := make([]ai.Message, 0, 1+len(messages))
 	fullMessages = append(fullMessages, ai.Message{
 		Role:    ai.RoleSystem,
-		Content: "You are the Ops Cat AI assistant, helping users manage IT assets. You can list assets, view details, add assets, and run commands on SSH servers. Respond in the same language the user uses.",
+		Content: "You are the OpsKat AI assistant, helping users manage IT assets. You can list assets, view details, add assets, and run commands on SSH servers. Respond in the same language the user uses.",
 	})
 	fullMessages = append(fullMessages, messages...)
 
@@ -1735,11 +1555,15 @@ func (a *App) persistConversationState(convID int64, messages []ai.Message) {
 		conv, err := conversation_svc.Conversation().Get(ctx, convID)
 		if err == nil {
 			sessionID := p.GetSessionID()
-			_ = conv.SetSessionInfo(&conversation_entity.SessionInfo{
+			if err := conv.SetSessionInfo(&conversation_entity.SessionInfo{
 				SessionID: sessionID,
-			})
+			}); err != nil {
+				logger.Default().Error("set conversation session info", zap.Error(err))
+			}
 			conv.Updatetime = time.Now().Unix()
-			_ = conversation_svc.Conversation().Update(ctx, conv)
+			if err := conversation_svc.Conversation().Update(ctx, conv); err != nil {
+				logger.Default().Error("update conversation session info", zap.Error(err))
+			}
 		}
 	}
 }
@@ -1760,7 +1584,9 @@ func (a *App) SaveConversationMessages(convID int64, displayMsgs []ConversationD
 			SortOrder:      i,
 			Createtime:     time.Now().Unix(),
 		}
-		_ = msg.SetBlocks(dm.Blocks)
+		if err := msg.SetBlocks(dm.Blocks); err != nil {
+			logger.Default().Error("set message blocks", zap.Error(err))
+		}
 		msgs = append(msgs, msg)
 	}
 	return conversation_svc.Conversation().SaveMessages(ctx, convID, msgs)
@@ -1827,61 +1653,42 @@ func (a *App) makeCommandConfirmFunc() ai.CommandConfirmFunc {
 	}
 }
 
-// PermissionConfirmResponse 权限申请确认响应
-type PermissionConfirmResponse struct {
-	Approved bool
-	Pattern  string // 用户可能编辑后的 pattern
-}
+// makePlanRequestFunc 创建 Plan 审批回调，复用 plan 审批弹窗
+func (a *App) makePlanRequestFunc() ai.PlanRequestFunc {
+	return func(assetID int64, assetName string, patterns []string, reason string) (bool, []string) {
+		// 构建 ApprovalRequest 并走 plan 审批流程
+		var planItems []approval.PlanItem
+		for _, p := range patterns {
+			planItems = append(planItems, approval.PlanItem{
+				Type:      "exec",
+				AssetID:   assetID,
+				AssetName: assetName,
+				Command:   p,
+				Detail:    reason,
+			})
+		}
 
-// makePermissionRequestFunc 创建权限申请回调，向 AI 聊天流发送 tool_confirm 事件并阻塞等待
-func (a *App) makePermissionRequestFunc() ai.PermissionRequestFunc {
-	return func(assetName string, assetID int64, commandPattern, reason string) (bool, string) {
-		convID := a.currentConversationID
-		confirmID := fmt.Sprintf("perm_%d_%d", convID, time.Now().UnixNano())
-		eventName := fmt.Sprintf("ai:event:%d", convID)
-
-		// 向 AI 聊天流发送权限申请确认事件
-		wailsRuntime.EventsEmit(a.ctx, eventName, ai.StreamEvent{
-			Type:      "tool_confirm",
-			ToolName:  "request_permission",
-			ToolInput: fmt.Sprintf("[%s] pattern: %s\nreason: %s", assetName, commandPattern, reason),
-			ConfirmID: confirmID,
+		resp := a.handlePlanApproval(approval.ApprovalRequest{
+			Type:        "plan",
+			SessionID:   fmt.Sprintf("plan_%d_%d", a.currentConversationID, time.Now().UnixNano()),
+			PlanItems:   planItems,
+			Description: reason,
 		})
 
-		// 阻塞等待前端响应
-		ch := make(chan PermissionConfirmResponse, 1)
-		a.pendingConfirms.Store(confirmID, ch)
-		defer a.pendingConfirms.Delete(confirmID)
-
-		select {
-		case resp := <-ch:
-			// 发送确认结果事件更新 UI 状态
-			behavior := "deny"
-			if resp.Approved {
-				behavior = "allow"
-			}
-			wailsRuntime.EventsEmit(a.ctx, eventName, ai.StreamEvent{
-				Type:      "tool_confirm_result",
-				ConfirmID: confirmID,
-				Content:   behavior,
-			})
-			return resp.Approved, resp.Pattern
-		case <-a.ctx.Done():
-			return false, ""
+		if !resp.Approved {
+			return false, nil
 		}
-	}
-}
 
-// RespondPermissionRequest 前端响应 request_permission 确认请求
-func (a *App) RespondPermissionRequest(confirmID string, approved bool, pattern string) {
-	if v, ok := a.pendingConfirms.Load(confirmID); ok {
-		if ch, ok := v.(chan PermissionConfirmResponse); ok {
-			select {
-			case ch <- PermissionConfirmResponse{Approved: approved, Pattern: pattern}:
-			default:
-			}
-			return
+		// 读回可能被用户编辑过的 items
+		items, err := plan_repo.Plan().ListItems(a.langCtx(), resp.SessionID)
+		if err != nil || len(items) == 0 {
+			return true, patterns
 		}
+		var finalPatterns []string
+		for _, item := range items {
+			finalPatterns = append(finalPatterns, item.Command)
+		}
+		return true, finalPatterns
 	}
 }
 
@@ -2094,10 +1901,10 @@ func (a *App) ExportToFile(password string) error {
 		if err != nil {
 			return err
 		}
-		defaultName = fmt.Sprintf("ops-cat-backup-%s.encrypted.json", time.Now().Format("20060102"))
+		defaultName = fmt.Sprintf("opskat-backup-%s.encrypted.json", time.Now().Format("20060102"))
 	} else {
 		output = jsonData
-		defaultName = fmt.Sprintf("ops-cat-backup-%s.json", time.Now().Format("20060102"))
+		defaultName = fmt.Sprintf("opskat-backup-%s.json", time.Now().Format("20060102"))
 	}
 
 	filePath, err := wailsRuntime.SaveFileDialog(a.ctx, wailsRuntime.SaveDialogOptions{
@@ -2463,8 +2270,10 @@ func (a *App) InstallSkills() error {
 	}
 
 	// 清理旧的 skill 文件
-	oldSkillPath := filepath.Join(home, ".claude", "commands", "ops-cat.md")
-	_ = os.Remove(oldSkillPath)
+	oldSkillPath := filepath.Join(home, ".claude", "commands", "opskat.md")
+	if err := os.Remove(oldSkillPath); err != nil && !os.IsNotExist(err) {
+		logger.Default().Warn("remove old skill file", zap.String("path", oldSkillPath), zap.Error(err))
+	}
 
 	return nil
 }

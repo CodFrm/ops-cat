@@ -6,13 +6,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 
-	"ops-cat/internal/model/entity/asset_entity"
-	"ops-cat/internal/repository/group_repo"
-	"ops-cat/internal/service/asset_svc"
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/repository/group_repo"
+	"github.com/opskat/opskat/internal/service/asset_svc"
+	"github.com/opskat/opskat/internal/service/credential_resolver"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -37,12 +39,16 @@ type ParamDef struct {
 	Required    bool
 }
 
+// CommandExtractorFunc 从工具参数中提取命令摘要（用于审计日志）
+type CommandExtractorFunc func(args map[string]any) string
+
 // ToolDef 统一工具定义
 type ToolDef struct {
-	Name        string
-	Description string
-	Params      []ParamDef
-	Handler     ToolHandlerFunc
+	Name             string
+	Description      string
+	Params           []ParamDef
+	Handler          ToolHandlerFunc
+	CommandExtractor CommandExtractorFunc // 可选，提取审计日志中的命令摘要
 }
 
 // AllToolDefs 返回所有工具定义
@@ -72,7 +78,8 @@ func AllToolDefs() []ToolDef {
 				{Name: "asset_id", Type: ParamNumber, Description: "Target server asset ID. Use list_assets to find available IDs.", Required: true},
 				{Name: "command", Type: ParamString, Description: "Shell command to execute on the remote server.", Required: true},
 			},
-			Handler: handleRunCommand,
+			Handler:          handleRunCommand,
+			CommandExtractor: func(args map[string]any) string { return argString(args, "command") },
 		},
 		{
 			Name:        "add_asset",
@@ -129,6 +136,9 @@ func AllToolDefs() []ToolDef {
 				{Name: "remote_path", Type: ParamString, Description: "Destination path on the remote server (including filename).", Required: true},
 			},
 			Handler: handleUploadFile,
+			CommandExtractor: func(args map[string]any) string {
+				return "upload " + argString(args, "local_path") + " → " + argString(args, "remote_path")
+			},
 		},
 		{
 			Name:        "download_file",
@@ -139,6 +149,9 @@ func AllToolDefs() []ToolDef {
 				{Name: "local_path", Type: ParamString, Description: "Absolute local path to save the file (including filename).", Required: true},
 			},
 			Handler: handleDownloadFile,
+			CommandExtractor: func(args map[string]any) string {
+				return "download " + argString(args, "remote_path") + " → " + argString(args, "local_path")
+			},
 		},
 		{
 			Name:        "exec_sql",
@@ -148,7 +161,8 @@ func AllToolDefs() []ToolDef {
 				{Name: "sql", Type: ParamString, Description: "SQL to execute.", Required: true},
 				{Name: "database", Type: ParamString, Description: "Override the default database for this execution."},
 			},
-			Handler: handleExecSQL,
+			Handler:          handleExecSQL,
+			CommandExtractor: func(args map[string]any) string { return argString(args, "sql") },
 		},
 		{
 			Name:        "exec_redis",
@@ -157,17 +171,25 @@ func AllToolDefs() []ToolDef {
 				{Name: "asset_id", Type: ParamNumber, Description: "Redis asset ID. Use list_assets with asset_type='redis' to find.", Required: true},
 				{Name: "command", Type: ParamString, Description: "Redis command (e.g. 'GET mykey', 'HGETALL user:1', 'SET key value EX 3600').", Required: true},
 			},
-			Handler: handleExecRedis,
+			Handler:          handleExecRedis,
+			CommandExtractor: func(args map[string]any) string { return argString(args, "command") },
 		},
 		{
 			Name:        "request_permission",
-			Description: "Request permission to execute commands on a remote server BEFORE actually running them. Supports wildcard patterns (e.g. 'cat *', 'systemctl * nginx', '*'). Once approved, subsequent run_command calls matching the pattern will be auto-approved without further prompts. Call this proactively when you plan to run multiple similar commands on the same asset.",
+			Description: "Request approval for a plan of command patterns BEFORE executing them. Submit command patterns (one per line, supports '*' wildcard) for a target asset. The user will review and may edit the patterns before approving. Once approved, subsequent run_command calls matching any approved pattern will be auto-approved. Call this proactively when you plan to run multiple commands on the same asset.",
 			Params: []ParamDef{
 				{Name: "asset_id", Type: ParamNumber, Description: "Target server asset ID.", Required: true},
-				{Name: "command_pattern", Type: ParamString, Description: "Command pattern to request permission for. Supports '*' wildcard (e.g. 'cat /var/log/*', 'systemctl *', 'docker logs *').", Required: true},
-				{Name: "reason", Type: ParamString, Description: "Brief explanation of why this permission is needed.", Required: true},
+				{Name: "command_patterns", Type: ParamString, Description: "Command patterns, one per line. Supports '*' wildcard (e.g. 'cat /var/log/*\\nsystemctl * nginx').", Required: true},
+				{Name: "reason", Type: ParamString, Description: "Brief explanation of why these permissions are needed.", Required: true},
 			},
-			Handler: handleRequestPermission,
+			Handler: handleRequestPlan,
+			CommandExtractor: func(args map[string]any) string {
+				v := argString(args, "command_patterns")
+				if reason := argString(args, "reason"); reason != "" {
+					return "plan: " + v + " reason: " + reason
+				}
+				return "plan: " + v
+			},
 		},
 	}
 }
@@ -237,7 +259,7 @@ func (c *SSHClientCache) getOrCreate(ctx context.Context, assetID int64, cfg *as
 	if client, ok := c.clients[assetID]; ok {
 		return client, nil
 	}
-	password, key, err := resolveAssetCredentials(ctx, cfg)
+	password, key, err := credential_resolver.Default().ResolveSSHCredentials(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +415,11 @@ func handleListAssets(ctx context.Context, args map[string]any) (string, error) 
 		views[i] = toSafeView(a)
 		views[i].Description = "" // list 不返回描述，通过 get_asset 查看
 	}
-	data, _ := json.Marshal(views)
+	data, err := json.Marshal(views)
+	if err != nil {
+		logger.Default().Error("marshal asset list", zap.Error(err))
+		return "", fmt.Errorf("序列化资产列表失败: %w", err)
+	}
 	return string(data), nil
 }
 
@@ -406,19 +432,35 @@ func handleGetAsset(ctx context.Context, args map[string]any) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("资产不存在: %w", err)
 	}
-	data, _ := json.Marshal(toSafeView(asset))
+	data, err := json.Marshal(toSafeView(asset))
+	if err != nil {
+		logger.Default().Error("marshal asset detail", zap.Error(err))
+		return "", fmt.Errorf("序列化资产详情失败: %w", err)
+	}
 	return string(data), nil
 }
 
-func handleRequestPermission(ctx context.Context, args map[string]any) (string, error) {
+func handleRequestPlan(ctx context.Context, args map[string]any) (string, error) {
 	assetID := argInt64(args, "asset_id")
-	commandPattern := argString(args, "command_pattern")
+	commandPatterns := argString(args, "command_patterns")
 	reason := argString(args, "reason")
 	if assetID == 0 {
 		return "", fmt.Errorf("缺少参数 asset_id")
 	}
-	if commandPattern == "" {
-		return "", fmt.Errorf("缺少参数 command_pattern")
+	if commandPatterns == "" {
+		return "", fmt.Errorf("缺少参数 command_patterns")
+	}
+
+	// 按行拆分模式
+	var patterns []string
+	for _, line := range strings.Split(commandPatterns, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			patterns = append(patterns, line)
+		}
+	}
+	if len(patterns) == 0 {
+		return "", fmt.Errorf("command_patterns 不能为空")
 	}
 
 	checker := GetPolicyChecker(ctx)
@@ -426,7 +468,8 @@ func handleRequestPermission(ctx context.Context, args map[string]any) (string, 
 		return "", fmt.Errorf("权限检查器不可用")
 	}
 
-	result := checker.RequestPermission(ctx, assetID, commandPattern, reason)
+	result := checker.SubmitPlan(ctx, assetID, patterns, reason)
+	setCheckResult(ctx, result)
 	return result.Message, nil
 }
 
@@ -443,6 +486,7 @@ func handleRunCommand(ctx context.Context, args map[string]any) (string, error) 
 	// 权限检查（两条路径共用）
 	if checker := GetPolicyChecker(ctx); checker != nil {
 		result := checker.Check(ctx, assetID, command)
+		setCheckResult(ctx, result)
 		if result.Decision != Allow {
 			return result.Message, nil // 返回提示消息给 AI（非 error）
 		}
@@ -466,7 +510,7 @@ func handleRunCommand(ctx context.Context, args map[string]any) (string, error) 
 	}
 
 	// 无缓存，创建一次性连接
-	password, key, err := resolveAssetCredentials(ctx, sshCfg)
+	password, key, err := credential_resolver.Default().ResolveSSHCredentials(ctx, sshCfg)
 	if err != nil {
 		return "", fmt.Errorf("解析凭据失败: %w", err)
 	}
@@ -665,7 +709,11 @@ func handleListGroups(ctx context.Context, _ map[string]any) (string, error) {
 			SortOrder: g.SortOrder,
 		}
 	}
-	data, _ := json.Marshal(views)
+	data, err := json.Marshal(views)
+	if err != nil {
+		logger.Default().Error("marshal group list", zap.Error(err))
+		return "", fmt.Errorf("序列化分组列表失败: %w", err)
+	}
 	return string(data), nil
 }
 
@@ -688,7 +736,11 @@ func handleGetGroup(ctx context.Context, args map[string]any) (string, error) {
 		},
 		Description: group.Description,
 	}
-	data, _ := json.Marshal(view)
+	data, err := json.Marshal(view)
+	if err != nil {
+		logger.Default().Error("marshal group detail", zap.Error(err))
+		return "", fmt.Errorf("序列化分组详情失败: %w", err)
+	}
 	return string(data), nil
 }
 
@@ -778,22 +830,4 @@ func handleDownloadFile(ctx context.Context, args map[string]any) (string, error
 	return fmt.Sprintf(`{"message":"文件下载成功","local_path":"%s"}`, localPath), nil
 }
 
-// resolveAssetSSH 获取资产及其 SSH 凭据（共用辅助函数）
-func resolveAssetSSH(ctx context.Context, assetID int64) (*asset_entity.Asset, *asset_entity.SSHConfig, string, string, error) {
-	asset, err := asset_svc.Asset().Get(ctx, assetID)
-	if err != nil {
-		return nil, nil, "", "", fmt.Errorf("资产不存在: %w", err)
-	}
-	if !asset.IsSSH() {
-		return nil, nil, "", "", fmt.Errorf("资产不是SSH类型")
-	}
-	sshCfg, err := asset.GetSSHConfig()
-	if err != nil {
-		return nil, nil, "", "", fmt.Errorf("获取SSH配置失败: %w", err)
-	}
-	password, key, err := resolveAssetCredentials(ctx, sshCfg)
-	if err != nil {
-		return nil, nil, "", "", fmt.Errorf("解析凭据失败: %w", err)
-	}
-	return asset, sshCfg, password, key, nil
-}
+// resolveAssetSSH is defined in ssh_helper.go
