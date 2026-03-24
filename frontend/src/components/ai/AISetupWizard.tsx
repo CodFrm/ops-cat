@@ -13,8 +13,8 @@ import {
 import { useAIStore } from "@/stores/aiStore";
 import {
   DetectOpsctl,
-  DetectClaudeSkill,
-  InstallClaudeSkill,
+  DetectSkills,
+  InstallSkills,
   InstallOpsctl,
   GetOpsctlInstallDir,
 } from "../../../wailsjs/go/main/App";
@@ -53,10 +53,7 @@ export function AISetupWizard() {
     version: string;
     embedded: boolean;
   }>({ installed: false, path: "", version: "", embedded: false });
-  const [skillInfo, setSkillInfo] = useState<{
-    installed: boolean;
-    path: string;
-  }>({ installed: false, path: "" });
+  const [skillsInstalled, setSkillsInstalled] = useState(false);
   const [installDir, setInstallDir] = useState("");
   const [opsctlInstalling, setOpsctlInstalling] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -81,13 +78,13 @@ export function AISetupWizard() {
 
   const detectIntegration = useCallback(async () => {
     try {
-      const [info, skill, dir] = await Promise.all([
+      const [info, skills, dir] = await Promise.all([
         DetectOpsctl(),
-        DetectClaudeSkill(),
+        DetectSkills(),
         GetOpsctlInstallDir(),
       ]);
       setOpsctlInfo(info);
-      setSkillInfo(skill);
+      setSkillsInstalled((skills || []).some((s: { installed: boolean }) => s.installed));
       setInstallDir(dir);
     } catch {}
   }, []);
@@ -117,10 +114,10 @@ export function AISetupWizard() {
     setCompleting(true);
     try {
       if (providerType === "local_cli") {
-        // Auto-install skill
-        if (!skillInfo.installed) {
+        // Auto-install skills
+        if (!skillsInstalled) {
           try {
-            await InstallClaudeSkill();
+            await InstallSkills();
           } catch {
             // Non-blocking: user can install later from settings
           }
@@ -281,13 +278,13 @@ export function AISetupWizard() {
                 )}
               </div>
 
-              {/* Claude Code Skill */}
+              {/* AI Skill */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Bot className="h-4 w-4 text-muted-foreground" />
                   <span className="text-sm">{t("integration.skill")}</span>
                 </div>
-                {skillInfo.installed ? (
+                {skillsInstalled ? (
                   <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
                     <Check className="h-3.5 w-3.5" />
                     {t("integration.skillInstalled")}

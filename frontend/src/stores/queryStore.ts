@@ -16,7 +16,7 @@ export interface QueryTab {
 
 export type InnerTab =
   | { id: string; type: "table"; database: string; table: string }
-  | { id: string; type: "sql"; title: string };
+  | { id: string; type: "sql"; title: string; sql?: string; selectedDb?: string };
 
 export interface DatabaseTabState {
   databases: string[];
@@ -27,13 +27,26 @@ export interface DatabaseTabState {
   activeInnerTabId: string | null;
 }
 
+const REDIS_PAGE_SIZE = 100;
+
+export interface RedisKeyInfo {
+  type: string;
+  ttl: number;
+  value: unknown;
+  total: number;       // LLEN/HLEN/SCARD/ZCARD, -1 for string
+  valueCursor: string;  // HSCAN/SSCAN cursor
+  valueOffset: number;  // LRANGE/ZRANGE next offset
+  hasMoreValues: boolean;
+  loadingMore: boolean;
+}
+
 export interface RedisTabState {
   currentDb: number;
   scanCursor: string;
   keys: string[];
   keyFilter: string;
   selectedKey: string | null;
-  keyInfo: { type: string; ttl: number; value: unknown } | null;
+  keyInfo: RedisKeyInfo | null;
   loadingKeys: boolean;
   hasMore: boolean;
 }
@@ -55,11 +68,13 @@ interface QueryState {
   openSqlTab: (tabId: string) => void;
   closeInnerTab: (tabId: string, innerTabId: string) => void;
   setActiveInnerTab: (tabId: string, innerTabId: string) => void;
+  updateInnerTab: (tabId: string, innerTabId: string, patch: Record<string, unknown>) => void;
 
   // Redis actions
   scanKeys: (tabId: string, reset?: boolean) => Promise<void>;
   selectRedisDb: (tabId: string, db: number) => Promise<void>;
   selectKey: (tabId: string, key: string) => Promise<void>;
+  loadMoreValues: (tabId: string) => Promise<void>;
   setKeyFilter: (tabId: string, pattern: string) => void;
 }
 
@@ -327,6 +342,22 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     }));
   },
 
+  updateInnerTab: (tabId, innerTabId, patch) => {
+    const state = get().dbStates[tabId];
+    if (!state) return;
+    set((s) => ({
+      dbStates: {
+        ...s.dbStates,
+        [tabId]: {
+          ...state,
+          innerTabs: state.innerTabs.map((t) =>
+            t.id === innerTabId ? ({ ...t, ...patch } as InnerTab) : t
+          ),
+        },
+      },
+    }));
+  },
+
   // --- Redis ---
 
   scanKeys: async (tabId, reset) => {
@@ -419,40 +450,90 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     }));
 
     try {
-      // Get type
+      // Get type + TTL
       const typeResult = await ExecuteRedis(tab.assetId, `TYPE ${key}`);
       const typeParsed: RedisResult = JSON.parse(typeResult);
       const keyType = String(typeParsed.value || "none");
 
-      // Get TTL
       const ttlResult = await ExecuteRedis(tab.assetId, `TTL ${key}`);
       const ttlParsed: RedisResult = JSON.parse(ttlResult);
       const ttl = Number(ttlParsed.value) || -1;
 
-      // Get value based on type
       let value: unknown = null;
-      let valueCmd = "";
+      let total = -1;
+      let valueCursor = "";
+      let valueOffset = 0;
+      let hasMoreValues = false;
+
       switch (keyType) {
-        case "string":
-          valueCmd = `GET ${key}`;
+        case "string": {
+          const r = await ExecuteRedis(tab.assetId, `GET ${key}`);
+          value = JSON.parse(r).value;
           break;
-        case "hash":
-          valueCmd = `HGETALL ${key}`;
+        }
+        case "list": {
+          const [countR, valR] = await Promise.all([
+            ExecuteRedis(tab.assetId, `LLEN ${key}`),
+            ExecuteRedis(tab.assetId, `LRANGE ${key} 0 ${REDIS_PAGE_SIZE - 1}`),
+          ]);
+          total = Number(JSON.parse(countR).value) || 0;
+          const items = (JSON.parse(valR).value as string[]) || [];
+          value = items;
+          valueOffset = items.length;
+          hasMoreValues = valueOffset < total;
           break;
-        case "list":
-          valueCmd = `LRANGE ${key} 0 -1`;
+        }
+        case "hash": {
+          const [countR, scanR] = await Promise.all([
+            ExecuteRedis(tab.assetId, `HLEN ${key}`),
+            ExecuteRedis(tab.assetId, `HSCAN ${key} 0 COUNT ${REDIS_PAGE_SIZE}`),
+          ]);
+          total = Number(JSON.parse(countR).value) || 0;
+          const scanParsed = JSON.parse(scanR);
+          if (scanParsed.type === "list" && Array.isArray(scanParsed.value)) {
+            const arr = scanParsed.value as unknown[];
+            valueCursor = String(arr[0] || "0");
+            const flat = (arr[1] as string[]) || [];
+            const entries: [string, string][] = [];
+            for (let i = 0; i < flat.length; i += 2) {
+              entries.push([flat[i], flat[i + 1] || ""]);
+            }
+            value = entries;
+            hasMoreValues = valueCursor !== "0";
+          }
           break;
-        case "set":
-          valueCmd = `SMEMBERS ${key}`;
+        }
+        case "set": {
+          const [countR, scanR] = await Promise.all([
+            ExecuteRedis(tab.assetId, `SCARD ${key}`),
+            ExecuteRedis(tab.assetId, `SSCAN ${key} 0 COUNT ${REDIS_PAGE_SIZE}`),
+          ]);
+          total = Number(JSON.parse(countR).value) || 0;
+          const scanParsed = JSON.parse(scanR);
+          if (scanParsed.type === "list" && Array.isArray(scanParsed.value)) {
+            const arr = scanParsed.value as unknown[];
+            valueCursor = String(arr[0] || "0");
+            value = (arr[1] as string[]) || [];
+            hasMoreValues = valueCursor !== "0";
+          }
           break;
-        case "zset":
-          valueCmd = `ZRANGE ${key} 0 -1 WITHSCORES`;
+        }
+        case "zset": {
+          const [countR, valR] = await Promise.all([
+            ExecuteRedis(tab.assetId, `ZCARD ${key}`),
+            ExecuteRedis(tab.assetId, `ZRANGE ${key} 0 ${REDIS_PAGE_SIZE - 1} WITHSCORES`),
+          ]);
+          total = Number(JSON.parse(countR).value) || 0;
+          const raw = (JSON.parse(valR).value as string[]) || [];
+          const pairs: [string, string][] = [];
+          for (let i = 0; i < raw.length; i += 2) {
+            pairs.push([raw[i], raw[i + 1] || "0"]);
+          }
+          value = pairs;
+          valueOffset = pairs.length;
+          hasMoreValues = valueOffset < total;
           break;
-      }
-      if (valueCmd) {
-        const valResult = await ExecuteRedis(tab.assetId, valueCmd);
-        const valParsed: RedisResult = JSON.parse(valResult);
-        value = valParsed.value;
+        }
       }
 
       set((s) => ({
@@ -460,11 +541,109 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           ...s.redisStates,
           [tabId]: {
             ...s.redisStates[tabId],
-            keyInfo: { type: keyType, ttl, value },
+            keyInfo: {
+              type: keyType, ttl, value, total,
+              valueCursor, valueOffset, hasMoreValues, loadingMore: false,
+            },
           },
         },
       }));
     } catch { /* ignore */ }
+  },
+
+  loadMoreValues: async (tabId) => {
+    const tab = get().openTabs.find((t) => t.id === tabId);
+    const state = get().redisStates[tabId];
+    if (!tab || !state?.keyInfo || !state.selectedKey || !state.keyInfo.hasMoreValues) return;
+
+    const key = state.selectedKey;
+    const info = state.keyInfo;
+
+    set((s) => ({
+      redisStates: {
+        ...s.redisStates,
+        [tabId]: { ...s.redisStates[tabId], keyInfo: { ...info, loadingMore: true } },
+      },
+    }));
+
+    try {
+      let newValue: unknown = info.value;
+      let newCursor = info.valueCursor;
+      let newOffset = info.valueOffset;
+      let newHasMore = false;
+
+      switch (info.type) {
+        case "list": {
+          const r = await ExecuteRedis(tab.assetId, `LRANGE ${key} ${newOffset} ${newOffset + REDIS_PAGE_SIZE - 1}`);
+          const items = (JSON.parse(r).value as string[]) || [];
+          newValue = [...(info.value as string[]), ...items];
+          newOffset = (newValue as string[]).length;
+          newHasMore = newOffset < info.total;
+          break;
+        }
+        case "hash": {
+          const r = await ExecuteRedis(tab.assetId, `HSCAN ${key} ${newCursor} COUNT ${REDIS_PAGE_SIZE}`);
+          const parsed = JSON.parse(r);
+          if (parsed.type === "list" && Array.isArray(parsed.value)) {
+            const arr = parsed.value as unknown[];
+            newCursor = String(arr[0] || "0");
+            const flat = (arr[1] as string[]) || [];
+            const entries: [string, string][] = [];
+            for (let i = 0; i < flat.length; i += 2) {
+              entries.push([flat[i], flat[i + 1] || ""]);
+            }
+            newValue = [...(info.value as [string, string][]), ...entries];
+            newHasMore = newCursor !== "0";
+          }
+          break;
+        }
+        case "set": {
+          const r = await ExecuteRedis(tab.assetId, `SSCAN ${key} ${newCursor} COUNT ${REDIS_PAGE_SIZE}`);
+          const parsed = JSON.parse(r);
+          if (parsed.type === "list" && Array.isArray(parsed.value)) {
+            const arr = parsed.value as unknown[];
+            newCursor = String(arr[0] || "0");
+            const items = (arr[1] as string[]) || [];
+            newValue = [...(info.value as string[]), ...items];
+            newHasMore = newCursor !== "0";
+          }
+          break;
+        }
+        case "zset": {
+          const r = await ExecuteRedis(tab.assetId, `ZRANGE ${key} ${newOffset} ${newOffset + REDIS_PAGE_SIZE - 1} WITHSCORES`);
+          const raw = (JSON.parse(r).value as string[]) || [];
+          const pairs: [string, string][] = [];
+          for (let i = 0; i < raw.length; i += 2) {
+            pairs.push([raw[i], raw[i + 1] || "0"]);
+          }
+          newValue = [...(info.value as [string, string][]), ...pairs];
+          newOffset = (newValue as [string, string][]).length;
+          newHasMore = newOffset < info.total;
+          break;
+        }
+      }
+
+      set((s) => ({
+        redisStates: {
+          ...s.redisStates,
+          [tabId]: {
+            ...s.redisStates[tabId],
+            keyInfo: {
+              ...info, value: newValue,
+              valueCursor: newCursor, valueOffset: newOffset,
+              hasMoreValues: newHasMore, loadingMore: false,
+            },
+          },
+        },
+      }));
+    } catch {
+      set((s) => ({
+        redisStates: {
+          ...s.redisStates,
+          [tabId]: { ...s.redisStates[tabId], keyInfo: { ...info, loadingMore: false } },
+        },
+      }));
+    }
   },
 
   setKeyFilter: (tabId, pattern) => {

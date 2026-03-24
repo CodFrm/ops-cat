@@ -1,9 +1,9 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Database, RefreshCw, Loader2, Search, Key } from "lucide-react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -17,12 +17,22 @@ interface RedisKeyBrowserProps {
   tabId: string;
 }
 
+const KEY_ROW_HEIGHT = 28;
+
 export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
   const { t } = useTranslation();
   const { redisStates, scanKeys, selectRedisDb, selectKey, setKeyFilter } =
     useQueryStore();
   const state = redisStates[tabId];
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: state?.keys.length ?? 0,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => KEY_ROW_HEIGHT,
+    overscan: 20,
+  });
 
   useEffect(() => {
     scanKeys(tabId, true);
@@ -119,31 +129,40 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
         {t("query.keyCount", { count: state.keys.length })}
       </div>
 
-      {/* Key list */}
-      <ScrollArea className="flex-1">
-        <div className="py-0.5">
-          {state.keys.map((key) => (
-            <button
-              key={key}
-              className={`flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs font-mono hover:bg-accent ${
-                state.selectedKey === key
-                  ? "bg-accent text-accent-foreground"
-                  : ""
-              }`}
-              onClick={() => handleSelectKey(key)}
-            >
-              <Key className="size-3 shrink-0 text-muted-foreground" />
-              <span className="truncate">{key}</span>
-            </button>
-          ))}
-
-          {state.loadingKeys && (
-            <div className="flex items-center justify-center py-3">
-              <Loader2 className="size-4 animate-spin text-muted-foreground" />
-            </div>
-          )}
+      {/* Virtualized key list */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        <div
+          style={{ height: virtualizer.getTotalSize(), position: "relative" }}
+        >
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            const key = state.keys[virtualRow.index];
+            return (
+              <button
+                key={key}
+                className={`absolute left-0 flex w-full items-center gap-1.5 px-2 text-left text-xs font-mono hover:bg-accent ${
+                  state.selectedKey === key
+                    ? "bg-accent text-accent-foreground"
+                    : ""
+                }`}
+                style={{
+                  top: virtualRow.start,
+                  height: virtualRow.size,
+                }}
+                onClick={() => handleSelectKey(key)}
+              >
+                <Key className="size-3 shrink-0 text-muted-foreground" />
+                <span className="truncate">{key}</span>
+              </button>
+            );
+          })}
         </div>
-      </ScrollArea>
+
+        {state.loadingKeys && (
+          <div className="flex items-center justify-center py-3">
+            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+          </div>
+        )}
+      </div>
 
       {/* Load more */}
       {state.hasMore && !state.loadingKeys && (

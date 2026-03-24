@@ -10,6 +10,7 @@ import (
 // AppConfig 应用持久化配置（config.json）
 type AppConfig struct {
 	UpdateChannel string `json:"update_channel,omitempty"` // stable, beta, nightly
+	KDFSalt       string `json:"kdf_salt,omitempty"`       // base64 编码的 Argon2id salt
 }
 
 var (

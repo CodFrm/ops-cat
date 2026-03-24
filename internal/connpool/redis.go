@@ -27,7 +27,6 @@ func DialRedis(ctx context.Context, cfg *asset_entity.RedisConfig, sshPool *sshp
 		Addr:     fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 		Username: cfg.Username,
 		Password: password,
-		DB:       cfg.Database,
 	}
 	if cfg.TLS {
 		opts.TLSConfig = &tls.Config{}

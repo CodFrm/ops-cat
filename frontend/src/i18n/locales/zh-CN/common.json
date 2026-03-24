@@ -100,6 +100,7 @@
       "cloud": "云厂商",
       "database": "数据库",
       "system": "系统平台",
+      "devops": "DevOps",
       "folder": "文件夹"
     },
     "privateKeys": "私钥文件路径",
@@ -131,6 +132,7 @@
     "deleteAssetDesc": "确定要删除资产 \"{{name}}\" 吗？此操作不可撤销。",
     "password": "密码",
     "passwordPlaceholder": "输入密码（留空则连接时输入）",
+    "passwordUnchanged": "已设置，留空则不修改",
     "keySource": "密钥来源",
     "keySourceManaged": "托管密钥",
     "keySourceFile": "本地文件",
@@ -368,9 +370,6 @@
     "sendPlaceholder": "输入消息... Ctrl+Enter 发送",
     "send": "发送",
     "notConfigured": "请在设置中配置 AI Provider",
-    "initNoSelection": "请先在左侧选择一个资产或分组",
-    "initAnalyzing": "正在分析服务器环境...",
-    "initError": "获取资产信息失败",
     "permissionTitle": "工具执行确认",
     "permissionAllow": "允许",
     "permissionAllowAll": "本次全部允许",
@@ -479,8 +478,8 @@
     "dataDir": "数据目录",
     "dataDirDesc": "桌面端和 CLI 共享的数据库位置",
     "refresh": "刷新",
-    "skill": "Claude Code 技能",
-    "skillDesc": "安装技能文件，让 Claude Code / Codex 使用 opsctl 管理你的资产",
+    "skill": "AI 技能",
+    "skillDesc": "安装技能文件，让 AI 编程工具使用 opsctl 管理你的资产",
     "skillInstalled": "已安装",
     "skillNotInstalled": "未安装",
     "skillInstall": "安装技能",
@@ -514,6 +513,7 @@
     "checkFailed": "检查更新失败",
     "opsctlUpdated": "opsctl 已同步更新",
     "opsctlUpdateFailed": "opsctl 更新失败: {{error}}",
+    "skillUpdateFailed": "Skill 更新失败: {{error}}",
     "restartNow": "立即重启",
     "restartLater": "稍后重启",
     "viewRelease": "查看发布页"
@@ -616,6 +616,7 @@
     "nextPage": "下一页",
     "loadMore": "加载更多",
     "keyCount": "{{count}} 个 key",
+    "loadedOfTotal": "{{loaded}} / {{total}}",
     "ttl": "过期时间",
     "ttlPersist": "永久",
     "ttlSeconds": "{{seconds}} 秒",
@@ -632,6 +633,10 @@
     "score": "分数",
     "index": "索引",
     "field": "字段",
-    "member": "成员"
+    "member": "成员",
+    "pendingEdits": "{{count}} 处修改待提交",
+    "discardEdits": "撤销",
+    "submitEdits": "提交修改",
+    "updateSuccess": "成功更新 {{count}} 行"
   }
 }

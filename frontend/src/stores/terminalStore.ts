@@ -601,13 +601,13 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       };
     });
 
-    // 重新连接
-    const newPassword = password !== undefined ? password : conn.password;
+    // 重新连接：优先使用新密码，否则让后端从已保存凭证中解析
+    const newPassword = password !== undefined ? password : "";
     const tab = get().tabs.find((t) => t.id === connectionId);
     get().connect(conn.assetId, conn.assetName, tab?.assetIcon || "", newPassword, 80, 24, metadata);
 
     // 如果提供了新密码，保存到资产
-    if (password && password !== conn.password) {
+    if (password) {
       UpdateAssetPassword(conn.assetId, password).catch(() => {});
     }
   },

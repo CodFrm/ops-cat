@@ -3,7 +3,6 @@ import {
   SendAIMessage,
   SetAIProvider,
   DetectLocalCLIs,
-  GetInitContext,
   ResetAISession,
   CreateConversation,
   ListConversations,
@@ -13,7 +12,6 @@ import {
 } from "../../wailsjs/go/main/App";
 import { ai, conversation_entity, main } from "../../wailsjs/go/models";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
-import { useAssetStore } from "./assetStore";
 import i18n from "../i18n";
 
 // 内容块：文本或工具调用
@@ -455,58 +453,8 @@ export const useAIStore = create<AIState>((set, get) => {
       // 仅检查当前 tab 是否正在发送，不阻塞其他 tab
       if (tabState.sending) return;
 
-      let actualContent = content;
-
-      // 拦截 /init 命令
-      if (content.trim() === "/init") {
-        const { selectedAssetId, selectedGroupId } =
-          useAssetStore.getState();
-        if (!selectedAssetId && !selectedGroupId) {
-          updateTab(tabId, {
-            messages: [
-              ...tabState.messages,
-              { role: "user", content: "/init", blocks: [] },
-              {
-                role: "assistant",
-                content: i18n.t("ai.initNoSelection"),
-                blocks: [
-                  {
-                    type: "text",
-                    content: i18n.t("ai.initNoSelection"),
-                  },
-                ],
-                streaming: false,
-              },
-            ],
-          });
-          return;
-        }
-        try {
-          actualContent = await GetInitContext(
-            selectedAssetId || 0,
-            selectedGroupId || 0
-          );
-        } catch (e) {
-          const errMsg = `${i18n.t("ai.initError")}: ${e}`;
-          updateTab(tabId, {
-            messages: [
-              ...tabState.messages,
-              { role: "user", content: "/init", blocks: [] },
-              {
-                role: "assistant",
-                content: errMsg,
-                blocks: [{ type: "text", content: errMsg }],
-                streaming: false,
-              },
-            ],
-          });
-          return;
-        }
-      }
-
       // 添加用户消息
-      const displayContent =
-        content.trim() === "/init" ? "/init" : content;
+      const displayContent = content;
       const userMsg: ChatMessage = {
         role: "user",
         content: displayContent,
@@ -803,12 +751,10 @@ export const useAIStore = create<AIState>((set, get) => {
       );
 
       // 转换为后端消息格式
-      const apiMessages = newMessages.map((m, idx) => {
-        const msgContent =
-          idx === newMessages.length - 1 ? actualContent : m.content;
+      const apiMessages = newMessages.map((m) => {
         return new ai.Message({
           role: m.role,
-          content: msgContent,
+          content: m.content,
         });
       });
 

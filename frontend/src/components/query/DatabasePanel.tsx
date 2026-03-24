@@ -56,7 +56,6 @@ export function DatabasePanel({ tabId }: DatabasePanelProps) {
   if (!dbState) return null;
 
   const { innerTabs, activeInnerTabId } = dbState;
-  const activeTab = innerTabs.find((tab) => tab.id === activeInnerTabId);
 
   return (
     <div className="flex h-full w-full">
@@ -116,21 +115,9 @@ export function DatabasePanel({ tabId }: DatabasePanelProps) {
           </div>
         )}
 
-        {/* Tab content */}
-        <div className="flex-1 min-h-0">
-          {activeTab ? (
-            activeTab.type === "table" ? (
-              <TableDataTab
-                key={activeTab.id}
-                tabId={tabId}
-                database={activeTab.database}
-                table={activeTab.table}
-              />
-            ) : (
-              <SqlEditorTab key={activeTab.id} tabId={tabId} />
-            )
-          ) : (
-            /* Empty state */
+        {/* Tab content — render all, hide inactive to preserve state */}
+        <div className="flex-1 min-h-0 relative">
+          {innerTabs.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
               <Database className="h-10 w-10 opacity-30" />
               <p className="text-xs">
@@ -138,6 +125,29 @@ export function DatabasePanel({ tabId }: DatabasePanelProps) {
               </p>
             </div>
           )}
+          {innerTabs.map((tab) => {
+            const isActive = tab.id === activeInnerTabId;
+            return (
+              <div
+                key={tab.id}
+                className="absolute inset-0"
+                style={{
+                  visibility: isActive ? "visible" : "hidden",
+                  pointerEvents: isActive ? "auto" : "none",
+                }}
+              >
+                {tab.type === "table" ? (
+                  <TableDataTab
+                    tabId={tabId}
+                    database={tab.database}
+                    table={tab.table}
+                  />
+                ) : (
+                  <SqlEditorTab tabId={tabId} innerTabId={tab.id} />
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

@@ -100,6 +100,7 @@
       "cloud": "Cloud Providers",
       "database": "Database",
       "system": "System",
+      "devops": "DevOps",
       "folder": "Folders"
     },
     "privateKeys": "Private Key Paths",
@@ -131,6 +132,7 @@
     "deleteAssetDesc": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
     "password": "Password",
     "passwordPlaceholder": "Enter password (leave empty to prompt on connect)",
+    "passwordUnchanged": "Set, leave empty to keep unchanged",
     "keySource": "Key Source",
     "keySourceManaged": "Managed Key",
     "keySourceFile": "Local File",
@@ -368,9 +370,6 @@
     "sendPlaceholder": "Type a message... Ctrl+Enter to send",
     "send": "Send",
     "notConfigured": "Please configure AI Provider in Settings",
-    "initNoSelection": "Please select an asset or group from the sidebar first",
-    "initAnalyzing": "Analyzing server environment...",
-    "initError": "Failed to get asset information",
     "permissionTitle": "Tool Execution Approval",
     "permissionAllow": "Allow",
     "permissionAllowAll": "Allow All",
@@ -479,8 +478,8 @@
     "dataDir": "Data Directory",
     "dataDirDesc": "Shared database location used by both desktop app and CLI",
     "refresh": "Refresh",
-    "skill": "Claude Code Skill",
-    "skillDesc": "Install a skill file so Claude Code / Codex can use opsctl to manage your assets",
+    "skill": "AI Skill",
+    "skillDesc": "Install a skill file so AI coding tools can use opsctl to manage your assets",
     "skillInstalled": "Installed",
     "skillNotInstalled": "Not Installed",
     "skillInstall": "Install Skill",
@@ -514,6 +513,7 @@
     "checkFailed": "Failed to check for updates",
     "opsctlUpdated": "opsctl has been updated",
     "opsctlUpdateFailed": "opsctl update failed: {{error}}",
+    "skillUpdateFailed": "Skill update failed: {{error}}",
     "restartNow": "Restart Now",
     "restartLater": "Later",
     "viewRelease": "View Release"
@@ -616,6 +616,7 @@
     "nextPage": "Next",
     "loadMore": "Load more",
     "keyCount": "{{count}} key(s)",
+    "loadedOfTotal": "{{loaded}} / {{total}}",
     "ttl": "TTL",
     "ttlPersist": "Persistent",
     "ttlSeconds": "{{seconds}}s",
@@ -632,6 +633,10 @@
     "score": "Score",
     "index": "Index",
     "field": "Field",
-    "member": "Member"
+    "member": "Member",
+    "pendingEdits": "{{count}} pending edit(s)",
+    "discardEdits": "Discard",
+    "submitEdits": "Submit Changes",
+    "updateSuccess": "{{count}} row(s) updated"
   }
 }

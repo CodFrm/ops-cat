@@ -4,30 +4,52 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"io"
+
+	"golang.org/x/crypto/argon2"
 )
 
-// CredentialSvc 凭证加解密服务（AES-256-GCM）
+// Argon2id 参数（与 backup_svc 保持一致）
+const (
+	argon2Time    = 3
+	argon2Memory  = 64 * 1024 // 64 MiB
+	argon2Threads = 4
+	argon2KeyLen  = 32 // AES-256
+	saltLen       = 16
+)
+
+// CredentialSvc 凭证加解密服务（Argon2id + AES-256-GCM）
 type CredentialSvc struct {
 	gcm cipher.AEAD
 }
 
-// New 创建凭证服务，masterKey 用于派生 AES 密钥
-func New(masterKey string) *CredentialSvc {
-	// 用 SHA-256 派生固定 32 字节密钥
-	hash := sha256.Sum256([]byte(masterKey))
-	block, err := aes.NewCipher(hash[:])
+// New 创建凭证服务，使用 Argon2id(masterKey, salt) 派生 AES-256 密钥
+func New(masterKey string, salt []byte) *CredentialSvc {
+	key := argon2.IDKey([]byte(masterKey), salt, argon2Time, argon2Memory, argon2Threads, argon2KeyLen)
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		panic(fmt.Sprintf("创建 AES cipher 失败: %v", err))
+	}
+	// 清除密钥材料
+	for i := range key {
+		key[i] = 0
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
 		panic(fmt.Sprintf("创建 GCM 失败: %v", err))
 	}
 	return &CredentialSvc{gcm: gcm}
+}
+
+// GenerateSalt 生成随机 salt
+func GenerateSalt() ([]byte, error) {
+	salt := make([]byte, saltLen)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, fmt.Errorf("生成 salt 失败: %w", err)
+	}
+	return salt, nil
 }
 
 // Encrypt 加密明文，返回 base64 编码的密文

@@ -62,10 +62,6 @@ export function DeleteGroup(arg1, arg2) {
   return window['go']['main']['App']['DeleteGroup'](arg1, arg2);
 }
 
-export function DetectClaudeSkill() {
-  return window['go']['main']['App']['DetectClaudeSkill']();
-}
-
 export function DetectLocalCLIs() {
   return window['go']['main']['App']['DetectLocalCLIs']();
 }
@@ -74,12 +70,20 @@ export function DetectOpsctl() {
   return window['go']['main']['App']['DetectOpsctl']();
 }
 
+export function DetectSkills() {
+  return window['go']['main']['App']['DetectSkills']();
+}
+
 export function DisconnectSSH(arg1) {
   return window['go']['main']['App']['DisconnectSSH'](arg1);
 }
 
 export function DownloadAndInstallUpdate() {
   return window['go']['main']['App']['DownloadAndInstallUpdate']();
+}
+
+export function EncryptPassword(arg1) {
+  return window['go']['main']['App']['EncryptPassword'](arg1);
 }
 
 export function ExecuteImportFile(arg1, arg2) {
@@ -142,10 +146,6 @@ export function GetGroup(arg1) {
   return window['go']['main']['App']['GetGroup'](arg1);
 }
 
-export function GetInitContext(arg1, arg2) {
-  return window['go']['main']['App']['GetInitContext'](arg1, arg2);
-}
-
 export function GetLanguage() {
   return window['go']['main']['App']['GetLanguage']();
 }
@@ -186,12 +186,12 @@ export function ImportTabbySelected(arg1, arg2, arg3) {
   return window['go']['main']['App']['ImportTabbySelected'](arg1, arg2, arg3);
 }
 
-export function InstallClaudeSkill() {
-  return window['go']['main']['App']['InstallClaudeSkill']();
-}
-
 export function InstallOpsctl(arg1) {
   return window['go']['main']['App']['InstallOpsctl'](arg1);
+}
+
+export function InstallSkills() {
+  return window['go']['main']['App']['InstallSkills']();
 }
 
 export function ListAssets(arg1, arg2) {
@@ -228,10 +228,6 @@ export function ListGroups() {
 
 export function ListLocalSSHKeys() {
   return window['go']['main']['App']['ListLocalSSHKeys']();
-}
-
-export function LoadCredential(arg1) {
-  return window['go']['main']['App']['LoadCredential'](arg1);
 }
 
 export function MoveAsset(arg1, arg2) {
@@ -320,10 +316,6 @@ export function SFTPUploadFile(arg1, arg2, arg3) {
 
 export function SaveConversationMessages(arg1, arg2) {
   return window['go']['main']['App']['SaveConversationMessages'](arg1, arg2);
-}
-
-export function SaveCredential(arg1) {
-  return window['go']['main']['App']['SaveCredential'](arg1);
 }
 
 export function SelectImportFile() {

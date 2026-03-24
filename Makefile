@@ -12,7 +12,7 @@ else
     UPX_FLAGS := --best
 endif
 
-VERSION ?= dev
+VERSION ?= 1.0.0
 VERSION_PKG := github.com/cago-frame/cago/configs
 LDFLAGS := -s -w -X $(VERSION_PKG).Version=$(VERSION)
 

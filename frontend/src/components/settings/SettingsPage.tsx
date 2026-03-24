@@ -48,8 +48,8 @@ import {
   DetectOpsctl,
   GetOpsctlInstallDir,
   InstallOpsctl,
-  DetectClaudeSkill,
-  InstallClaudeSkill,
+  DetectSkills,
+  InstallSkills,
   GetSkillPreview,
   GetDataDir,
   GetAppVersion,
@@ -119,7 +119,7 @@ function PasswordInput({
 function IntegrationSection() {
   const { t } = useTranslation();
   const [opsctlInfo, setOpsctlInfo] = useState<{installed: boolean; path: string; version: string; embedded: boolean}>({installed: false, path: "", version: "", embedded: false});
-  const [skillInfo, setSkillInfo] = useState<{installed: boolean; path: string}>({installed: false, path: ""});
+  const [skillTargets, setSkillTargets] = useState<{name: string; installed: boolean; path: string}[]>([]);
   const [installDir, setInstallDir] = useState("");
   const [installing, setInstalling] = useState(false);
   const [skillInstalling, setSkillInstalling] = useState(false);
@@ -129,14 +129,14 @@ function IntegrationSection() {
 
   const detect = useCallback(async () => {
     try {
-      const [info, skill, dir, dd] = await Promise.all([
+      const [info, skills, dir, dd] = await Promise.all([
         DetectOpsctl(),
-        DetectClaudeSkill(),
+        DetectSkills(),
         GetOpsctlInstallDir(),
         GetDataDir(),
       ]);
       setOpsctlInfo(info);
-      setSkillInfo(skill);
+      setSkillTargets(skills || []);
       setInstallDir(dir);
       setDataDir(dd);
     } catch {}
@@ -161,7 +161,7 @@ function IntegrationSection() {
   const handleInstallSkill = async () => {
     setSkillInstalling(true);
     try {
-      await InstallClaudeSkill();
+      await InstallSkills();
       toast.success(t("integration.skillInstallSuccess"));
       await detect();
     } catch (e: any) {
@@ -273,7 +273,7 @@ function IntegrationSection() {
         </CardContent>
       </Card>
 
-      {/* Claude Code Skill */}
+      {/* AI Skill */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -281,19 +281,25 @@ function IntegrationSection() {
               <CardTitle className="text-base">{t("integration.skill")}</CardTitle>
               <CardDescription>{t("integration.skillDesc")}</CardDescription>
             </div>
-            {skillInfo.installed && (
-              <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400">
-                <Check className="h-3.5 w-3.5" />
-                {t("integration.skillInstalled")}
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              {skillTargets.filter(s => s.installed).map(s => (
+                <span key={s.name} className="inline-flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400">
+                  <Check className="h-3.5 w-3.5" />
+                  {s.name}
+                </span>
+              ))}
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          {skillInfo.installed && (
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">{t("integration.skillPath")}</span>
-              <span className="font-mono text-xs truncate max-w-[300px]">{skillInfo.path}</span>
+          {skillTargets.some(s => s.installed) && (
+            <div className="space-y-1">
+              {skillTargets.filter(s => s.installed).map(s => (
+                <div key={s.name} className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">{s.name}</span>
+                  <span className="font-mono text-xs truncate max-w-[300px]">{s.path}</span>
+                </div>
+              ))}
             </div>
           )}
 
@@ -301,7 +307,7 @@ function IntegrationSection() {
             <Button onClick={handleInstallSkill} disabled={skillInstalling} size="sm">
               {skillInstalling ? (
                 <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />{t("integration.skillInstalling")}</>
-              ) : skillInfo.installed ? (
+              ) : skillTargets.every(s => s.installed) ? (
                 t("integration.skillUpdate")
               ) : (
                 t("integration.skillInstall")
@@ -362,9 +368,13 @@ function UpdateSection() {
     const cancelOpsctlErr = EventsOn("update:opsctl-error", (errMsg: string) => {
       toast.error(t("appUpdate.opsctlUpdateFailed", { error: errMsg }));
     });
+    const cancelSkillErr = EventsOn("update:skill-error", (errMsg: string) => {
+      toast.error(t("appUpdate.skillUpdateFailed", { error: errMsg }));
+    });
     return () => {
       cancelProgress();
       cancelOpsctlErr();
+      cancelSkillErr();
     };
   }, [t]);
 

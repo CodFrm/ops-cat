@@ -7,6 +7,14 @@ description: "ops-cat CLI tool (opsctl) for server asset management and remote o
 
 ops-cat's standalone CLI for asset management and remote operations without the GUI.
 
+## Data Directory
+
+/Users/codfrm/Library/Application Support/ops-cat
+
+## Data Directory
+
+/Users/codfrm/Library/Application Support/ops-cat
+
 ## Global Flags
 
 - `--data-dir <path>` — Override app data directory (default: platform-specific)

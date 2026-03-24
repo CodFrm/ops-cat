@@ -54,6 +54,9 @@ var skillMDContent string
 //go:embed skill/references/commands.md
 var skillCommandsMDContent string
 
+//go:embed skill/references/ops-init.md
+var skillOpsInitMDContent string
+
 // ConfirmResponse 命令确认响应
 type ConfirmResponse struct {
 	Behavior string // "allow" | "allowAll" | "deny"
@@ -162,6 +165,14 @@ func (a *App) startup(ctx context.Context) {
 // startApprovalServer 启动 opsctl 审批 Unix socket 服务
 func (a *App) startApprovalServer() {
 	handler := func(req approval.ApprovalRequest) approval.ApprovalResponse {
+		// 数据变更通知：opsctl 通知前端刷新
+		if req.Type == "notify" {
+			wailsRuntime.EventsEmit(a.ctx, "data:changed", map[string]any{
+				"resource": req.Detail,
+			})
+			return approval.ApprovalResponse{Approved: true}
+		}
+
 		// 计划审批
 		if req.Type == "plan" {
 			return a.handlePlanApproval(req)
@@ -297,6 +308,21 @@ func (a *App) resolveSSHCredentials(sshCfg *asset_entity.SSHConfig) (password, k
 		}
 	}
 	return "", ""
+}
+
+// decryptProxyPassword 解密代理配置中的密码，返回新的 ProxyConfig（不修改原始对象）
+func (a *App) decryptProxyPassword(proxy *asset_entity.ProxyConfig) *asset_entity.ProxyConfig {
+	if proxy == nil || proxy.Password == "" {
+		return proxy
+	}
+	decrypted, err := credential_svc.Default().Decrypt(proxy.Password)
+	if err != nil {
+		// 解密失败，可能是明文（测试连接场景），原样返回
+		return proxy
+	}
+	cp := *proxy
+	cp.Password = decrypted
+	return &cp
 }
 
 // resolveJumpHostsWithCredentials 递归解析跳板机链（含凭据解密）
@@ -698,7 +724,7 @@ func (a *App) ConnectSSH(req SSHConnectRequest) (string, error) {
 		AssetID:     req.AssetID,
 		Cols:        req.Cols,
 		Rows:        req.Rows,
-		Proxy:       sshCfg.Proxy,
+		Proxy:       a.decryptProxyPassword(sshCfg.Proxy),
 		OnData: func(sid string, data []byte) {
 			wailsRuntime.EventsEmit(a.ctx, "ssh:data:"+sid, base64.StdEncoding.EncodeToString(data))
 		},
@@ -800,7 +826,7 @@ func (a *App) ConnectSSHAsync(req SSHConnectRequest) (string, error) {
 			AssetID:     req.AssetID,
 			Cols:        req.Cols,
 			Rows:        req.Rows,
-			Proxy:       sshCfg.Proxy,
+			Proxy:       a.decryptProxyPassword(sshCfg.Proxy),
 			OnData: func(sid string, data []byte) {
 				wailsRuntime.EventsEmit(a.ctx, "ssh:data:"+sid, base64.StdEncoding.EncodeToString(data))
 			},
@@ -1759,84 +1785,11 @@ func (a *App) ResetAISession() {
 	a.currentConversationID = 0
 }
 
-// GetInitContext 获取 /init 命令的资产上下文信息
-func (a *App) GetInitContext(assetID int64, groupID int64) (string, error) {
-	ctx := a.langCtx()
-	var sb strings.Builder
-
-	if assetID > 0 {
-		asset, err := asset_svc.Asset().Get(ctx, assetID)
-		if err != nil {
-			return "", fmt.Errorf("获取资产失败: %w", err)
-		}
-		sb.WriteString("=== 资产初始化分析 ===\n\n")
-		sb.WriteString(a.formatAssetContext(asset))
-	} else if groupID > 0 {
-		group, err := group_repo.Group().Find(ctx, groupID)
-		if err != nil {
-			return "", fmt.Errorf("获取分组失败: %w", err)
-		}
-		assets, err := asset_svc.Asset().List(ctx, "", groupID)
-		if err != nil {
-			return "", fmt.Errorf("获取资产列表失败: %w", err)
-		}
-		fmt.Fprintf(&sb, "=== 分组「%s」初始化分析 ===\n\n", group.Name)
-		if len(assets) == 0 {
-			sb.WriteString("该分组下没有资产。\n")
-		}
-		for _, asset := range assets {
-			sb.WriteString(a.formatAssetContext(asset))
-			sb.WriteString("\n")
-		}
-	} else {
-		return "", fmt.Errorf("请选择一个资产或分组")
-	}
-
-	sb.WriteString("\n请分析以上服务器环境，执行以下发现命令：\n")
-	sb.WriteString("1. uname -a（操作系统信息）\n")
-	sb.WriteString("2. cat /etc/os-release（发行版信息）\n")
-	sb.WriteString("3. hostname（主机名）\n")
-	sb.WriteString("4. df -h（磁盘使用）\n")
-	sb.WriteString("5. free -h（内存使用）\n")
-	sb.WriteString("6. nproc（CPU核心数）\n")
-	sb.WriteString("7. ip addr 或 ifconfig（网络接口）\n")
-	sb.WriteString("8. docker ps 2>/dev/null（Docker容器）\n")
-	sb.WriteString("9. systemctl list-units --type=service --state=running 2>/dev/null | head -20（运行中的服务）\n")
-
-	return sb.String(), nil
-}
-
-// formatAssetContext 格式化单个资产的上下文信息
-func (a *App) formatAssetContext(asset *asset_entity.Asset) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "- 名称: %s (ID: %d)\n", asset.Name, asset.ID)
-	fmt.Fprintf(&sb, "  类型: %s\n", asset.Type)
-
-	if asset.IsSSH() {
-		cfg, err := asset.GetSSHConfig()
-		if err == nil {
-			fmt.Fprintf(&sb, "  地址: %s:%d\n", cfg.Host, cfg.Port)
-			fmt.Fprintf(&sb, "  用户: %s\n", cfg.Username)
-			fmt.Fprintf(&sb, "  认证: %s\n", cfg.AuthType)
-		}
-	}
-
-	if asset.Description != "" {
-		fmt.Fprintf(&sb, "  描述: %s\n", asset.Description)
-	}
-	return sb.String()
-}
-
 // --- 凭证操作 ---
 
-// SaveCredential 加密保存凭证（密码或密钥），返回加密后的字符串
-func (a *App) SaveCredential(plaintext string) (string, error) {
+// EncryptPassword 加密密码，返回加密后的字符串（用于前端保存资产配置）
+func (a *App) EncryptPassword(plaintext string) (string, error) {
 	return credential_svc.Default().Encrypt(plaintext)
-}
-
-// LoadCredential 解密凭证
-func (a *App) LoadCredential(ciphertext string) (string, error) {
-	return credential_svc.Default().Decrypt(ciphertext)
 }
 
 // --- 导入导出 ---
@@ -2307,24 +2260,38 @@ func (a *App) InstallOpsctl(targetDir string) (string, error) {
 	return embedded.InstallOpsctl(targetDir)
 }
 
-// SkillInfo Claude Code Skill 检测结果
-type SkillInfo struct {
+// SkillTarget AI Skill 安装目标
+type SkillTarget struct {
+	Name      string `json:"name"`
 	Installed bool   `json:"installed"`
 	Path      string `json:"path"`
 }
 
-// DetectClaudeSkill 检测 Claude Code Skill 是否已安装
-func (a *App) DetectClaudeSkill() SkillInfo {
+// skillTargetDefs 支持的 Skill 安装目标，添加新 CLI 只需在此追加
+var skillTargetDefs = []struct {
+	Name   string // 显示名称
+	SubDir string // home 目录下的子目录，如 ".claude"
+}{
+	{"Claude Code", ".claude"},
+	{"Codex", ".codex"},
+}
+
+// DetectSkills 检测所有 AI 工具的 Skill 安装状态
+func (a *App) DetectSkills() []SkillTarget {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return SkillInfo{}
+		return nil
 	}
-	skillDir := filepath.Join(home, ".claude", "skills", "opsctl")
-	skillPath := filepath.Join(skillDir, "SKILL.md")
-	if _, err := os.Stat(skillPath); err == nil {
-		return SkillInfo{Installed: true, Path: skillDir}
+	targets := make([]SkillTarget, 0, len(skillTargetDefs))
+	for _, def := range skillTargetDefs {
+		skillDir := filepath.Join(home, def.SubDir, "skills", "opsctl")
+		installed := false
+		if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err == nil {
+			installed = true
+		}
+		targets = append(targets, SkillTarget{Name: def.Name, Installed: installed, Path: skillDir})
 	}
-	return SkillInfo{Path: skillDir}
+	return targets
 }
 
 // skillMDWithDataDir 返回注入数据目录后的 SKILL.md 内容
@@ -2334,37 +2301,51 @@ func skillMDWithDataDir() string {
 	return strings.Replace(skillMDContent, "## Global Flags", insertion+"## Global Flags", 1)
 }
 
-// InstallClaudeSkill 安装 Claude Code Skill 文件
-func (a *App) InstallClaudeSkill() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("get home directory failed: %w", err)
-	}
-
-	skillDir := filepath.Join(home, ".claude", "skills", "opsctl")
+// installSkillTo 将 Skill 文件安装到指定目录
+func installSkillTo(skillDir string) error {
 	refsDir := filepath.Join(skillDir, "references")
 	if err := os.MkdirAll(refsDir, 0755); err != nil {
-		return "", fmt.Errorf("create directory failed: %w", err)
+		return fmt.Errorf("create directory failed: %w", err)
 	}
 
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMDWithDataDir()), 0644); err != nil {
-		return "", fmt.Errorf("write SKILL.md failed: %w", err)
+		return fmt.Errorf("write SKILL.md failed: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(refsDir, "commands.md"), []byte(skillCommandsMDContent), 0644); err != nil {
-		return "", fmt.Errorf("write commands.md failed: %w", err)
+		return fmt.Errorf("write commands.md failed: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(refsDir, "ops-init.md"), []byte(skillOpsInitMDContent), 0644); err != nil {
+		return fmt.Errorf("write ops-init.md failed: %w", err)
+	}
+	return nil
+}
+
+// InstallSkills 安装 Skill 文件到所有支持的 AI 工具
+func (a *App) InstallSkills() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("get home directory failed: %w", err)
+	}
+
+	for _, def := range skillTargetDefs {
+		skillDir := filepath.Join(home, def.SubDir, "skills", "opsctl")
+		if err := installSkillTo(skillDir); err != nil {
+			return fmt.Errorf("install %s skill failed: %w", def.Name, err)
+		}
 	}
 
 	// 清理旧的 skill 文件
 	oldSkillPath := filepath.Join(home, ".claude", "commands", "ops-cat.md")
 	_ = os.Remove(oldSkillPath)
 
-	return skillDir, nil
+	return nil
 }
 
 // GetSkillPreview 获取 Skill 文件内容预览
 func (a *App) GetSkillPreview() string {
 	return "--- SKILL.md ---\n\n" + skillMDWithDataDir() +
-		"\n\n--- references/commands.md ---\n\n" + skillCommandsMDContent
+		"\n\n--- references/commands.md ---\n\n" + skillCommandsMDContent +
+		"\n\n--- references/ops-init.md ---\n\n" + skillOpsInitMDContent
 }
 
 // --- 审计日志 ---
@@ -2440,6 +2421,16 @@ func (a *App) DownloadAndInstallUpdate() error {
 		if _, err := embedded.InstallOpsctl(installDir); err != nil {
 			// opsctl 更新失败不阻塞主更新
 			wailsRuntime.EventsEmit(a.ctx, "update:opsctl-error", err.Error())
+		}
+	}
+
+	// 更新后重新安装 Skills（如果已安装）
+	skills := a.DetectSkills()
+	for _, s := range skills {
+		if s.Installed {
+			if err := installSkillTo(s.Path); err != nil {
+				wailsRuntime.EventsEmit(a.ctx, "update:skill-error", err.Error())
+			}
 		}
 	}
 

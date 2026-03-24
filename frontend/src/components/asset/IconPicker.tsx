@@ -30,7 +30,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Tooltip,
   TooltipContent,
@@ -45,15 +44,30 @@ import {
   AliCloudIcon,
   TencentCloudIcon,
   HuaweiCloudIcon,
+  CloudflareIcon,
   MysqlIcon,
   PostgresqlIcon,
   RedisIcon,
   MongodbIcon,
   ElasticsearchIcon,
+  KafkaIcon,
+  MariadbIcon,
+  SqliteIcon,
+  RabbitmqIcon,
+  EtcdIcon,
+  ClickhouseIcon,
   DockerIcon,
   KubernetesIcon,
   LinuxIcon,
   WindowsIcon,
+  UbuntuIcon,
+  CentosIcon,
+  DebianIcon,
+  RedhatIcon,
+  MacosIcon,
+  NginxIcon,
+  GrafanaIcon,
+  PrometheusIcon,
 } from "./brand-icons";
 
 type IconComponent = React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
@@ -83,15 +97,30 @@ const ICON_DISPLAY_NAMES: Record<string, string> = {
   alicloud: "Alibaba Cloud",
   tencentcloud: "Tencent Cloud",
   huaweicloud: "Huawei Cloud",
+  cloudflare: "Cloudflare",
   mysql: "MySQL",
   postgresql: "PostgreSQL",
   redis: "Redis",
   mongodb: "MongoDB",
   elasticsearch: "Elasticsearch",
+  kafka: "Kafka",
+  mariadb: "MariaDB",
+  sqlite: "SQLite",
+  rabbitmq: "RabbitMQ",
+  etcd: "etcd",
+  clickhouse: "ClickHouse",
   docker: "Docker",
   kubernetes: "Kubernetes",
   linux: "Linux",
   windows: "Windows",
+  ubuntu: "Ubuntu",
+  centos: "CentOS",
+  debian: "Debian",
+  redhat: "Red Hat",
+  macos: "macOS",
+  nginx: "Nginx",
+  grafana: "Grafana",
+  prometheus: "Prometheus",
   folder: "Folder",
   "folder-open": "Folder Open",
   "folder-heart": "Folder Heart",
@@ -127,6 +156,7 @@ const CATEGORIES: IconCategory[] = [
       alicloud: AliCloudIcon,
       tencentcloud: TencentCloudIcon,
       huaweicloud: HuaweiCloudIcon,
+      cloudflare: CloudflareIcon,
     },
   },
   {
@@ -137,6 +167,12 @@ const CATEGORIES: IconCategory[] = [
       redis: RedisIcon,
       mongodb: MongodbIcon,
       elasticsearch: ElasticsearchIcon,
+      kafka: KafkaIcon,
+      mariadb: MariadbIcon,
+      sqlite: SqliteIcon,
+      rabbitmq: RabbitmqIcon,
+      etcd: EtcdIcon,
+      clickhouse: ClickhouseIcon,
     },
   },
   {
@@ -146,6 +182,19 @@ const CATEGORIES: IconCategory[] = [
       kubernetes: KubernetesIcon,
       linux: LinuxIcon,
       windows: WindowsIcon,
+      ubuntu: UbuntuIcon,
+      centos: CentosIcon,
+      debian: DebianIcon,
+      redhat: RedhatIcon,
+      macos: MacosIcon,
+    },
+  },
+  {
+    key: "devops",
+    icons: {
+      nginx: NginxIcon,
+      grafana: GrafanaIcon,
+      prometheus: PrometheusIcon,
     },
   },
   {
@@ -161,23 +210,16 @@ const CATEGORIES: IconCategory[] = [
   },
 ];
 
-// Brand colors for icons (only for brand/product icons, not generic ones)
+// Brand colors for monochrome icons (simple-icons / tdesign).
+// logos set icons already have colors baked in, so only these need explicit colors.
 const ICON_COLORS: Record<string, string> = {
-  aws: "#FF9900",
-  azure: "#0078D4",
-  gcp: "#4285F4",
   alicloud: "#FF6A00",
   tencentcloud: "#00A4FF",
   huaweicloud: "#CF0A2C",
-  mysql: "#4479A1",
-  postgresql: "#336791",
-  redis: "#DC382D",
-  mongodb: "#47A248",
-  elasticsearch: "#F0BF24",
-  docker: "#2496ED",
-  kubernetes: "#326CE5",
-  linux: "#E95420",
-  windows: "#00A4EF",
+  clickhouse: "#FFCC01",
+  sqlite: "#0F80CC",
+  linux: "#FCC624",
+  macos: "#A2AAAD",
 };
 
 // Preset colors for custom color selection
@@ -300,7 +342,7 @@ export function IconPicker({
               />
             </div>
           </div>
-          <ScrollArea className="max-h-[280px] overflow-hidden">
+          <div className="max-h-[280px] overflow-y-auto" onWheel={(e) => e.stopPropagation()}>
             <div className="p-2 pt-1 space-y-2">
               {filteredCategories.length === 0 && (
                 <div className="text-center text-sm text-muted-foreground py-6">
@@ -345,7 +387,7 @@ export function IconPicker({
                 </div>
               ))}
             </div>
-          </ScrollArea>
+          </div>
           {/* Color picker */}
           <div className="border-t p-2 space-y-1.5">
             <div className="text-[11px] font-medium text-muted-foreground px-0.5">

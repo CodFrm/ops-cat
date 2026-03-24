@@ -1,10 +1,11 @@
 import { useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Key, Loader2, Send, ChevronRight } from "lucide-react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useQueryStore } from "@/stores/queryStore";
+import { useQueryStore, RedisKeyInfo } from "@/stores/queryStore";
 import { ExecuteRedis } from "../../../wailsjs/go/main/App";
 
 interface RedisKeyDetailProps {
@@ -24,6 +25,8 @@ const TYPE_COLORS: Record<string, string> = {
   zset: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
 };
 
+const VALUE_ROW_HEIGHT = 30;
+
 function formatResult(parsed: RedisResult): string {
   if (parsed.type === "nil") return "(nil)";
   if (parsed.type === "string" || parsed.type === "integer") {
@@ -40,6 +43,153 @@ function formatResult(parsed: RedisResult): string {
       .join("\n");
   }
   return JSON.stringify(parsed.value, null, 2);
+}
+
+function getItemCount(info: RedisKeyInfo): number {
+  switch (info.type) {
+    case "hash":
+      return ((info.value as [string, string][]) || []).length;
+    case "list":
+    case "set":
+      return ((info.value as string[]) || []).length;
+    case "zset":
+      return ((info.value as [string, string][]) || []).length;
+    default:
+      return 0;
+  }
+}
+
+function CollectionTable({ info, tabId, t }: {
+  info: RedisKeyInfo;
+  tabId: string;
+  t: (key: string, opts?: Record<string, unknown>) => string;
+}) {
+  const { loadMoreValues } = useQueryStore();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const itemCount = getItemCount(info);
+
+  const virtualizer = useVirtualizer({
+    count: itemCount,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => VALUE_ROW_HEIGHT,
+    overscan: 20,
+  });
+
+  const totalLabel = info.total >= 0
+    ? t("query.loadedOfTotal", { loaded: itemCount, total: info.total })
+    : `${itemCount}`;
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* Table header */}
+      <div className="flex items-center border-b text-xs">
+        {info.type === "hash" && (
+          <>
+            <div className="w-1/3 shrink-0 px-2 py-1.5 font-medium text-muted-foreground">
+              {t("query.field")}
+            </div>
+            <div className="flex-1 px-2 py-1.5 font-medium text-muted-foreground">
+              {t("query.value")}
+            </div>
+          </>
+        )}
+        {info.type === "list" && (
+          <>
+            <div className="w-16 shrink-0 px-2 py-1.5 font-medium text-muted-foreground">
+              {t("query.index")}
+            </div>
+            <div className="flex-1 px-2 py-1.5 font-medium text-muted-foreground">
+              {t("query.value")}
+            </div>
+          </>
+        )}
+        {info.type === "set" && (
+          <div className="flex-1 px-2 py-1.5 font-medium text-muted-foreground">
+            {t("query.member")}
+          </div>
+        )}
+        {info.type === "zset" && (
+          <>
+            <div className="w-24 shrink-0 px-2 py-1.5 font-medium text-muted-foreground">
+              {t("query.score")}
+            </div>
+            <div className="flex-1 px-2 py-1.5 font-medium text-muted-foreground">
+              {t("query.member")}
+            </div>
+          </>
+        )}
+        <div className="shrink-0 px-2 py-1.5 text-xs text-muted-foreground">
+          {totalLabel}
+        </div>
+      </div>
+
+      {/* Virtualized rows */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            const idx = virtualRow.index;
+            return (
+              <div
+                key={virtualRow.key}
+                className="absolute left-0 flex w-full items-center border-b text-xs font-mono last:border-0"
+                style={{ top: virtualRow.start, height: virtualRow.size }}
+              >
+                {info.type === "hash" && (() => {
+                  const entry = (info.value as [string, string][])[idx];
+                  return (
+                    <>
+                      <div className="w-1/3 shrink-0 truncate px-2 text-foreground">{entry[0]}</div>
+                      <div className="flex-1 truncate px-2 text-foreground">{entry[1]}</div>
+                    </>
+                  );
+                })()}
+                {info.type === "list" && (
+                  <>
+                    <div className="w-16 shrink-0 px-2 text-muted-foreground">{idx}</div>
+                    <div className="flex-1 truncate px-2 text-foreground">
+                      {(info.value as string[])[idx]}
+                    </div>
+                  </>
+                )}
+                {info.type === "set" && (
+                  <div className="flex-1 truncate px-2 text-foreground">
+                    {(info.value as string[])[idx]}
+                  </div>
+                )}
+                {info.type === "zset" && (() => {
+                  const pair = (info.value as [string, string][])[idx];
+                  return (
+                    <>
+                      <div className="w-24 shrink-0 px-2 text-muted-foreground">{pair[1]}</div>
+                      <div className="flex-1 truncate px-2 text-foreground">{pair[0]}</div>
+                    </>
+                  );
+                })()}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Load more values */}
+      {info.hasMoreValues && (
+        <div className="border-t px-2 py-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-full text-xs"
+            onClick={() => loadMoreValues(tabId)}
+            disabled={info.loadingMore}
+          >
+            {info.loadingMore ? (
+              <Loader2 className="mr-1 size-3 animate-spin" />
+            ) : null}
+            {t("query.loadMore")}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
@@ -63,7 +213,6 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
     setCmdResult(null);
     setCmdError(null);
 
-    // Add to history
     setHistory((prev) => {
       const next = [command, ...prev.filter((c) => c !== command)].slice(0, 20);
       return next;
@@ -134,7 +283,8 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
     );
   }
 
-  const { type, ttl, value } = state.keyInfo;
+  const { type, ttl } = state.keyInfo;
+  const isCollection = type === "hash" || type === "list" || type === "set" || type === "zset";
 
   const ttlDisplay =
     ttl === -1
@@ -160,9 +310,19 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
       </div>
 
       {/* Value display */}
-      <ScrollArea className="flex-1">
-        <div className="p-3">{renderValue(type, value, t)}</div>
-      </ScrollArea>
+      {isCollection ? (
+        <div className="min-h-0 flex-1">
+          <CollectionTable info={state.keyInfo} tabId={tabId} t={t} />
+        </div>
+      ) : (
+        <ScrollArea className="flex-1">
+          <div className="p-3">
+            <pre className="whitespace-pre-wrap break-all rounded border bg-muted/50 p-3 font-mono text-xs">
+              {String(state.keyInfo.value)}
+            </pre>
+          </div>
+        </ScrollArea>
+      )}
 
       {/* Command input */}
       <div className="border-t">
@@ -211,147 +371,4 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
       </div>
     </div>
   );
-}
-
-function renderValue(
-  type: string,
-  value: unknown,
-  t: (key: string) => string
-) {
-  switch (type) {
-    case "string":
-      return (
-        <pre className="whitespace-pre-wrap break-all rounded border bg-muted/50 p-3 font-mono text-xs">
-          {String(value)}
-        </pre>
-      );
-
-    case "hash": {
-      const entries = Object.entries(
-        (value as Record<string, string>) || {}
-      );
-      return (
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b text-left">
-              <th className="px-2 py-1.5 font-medium text-muted-foreground">
-                {t("query.field")}
-              </th>
-              <th className="px-2 py-1.5 font-medium text-muted-foreground">
-                {t("query.value")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map(([field, val]) => (
-              <tr key={field} className="border-b last:border-0">
-                <td className="px-2 py-1.5 font-mono text-foreground">
-                  {field}
-                </td>
-                <td className="px-2 py-1.5 font-mono break-all text-foreground">
-                  {val}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      );
-    }
-
-    case "list": {
-      const items = (value as string[]) || [];
-      return (
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b text-left">
-              <th className="w-16 px-2 py-1.5 font-medium text-muted-foreground">
-                {t("query.index")}
-              </th>
-              <th className="px-2 py-1.5 font-medium text-muted-foreground">
-                {t("query.value")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item, idx) => (
-              <tr key={idx} className="border-b last:border-0">
-                <td className="px-2 py-1.5 font-mono text-muted-foreground">
-                  {idx}
-                </td>
-                <td className="px-2 py-1.5 font-mono break-all text-foreground">
-                  {item}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      );
-    }
-
-    case "set": {
-      const members = (value as string[]) || [];
-      return (
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b text-left">
-              <th className="px-2 py-1.5 font-medium text-muted-foreground">
-                {t("query.member")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {members.map((member, idx) => (
-              <tr key={idx} className="border-b last:border-0">
-                <td className="px-2 py-1.5 font-mono break-all text-foreground">
-                  {member}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      );
-    }
-
-    case "zset": {
-      // ZRANGE ... WITHSCORES returns [member, score, member, score, ...]
-      const raw = (value as string[]) || [];
-      const pairs: { member: string; score: string }[] = [];
-      for (let i = 0; i < raw.length; i += 2) {
-        pairs.push({ member: raw[i], score: raw[i + 1] || "0" });
-      }
-      return (
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b text-left">
-              <th className="px-2 py-1.5 font-medium text-muted-foreground">
-                {t("query.score")}
-              </th>
-              <th className="px-2 py-1.5 font-medium text-muted-foreground">
-                {t("query.member")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {pairs.map((pair, idx) => (
-              <tr key={idx} className="border-b last:border-0">
-                <td className="w-24 px-2 py-1.5 font-mono text-muted-foreground">
-                  {pair.score}
-                </td>
-                <td className="px-2 py-1.5 font-mono break-all text-foreground">
-                  {pair.member}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      );
-    }
-
-    default:
-      return (
-        <pre className="whitespace-pre-wrap break-all rounded border bg-muted/50 p-3 font-mono text-xs">
-          {JSON.stringify(value, null, 2)}
-        </pre>
-      );
-  }
 }

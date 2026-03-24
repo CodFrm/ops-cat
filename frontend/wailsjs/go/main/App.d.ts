@@ -43,15 +43,17 @@ export function DeleteForwardConfig(arg1:number):Promise<void>;
 
 export function DeleteGroup(arg1:number,arg2:boolean):Promise<void>;
 
-export function DetectClaudeSkill():Promise<main.SkillInfo>;
-
 export function DetectLocalCLIs():Promise<Array<ai.CLIInfo>>;
 
 export function DetectOpsctl():Promise<main.OpsctlInfo>;
 
+export function DetectSkills():Promise<Array<main.SkillTarget>>;
+
 export function DisconnectSSH(arg1:string):Promise<void>;
 
 export function DownloadAndInstallUpdate():Promise<void>;
+
+export function EncryptPassword(arg1:string):Promise<string>;
 
 export function ExecuteImportFile(arg1:string,arg2:string):Promise<void>;
 
@@ -83,8 +85,6 @@ export function GetGitHubUser(arg1:string):Promise<backup_svc.GitHubUser>;
 
 export function GetGroup(arg1:number):Promise<group_entity.Group>;
 
-export function GetInitContext(arg1:number,arg2:number):Promise<string>;
-
 export function GetLanguage():Promise<string>;
 
 export function GetOpsctlInstallDir():Promise<string>;
@@ -105,9 +105,9 @@ export function ImportSSHKeyPEM(arg1:string,arg2:string,arg3:string):Promise<cre
 
 export function ImportTabbySelected(arg1:Array<number>,arg2:string,arg3:boolean):Promise<import_svc.ImportResult>;
 
-export function InstallClaudeSkill():Promise<string>;
-
 export function InstallOpsctl(arg1:string):Promise<string>;
+
+export function InstallSkills():Promise<void>;
 
 export function ListAssets(arg1:string,arg2:number):Promise<Array<asset_entity.Asset>>;
 
@@ -126,8 +126,6 @@ export function ListForwardConfigs():Promise<Array<main.ForwardConfigWithStatus>
 export function ListGroups():Promise<Array<group_entity.Group>>;
 
 export function ListLocalSSHKeys():Promise<Array<main.LocalSSHKeyInfo>>;
-
-export function LoadCredential(arg1:string):Promise<string>;
 
 export function MoveAsset(arg1:number,arg2:string):Promise<void>;
 
@@ -172,8 +170,6 @@ export function SFTPUploadDir(arg1:string,arg2:string):Promise<string>;
 export function SFTPUploadFile(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function SaveConversationMessages(arg1:number,arg2:Array<main.ConversationDisplayMessage>):Promise<void>;
-
-export function SaveCredential(arg1:string):Promise<string>;
 
 export function SelectImportFile():Promise<main.ImportFileInfo>;
 

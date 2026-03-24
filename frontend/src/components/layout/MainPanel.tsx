@@ -1,6 +1,8 @@
 import { createContext, useContext, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { X, Cat, Settings, KeyRound, MessageSquare, ScrollText, ArrowRightLeft, Server, Folder } from "lucide-react";
+import { X, Settings, KeyRound, MessageSquare, ScrollText, ArrowRightLeft, Server, Folder } from "lucide-react";
+import logoLight from "@/assets/images/logo.png";
+import logoDark from "@/assets/images/logo-dark.png";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { AssetDetail } from "@/components/asset/AssetDetail";
 import { GroupDetail } from "@/components/asset/GroupDetail";
@@ -510,7 +512,8 @@ export function MainPanel({
             <div className="flex items-center justify-center h-full bg-gradient-to-br from-background via-background to-primary/5">
               <div className="text-center space-y-4">
                 <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-                  <Cat className="h-8 w-8 text-primary" />
+                  <img src={logoLight} alt="ops-cat" className="h-10 w-10 rounded-lg dark:hidden" />
+                  <img src={logoDark} alt="ops-cat" className="h-10 w-10 rounded-lg hidden dark:block" />
                 </div>
                 <div className="space-y-1">
                   <h2 className="text-2xl font-semibold tracking-tight">

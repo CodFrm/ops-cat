@@ -27,8 +27,7 @@ import { GroupSelect } from "@/components/asset/GroupSelect";
 import { useAssetStore } from "@/stores/assetStore";
 import { asset_entity, credential_entity } from "../../../wailsjs/go/models";
 import {
-  SaveCredential,
-  LoadCredential,
+  EncryptPassword,
   ListCredentialsByType,
   ListLocalSSHKeys,
   SelectSSHKeyFile,
@@ -83,7 +82,6 @@ interface RedisConfig {
   port: number;
   username?: string;
   password?: string;
-  database?: number;
   tls?: boolean;
   ssh_asset_id?: number;
 }
@@ -149,6 +147,7 @@ export function AssetForm({
   const [proxyPort, setProxyPort] = useState(1080);
   const [proxyUsername, setProxyUsername] = useState("");
   const [proxyPassword, setProxyPassword] = useState("");
+  const [encryptedProxyPassword, setEncryptedProxyPassword] = useState("");
 
   // Database fields
   const [driver, setDriver] = useState("mysql");
@@ -159,7 +158,6 @@ export function AssetForm({
   const [params, setParams] = useState("");
 
   // Redis fields
-  const [redisDatabase, setRedisDatabase] = useState(0);
   const [tls, setTls] = useState(false);
   const [redisSshAssetId, setRedisSshAssetId] = useState(0);
 
@@ -219,13 +217,7 @@ export function AssetForm({
       setAuthType(cfg.auth_type || "password");
 
       setEncryptedPassword(cfg.password || "");
-      if (cfg.password) {
-        LoadCredential(cfg.password)
-          .then((p) => setPassword(p))
-          .catch(() => setPassword(""));
-      } else {
-        setPassword("");
-      }
+      setPassword("");
       // 向后兼容：如果有 private_keys 字段则是文件模式，否则是托管模式
       setKeySource(cfg.private_keys && cfg.private_keys.length > 0 ? "file" : "managed");
       setCredentialId(cfg.credential_id || 0);
@@ -245,7 +237,8 @@ export function AssetForm({
         setProxyHost(cfg.proxy.host || "");
         setProxyPort(cfg.proxy.port || 1080);
         setProxyUsername(cfg.proxy.username || "");
-        setProxyPassword(cfg.proxy.password || "");
+        setEncryptedProxyPassword(cfg.proxy.password || "");
+        setProxyPassword("");
       } else {
         resetProxyFields();
       }
@@ -268,13 +261,7 @@ export function AssetForm({
       setParams(cfg.params || "");
 
       setEncryptedPassword(cfg.password || "");
-      if (cfg.password) {
-        LoadCredential(cfg.password)
-          .then((p) => setPassword(p))
-          .catch(() => setPassword(""));
-      } else {
-        setPassword("");
-      }
+      setPassword("");
     } catch {
       resetDatabaseFields();
     }
@@ -286,18 +273,11 @@ export function AssetForm({
       setHost(cfg.host || "");
       setPort(cfg.port || 6379);
       setUsername(cfg.username || "");
-      setRedisDatabase(cfg.database || 0);
       setTls(cfg.tls || false);
       setRedisSshAssetId(cfg.ssh_asset_id || 0);
 
       setEncryptedPassword(cfg.password || "");
-      if (cfg.password) {
-        LoadCredential(cfg.password)
-          .then((p) => setPassword(p))
-          .catch(() => setPassword(""));
-      } else {
-        setPassword("");
-      }
+      setPassword("");
     } catch {
       resetRedisFields();
     }
@@ -309,6 +289,7 @@ export function AssetForm({
     setProxyPort(1080);
     setProxyUsername("");
     setProxyPassword("");
+    setEncryptedProxyPassword("");
   };
 
   const resetSSHFields = () => {
@@ -349,7 +330,6 @@ export function AssetForm({
     setPassword("");
     setShowPassword(false);
     setEncryptedPassword("");
-    setRedisDatabase(0);
     setTls(false);
     setRedisSshAssetId(0);
   };
@@ -396,6 +376,10 @@ export function AssetForm({
       if (keySource === "managed" && credentialId > 0) sshConfig.credential_id = credentialId;
       if (keySource === "file" && selectedKeyPaths.length > 0) sshConfig.private_keys = selectedKeyPaths;
     }
+    // 没有输入新密码时，传入已保存的加密密码供后端解密
+    if (!password && encryptedPassword) {
+      sshConfig.password = encryptedPassword;
+    }
     if (connectionType === "jumphost" && jumpHostId > 0) sshConfig.jump_host_id = jumpHostId;
     if (connectionType === "proxy" && proxyHost) {
       sshConfig.proxy = { type: proxyType, host: proxyHost, port: proxyPort, username: proxyUsername || undefined, password: proxyPassword || undefined };
@@ -418,6 +402,8 @@ export function AssetForm({
     if (readOnly) cfg.read_only = true;
     if (dbSshAssetId > 0) cfg.ssh_asset_id = dbSshAssetId;
     if (params) cfg.params = params;
+    // 没有输入新密码时，传入已保存的加密密码供后端解密
+    if (!password && encryptedPassword) cfg.password = encryptedPassword;
     setTesting(true);
     try {
       await TestDatabaseConnection(JSON.stringify(cfg), password);
@@ -432,9 +418,10 @@ export function AssetForm({
   const handleTestRedisConnection = async () => {
     const cfg: RedisConfig = { host, port };
     if (username) cfg.username = username;
-    if (redisDatabase > 0) cfg.database = redisDatabase;
     if (tls) cfg.tls = true;
     if (redisSshAssetId > 0) cfg.ssh_asset_id = redisSshAssetId;
+    // 没有输入新密码时，传入已保存的加密密码供后端解密
+    if (!password && encryptedPassword) cfg.password = encryptedPassword;
     setTesting(true);
     try {
       await TestRedisConnection(JSON.stringify(cfg), password);
@@ -449,7 +436,7 @@ export function AssetForm({
   const encryptPassword = async (): Promise<string | undefined> => {
     if (password) {
       try {
-        return await SaveCredential(password);
+        return await EncryptPassword(password);
       } catch {
         toast.error("Failed to encrypt password");
         return undefined;
@@ -458,6 +445,19 @@ export function AssetForm({
     // Keep existing encrypted password if user didn't change it
     if (encryptedPassword) return encryptedPassword;
     return "";
+  };
+
+  const encryptProxyPassword = async (): Promise<string | undefined> => {
+    if (proxyPassword) {
+      try {
+        return await EncryptPassword(proxyPassword);
+      } catch {
+        toast.error("Failed to encrypt proxy password");
+        return undefined;
+      }
+    }
+    if (encryptedProxyPassword) return encryptedProxyPassword;
+    return undefined;
   };
 
   const handleSubmit = async () => {
@@ -484,12 +484,13 @@ export function AssetForm({
 
       if (connectionType === "jumphost" && jumpHostId > 0) sshConfig.jump_host_id = jumpHostId;
       if (connectionType === "proxy" && proxyHost) {
+        const encProxy = await encryptProxyPassword();
         sshConfig.proxy = {
           type: proxyType,
           host: proxyHost,
           port: proxyPort,
           username: proxyUsername || undefined,
-          password: proxyPassword || undefined,
+          password: encProxy || undefined,
         };
       }
       config = JSON.stringify(sshConfig);
@@ -518,7 +519,6 @@ export function AssetForm({
       };
       if (username) redisConfig.username = username;
       if (encrypted) redisConfig.password = encrypted;
-      if (redisDatabase > 0) redisConfig.database = redisDatabase;
       if (tls) redisConfig.tls = true;
       if (redisSshAssetId > 0) redisConfig.ssh_asset_id = redisSshAssetId;
       config = JSON.stringify(redisConfig);
@@ -730,6 +730,7 @@ export function AssetForm({
                     type="password"
                     value={proxyPassword}
                     onChange={(e) => setProxyPassword(e.target.value)}
+                    placeholder={encryptedProxyPassword ? t("asset.passwordUnchanged") : ""}
                   />
                 </div>
               </div>
@@ -784,7 +785,7 @@ export function AssetForm({
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder={t("asset.passwordPlaceholder")}
+                  placeholder={encryptedPassword ? t("asset.passwordUnchanged") : t("asset.passwordPlaceholder")}
                   className="pr-9"
                 />
                 <Button
@@ -813,6 +814,7 @@ export function AssetForm({
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  placeholder={encryptedPassword ? t("asset.passwordUnchanged") : ""}
                   className="pr-9"
                 />
                 <Button
@@ -1031,16 +1033,6 @@ export function AssetForm({
           {/* Redis: extra fields */}
           {assetType === "redis" && (
             <>
-              <div className="grid gap-2">
-                <Label>{t("asset.redisDatabase")}</Label>
-                <Input
-                  type="number"
-                  value={redisDatabase}
-                  onChange={(e) => setRedisDatabase(Number(e.target.value))}
-                  className="[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                />
-              </div>
-
               <div className="flex items-center justify-between">
                 <Label>{t("asset.tls")}</Label>
                 <Switch checked={tls} onCheckedChange={setTls} />

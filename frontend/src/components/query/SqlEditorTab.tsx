@@ -15,6 +15,7 @@ import { QueryResultTable } from "./QueryResultTable";
 
 interface SqlEditorTabProps {
   tabId: string;
+  innerTabId: string;
 }
 
 interface SQLResult {
@@ -24,9 +25,9 @@ interface SQLResult {
   affected_rows?: number;
 }
 
-export function SqlEditorTab({ tabId }: SqlEditorTabProps) {
+export function SqlEditorTab({ tabId, innerTabId }: SqlEditorTabProps) {
   const { t } = useTranslation();
-  const { openTabs, dbStates } = useQueryStore();
+  const { openTabs, dbStates, updateInnerTab } = useQueryStore();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const queryTab = openTabs.find((tab) => tab.id === tabId);
@@ -34,9 +35,14 @@ export function SqlEditorTab({ tabId }: SqlEditorTabProps) {
   const assetId = queryTab?.assetId ?? 0;
   const databases = dbState?.databases || [];
 
-  const [sql, setSql] = useState("");
+  // Restore persisted state from store
+  const innerTab = dbState?.innerTabs.find((t) => t.id === innerTabId);
+  const persistedSql = innerTab?.type === "sql" ? innerTab.sql : undefined;
+  const persistedDb = innerTab?.type === "sql" ? innerTab.selectedDb : undefined;
+
+  const [sql, setSql] = useState(persistedSql || "");
   const [selectedDb, setSelectedDb] = useState(
-    queryTab?.defaultDatabase || ""
+    persistedDb || queryTab?.defaultDatabase || ""
   );
   const [columns, setColumns] = useState<string[]>([]);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
@@ -50,6 +56,15 @@ export function SqlEditorTab({ tabId }: SqlEditorTabProps) {
       setSelectedDb(queryTab?.defaultDatabase || databases[0]);
     }
   }, [databases, selectedDb, queryTab?.defaultDatabase]);
+
+  // Persist sql and selectedDb to store
+  useEffect(() => {
+    updateInnerTab(tabId, innerTabId, { sql });
+  }, [sql, tabId, innerTabId, updateInnerTab]);
+
+  useEffect(() => {
+    updateInnerTab(tabId, innerTabId, { selectedDb });
+  }, [selectedDb, tabId, innerTabId, updateInnerTab]);
 
   const execute = useCallback(async () => {
     const trimmed = sql.trim();

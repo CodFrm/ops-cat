@@ -20,7 +20,7 @@ import { useAIStore } from "@/stores/aiStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { asset_entity, group_entity } from "../wailsjs/go/models";
-import { WindowToggleMaximise } from "../wailsjs/runtime/runtime";
+import { EventsOn, WindowToggleMaximise } from "../wailsjs/runtime/runtime";
 
 const AI_TAB_PREFIX = "ai:";
 const QUERY_TAB_PREFIX = "query:";
@@ -91,6 +91,14 @@ function App() {
 
   const handleOpenConversation = useCallback((tabId: string) => {
     setActivePageTab(AI_TAB_PREFIX + tabId);
+  }, []);
+
+  // 监听外部数据变更（opsctl 等），自动刷新 UI
+  useEffect(() => {
+    const cancel = EventsOn("data:changed", () => {
+      useAssetStore.getState().refresh();
+    });
+    return () => { cancel(); };
   }, []);
 
   // 双击拖拽区域最大化/还原窗口

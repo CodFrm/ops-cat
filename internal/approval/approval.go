@@ -152,6 +152,15 @@ func (s *Server) handleConn(conn net.Conn) {
 
 // --- Client ---
 
+// SendNotification sends a data-change notification to the desktop app (fire-and-forget).
+// resource indicates what changed, e.g. "asset".
+func SendNotification(socketPath string, resource string) {
+	_, _ = RequestApproval(socketPath, ApprovalRequest{
+		Type:   "notify",
+		Detail: resource,
+	})
+}
+
 // RequestApproval connects to the Unix socket and sends an approval request.
 // Blocks until a response is received.
 func RequestApproval(socketPath string, req ApprovalRequest) (ApprovalResponse, error) {
