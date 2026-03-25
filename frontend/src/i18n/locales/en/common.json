@@ -608,7 +608,8 @@
     "skillUpdateFailed": "Skill update failed: {{error}}",
     "restartNow": "Restart Now",
     "restartLater": "Later",
-    "viewRelease": "View Release"
+    "viewRelease": "View Release",
+    "autoUpdateFound": "New version {{version}} available. Update in Settings."
   },
   "opsctlApproval": {
     "title": "CLI Operation Approval",

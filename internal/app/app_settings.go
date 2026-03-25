@@ -647,6 +647,38 @@ func (a *App) ListAuditSessions(startTime int64) ([]audit_repo.SessionInfo, erro
 
 // --- 更新 ---
 
+// startAutoUpdateCheck 启动时自动检查更新（每天一次）
+func (a *App) startAutoUpdateCheck() {
+	go func() {
+		// 延迟 5 秒，等前端就绪
+		time.Sleep(5 * time.Second)
+
+		cfg := bootstrap.GetConfig()
+		if cfg == nil {
+			return
+		}
+		now := time.Now().Unix()
+		if now-cfg.LastUpdateCheck < 86400 {
+			return
+		}
+
+		info, err := update_svc.CheckForUpdate(a.GetUpdateChannel())
+		if err != nil {
+			logger.Default().Warn("auto check update failed", zap.Error(err))
+			return
+		}
+
+		cfg.LastUpdateCheck = now
+		if err := bootstrap.SaveConfig(cfg); err != nil {
+			logger.Default().Warn("save last update check time", zap.Error(err))
+		}
+
+		if info.HasUpdate {
+			wailsRuntime.EventsEmit(a.ctx, "update:available", info)
+		}
+	}()
+}
+
 // GetAppVersion 返回当前应用版本
 func (a *App) GetAppVersion() string {
 	return configs.Version

@@ -17,6 +17,7 @@ type AppConfig struct {
 	AIModel        string `json:"ai_model,omitempty"`         // 模型名或 CLI 类型
 	GitHubToken    string `json:"github_token,omitempty"`     // 加密后的 GitHub token
 	GitHubUser     string `json:"github_user,omitempty"`      // GitHub 用户名（非敏感）
+	LastUpdateCheck int64 `json:"last_update_check,omitempty"` // 上次自动检查更新的 Unix 时间戳
 }
 
 var (

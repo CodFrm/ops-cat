@@ -18,12 +18,12 @@ func HasEmbeddedOpsctl() bool {
 // DefaultInstallDir 返回默认安装目录
 func DefaultInstallDir() string {
 	if runtime.GOOS == "windows" {
-		localAppData := os.Getenv("LOCALAPPDATA")
-		if localAppData == "" {
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
 			home, _ := os.UserHomeDir()
-			localAppData = filepath.Join(home, "AppData", "Local")
+			appData = filepath.Join(home, "AppData", "Roaming")
 		}
-		return filepath.Join(localAppData, "opsctl")
+		return filepath.Join(appData, "opskat", "bin")
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "bin")

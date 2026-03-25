@@ -28,10 +28,13 @@ jobs:
             goos: linux
             goarch: amd64
             platform: linux-amd64
+            webkit_pkg: libwebkit2gtk-4.0-dev
           - os: ubuntu-24.04-arm
             goos: linux
             goarch: arm64
             platform: linux-arm64
+            webkit_pkg: libwebkit2gtk-4.1-dev
+            extra_tags: ",webkit2_41"
           - os: windows-latest
             goos: windows
             goarch: amd64
@@ -77,7 +80,7 @@ jobs:
 
       - name: Install Linux dependencies
         if: matrix.goos == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev ${{ matrix.webkit_pkg || 'libwebkit2gtk-4.0-dev' }}
 
       - name: Install NSIS
         if: matrix.goos == 'windows'
@@ -94,7 +97,7 @@ jobs:
 
       - name: Build desktop app
         if: matrix.goos != 'windows'
-        run: wails build -platform ${{ matrix.goos }}/${{ matrix.goarch }} -ldflags="-s -w -X github.com/cago-frame/cago/configs.Version=${{ env.VERSION }}" -tags embed_opsctl
+        run: wails build -platform ${{ matrix.goos }}/${{ matrix.goarch }} -ldflags="-s -w -X github.com/cago-frame/cago/configs.Version=${{ env.VERSION }}" -tags "embed_opsctl${{ matrix.extra_tags }}"
 
       - name: Build desktop app (Windows)
         if: matrix.goos == 'windows'

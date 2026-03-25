@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
@@ -24,6 +25,8 @@ import { asset_entity, group_entity } from "../wailsjs/go/models";
 import { EventsOn, WindowToggleMaximise } from "../wailsjs/runtime/runtime";
 
 function App() {
+  const { t } = useTranslation();
+
   // 监听外部数据变更（opsctl 等），自动刷新 UI
   useEffect(() => {
     const cancel = EventsOn("data:changed", () => {
@@ -33,6 +36,16 @@ function App() {
       cancel();
     };
   }, []);
+
+  // 监听自动更新检查结果
+  useEffect(() => {
+    const cancel = EventsOn("update:available", (info: { latestVersion: string }) => {
+      toast.info(t("appUpdate.autoUpdateFound", { version: info.latestVersion }));
+    });
+    return () => {
+      cancel();
+    };
+  }, [t]);
 
   // 双击拖拽区域最大化/还原窗口
   useEffect(() => {

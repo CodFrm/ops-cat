@@ -107,6 +107,7 @@ func (a *App) Startup(ctx context.Context) {
 
 	a.startApprovalServer(authToken)
 	a.startSSHPoolServer(authToken)
+	a.startAutoUpdateCheck()
 }
 
 // Cleanup 关闭审批服务等资源

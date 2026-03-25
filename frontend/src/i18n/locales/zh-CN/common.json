@@ -608,7 +608,8 @@
     "skillUpdateFailed": "Skill 更新失败: {{error}}",
     "restartNow": "立即重启",
     "restartLater": "稍后重启",
-    "viewRelease": "查看发布页"
+    "viewRelease": "查看发布页",
+    "autoUpdateFound": "发现新版本 {{version}}，可在设置中更新"
   },
   "opsctlApproval": {
     "title": "CLI 操作审批",
