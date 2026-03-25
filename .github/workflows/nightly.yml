@@ -116,26 +116,53 @@ jobs:
         run: go build -ldflags="-s -w -X github.com/cago-frame/cago/configs.Version=${{ env.VERSION }}" -o ./internal/embedded/opsctl_bin ./cmd/opsctl/
 
       - name: Build desktop app
-        run: wails build -platform ${{ matrix.goos }}/${{ matrix.goarch }} -ldflags="-s -w -X github.com/cago-frame/cago/configs.Version=${{ env.VERSION }}" -tags embed_opsctl
+        run: wails build -platform ${{ matrix.goos }}/${{ matrix.goarch }} -ldflags="-s -w -X github.com/cago-frame/cago/configs.Version=${{ env.VERSION }}" -tags embed_opsctl ${{ matrix.goos == 'windows' && '-nsis' || '' }}
 
-      - name: Package (Unix)
-        if: matrix.goos != 'windows'
+      - name: Package (macOS dmg)
+        if: matrix.goos == 'darwin'
         run: |
-          if [ "${{ matrix.goos }}" = "darwin" ]; then
-            tar -czf opskat-${{ matrix.platform }}.tar.gz -C build/bin opskat.app
-          else
-            tar -czf opskat-${{ matrix.platform }}.tar.gz -C build/bin opskat
-          fi
+          hdiutil create -volname "Opskat" -srcfolder build/bin/opskat.app -ov -format UDZO opskat-${{ matrix.platform }}.dmg
 
-      - name: Package (Windows)
+      - name: Package (Linux deb)
+        if: matrix.goos == 'linux'
+        run: |
+          PKG_ROOT=pkg-deb
+          mkdir -p ${PKG_ROOT}/DEBIAN
+          mkdir -p ${PKG_ROOT}/usr/bin
+          mkdir -p ${PKG_ROOT}/usr/share/applications
+          mkdir -p ${PKG_ROOT}/usr/share/icons/hicolor/256x256/apps
+          cp build/bin/opskat ${PKG_ROOT}/usr/bin/opskat
+          cp build/appicon.png ${PKG_ROOT}/usr/share/icons/hicolor/256x256/apps/opskat.png
+          cat > ${PKG_ROOT}/DEBIAN/control << CTRL
+          Package: opskat
+          Version: ${VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: opskat
+          Description: Opskat desktop application
+          CTRL
+          sed -i 's/^          //' ${PKG_ROOT}/DEBIAN/control
+          cat > ${PKG_ROOT}/usr/share/applications/opskat.desktop << DESK
+          [Desktop Entry]
+          Name=Opskat
+          Exec=/usr/bin/opskat
+          Icon=opskat
+          Type=Application
+          Categories=Utility;
+          DESK
+          sed -i 's/^          //' ${PKG_ROOT}/usr/share/applications/opskat.desktop
+          dpkg-deb --build ${PKG_ROOT} opskat-${{ matrix.platform }}.deb
+
+      - name: Package (Windows installer)
         if: matrix.goos == 'windows'
         shell: pwsh
-        run: Compress-Archive -Path build/bin/opskat.exe -DestinationPath opskat-${{ matrix.platform }}.zip
+        run: Move-Item -Path "build\bin\opskat-amd64-installer.exe" -Destination "opskat-${{ matrix.platform }}-installer.exe"
 
       - uses: actions/upload-artifact@v7
         with:
           name: nightly-opskat-${{ matrix.platform }}
-          path: opskat-${{ matrix.platform }}.*
+          path: opskat-${{ matrix.platform }}*
 
   release:
     name: Update Nightly Release
