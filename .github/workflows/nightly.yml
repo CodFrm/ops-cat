@@ -35,7 +35,7 @@ jobs:
   prepare:
     name: Prepare version
     needs: [sync]
-    if: always() && (needs.sync.result == 'success' || needs.sync.result == 'skipped')
+    if: ${{ always() && !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.ver.outputs.version }}
