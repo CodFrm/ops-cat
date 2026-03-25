@@ -91,10 +91,18 @@ jobs:
             goos: linux
             goarch: amd64
             platform: linux-amd64
+          - os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            platform: linux-arm64
           - os: windows-latest
             goos: windows
             goarch: amd64
             platform: windows-amd64
+          - os: windows-latest
+            goos: windows
+            goarch: arm64
+            platform: windows-arm64
     steps:
       - uses: actions/checkout@v6
         with:
@@ -155,7 +163,7 @@ jobs:
 
       - name: Build desktop app (Windows)
         if: matrix.goos == 'windows'
-        run: wails build -nsis -ldflags="-s -w -X github.com/cago-frame/cago/configs.Version=${{ env.VERSION }}" -tags embed_opsctl
+        run: wails build -nsis -platform ${{ matrix.goos }}/${{ matrix.goarch }} -ldflags="-s -w -X github.com/cago-frame/cago/configs.Version=${{ env.VERSION }}" -tags embed_opsctl
 
       - name: Import Apple certificate
         if: matrix.goos == 'darwin'
@@ -230,7 +238,7 @@ jobs:
           Version: $(echo "${VERSION#v}" | tr '-' '~')
           Section: utils
           Priority: optional
-          Architecture: amd64
+          Architecture: ${{ matrix.goarch }}
           Maintainer: opskat
           Description: Opskat desktop application
           CTRL
@@ -249,7 +257,7 @@ jobs:
       - name: Package (Windows installer)
         if: matrix.goos == 'windows'
         shell: pwsh
-        run: Move-Item "build\bin\opskat-amd64-installer.exe" "opskat-$($env:VERSION)-${{ matrix.platform }}-installer.exe"
+        run: Move-Item "build\bin\opskat-${{ matrix.goarch }}-installer.exe" "opskat-$($env:VERSION)-${{ matrix.platform }}-installer.exe"
 
       - uses: actions/upload-artifact@v7
         with:
