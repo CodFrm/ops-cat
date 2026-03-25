@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -167,19 +168,31 @@ func CheckForUpdate(channel string) (*UpdateInfo, error) {
 	return info, nil
 }
 
+// isNightlyVersion 判断是否为 nightly 版本
+func isNightlyVersion(version string) bool {
+	return strings.Contains(version, "nightly.") || strings.HasPrefix(version, "nightly-")
+}
+
 // hasUpdate 判断是否有更新
 func hasUpdate(channel, currentVersion, latestVersion string) bool {
 	if currentVersion == "dev" || currentVersion == "" {
 		return true
 	}
 
-	isCurrentNightly := strings.HasPrefix(currentVersion, "nightly-")
+	isCurrentNightly := isNightlyVersion(currentVersion)
 
 	if channel == ChannelNightly {
 		if !isCurrentNightly {
 			return true // 从 stable/beta 切换到 nightly
 		}
-		return currentVersion != latestVersion
+		// 旧格式 nightly-YYYYMMDD-SHA 直接字符串比较
+		if strings.HasPrefix(currentVersion, "nightly-") {
+			return currentVersion != latestVersion
+		}
+		// 新格式使用语义化版本比较
+		cv := strings.TrimPrefix(currentVersion, "v")
+		lv := strings.TrimPrefix(latestVersion, "v")
+		return compareVersions(lv, cv) > 0
 	}
 
 	// stable 或 beta 通道
@@ -189,7 +202,7 @@ func hasUpdate(channel, currentVersion, latestVersion string) bool {
 
 	cv := strings.TrimPrefix(currentVersion, "v")
 	lv := strings.TrimPrefix(latestVersion, "v")
-	return lv != cv && compareVersions(lv, cv) > 0
+	return compareVersions(lv, cv) > 0
 }
 
 // DownloadAndUpdate 下载指定通道的最新版本并替换当前二进制
@@ -205,14 +218,15 @@ func DownloadAndUpdate(channel string, onProgress func(downloaded, total int64))
 
 	// 找到当前平台的桌面端资产
 	platform := runtime.GOOS + "-" + runtime.GOARCH
-	assetName := fmt.Sprintf("opskat-%s", platform)
 
 	var downloadURL string
 	var assetSize int64
+	var assetName string
 	for _, asset := range release.Assets {
-		if strings.HasPrefix(asset.Name, assetName) {
+		if strings.Contains(asset.Name, platform) {
 			downloadURL = asset.BrowserDownloadURL
 			assetSize = asset.Size
+			assetName = asset.Name
 			break
 		}
 	}
@@ -240,8 +254,9 @@ func DownloadAndUpdate(channel string, onProgress func(downloaded, total int64))
 		assetSize = dlResp.ContentLength
 	}
 
-	// 下载到临时文件
-	tmpFile, err := os.CreateTemp("", "opskat-update-*")
+	// 下载到临时文件（保留扩展名以便后续判断格式）
+	ext := filepath.Ext(assetName)
+	tmpFile, err := os.CreateTemp("", "opskat-update-*"+ext)
 	if err != nil {
 		return fmt.Errorf("create temp file failed: %w", err)
 	}
@@ -301,9 +316,64 @@ func updateMacOS(archivePath, execPath string) error {
 		return updateLinux(archivePath, execPath)
 	}
 
-	parentDir := filepath.Dir(appDir)
+	if strings.HasSuffix(archivePath, ".dmg") {
+		return updateMacOSFromDMG(archivePath, appDir)
+	}
+	return updateMacOSFromTarGz(archivePath, appDir)
+}
 
-	// 解压 tar.gz 到临时目录
+// updateMacOSFromDMG 从 DMG 文件更新 macOS .app bundle
+func updateMacOSFromDMG(dmgPath, appDir string) error {
+	mountPoint, err := os.MkdirTemp("", "opskat-mount-*")
+	if err != nil {
+		return fmt.Errorf("create mount point failed: %w", err)
+	}
+	defer func() {
+		if err := os.RemoveAll(mountPoint); err != nil {
+			logger.Default().Warn("remove mount point", zap.String("path", mountPoint), zap.Error(err))
+		}
+	}()
+
+	// 挂载 DMG
+	if output, err := exec.Command("hdiutil", "attach", dmgPath, "-mountpoint", mountPoint, "-nobrowse", "-quiet").CombinedOutput(); err != nil {
+		return fmt.Errorf("mount DMG failed: %s: %w", string(output), err)
+	}
+	defer func() {
+		if output, err := exec.Command("hdiutil", "detach", mountPoint, "-quiet").CombinedOutput(); err != nil {
+			logger.Default().Warn("unmount DMG", zap.String("output", string(output)), zap.Error(err))
+		}
+	}()
+
+	newAppPath := filepath.Join(mountPoint, "opskat.app")
+	if _, err := os.Stat(newAppPath); err != nil {
+		return fmt.Errorf("app not found in DMG: %w", err)
+	}
+
+	// 备份旧的 .app
+	backupDir := appDir + ".backup"
+	if err := os.RemoveAll(backupDir); err != nil {
+		logger.Default().Warn("remove old backup dir", zap.String("path", backupDir), zap.Error(err))
+	}
+	if err := os.Rename(appDir, backupDir); err != nil {
+		return fmt.Errorf("backup old app failed: %w", err)
+	}
+
+	// 从挂载点复制新的 .app（跨挂载点无法 rename）
+	if output, err := exec.Command("cp", "-R", newAppPath, appDir).CombinedOutput(); err != nil {
+		if renameErr := os.Rename(backupDir, appDir); renameErr != nil {
+			logger.Default().Error("restore backup after failed install", zap.Error(renameErr))
+		}
+		return fmt.Errorf("install new app failed: %s: %w", string(output), err)
+	}
+
+	if err := os.RemoveAll(backupDir); err != nil {
+		logger.Default().Warn("remove backup dir", zap.String("path", backupDir), zap.Error(err))
+	}
+	return nil
+}
+
+// updateMacOSFromTarGz 从 tar.gz 更新 macOS .app bundle
+func updateMacOSFromTarGz(archivePath, appDir string) error {
 	tmpExtractDir, err := os.MkdirTemp("", "opskat-extract-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir failed: %w", err)
@@ -318,13 +388,11 @@ func updateMacOS(archivePath, execPath string) error {
 		return fmt.Errorf("extract failed: %w", err)
 	}
 
-	// 找到解压出的 .app 目录
 	newAppDir := filepath.Join(tmpExtractDir, "opskat.app")
 	if _, err := os.Stat(newAppDir); err != nil {
 		return fmt.Errorf("extracted app not found: %w", err)
 	}
 
-	// 备份旧的 .app
 	backupDir := appDir + ".backup"
 	if err := os.RemoveAll(backupDir); err != nil {
 		logger.Default().Warn("remove old backup dir", zap.String("path", backupDir), zap.Error(err))
@@ -333,9 +401,7 @@ func updateMacOS(archivePath, execPath string) error {
 		return fmt.Errorf("backup old app failed: %w", err)
 	}
 
-	// 移动新的 .app 到原位置
-	if err := os.Rename(newAppDir, filepath.Join(parentDir, "opskat.app")); err != nil {
-		// 恢复备份
+	if err := os.Rename(newAppDir, appDir); err != nil {
 		if renameErr := os.Rename(backupDir, appDir); renameErr != nil {
 			logger.Default().Error("restore backup after failed install", zap.Error(renameErr))
 		}
@@ -350,7 +416,38 @@ func updateMacOS(archivePath, execPath string) error {
 
 // updateLinux 更新 Linux 二进制
 func updateLinux(archivePath, execPath string) error {
-	// 解压 tar.gz
+	if strings.HasSuffix(archivePath, ".deb") {
+		return updateLinuxFromDeb(archivePath, execPath)
+	}
+	return updateLinuxFromTarGz(archivePath, execPath)
+}
+
+// updateLinuxFromDeb 从 deb 包提取二进制并替换
+func updateLinuxFromDeb(debPath, execPath string) error {
+	tmpExtractDir, err := os.MkdirTemp("", "opskat-extract-*")
+	if err != nil {
+		return fmt.Errorf("create temp dir failed: %w", err)
+	}
+	defer func() {
+		if err := os.RemoveAll(tmpExtractDir); err != nil {
+			logger.Default().Warn("remove temp extract dir", zap.String("path", tmpExtractDir), zap.Error(err))
+		}
+	}()
+
+	if output, err := exec.Command("dpkg", "-x", debPath, tmpExtractDir).CombinedOutput(); err != nil {
+		return fmt.Errorf("extract deb failed: %s: %w", string(output), err)
+	}
+
+	newBin := filepath.Join(tmpExtractDir, "usr", "bin", "opskat")
+	if _, err := os.Stat(newBin); err != nil {
+		return fmt.Errorf("extracted binary not found: %w", err)
+	}
+
+	return replaceBinary(newBin, execPath)
+}
+
+// updateLinuxFromTarGz 从 tar.gz 提取二进制并替换
+func updateLinuxFromTarGz(archivePath, execPath string) error {
 	tmpExtractDir, err := os.MkdirTemp("", "opskat-extract-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir failed: %w", err)
@@ -370,7 +467,11 @@ func updateLinux(archivePath, execPath string) error {
 		return fmt.Errorf("extracted binary not found: %w", err)
 	}
 
-	// 备份旧文件，替换新文件
+	return replaceBinary(newBin, execPath)
+}
+
+// replaceBinary 备份旧二进制并替换为新二进制
+func replaceBinary(newBin, execPath string) error {
 	backupPath := execPath + ".backup"
 	if err := os.Remove(backupPath); err != nil {
 		logger.Default().Warn("remove old backup", zap.String("path", backupPath), zap.Error(err))
@@ -394,7 +495,19 @@ func updateLinux(archivePath, execPath string) error {
 
 // updateWindows 更新 Windows 二进制
 func updateWindows(archivePath, execPath string) error {
-	// 解压 zip
+	if strings.HasSuffix(archivePath, ".exe") {
+		return updateWindowsFromInstaller(archivePath)
+	}
+	return updateWindowsFromZip(archivePath, execPath)
+}
+
+// updateWindowsFromInstaller 运行 NSIS 安装程序静默更新（通过 UAC 提权）
+func updateWindowsFromInstaller(installerPath string) error {
+	return runInstallerElevated(installerPath, "/S")
+}
+
+// updateWindowsFromZip 从 zip 提取二进制并替换
+func updateWindowsFromZip(archivePath, execPath string) error {
 	tmpExtractDir, err := os.MkdirTemp("", "opskat-extract-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir failed: %w", err)
