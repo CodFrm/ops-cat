@@ -8,8 +8,7 @@ vi.mock("../i18n", () => ({
 import { useAIStore, getAISendOnEnter, setAISendOnEnter } from "../stores/aiStore";
 import { useTabStore } from "../stores/tabStore";
 import {
-  SaveAISetting,
-  DetectLocalCLIs,
+  GetActiveAIProvider,
   ListConversations,
   DeleteConversation,
   SwitchConversation,
@@ -24,36 +23,32 @@ describe("aiStore", () => {
       tabStates: {},
       conversations: [],
       configured: false,
-      localCLIs: [],
     });
   });
 
-  describe("configure", () => {
-    it("calls SaveAISetting and sets configured=true", async () => {
-      vi.mocked(SaveAISetting).mockResolvedValue(undefined as any);
+  describe("checkConfigured", () => {
+    it("sets configured=true when active provider exists", async () => {
+      vi.mocked(GetActiveAIProvider).mockResolvedValue({ id: 1, name: "test", type: "openai" } as any);
 
-      await useAIStore.getState().configure("openai", "https://api.example.com", "sk-xxx", "gpt-4");
+      await useAIStore.getState().checkConfigured();
 
-      expect(SaveAISetting).toHaveBeenCalledWith("openai", "https://api.example.com", "sk-xxx", "gpt-4");
       expect(useAIStore.getState().configured).toBe(true);
     });
-  });
 
-  describe("detectCLIs", () => {
-    it("stores detected CLIs", async () => {
-      vi.mocked(DetectLocalCLIs).mockResolvedValue([{ name: "claude", path: "/usr/bin/claude" }] as any);
+    it("sets configured=false when no active provider", async () => {
+      vi.mocked(GetActiveAIProvider).mockResolvedValue(null as any);
 
-      await useAIStore.getState().detectCLIs();
+      await useAIStore.getState().checkConfigured();
 
-      expect(useAIStore.getState().localCLIs).toHaveLength(1);
+      expect(useAIStore.getState().configured).toBe(false);
     });
 
-    it("handles null response", async () => {
-      vi.mocked(DetectLocalCLIs).mockResolvedValue(null as any);
+    it("sets configured=false on error", async () => {
+      vi.mocked(GetActiveAIProvider).mockRejectedValue(new Error("fail"));
 
-      await useAIStore.getState().detectCLIs();
+      await useAIStore.getState().checkConfigured();
 
-      expect(useAIStore.getState().localCLIs).toEqual([]);
+      expect(useAIStore.getState().configured).toBe(false);
     });
   });
 

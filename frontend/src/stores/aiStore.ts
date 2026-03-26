@@ -2,10 +2,7 @@ import { useState, useEffect } from "react";
 import { create } from "zustand";
 import {
   SendAIMessage,
-  SaveAISetting,
-  LoadAISetting,
-  DetectLocalCLIs,
-  ResetAISession,
+  GetActiveAIProvider,
   CreateConversation,
   ListConversations,
   SwitchConversation,
@@ -133,11 +130,9 @@ interface AIState {
   // 全局状态
   conversations: conversation_entity.Conversation[];
   configured: boolean;
-  localCLIs: ai.CLIInfo[];
 
   // 配置
-  configure: (providerType: string, apiBase: string, apiKey: string, model: string) => Promise<void>;
-  detectCLIs: () => Promise<void>;
+  checkConfigured: () => Promise<void>;
 
   // 发送
   send: (content: string) => Promise<void>;
@@ -174,16 +169,14 @@ export const useAIStore = create<AIState>((set, get) => {
 
     conversations: [],
     configured: false,
-    localCLIs: [],
 
-    configure: async (providerType, apiBase, apiKey, model) => {
-      await SaveAISetting(providerType, apiBase, apiKey, model);
-      set({ configured: true });
-    },
-
-    detectCLIs: async () => {
-      const clis = await DetectLocalCLIs();
-      set({ localCLIs: clis || [] });
+    checkConfigured: async () => {
+      try {
+        const active = await GetActiveAIProvider();
+        set({ configured: active !== null && active !== undefined });
+      } catch {
+        set({ configured: false });
+      }
     },
 
     fetchConversations: async () => {
@@ -297,7 +290,6 @@ export const useAIStore = create<AIState>((set, get) => {
       if (activeTab) {
         tabStore.closeTab(activeTab.id);
       }
-      ResetAISession().catch(() => {});
     },
 
     // === 核心发送 ===
@@ -593,12 +585,15 @@ registerTabCloseHook((tab) => {
 // === Restore Hook: load AI settings and restore conversation tabs ===
 
 async function restoreAITabs(tabs: Tab[]) {
-  const info = await LoadAISetting();
-  if (!info || !info.configured) {
+  try {
+    const active = await GetActiveAIProvider();
+    if (!active) {
+      return;
+    }
+    useAIStore.setState({ configured: true });
+  } catch {
     return;
   }
-
-  useAIStore.setState({ configured: true });
 
   const store = useAIStore.getState();
   await store.fetchConversations();
