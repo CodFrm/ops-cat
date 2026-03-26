@@ -35,8 +35,7 @@ func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
 	var provider ai.Provider
 	switch p.Type {
 	case "anthropic":
-		// TODO: Task 4 将替换为 NewAnthropicProvider
-		provider = ai.NewOpenAIProvider(p.Name, p.APIBase, apiKey, p.Model)
+		provider = ai.NewAnthropicProvider(p.Name, p.APIBase, apiKey, p.Model)
 	default: // "openai"
 		provider = ai.NewOpenAIProvider(p.Name, p.APIBase, apiKey, p.Model)
 	}
@@ -209,7 +208,9 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message) error {
 
 		// 更新会话时间
 		if conv, err := conversation_svc.Conversation().Get(a.ctx, convID); err == nil {
-			_ = conversation_svc.Conversation().Update(a.ctx, conv)
+			if err := conversation_svc.Conversation().Update(a.ctx, conv); err != nil {
+				logger.Default().Warn("update conversation time", zap.Error(err))
+			}
 		}
 	}()
 
