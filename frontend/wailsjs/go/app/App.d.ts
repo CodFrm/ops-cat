@@ -8,12 +8,12 @@ import {conversation_entity} from '../models';
 import {forward_entity} from '../models';
 import {group_entity} from '../models';
 import {credential_entity} from '../models';
-import {ai} from '../models';
 import {backup_svc} from '../models';
 import {sshpool} from '../models';
 import {import_svc} from '../models';
 import {audit_repo} from '../models';
 import {sftp_svc} from '../models';
+import {ai} from '../models';
 
 export function CancelGitHubAuth():Promise<void>;
 
@@ -31,6 +31,8 @@ export function ConnectSSHAsync(arg1:app.SSHConnectRequest):Promise<string>;
 
 export function CopyPolicyGroup(arg1:number,arg2:string):Promise<policy_group_entity.PolicyGroup>;
 
+export function CreateAIProvider(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<app.AIProviderInfo>;
+
 export function CreateAsset(arg1:asset_entity.Asset):Promise<void>;
 
 export function CreateConversation():Promise<conversation_entity.Conversation>;
@@ -43,6 +45,8 @@ export function CreatePasswordCredential(arg1:string,arg2:string,arg3:string,arg
 
 export function CreatePolicyGroup(arg1:policy_group_entity.PolicyGroup):Promise<policy_group_entity.PolicyGroup>;
 
+export function DeleteAIProvider(arg1:number):Promise<void>;
+
 export function DeleteAsset(arg1:number):Promise<void>;
 
 export function DeleteConversation(arg1:number):Promise<void>;
@@ -54,8 +58,6 @@ export function DeleteForwardConfig(arg1:number):Promise<void>;
 export function DeleteGroup(arg1:number,arg2:boolean):Promise<void>;
 
 export function DeletePolicyGroup(arg1:number):Promise<void>;
-
-export function DetectLocalCLIs():Promise<Array<ai.CLIInfo>>;
 
 export function DetectOpsctl():Promise<app.OpsctlInfo>;
 
@@ -82,6 +84,8 @@ export function ExportToFile(arg1:string,arg2:backup_svc.ExportOptions):Promise<
 export function ExportToGist(arg1:string,arg2:string,arg3:string,arg4:backup_svc.ExportOptions):Promise<backup_svc.GistInfo>;
 
 export function GenerateSSHKey(arg1:string,arg2:string,arg3:string,arg4:number):Promise<credential_entity.Credential>;
+
+export function GetActiveAIProvider():Promise<app.AIProviderInfo>;
 
 export function GetAppVersion():Promise<string>;
 
@@ -127,9 +131,13 @@ export function ImportSSHKeyPEM(arg1:string,arg2:string,arg3:string):Promise<cre
 
 export function ImportTabbySelected(arg1:Array<number>,arg2:string,arg3:boolean):Promise<import_svc.ImportResult>;
 
+export function InitAIProvider():Promise<void>;
+
 export function InstallOpsctl(arg1:string):Promise<string>;
 
 export function InstallSkills():Promise<void>;
+
+export function ListAIProviders():Promise<Array<app.AIProviderInfo>>;
 
 export function ListAssets(arg1:string,arg2:number):Promise<Array<asset_entity.Asset>>;
 
@@ -153,11 +161,11 @@ export function ListLocalSSHKeys():Promise<Array<app.LocalSSHKeyInfo>>;
 
 export function ListPolicyGroups(arg1:string):Promise<Array<policy_group_entity.PolicyGroupItem>>;
 
-export function LoadAISetting():Promise<app.AISettingInfo>;
-
 export function MoveAsset(arg1:number,arg2:string):Promise<void>;
 
 export function MoveGroup(arg1:number,arg2:string):Promise<void>;
+
+export function OnSecondInstanceLaunch():Promise<void>;
 
 export function OpenDirectory(arg1:string):Promise<void>;
 
@@ -168,8 +176,6 @@ export function PreviewImportFile(arg1:string,arg2:string):Promise<backup_svc.Ba
 export function PreviewSSHConfig():Promise<import_svc.PreviewResult>;
 
 export function PreviewTabbyConfig():Promise<import_svc.PreviewResult>;
-
-export function ResetAISession():Promise<void>;
 
 export function ResizeSSH(arg1:string,arg2:number,arg3:number):Promise<void>;
 
@@ -207,8 +213,6 @@ export function SFTPUploadDir(arg1:string,arg2:string):Promise<string>;
 
 export function SFTPUploadFile(arg1:string,arg2:string,arg3:string):Promise<string>;
 
-export function SaveAISetting(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
-
 export function SaveConversationMessages(arg1:number,arg2:Array<app.ConversationDisplayMessage>):Promise<void>;
 
 export function SaveGitHubToken(arg1:string,arg2:string):Promise<void>;
@@ -219,7 +223,7 @@ export function SelectSSHKeyFile():Promise<app.LocalSSHKeyInfo>;
 
 export function SendAIMessage(arg1:number,arg2:Array<ai.Message>):Promise<void>;
 
-export function SetAIProvider(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+export function SetActiveAIProvider(arg1:number):Promise<void>;
 
 export function SetLanguage(arg1:string):Promise<void>;
 
@@ -242,6 +246,8 @@ export function TestPolicyRule(arg1:app.PolicyTestRequest):Promise<app.PolicyTes
 export function TestRedisConnection(arg1:string,arg2:string):Promise<void>;
 
 export function TestSSHConnection(arg1:string,arg2:string):Promise<void>;
+
+export function UpdateAIProvider(arg1:number,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string):Promise<void>;
 
 export function UpdateAsset(arg1:asset_entity.Asset):Promise<void>;
 

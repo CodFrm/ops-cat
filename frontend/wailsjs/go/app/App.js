@@ -34,6 +34,10 @@ export function CopyPolicyGroup(arg1, arg2) {
   return window['go']['app']['App']['CopyPolicyGroup'](arg1, arg2);
 }
 
+export function CreateAIProvider(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['CreateAIProvider'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function CreateAsset(arg1) {
   return window['go']['app']['App']['CreateAsset'](arg1);
 }
@@ -58,6 +62,10 @@ export function CreatePolicyGroup(arg1) {
   return window['go']['app']['App']['CreatePolicyGroup'](arg1);
 }
 
+export function DeleteAIProvider(arg1) {
+  return window['go']['app']['App']['DeleteAIProvider'](arg1);
+}
+
 export function DeleteAsset(arg1) {
   return window['go']['app']['App']['DeleteAsset'](arg1);
 }
@@ -80,10 +88,6 @@ export function DeleteGroup(arg1, arg2) {
 
 export function DeletePolicyGroup(arg1) {
   return window['go']['app']['App']['DeletePolicyGroup'](arg1);
-}
-
-export function DetectLocalCLIs() {
-  return window['go']['app']['App']['DetectLocalCLIs']();
 }
 
 export function DetectOpsctl() {
@@ -136,6 +140,10 @@ export function ExportToGist(arg1, arg2, arg3, arg4) {
 
 export function GenerateSSHKey(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['GenerateSSHKey'](arg1, arg2, arg3, arg4);
+}
+
+export function GetActiveAIProvider() {
+  return window['go']['app']['App']['GetActiveAIProvider']();
 }
 
 export function GetAppVersion() {
@@ -226,12 +234,20 @@ export function ImportTabbySelected(arg1, arg2, arg3) {
   return window['go']['app']['App']['ImportTabbySelected'](arg1, arg2, arg3);
 }
 
+export function InitAIProvider() {
+  return window['go']['app']['App']['InitAIProvider']();
+}
+
 export function InstallOpsctl(arg1) {
   return window['go']['app']['App']['InstallOpsctl'](arg1);
 }
 
 export function InstallSkills() {
   return window['go']['app']['App']['InstallSkills']();
+}
+
+export function ListAIProviders() {
+  return window['go']['app']['App']['ListAIProviders']();
 }
 
 export function ListAssets(arg1, arg2) {
@@ -278,16 +294,16 @@ export function ListPolicyGroups(arg1) {
   return window['go']['app']['App']['ListPolicyGroups'](arg1);
 }
 
-export function LoadAISetting() {
-  return window['go']['app']['App']['LoadAISetting']();
-}
-
 export function MoveAsset(arg1, arg2) {
   return window['go']['app']['App']['MoveAsset'](arg1, arg2);
 }
 
 export function MoveGroup(arg1, arg2) {
   return window['go']['app']['App']['MoveGroup'](arg1, arg2);
+}
+
+export function OnSecondInstanceLaunch() {
+  return window['go']['app']['App']['OnSecondInstanceLaunch']();
 }
 
 export function OpenDirectory(arg1) {
@@ -308,10 +324,6 @@ export function PreviewSSHConfig() {
 
 export function PreviewTabbyConfig() {
   return window['go']['app']['App']['PreviewTabbyConfig']();
-}
-
-export function ResetAISession() {
-  return window['go']['app']['App']['ResetAISession']();
 }
 
 export function ResizeSSH(arg1, arg2, arg3) {
@@ -386,10 +398,6 @@ export function SFTPUploadFile(arg1, arg2, arg3) {
   return window['go']['app']['App']['SFTPUploadFile'](arg1, arg2, arg3);
 }
 
-export function SaveAISetting(arg1, arg2, arg3, arg4) {
-  return window['go']['app']['App']['SaveAISetting'](arg1, arg2, arg3, arg4);
-}
-
 export function SaveConversationMessages(arg1, arg2) {
   return window['go']['app']['App']['SaveConversationMessages'](arg1, arg2);
 }
@@ -410,8 +418,8 @@ export function SendAIMessage(arg1, arg2) {
   return window['go']['app']['App']['SendAIMessage'](arg1, arg2);
 }
 
-export function SetAIProvider(arg1, arg2, arg3, arg4) {
-  return window['go']['app']['App']['SetAIProvider'](arg1, arg2, arg3, arg4);
+export function SetActiveAIProvider(arg1) {
+  return window['go']['app']['App']['SetActiveAIProvider'](arg1);
 }
 
 export function SetLanguage(arg1) {
@@ -456,6 +464,10 @@ export function TestRedisConnection(arg1, arg2) {
 
 export function TestSSHConnection(arg1, arg2) {
   return window['go']['app']['App']['TestSSHConnection'](arg1, arg2);
+}
+
+export function UpdateAIProvider(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['app']['App']['UpdateAIProvider'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function UpdateAsset(arg1) {

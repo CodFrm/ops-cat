@@ -1,23 +1,5 @@
 export namespace ai {
 	
-	export class CLIInfo {
-	    name: string;
-	    type: string;
-	    path: string;
-	    version: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new CLIInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.type = source["type"];
-	        this.path = source["path"];
-	        this.version = source["version"];
-	    }
-	}
 	export class ToolCall {
 	    id: string;
 	    // Go type: struct { Name string "json:\"name\""; Arguments string "json:\"arguments\"" }
@@ -92,24 +74,28 @@ export namespace ai {
 
 export namespace app {
 	
-	export class AISettingInfo {
-	    providerType: string;
+	export class AIProviderInfo {
+	    id: number;
+	    name: string;
+	    type: string;
 	    apiBase: string;
 	    maskedApiKey: string;
 	    model: string;
-	    configured: boolean;
+	    isActive: boolean;
 	
 	    static createFrom(source: any = {}) {
-	        return new AISettingInfo(source);
+	        return new AIProviderInfo(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.providerType = source["providerType"];
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.type = source["type"];
 	        this.apiBase = source["apiBase"];
 	        this.maskedApiKey = source["maskedApiKey"];
 	        this.model = source["model"];
-	        this.configured = source["configured"];
+	        this.isActive = source["isActive"];
 	    }
 	}
 	export class AuditLogListResult {
@@ -719,6 +705,7 @@ export namespace conversation_entity {
 	    Title: string;
 	    ProviderType: string;
 	    Model: string;
+	    ProviderID: number;
 	    SessionData: string;
 	    WorkDir: string;
 	    Status: number;
@@ -735,6 +722,7 @@ export namespace conversation_entity {
 	        this.Title = source["Title"];
 	        this.ProviderType = source["ProviderType"];
 	        this.Model = source["Model"];
+	        this.ProviderID = source["ProviderID"];
 	        this.SessionData = source["SessionData"];
 	        this.WorkDir = source["WorkDir"];
 	        this.Status = source["Status"];
