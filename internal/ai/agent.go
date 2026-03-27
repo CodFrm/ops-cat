@@ -137,6 +137,13 @@ func (a *Agent) Chat(ctx context.Context, messages []Message, onEvent func(Strea
 
 		for i, tc := range toolCalls {
 			g.Go(func() error {
+				// 通知前端工具开始执行
+				onEvent(StreamEvent{
+					Type:      "tool_start",
+					ToolName:  tc.Function.Name,
+					ToolInput: tc.Function.Arguments,
+				})
+
 				result, execErr := executor.Execute(gCtx, tc.Function.Name, tc.Function.Arguments)
 				if execErr != nil {
 					result = fmt.Sprintf("Tool execution error: %s", execErr.Error())
@@ -146,6 +153,14 @@ func (a *Agent) Chat(ctx context.Context, messages []Message, onEvent func(Strea
 						"\n\n--- Output truncated ---\nOutput too large (%d bytes, exceeds %d byte limit). Use more precise filters, pipe through | head or | grep, or split the query.",
 						len(result), maxResultLen)
 				}
+
+				// 通知前端工具执行完成
+				onEvent(StreamEvent{
+					Type:     "tool_result",
+					ToolName: tc.Function.Name,
+					Content:  result,
+				})
+
 				mu.Lock()
 				results[i] = toolResult{content: result, callID: tc.ID}
 				mu.Unlock()

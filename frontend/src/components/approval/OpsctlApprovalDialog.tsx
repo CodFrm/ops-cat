@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useWailsEvent } from "@/hooks/useWailsEvent";
 import { RespondOpsctlApproval } from "../../../wailsjs/go/app/App";
@@ -61,6 +62,7 @@ export function OpsctlApprovalDialog() {
   const { t } = useTranslation();
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [editState, setEditState] = useState<Record<string, Record<number, string>>>({});
+  const [rememberMode, setRememberMode] = useState(false);
 
   const enqueue = useCallback((item: QueueItem) => {
     setQueue((prev) => prev.some((q) => q.id === item.id) ? prev : [...prev, item]);
@@ -121,7 +123,11 @@ export function OpsctlApprovalDialog() {
     const resp = new ai.ApprovalResponse();
     resp.decision = decision;
 
-    if (current.kind === "grant" && decision !== "deny") {
+    const shouldSendEdits =
+      (current.kind === "grant" && decision !== "deny") ||
+      (current.kind === "single" && decision === "allowAll");
+
+    if (shouldSendEdits) {
       const edits = editState[current.id] || {};
       resp.edited_items = current.items.map((item, i) => {
         const edited = new ai.ApprovalItem();
@@ -138,6 +144,7 @@ export function OpsctlApprovalDialog() {
 
     RespondOpsctlApproval(current.id, resp);
     setQueue((prev) => prev.slice(1));
+    setRememberMode(false);
     setEditState((prev) => {
       const next = { ...prev };
       delete next[current.id];
@@ -227,6 +234,27 @@ export function OpsctlApprovalDialog() {
                   )}
                 </div>
               ))}
+              {/* 记住模式：展开模式编辑器 */}
+              {current.kind === "single" && current.sessionID && rememberMode && (
+                <div className="space-y-1.5 pt-1">
+                  <div className="text-xs text-muted-foreground">{t("opsctlApproval.patternLabel")}</div>
+                  {current.items.map((_item, i) => (
+                    <Input
+                      key={i}
+                      value={editState[current.id]?.[i] ?? _item.command}
+                      onChange={(e) =>
+                        setEditState((prev) => ({
+                          ...prev,
+                          [current.id]: { ...prev[current.id], [i]: e.target.value },
+                        }))
+                      }
+                      className="font-mono text-xs"
+                      placeholder={t("opsctlApproval.patternPlaceholder")}
+                    />
+                  ))}
+                  <div className="text-[10px] text-muted-foreground/70">{t("opsctlApproval.patternHint")}</div>
+                </div>
+              )}
             </div>
 
             <DialogFooter className="gap-2">
@@ -234,9 +262,21 @@ export function OpsctlApprovalDialog() {
                 {t("opsctlApproval.deny")}
               </Button>
               {current.kind === "single" && current.sessionID && (
-                <Button variant="secondary" onClick={() => respond("allowAll")}>
-                  {t("opsctlApproval.alwaysAllow")}
-                </Button>
+                rememberMode ? (
+                  <Button variant="secondary" onClick={() => respond("allowAll")}>
+                    {t("opsctlApproval.approve")}
+                  </Button>
+                ) : (
+                  <Button variant="secondary" onClick={() => {
+                    // 初始化 editState 用当前命令预填充
+                    const edits: Record<number, string> = {};
+                    current.items.forEach((it, idx) => { edits[idx] = it.command; });
+                    setEditState((prev) => ({ ...prev, [current.id]: { ...prev[current.id], ...edits } }));
+                    setRememberMode(true);
+                  }}>
+                    {t("opsctlApproval.remember")}
+                  </Button>
+                )
               )}
               <Button onClick={() => respond("allow")}>
                 {current.kind === "grant"

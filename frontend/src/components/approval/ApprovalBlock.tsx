@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Shield, Terminal, Database, Server, Globe, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { RespondAIApproval } from "../../../wailsjs/go/app/App";
 import { ai } from "../../../wailsjs/go/models";
@@ -26,13 +27,16 @@ export function ApprovalBlock({ block }: ApprovalBlockProps) {
     return map;
   });
 
+  // "记住"模式：展开模式编辑器
+  const [rememberMode, setRememberMode] = useState(false);
+
   const respond = (decision: string) => {
     if (!block.confirmId) return;
 
     const resp = new ai.ApprovalResponse();
     resp.decision = decision;
 
-    if (kind === "grant" && decision !== "deny") {
+    if ((kind === "grant" || (kind === "single" && decision === "allowAll")) && decision !== "deny") {
       resp.edited_items = items.map((item, i) => {
         const edited = new ai.ApprovalItem();
         edited.type = item.type;
@@ -106,6 +110,24 @@ export function ApprovalBlock({ block }: ApprovalBlockProps) {
             )}
           </div>
         ))}
+        {/* 记住模式：展开模式编辑器 */}
+        {kind === "single" && isPending && rememberMode && (
+          <div className="space-y-1 pt-0.5">
+            <div className="text-[10px] text-muted-foreground">{t("opsctlApproval.patternLabel")}</div>
+            {items.map((_item, i) => (
+              <Input
+                key={i}
+                value={editedCommands[i] || ""}
+                onChange={(e) =>
+                  setEditedCommands((prev) => ({ ...prev, [i]: e.target.value }))
+                }
+                className="font-mono text-[11px] h-7 bg-background"
+                placeholder={t("opsctlApproval.patternPlaceholder")}
+              />
+            ))}
+            <div className="text-[10px] text-muted-foreground/70">{t("opsctlApproval.patternHint")}</div>
+          </div>
+        )}
       </div>
 
       {isPending && (
@@ -114,9 +136,15 @@ export function ApprovalBlock({ block }: ApprovalBlockProps) {
             {t("ai.approvalDeny")}
           </Button>
           {kind === "single" && (
-            <Button size="sm" variant="secondary" className="h-6 px-2 text-xs" onClick={() => respond("allowAll")}>
-              {t("ai.approvalAlwaysAllow")}
-            </Button>
+            rememberMode ? (
+              <Button size="sm" variant="secondary" className="h-6 px-2 text-xs" onClick={() => respond("allowAll")}>
+                {t("opsctlApproval.approve")}
+              </Button>
+            ) : (
+              <Button size="sm" variant="secondary" className="h-6 px-2 text-xs" onClick={() => setRememberMode(true)}>
+                {t("opsctlApproval.remember")}
+              </Button>
+            )
           )}
           <Button size="sm" className="h-6 px-2 text-xs" onClick={() => respond(kind === "grant" ? "allow" : "allow")}>
             {kind === "grant" ? t("ai.approvalApprove") : t("ai.approvalAllow")}

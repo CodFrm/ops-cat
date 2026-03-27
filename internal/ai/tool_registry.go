@@ -156,11 +156,11 @@ func AllToolDefs() []ToolDef {
 		},
 		{
 			Name:        "exec_redis",
-			Description: "Execute a Redis command on a Redis asset. Returns the result as JSON. Credentials are resolved automatically.",
+			Description: "Execute a Redis command on a Redis asset. Returns the result as JSON. Credentials are resolved automatically. IMPORTANT: Do NOT use the SELECT command to switch databases — it has no effect due to connection pooling. Use the 'db' parameter instead.",
 			Params: []ParamDef{
 				{Name: "asset_id", Type: ParamNumber, Description: "Redis asset ID. Use list_assets with asset_type='redis' to find.", Required: true},
-				{Name: "command", Type: ParamString, Description: "Redis command (e.g. 'GET mykey', 'HGETALL user:1', 'SET key value EX 3600').", Required: true},
-				{Name: "db", Type: ParamNumber, Description: "Override the default Redis database number (0-15)."},
+				{Name: "command", Type: ParamString, Description: "Redis command (e.g. 'GET mykey', 'HGETALL user:1', 'SET key value EX 3600'). Do NOT use SELECT command here, use the 'db' parameter to switch databases.", Required: true},
+				{Name: "db", Type: ParamNumber, Description: "Override the default Redis database number (0-15). Use this instead of the SELECT command."},
 			},
 			Handler:          handleExecRedis,
 			CommandExtractor: func(args map[string]any) string { return argString(args, "command") },

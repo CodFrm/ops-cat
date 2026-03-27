@@ -1,55 +1,90 @@
-<p align="center">
-  <img src="build/appicon.png" width="128" height="128" alt="OpsKat Logo">
+<p align="right">
+<a href="./README.md">English</a> | <a href="./README_zh.md">中文</a>
 </p>
 
-<h1 align="center">OpsKat</h1>
+<h1 align="center">
+<img src="build/appicon.png" width="128" height="128"/><br/>
+OpsKat
+</h1>
+
+<p align="center">An AI-first desktop application for managing remote infrastructure. Describe what you need — the AI agent handles the rest, with policy enforcement and full audit logging.</p>
 
 <p align="center">
-  <strong>AI-First Infrastructure Management</strong>
+<a href="https://opskat.com">Website</a> ·
+<a href="https://docs.opskat.com">Docs</a> ·
+<a href="https://github.com/opskat/opskat/releases">Download</a>
 </p>
 
 <p align="center">
-  <a href="README_zh.md">中文</a>
+  <img src="https://img.shields.io/badge/Go-1.25-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go">
+  &nbsp;
+  <img src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=white" alt="React">
+  &nbsp;
+  <img src="https://img.shields.io/badge/Wails-v2-EB4034?style=for-the-badge&logo=wails&logoColor=white" alt="Wails">
+  &nbsp;
+  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=for-the-badge&logo=windows&logoColor=white" alt="Platform">
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white" alt="Go">
-  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React">
-  <img src="https://img.shields.io/badge/Wails-v2-EB4034?logo=wails&logoColor=white" alt="Wails">
-  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?logo=windows&logoColor=white" alt="Platform">
-</p>
-
----
+## About
 
 OpsKat is an **AI-first** desktop application for managing remote infrastructure. Instead of navigating menus and filling forms, describe what you need — the AI agent executes commands, queries, and file transfers on your behalf, with policy enforcement and full audit logging at every step.
 
 It also ships a standalone CLI tool (`opsctl`) sharing the same core, for headless operations and scripting.
 
+**If you find it useful, please give us a Star — it means a lot to us!**
+
+## Demo
+
+<!-- Replace the image below with your video/gif demo -->
 <p align="center">
   <img src="docs/images/screenshot-main.png" alt="OpsKat Screenshot">
 </p>
 
-## ✨ Features
+<!--
+To embed a video demo, use one of the following:
 
-**🤖 AI Agent** — Multi-turn conversations with tool calling. Supports OpenAI-compatible API, Claude CLI, and Codex CLI. The agent can manage assets, run commands, execute queries, transfer files, and more — all routed through the same policy and audit pipeline.
+GitHub hosted video:
+https://github.com/user-attachments/assets/xxxxx
 
-**🖥️ Asset Management** — Organize infrastructure into tree-structured groups. Currently supports SSH servers, MySQL/PostgreSQL databases, and Redis instances, with more asset types planned. Encrypted credential storage with OS keyring integration. Import from SSH config or Tabby; export to file or GitHub Gist.
+YouTube embed (won't render on GitHub, use a linked thumbnail instead):
+[![OpsKat Demo](https://img.youtube.com/vi/VIDEO_ID/maxresdefault.jpg)](https://www.youtube.com/watch?v=VIDEO_ID)
+-->
 
-**🔌 SSH Terminal** — Interactive terminal with split pane, customizable themes, SFTP file browser, jump host chains, connection pooling, port forwarding, and SOCKS proxy.
+## ✨ Core Features
 
-**🗄️ Query Editor** — SQL editor with result tables (MySQL/PostgreSQL via SSH tunnel), Redis command execution with key browser, and SQL analysis powered by TiDB Parser.
+### 🤖 AI Agent
 
-**🛡️ Policy Enforcement** — Allow/deny rules for SSH commands, SQL statements, and Redis operations. Policy group system with built-in templates and user-defined groups.
+Multi-turn conversations with tool calling. Supports OpenAI-compatible API, Claude CLI, and Codex CLI. The agent can manage assets, run commands, execute queries, transfer files, and more — all routed through the same policy and audit pipeline.
 
-**📋 Audit & Approval** — Every action is logged with decision tracking. Grant/approval workflow for opsctl with command pattern pre-approval.
+### 🖥️ Asset Management
 
-**🌐 i18n** — English and Simplified Chinese.
+Organize infrastructure into tree-structured groups. Currently supports SSH servers, MySQL/PostgreSQL databases, and Redis instances, with more asset types planned. Encrypted credential storage with OS keyring integration. Import from SSH config or Tabby; export to file or GitHub Gist.
+
+### 🔌 SSH Terminal
+
+Interactive terminal with split pane, customizable themes, SFTP file browser, jump host chains, connection pooling, port forwarding, and SOCKS proxy.
+
+### 🗄️ Query Editor
+
+SQL editor with result tables (MySQL/PostgreSQL via SSH tunnel), Redis command execution with key browser, and SQL analysis powered by TiDB Parser.
+
+### 🛡️ Policy Enforcement
+
+Allow/deny rules for SSH commands, SQL statements, and Redis operations. Policy group system with built-in templates and user-defined groups.
+
+### 📋 Audit & Approval
+
+Every action is logged with decision tracking. Grant/approval workflow for opsctl with command pattern pre-approval.
+
+### 🌐 i18n
+
+English and Simplified Chinese.
 
 ## ⌨️ opsctl CLI
 
 Standalone CLI sharing the same core as the desktop app, for scripting and automation without the GUI. Can be auto-installed from the desktop app with one click.
 
-```
+```bash
 opsctl exec <asset> -- <command>    # Execute remote command
 opsctl ssh <asset>                  # Interactive SSH session
 opsctl cp <src> <dst>               # File transfer (local/remote/cross-server)
@@ -72,7 +107,7 @@ OpsKat has built-in integration with AI coding CLIs — **Claude Code** and **Co
 ## 🛠️ Tech Stack
 
 | | |
-|-------|-----------|
+|---------|------------|
 | Desktop | [Wails v2](https://wails.io/) (Go + Web) |
 | Frontend | React 19 + TypeScript + Tailwind CSS |
 | Backend | Go 1.25, SQLite |
@@ -88,3 +123,15 @@ make build          # Production build
 make build-embed    # Production build with embedded opsctl
 make build-cli      # Build opsctl CLI only
 ```
+
+---
+
+## 🤝 Contributing
+
+We welcome all forms of contribution! Check out the issues or submit a pull request.
+
+---
+
+## 📄 License
+
+This project is open-sourced under the [GPLv3](./LICENSE) license.

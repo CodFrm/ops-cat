@@ -218,7 +218,7 @@ func (c *CommandPolicyChecker) Check(ctx context.Context, assetID int64, command
 	if result.Decision != NeedConfirm {
 		return result
 	}
-	return c.handleConfirm(ctx, assetID, command)
+	return c.handleConfirm(ctx, assetID, asset_entity.AssetTypeSSH, command)
 }
 
 // CheckPolicyOnly 只检查 allow/deny 列表 + DB Grant 匹配，不触发确认回调。
@@ -243,11 +243,11 @@ func (c *CommandPolicyChecker) CheckForAsset(ctx context.Context, assetID int64,
 	if result.Decision != NeedConfirm {
 		return result
 	}
-	return c.handleConfirm(ctx, assetID, command)
+	return c.handleConfirm(ctx, assetID, assetType, command)
 }
 
 // handleConfirm 处理需要用户确认的情况
-func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64, command string) CheckResult {
+func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64, assetType, command string) CheckResult {
 	if c.confirmFunc == nil {
 		return CheckResult{Decision: Deny, Message: policyMsg(ctx, "command not authorized and no confirmation mechanism", "命令未授权且无确认机制"), DecisionSource: SourcePolicyDeny}
 	}
@@ -261,8 +261,17 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 		assetName = asset.Name
 	}
 
+	// 映射资产类型到审批项类型
+	approvalType := "exec"
+	switch assetType {
+	case asset_entity.AssetTypeDatabase:
+		approvalType = "sql"
+	case asset_entity.AssetTypeRedis:
+		approvalType = "redis"
+	}
+
 	items := []ApprovalItem{{
-		Type:      "exec",
+		Type:      approvalType,
 		AssetID:   assetID,
 		AssetName: assetName,
 		Command:   command,
@@ -276,14 +285,32 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 	}
 	if resp.Decision == "allowAll" {
 		sessionID := GetSessionID(ctx)
-		subCmds, _ := ExtractSubCommands(command)
-		if len(subCmds) == 0 {
-			subCmds = []string{command}
+		var patterns []string
+		// 优先使用用户编辑后的模式（支持 * 通配符）
+		if len(resp.EditedItems) > 0 {
+			for _, item := range resp.EditedItems {
+				cmd := strings.TrimSpace(item.Command)
+				if cmd != "" {
+					patterns = append(patterns, cmd)
+				}
+			}
 		}
-		for _, cmd := range subCmds {
+		// 无编辑项时回退：SSH 解析子命令，其他类型直接使用原始命令
+		if len(patterns) == 0 {
+			if assetType == asset_entity.AssetTypeSSH {
+				subCmds, _ := ExtractSubCommands(command)
+				if len(subCmds) == 0 {
+					subCmds = []string{command}
+				}
+				patterns = subCmds
+			} else {
+				patterns = []string{command}
+			}
+		}
+		for _, cmd := range patterns {
 			SaveGrantPattern(ctx, sessionID, assetID, assetName, cmd)
 		}
-		writeGrantSubmitAudit(ctx, assetID, assetName, subCmds)
+		writeGrantSubmitAudit(ctx, assetID, assetName, patterns)
 	}
 	return CheckResult{Decision: Allow, DecisionSource: SourceUserAllow}
 }
