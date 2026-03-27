@@ -7,7 +7,7 @@
 OpsKat
 </h1>
 
-<p align="center">AI 优先的桌面运维工具。描述你的需求，AI Agent 代你执行，每一步都有策略管控和完整审计日志。</p>
+<p align="center">开源的 AI 优先桌面运维工具。描述你的需求，AI Agent 代你执行，每一步都有策略管控和完整审计日志。</p>
 
 <p align="center">
 <a href="https://opskat.github.io/">官网</a> ·
@@ -31,69 +31,58 @@ OpsKat
 
 ## 关于
 
-OpsKat 是一个 **AI 优先** 的桌面运维工具。无需在菜单和表单之间跳转，直接描述你的需求 — AI Agent 会代你执行命令、查询和文件传输，每一步都有策略管控和完整审计日志。
+平时操作服务器环境，经常要打开好几个工具来回切换。OpsKat 把常用的资产操作都集成在一起，不用再在好几个工具之间跳了。加上 AI Agent，直接跟它说一句话就能搞定，当然每一步都有策略管控和审计日志。
 
-同时提供独立命令行工具 `opsctl`，共享相同核心，支持无 GUI 的脚本化操作。
+目前支持管理 SSH 服务器、MySQL/PostgreSQL 数据库、Redis，后续还会考虑使用插件模式集成其它常用运维资产。
 
-**如果觉得好用，请给我们一个 Star ⭐ 这是对我们最大的支持！**
+**如果觉得有用，求个 Star ⭐ 这是对我们最大的支持！**
 
 ## 演示
 
-https://github.com/user-attachments/assets/06627133-373b-4e53-8d76-ebe7fce0866e
+https://github.com/user-attachments/assets/035fc0df-230c-456b-87bd-8a4a125feaec
 
-## ✨ 核心特性
+## ✨ 实际使用场景
 
-### 🤖 AI Agent
+- **"帮我看一下 web-01 上 nginx 最近的错误日志"** → AI 自动 SSH 上去执行命令并返回结果
+- **"统计一下 db-prod 上 users 表各 status 的数量"** → AI 通过 SSH 隧道连数据库执行 SQL
+- **"检查一下 k3s 集群的健康状况"** → AI 自动跑 kubectl 相关命令，汇总节点和 Pod 状态
 
-多轮对话 + 工具调用，支持 OpenAI 兼容 API、Claude CLI、Codex CLI。Agent 可以管理资产、执行命令、查询数据库、传输文件等，所有操作都经过策略管控和审计。
+## 🛡️ 安全与审计
 
-### 🖥️ 资产管理
+给 AI 操作服务器的权限，怎么保证安全？
 
-以树形结构组织基础设施。目前支持 SSH 服务器、MySQL/PostgreSQL 数据库和 Redis，未来将支持更多资产类型。凭据加密存储，集成系统密钥链。支持从 SSH config、Tabby 导入，导出到文件或 GitHub Gist。
+- **操作策略** — SSH 命令、SQL 语句、Redis 操作都支持白名单/黑名单，SQL 还会基于 Parser 自动拦截无 WHERE 的 DELETE/UPDATE 等危险操作
+- **策略组** — 内置常用模板（Linux 只读、危险命令拒绝等），也可以自定义
+- **预申请权限** — AI 或 opsctl 可以提前申请一批命令的执行权限，用户一次审批后，后续匹配的命令自动放行，不用每条都确认
+- **审计日志** — 所有操作自动记录，谁在什么时候对哪台服务器执行了什么命令，决策来源全部可追溯
 
-### 🔌 SSH 终端
+## 🖥️ 也是个好用的终端和资产管理工具
 
-交互式终端，支持分屏、自定义主题、SFTP 文件浏览器、跳板机链式连接、连接池、端口转发和 SOCKS 代理。
+抛开 AI 部分，OpsKat 本身也是一个功能完整的终端和资产管理工具：
 
-### 🗄️ 查询编辑器
+- 树形分组管理 SSH 服务器、数据库、Redis
+- 分屏终端，自定义主题
+- SFTP 文件浏览器
+- 跳板机链式连接
+- 数据库查询编辑器（MySQL/PostgreSQL，支持 SSH 隧道）
+- Redis 命令执行与 Key 浏览器
+- 端口转发、SOCKS 代理
+- 凭据加密存储
+- 从 SSH config / Tabby 导入
 
-SQL 编辑器 + 结果表格（MySQL/PostgreSQL 可通过 SSH 隧道），Redis 命令执行与 Key 浏览器，基于 TiDB Parser 的 SQL 分析。
+## ⌨️ opsctl CLI + AI 编程工具集成
 
-### 🛡️ 策略管控
+OpsKat 还提供了独立命令行工具 `opsctl`，主要给 **Claude Code**、**Codex**、**Gemini CLI** 这类 AI 编程助手用。桌面端一键安装 Skill，AI 编程助手就能通过 opsctl 直接管理服务器、查日志、查数据库、排查线上问题。
 
-SSH 命令、SQL 语句、Redis 操作的允许/拒绝规则。策略组系统：内置模板 + 自定义策略组。
+桌面端运行时，opsctl 会复用桌面端的连接池和审批流程，操作同样受策略管控和审计。
 
-### 📋 审计与审批
-
-每个操作都记录决策信息。
-
-### 🌐 国际化
-
-支持英文和简体中文。
-
-## ⌨️ opsctl CLI
-
-独立命令行工具，与桌面端共享相同核心，无需 GUI 即可脚本化操作。支持从桌面端一键安装。
+当然也可以自己手动用：
 
 ```bash
-opsctl exec <asset> -- <command>    # 执行远程命令
-opsctl ssh <asset>                  # 交互式 SSH 会话
-opsctl cp <src> <dst>               # 文件传输（本地/远程/跨服务器）
-opsctl sql <asset> "<query>"        # 执行 SQL 查询
-opsctl redis <asset> "<command>"    # 执行 Redis 命令
-opsctl list assets|groups           # 列出资产或分组
-opsctl grant submit ...             # 预审批命令模式
+opsctl exec web-01 -- tail -n 100 /var/log/nginx/error.log
+opsctl sql db-prod "SELECT status, COUNT(*) FROM users GROUP BY status"
+opsctl ssh web-01
 ```
-
-桌面端运行时，opsctl 会复用其连接池，并通过桌面端 UI 进行审批。
-
-## 🧩 AI 编程工具集成
-
-OpsKat 内置了 AI 编程 CLI 集成 — **Claude Code** 和 **Codex**。从桌面端一键安装 Skill，让 AI 编程助手学会使用 `opsctl`，直接管理服务器、执行命令、传输文件和查询数据库。
-
-<p align="center">
-  <img src="docs/images/screenshot-skill.png" alt="Skill 安装">
-</p>
 
 ## 🛠️ 技术栈
 

@@ -7,7 +7,7 @@
 OpsKat
 </h1>
 
-<p align="center">An AI-first desktop application for managing remote infrastructure. Describe what you need — the AI agent handles the rest, with policy enforcement and full audit logging.</p>
+<p align="center">An open-source, AI-first desktop application for managing remote infrastructure. Describe what you need — the AI agent handles the rest, with policy enforcement and full audit logging.</p>
 
 <p align="center">
 <a href="https://opskat.github.io/">Website</a> ·
@@ -31,69 +31,58 @@ OpsKat
 
 ## About
 
-OpsKat is an **AI-first** desktop application for managing remote infrastructure. Instead of navigating menus and filling forms, describe what you need — the AI agent executes commands, queries, and file transfers on your behalf, with policy enforcement and full audit logging at every step.
+Managing servers often means juggling multiple tools — SSH clients, database GUIs, Redis managers — constantly switching between them. OpsKat brings everything together in one place. With its AI agent, you can describe what you need in natural language, and it handles the rest. Even without the AI features, all common asset operations are unified in a single interface.
 
-It also ships a standalone CLI tool (`opsctl`) sharing the same core, for headless operations and scripting.
+Currently supports SSH servers, MySQL/PostgreSQL databases, and Redis, with more asset types planned via a plugin system.
 
-**If you find it useful, please give us a Star — it means a lot to us!**
+**If you find it useful, please give us a Star ⭐ — it means a lot!**
 
 ## Demo
 
-https://github.com/user-attachments/assets/06627133-373b-4e53-8d76-ebe7fce0866e
+https://github.com/user-attachments/assets/035fc0df-230c-456b-87bd-8a4a125feaec
 
-## ✨ Core Features
+## ✨ Use Cases
 
-### 🤖 AI Agent
+- **"Show me the recent nginx error logs on web-01"** → AI automatically SSHs in, runs the command, and returns the results
+- **"Count users by status in the db-prod users table"** → AI connects to the database via SSH tunnel and executes the SQL query
+- **"Check the health of the k3s cluster"** → AI runs kubectl commands and summarizes node and pod status
 
-Multi-turn conversations with tool calling. Supports OpenAI-compatible API, Claude CLI, and Codex CLI. The agent can manage assets, run commands, execute queries, transfer files, and more — all routed through the same policy and audit pipeline.
+## 🛡️ Security & Audit
 
-### 🖥️ Asset Management
+Giving AI permission to operate on your servers — how do you keep it safe?
 
-Organize infrastructure into tree-structured groups. Currently supports SSH servers, MySQL/PostgreSQL databases, and Redis instances, with more asset types planned. Encrypted credential storage with OS keyring integration. Import from SSH config or Tabby; export to file or GitHub Gist.
+- **Operation policies** — SSH commands, SQL statements, and Redis operations all support allow/deny lists. SQL is analyzed by a parser that automatically blocks dangerous operations like DELETE/UPDATE without WHERE clauses
+- **Policy groups** — Built-in templates (Linux read-only, dangerous command deny, etc.) plus custom user-defined groups
+- **Pre-approved permissions** — AI or opsctl can request a batch of command patterns upfront. Once approved, matching commands execute automatically without per-command confirmation
+- **Audit logs** — Every operation is automatically recorded: who, when, which server, what command, and the full decision trail
 
-### 🔌 SSH Terminal
+## 🖥️ Also a Full-Featured Terminal & Asset Manager
 
-Interactive terminal with split pane, customizable themes, SFTP file browser, jump host chains, connection pooling, port forwarding, and SOCKS proxy.
+Beyond the AI, OpsKat is a complete terminal and asset management tool:
 
-### 🗄️ Query Editor
+- Tree-structured grouping for SSH servers, databases, and Redis
+- Split pane terminal with customizable themes
+- SFTP file browser
+- Jump host chain connections
+- SQL query editor (MySQL/PostgreSQL via SSH tunnel)
+- Redis command execution with key browser
+- Port forwarding and SOCKS proxy
+- Encrypted credential storage
+- Import from SSH config / Tabby
 
-SQL editor with result tables (MySQL/PostgreSQL via SSH tunnel), Redis command execution with key browser, and SQL analysis powered by TiDB Parser.
+## ⌨️ opsctl CLI + AI Coding Tool Integration
 
-### 🛡️ Policy Enforcement
+OpsKat ships a standalone CLI tool (`opsctl`), primarily designed for AI coding assistants like **Claude Code**, **Codex**, and **Gemini CLI**. One-click skill installation from the desktop app teaches these AI assistants to use `opsctl` — so they can directly manage servers, check logs, query databases, and troubleshoot production issues.
 
-Allow/deny rules for SSH commands, SQL statements, and Redis operations. Policy group system with built-in templates and user-defined groups.
+When the desktop app is running, opsctl reuses its connection pool and approval workflow, with all operations subject to the same policy enforcement and audit logging.
 
-### 📋 Audit & Approval
-
-Every action is logged with decision tracking. Grant/approval workflow for opsctl with command pattern pre-approval.
-
-### 🌐 i18n
-
-English and Simplified Chinese.
-
-## ⌨️ opsctl CLI
-
-Standalone CLI sharing the same core as the desktop app, for scripting and automation without the GUI. Can be auto-installed from the desktop app with one click.
+You can also use it manually:
 
 ```bash
-opsctl exec <asset> -- <command>    # Execute remote command
-opsctl ssh <asset>                  # Interactive SSH session
-opsctl cp <src> <dst>               # File transfer (local/remote/cross-server)
-opsctl sql <asset> "<query>"        # Execute SQL query
-opsctl redis <asset> "<command>"    # Execute Redis command
-opsctl list assets|groups           # List assets or groups
-opsctl grant submit ...             # Pre-approve command patterns
+opsctl exec web-01 -- tail -n 100 /var/log/nginx/error.log
+opsctl sql db-prod "SELECT status, COUNT(*) FROM users GROUP BY status"
+opsctl ssh web-01
 ```
-
-When the desktop app is running, opsctl reuses its connection pool and routes approval through the app's UI.
-
-## 🧩 AI Coding Tool Integration
-
-OpsKat has built-in integration with AI coding CLIs — **Claude Code** and **Codex**. One-click skill installation from the desktop app teaches these AI assistants how to use `opsctl`, so they can directly manage servers, run commands, transfer files, and query databases on your behalf.
-
-<p align="center">
-  <img src="docs/images/screenshot-skill.png" alt="Skill Installation">
-</p>
 
 ## 🛠️ Tech Stack
 
