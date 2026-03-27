@@ -25,6 +25,10 @@ OpsKat
   <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=for-the-badge&logo=windows&logoColor=white" alt="Platform">
 </p>
 
+<p align="center">
+  <img src="docs/images/screenshot-main.png" alt="OpsKat Screenshot">
+</p>
+
 ## About
 
 OpsKat is an **AI-first** desktop application for managing remote infrastructure. Instead of navigating menus and filling forms, describe what you need — the AI agent executes commands, queries, and file transfers on your behalf, with policy enforcement and full audit logging at every step.
@@ -41,11 +45,7 @@ https://github.com/user-attachments/assets/06627133-373b-4e53-8d76-ebe7fce0866e
 
 ### 🤖 AI Agent
 
-Multi-turn conversations with tool calling. Supports OpenAI-compatible API, Claude CLI, and Codex CLI. The agent can manage assets, run commands, exe
-
-Uploading demo.mp4…
-
-cute queries, transfer files, and more — all routed through the same policy and audit pipeline.
+Multi-turn conversations with tool calling. Supports OpenAI-compatible API, Claude CLI, and Codex CLI. The agent can manage assets, run commands, execute queries, transfer files, and more — all routed through the same policy and audit pipeline.
 
 ### 🖥️ Asset Management
 
