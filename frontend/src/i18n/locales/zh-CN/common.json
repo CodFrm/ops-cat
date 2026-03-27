@@ -847,5 +847,17 @@
     "formatJson": "格式化",
     "rawText": "原始",
     "clearResult": "清除"
+  },
+  "systemStatus": {
+    "title": "系统状态",
+    "allGood": "一切正常",
+    "allGoodDesc": "系统启动未检测到任何问题",
+    "toastError": "系统启动遇到问题，点击查看详情",
+    "toastWarn": "系统启动有警告信息，点击查看详情",
+    "source": "来源",
+    "detail": "详情",
+    "showDetail": "查看详情",
+    "hideDetail": "收起详情",
+    "count": "{{count}} 个问题"
   }
 }

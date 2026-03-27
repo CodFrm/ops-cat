@@ -847,5 +847,17 @@
     "formatJson": "Format",
     "rawText": "Raw",
     "clearResult": "Clear"
+  },
+  "systemStatus": {
+    "title": "Status",
+    "allGood": "All Systems Normal",
+    "allGoodDesc": "No issues detected during startup",
+    "toastError": "Startup issues detected. Click to view details.",
+    "toastWarn": "Startup warnings detected. Click to view details.",
+    "source": "Source",
+    "detail": "Detail",
+    "showDetail": "Show detail",
+    "hideDetail": "Hide detail",
+    "count": "{{count}} issue(s)"
   }
 }
