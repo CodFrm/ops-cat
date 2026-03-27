@@ -103,6 +103,7 @@ func (a *App) Startup(ctx context.Context) {
 	a.startSSHPoolServer(authToken)
 	a.startAutoUpdateCheck()
 	a.InitAIProvider()
+	a.emitSystemStatus()
 }
 
 // Cleanup 关闭审批服务等资源
