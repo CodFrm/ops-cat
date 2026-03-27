@@ -10,6 +10,7 @@ import (
 // AppConfig 应用持久化配置（config.json）
 type AppConfig struct {
 	UpdateChannel   string `json:"update_channel,omitempty"`    // stable, beta, nightly
+	DownloadMirror  string `json:"download_mirror,omitempty"`   // 下载镜像 URL 前缀，空表示直连 GitHub
 	KDFSalt         string `json:"kdf_salt,omitempty"`          // base64 编码的 Argon2id salt
 	AIProviderType  string `json:"ai_provider_type,omitempty"`  // openai, local_cli
 	AIAPIBase       string `json:"ai_api_base,omitempty"`       // API base URL 或 CLI 路径
