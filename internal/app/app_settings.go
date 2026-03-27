@@ -14,6 +14,7 @@ import (
 	"github.com/opskat/opskat/internal/bootstrap"
 	"github.com/opskat/opskat/internal/buildinfo"
 	"github.com/opskat/opskat/internal/embedded"
+	"github.com/opskat/opskat/internal/pkg/executil"
 	"github.com/opskat/opskat/internal/model/entity/audit_entity"
 	"github.com/opskat/opskat/internal/repository/audit_repo"
 	"github.com/opskat/opskat/internal/service/backup_svc"
@@ -490,7 +491,9 @@ func (a *App) OpenDirectory(path string) error {
 		cmd = "xdg-open"
 		args = []string{path}
 	}
-	return exec.Command(cmd, args...).Start() //nolint:gosec
+	c := exec.Command(cmd, args...) //nolint:gosec
+	executil.HideWindow(c)
+	return c.Start()
 }
 
 // --- Opsctl 安装 ---
@@ -524,7 +527,9 @@ func (a *App) DetectOpsctl() OpsctlInfo {
 	}
 	info.Installed = true
 	info.Path = opsctlPath
-	out, err := exec.Command(opsctlPath, "version").Output() //nolint:gosec
+	versionCmd := exec.Command(opsctlPath, "version") //nolint:gosec
+	executil.HideWindow(versionCmd)
+	out, err := versionCmd.Output()
 	if err == nil {
 		info.Version = strings.TrimSpace(string(out))
 	}
