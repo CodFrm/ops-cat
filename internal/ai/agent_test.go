@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/smartystreets/goconvey/convey"
@@ -90,6 +91,108 @@ func TestAgent_SimpleChat(t *testing.T) {
 	})
 }
 
+func TestToolCall_SerializationType(t *testing.T) {
+	convey.Convey("ToolCall 序列化包含 type 字段", t, func() {
+		tc := ToolCall{ID: "call_1", Type: "function"}
+		tc.Function.Name = "list_assets"
+		tc.Function.Arguments = `{"asset_type":"ssh"}`
+
+		data, err := json.Marshal(tc)
+		assert.NoError(t, err)
+
+		var raw map[string]any
+		err = json.Unmarshal(data, &raw)
+		assert.NoError(t, err)
+		assert.Equal(t, "function", raw["type"])
+	})
+
+	convey.Convey("包含 ToolCall 的 Message 序列化 type 字段", t, func() {
+		tc := ToolCall{ID: "call_1", Type: "function"}
+		tc.Function.Name = "run_command"
+		tc.Function.Arguments = `{"command":"ls"}`
+
+		msg := Message{
+			Role:      RoleAssistant,
+			Content:   "",
+			ToolCalls: []ToolCall{tc},
+		}
+
+		data, err := json.Marshal(msg)
+		assert.NoError(t, err)
+
+		var raw map[string]any
+		err = json.Unmarshal(data, &raw)
+		assert.NoError(t, err)
+
+		toolCalls := raw["tool_calls"].([]any)
+		assert.Len(t, toolCalls, 1)
+		call := toolCalls[0].(map[string]any)
+		assert.Equal(t, "function", call["type"])
+		assert.Equal(t, "call_1", call["id"])
+	})
+}
+
+func TestAgent_ToolCallMessageIncludesType(t *testing.T) {
+	convey.Convey("Agent tool 调用后构造的 assistant 消息包含 type 字段", t, func() {
+		var capturedMessages []Message
+		provider := &mockProvider{
+			responses: [][]StreamEvent{
+				{
+					{Type: "tool_call", ToolCalls: []ToolCall{
+						{ID: "call_1", Type: "function", Function: struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						}{Name: "list_assets", Arguments: `{}`}},
+					}},
+					{Type: "done"},
+				},
+				{
+					{Type: "content", Content: "done"},
+					{Type: "done"},
+				},
+			},
+		}
+		// 替换 provider.Chat 以捕获发送的 messages
+		captureProvider := &captureMockProvider{
+			inner:    provider,
+			captured: &capturedMessages,
+		}
+
+		executor := &mockExecutor{results: map[string]string{"list_assets": `[]`}}
+		agent := NewAgent(captureProvider, func() ToolExecutor { return executor }, nil, NewDefaultConfig())
+
+		err := agent.Chat(context.Background(), []Message{
+			{Role: RoleUser, Content: "test"},
+		}, func(e StreamEvent) {})
+
+		assert.NoError(t, err)
+		// 第二轮调用时 messages 应包含 assistant 的 tool_calls
+		assert.True(t, len(capturedMessages) >= 3) // system可能没有，至少 user + assistant + tool
+		// 找到 assistant 消息
+		for _, msg := range capturedMessages {
+			if msg.Role == RoleAssistant && len(msg.ToolCalls) > 0 {
+				assert.Equal(t, "function", msg.ToolCalls[0].Type)
+			}
+		}
+	})
+}
+
+// captureMockProvider 包装 mockProvider，捕获第二轮发送的 messages
+type captureMockProvider struct {
+	inner    *mockProvider
+	captured *[]Message
+}
+
+func (c *captureMockProvider) Name() string { return "capture_mock" }
+
+func (c *captureMockProvider) Chat(ctx context.Context, msgs []Message, tools []Tool) (<-chan StreamEvent, error) {
+	// 第二轮调用时捕获完整 messages
+	if c.inner.round > 0 {
+		*c.captured = append(*c.captured, msgs...)
+	}
+	return c.inner.Chat(ctx, msgs, tools)
+}
+
 func TestAgent_ToolCallLoop(t *testing.T) {
 	convey.Convey("Agent tool 调用循环", t, func() {
 		provider := &mockProvider{
@@ -97,7 +200,7 @@ func TestAgent_ToolCallLoop(t *testing.T) {
 				// 第一轮：LLM 返回 tool 调用
 				{
 					{Type: "tool_call", ToolCalls: []ToolCall{
-						{ID: "call_1", Function: struct {
+						{ID: "call_1", Type: "function", Function: struct {
 							Name      string `json:"name"`
 							Arguments string `json:"arguments"`
 						}{Name: "list_assets", Arguments: `{"asset_type":"ssh"}`}},

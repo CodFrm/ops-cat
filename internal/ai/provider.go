@@ -23,6 +23,7 @@ type Message struct {
 // ToolCall AI 发起的工具调用
 type ToolCall struct {
 	ID       string `json:"id"`
+	Type     string `json:"type"` // "function"
 	Function struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"` // JSON string

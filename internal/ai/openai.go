@@ -157,7 +157,7 @@ func (p *OpenAIProvider) readStream(ctx context.Context, body io.ReadCloser, ch 
 		for _, tc := range delta.ToolCalls {
 			existing, ok := toolCallMap[tc.Index]
 			if !ok {
-				existing = &ToolCall{ID: tc.ID}
+				existing = &ToolCall{ID: tc.ID, Type: "function"}
 				existing.Function.Name = tc.Function.Name
 				toolCallMap[tc.Index] = existing
 			}

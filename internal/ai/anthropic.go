@@ -338,7 +338,7 @@ func (p *AnthropicProvider) readStream(ctx context.Context, body io.ReadCloser, 
 				continue
 			}
 			if bs.blockType == "tool_use" {
-				tc := ToolCall{ID: bs.toolID}
+				tc := ToolCall{ID: bs.toolID, Type: "function"}
 				tc.Function.Name = bs.toolName
 				tc.Function.Arguments = bs.inputJSON.String()
 				ch <- StreamEvent{Type: "tool_call", ToolCalls: []ToolCall{tc}}
