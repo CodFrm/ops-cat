@@ -758,6 +758,43 @@ func parseChecksums(content string) map[string]string {
 	return result
 }
 
+// fetchChecksums 从 release assets 下载并解析 SHA256SUMS.txt
+// 如果 release 中没有 SHA256SUMS.txt，返回 nil（跳过校验，兼容旧版本 release）
+func fetchChecksums(assets []ReleaseAsset) (map[string]string, error) {
+	var checksumURL string
+	for _, asset := range assets {
+		if asset.Name == "SHA256SUMS.txt" {
+			checksumURL = asset.BrowserDownloadURL
+			break
+		}
+	}
+	if checksumURL == "" {
+		return nil, nil
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(checksumURL)
+	if err != nil {
+		return nil, fmt.Errorf("download SHA256SUMS.txt failed: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logger.Default().Warn("close checksum response body", zap.Error(err))
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download SHA256SUMS.txt returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read SHA256SUMS.txt failed: %w", err)
+	}
+
+	return parseChecksums(string(body)), nil
+}
+
 // compareVersions 比较两个版本号，支持预发布后缀
 // 如 "1.0.0" vs "1.0.0-beta.1"，"1.0.0-beta.1" vs "1.0.0-beta.2"
 // 返回: >0 表示 a 更新, <0 表示 b 更新, 0 表示相同
