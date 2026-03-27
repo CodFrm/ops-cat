@@ -162,6 +162,8 @@ interface AIState {
   // 全局状态
   conversations: conversation_entity.Conversation[];
   configured: boolean;
+  providerName: string;
+  modelName: string;
 
   // 配置
   checkConfigured: () => Promise<void>;
@@ -201,11 +203,17 @@ export const useAIStore = create<AIState>((set, get) => {
 
     conversations: [],
     configured: false,
+    providerName: "",
+    modelName: "",
 
     checkConfigured: async () => {
       try {
         const active = await GetActiveAIProvider();
-        set({ configured: active !== null && active !== undefined });
+        if (active) {
+          set({ configured: true, providerName: active.name, modelName: active.model });
+        } else {
+          set({ configured: false, providerName: "", modelName: "" });
+        }
       } catch {
         set({ configured: false });
       }
