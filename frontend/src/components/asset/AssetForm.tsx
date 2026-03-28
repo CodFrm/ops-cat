@@ -153,7 +153,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   const [redisSshAssetId, setRedisSshAssetId] = useState(0);
 
   // Extension config
-  const [extensionConfig, setExtensionConfig] = useState<Record<string, any>>({});
+  const [extensionConfig, setExtensionConfig] = useState<Record<string, unknown>>({});
 
   // Exclude self from jump host / SSH tunnel selection
   const jumpHostExcludeIds = editAsset?.ID ? [editAsset.ID] : undefined;
@@ -489,7 +489,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   };
 
   const handleSubmit = async () => {
-    let config = "";
+    let config: string;
 
     if (assetType === "ssh") {
       const sshConfig: SSHConfig = {

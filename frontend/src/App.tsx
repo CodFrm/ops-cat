@@ -32,7 +32,7 @@ function App() {
   // 加载扩展列表
   useEffect(() => {
     fetchExtensions();
-  }, []);
+  }, [fetchExtensions]);
 
   // 监听外部数据变更（opsctl 等），自动刷新 UI
   useEffect(() => {

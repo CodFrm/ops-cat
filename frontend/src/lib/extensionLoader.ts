@@ -2,7 +2,7 @@ import React from "react";
 
 // ExtensionModule 从扩展 IIFE 脚本加载的模块
 export interface ExtensionModule {
-  [componentName: string]: React.ComponentType<any>;
+  [componentName: string]: React.ComponentType<Record<string, unknown>>;
 }
 
 // 已加载的扩展模块缓存
@@ -13,9 +13,7 @@ const loadingPromises: Map<string, Promise<ExtensionModule>> = new Map();
  * 加载扩展前端模块（IIFE 格式，注册到 window.__OPSKAT_EXT_{name}__）
  * 同一扩展只加载一次，后续调用返回缓存。
  */
-export function loadExtensionModule(
-  extName: string
-): Promise<ExtensionModule> {
+export function loadExtensionModule(extName: string): Promise<ExtensionModule> {
   const cached = loadedModules.get(extName);
   if (cached) return Promise.resolve(cached);
 
@@ -27,18 +25,14 @@ export function loadExtensionModule(
     script.src = `/extensions/${extName}/frontend/index.js`;
     script.onload = () => {
       const globalName = `__OPSKAT_EXT_${extName}__`;
-      const mod = (window as any)[globalName] as ExtensionModule | undefined;
+      const mod = (window as unknown as Record<string, unknown>)[globalName] as ExtensionModule | undefined;
       if (mod) {
         loadedModules.set(extName, mod);
         loadingPromises.delete(extName);
         resolve(mod);
       } else {
         loadingPromises.delete(extName);
-        reject(
-          new Error(
-            `Extension "${extName}" loaded but window.${globalName} not found`
-          )
-        );
+        reject(new Error(`Extension "${extName}" loaded but window.${globalName} not found`));
       }
     };
     script.onerror = () => {
@@ -58,14 +52,12 @@ export function loadExtensionModule(
 export function lazyExtensionComponent(
   extName: string,
   componentName: string
-): React.LazyExoticComponent<React.ComponentType<any>> {
+): React.LazyExoticComponent<React.ComponentType<Record<string, unknown>>> {
   return React.lazy(() =>
     loadExtensionModule(extName).then((mod) => {
       const Component = mod[componentName];
       if (!Component) {
-        throw new Error(
-          `Component "${componentName}" not found in extension "${extName}"`
-        );
+        throw new Error(`Component "${componentName}" not found in extension "${extName}"`);
       }
       return { default: Component };
     })

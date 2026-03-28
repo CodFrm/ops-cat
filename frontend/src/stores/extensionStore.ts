@@ -5,7 +5,7 @@ export interface ExtensionAssetType {
   type: string;
   name: string;
   name_en: string;
-  configSchema: any;
+  configSchema: Record<string, unknown>;
 }
 
 export interface ExtensionPage {
@@ -50,16 +50,12 @@ export const useExtensionStore = create<ExtensionState>((set, get) => ({
   },
 
   getExtensionForAssetType: (type: string) => {
-    return get().extensions.find((ext) =>
-      ext.assetTypes?.some((at) => at.type === type)
-    );
+    return get().extensions.find((ext) => ext.assetTypes?.some((at) => at.type === type));
   },
 
   isExtensionAssetType: (type: string) => {
     const builtinTypes = ["ssh", "database", "redis"];
     if (builtinTypes.includes(type)) return false;
-    return get().extensions.some((ext) =>
-      ext.assetTypes?.some((at) => at.type === type)
-    );
+    return get().extensions.some((ext) => ext.assetTypes?.some((at) => at.type === type));
   },
 }));
