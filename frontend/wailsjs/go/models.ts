@@ -301,8 +301,8 @@ export namespace app {
 	    icon: string;
 	    description: string;
 	    description_zh: string;
-	    assetTypes: extension.AssetTypeDef[];
-	    pages: extension.PageDef[];
+	    assetTypes: extruntime.AssetTypeDef[];
+	    pages: extruntime.PageDef[];
 	    policyType?: string;
 	    policyActions?: string[];
 	
@@ -319,8 +319,8 @@ export namespace app {
 	        this.icon = source["icon"];
 	        this.description = source["description"];
 	        this.description_zh = source["description_zh"];
-	        this.assetTypes = this.convertValues(source["assetTypes"], extension.AssetTypeDef);
-	        this.pages = this.convertValues(source["pages"], extension.PageDef);
+	        this.assetTypes = this.convertValues(source["assetTypes"], extruntime.AssetTypeDef);
+	        this.pages = this.convertValues(source["pages"], extruntime.PageDef);
 	        this.policyType = source["policyType"];
 	        this.policyActions = source["policyActions"];
 	    }
@@ -931,7 +931,7 @@ export namespace credential_entity {
 
 }
 
-export namespace extension {
+export namespace extruntime {
 	
 	export class AssetTypeDef {
 	    type: string;
