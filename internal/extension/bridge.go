@@ -4,12 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/opskat/opskat/internal/ai"
+
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 )
 
-// Bridge 将扩展的 tools/policies 注册到主 App 系统
+// Bridge 将扩展系统桥接到 AI 工具系统
+// 通过 ext_exec 内置工具统一路由，不再为每个扩展工具单独注册 AI ToolDef
 type Bridge struct {
 	host       *ExtensionHost
 	extensions []*ExtensionInfo
@@ -36,25 +42,154 @@ func (b *Bridge) ExtensionNames() []string {
 	return names
 }
 
-// MergeToolDefs 将扩展工具合并到内置工具列表
-// 扩展工具名自动加 "{ext}." 前缀，如 oss.list_buckets
-func (b *Bridge) MergeToolDefs(builtinTools []ai.ToolDef) []ai.ToolDef {
-	all := append([]ai.ToolDef{}, builtinTools...)
-	for _, ext := range b.extensions {
-		for _, tool := range ext.Manifest.Tools {
-			qualifiedName := ext.Manifest.Name + "." + tool.Name
-			all = append(all, ai.ToolDef{
-				Name:        qualifiedName,
-				Description: tool.Description,
-				Params:      convertJSONSchemaToParams(tool.Parameters),
-				Handler:     b.makeWASMHandler(ext.Manifest.Name, tool.Name),
-				CommandExtractor: func(args map[string]any) string {
-					return qualifiedName
-				},
-			})
+// ExecuteTool 统一执行入口：校验工具存在 → 调用 check_policy 获取 action → 检查策略 → 调用 execute_tool
+func (b *Bridge) ExecuteTool(ctx context.Context, extName, toolName string, argsJSON json.RawMessage) (string, error) {
+	// 查找扩展
+	var ext *ExtensionInfo
+	for _, e := range b.extensions {
+		if e.Manifest.Name == extName {
+			ext = e
+			break
 		}
 	}
-	return all
+	if ext == nil {
+		return "", fmt.Errorf("extension %q not registered", extName)
+	}
+
+	// 校验工具存在
+	if !ext.HasTool(toolName) {
+		return "", fmt.Errorf("tool %q not found in extension %q", toolName, extName)
+	}
+
+	// 获取 WASM 插件
+	if b.host == nil {
+		return "", fmt.Errorf("extension host not initialized")
+	}
+	plugin := b.host.GetPlugin(extName)
+	if plugin == nil {
+		return "", fmt.Errorf("extension %q plugin not loaded", extName)
+	}
+
+	// 调用 check_policy 获取 action 分类
+	policyResult, err := plugin.CallCheckPolicy(ctx, toolName, argsJSON)
+	if err != nil {
+		logger.Default().Warn("extension check_policy failed, treating as NeedConfirm",
+			zap.String("extension", extName),
+			zap.String("tool", toolName),
+			zap.Error(err),
+		)
+	}
+
+	// 如果 check_policy 返回了 action，检查资产策略
+	if policyResult != nil && policyResult.Action != "" {
+		checkResult := b.checkExtensionToolPolicy(ctx, argsJSON, policyResult.Action, policyResult.Resource)
+		ai.SetCheckResult(ctx, checkResult)
+		if checkResult.Decision == ai.Deny {
+			return checkResult.Message, nil
+		}
+		// NeedConfirm 时走用户确认流程
+		if checkResult.Decision == ai.NeedConfirm {
+			checker := ai.GetPolicyChecker(ctx)
+			if checker != nil && checker.ConfirmFunc() != nil {
+				qualifiedName := extName + "." + toolName
+				confirmResult := checker.CheckForAsset(ctx, 0, "extension", qualifiedName)
+				ai.SetCheckResult(ctx, confirmResult)
+				if confirmResult.Decision != ai.Allow {
+					return confirmResult.Message, nil
+				}
+			}
+		}
+	}
+
+	// 调用 execute_tool
+	result, err := plugin.CallTool(ctx, toolName, argsJSON)
+	if err != nil {
+		return "", err
+	}
+	return string(result), nil
+}
+
+// checkExtensionToolPolicy 检查扩展工具的策略
+func (b *Bridge) checkExtensionToolPolicy(ctx context.Context, argsJSON json.RawMessage, action, resource string) ai.CheckResult {
+	// 从参数中尝试提取 asset_id
+	var args struct {
+		AssetID int64 `json:"asset_id"`
+	}
+	if json.Unmarshal(argsJSON, &args) != nil || args.AssetID == 0 {
+		// 无 asset_id，无法检查资产策略，返回 NeedConfirm
+		return ai.CheckResult{Decision: ai.NeedConfirm}
+	}
+
+	// 检查资产的 CmdPolicy
+	result := ai.CheckPermission(ctx, "exec", args.AssetID, action)
+	return result
+}
+
+// GetExtensionPrompts 收集所有扩展的 prompt 文本，用于注入 AI 系统消息
+func (b *Bridge) GetExtensionPrompts() string {
+	if len(b.extensions) == 0 {
+		return ""
+	}
+
+	var parts []string
+	for _, ext := range b.extensions {
+		prompt := b.loadExtensionPrompt(ext)
+		if prompt != "" {
+			parts = append(parts, prompt)
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return "\n\n--- Extensions ---\n" +
+		"The following extensions are available. Use the ext_exec tool to execute extension tools.\n\n" +
+		strings.Join(parts, "\n\n")
+}
+
+// loadExtensionPrompt 加载单个扩展的 prompt 文本
+// 优先从 prompt_file 读取，无 prompt_file 时自动从工具定义生成
+func (b *Bridge) loadExtensionPrompt(ext *ExtensionInfo) string {
+	// 尝试从 prompt_file 加载
+	if ext.Manifest.PromptFile != "" {
+		promptPath := filepath.Clean(filepath.Join(ext.Dir, ext.Manifest.PromptFile))
+		data, err := os.ReadFile(promptPath)
+		if err != nil {
+			logger.Default().Warn("read extension prompt file",
+				zap.String("extension", ext.Manifest.Name),
+				zap.String("path", promptPath),
+				zap.Error(err),
+			)
+		} else if len(data) > 0 {
+			return fmt.Sprintf("### Extension: %s\n%s", ext.Manifest.Name, strings.TrimSpace(string(data)))
+		}
+	}
+
+	// 自动从工具定义生成
+	return b.autoGeneratePrompt(ext)
+}
+
+// autoGeneratePrompt 从工具定义自动生成 prompt 文本
+func (b *Bridge) autoGeneratePrompt(ext *ExtensionInfo) string {
+	if len(ext.Manifest.Tools) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("### Extension: %s\n", ext.Manifest.Name))
+	if ext.Manifest.Description != "" {
+		sb.WriteString(ext.Manifest.Description)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\nAvailable tools:\n")
+	for _, tool := range ext.Manifest.Tools {
+		sb.WriteString(fmt.Sprintf("- **%s**: %s\n", tool.Name, tool.Description))
+		if tool.Parameters != nil {
+			sb.WriteString(fmt.Sprintf("  Parameters: %s\n", string(tool.Parameters)))
+		}
+	}
+	return sb.String()
 }
 
 // ParseExtensionToolName 解析带命名空间的工具名，返回 (extName, toolName, ok)
@@ -64,63 +199,4 @@ func ParseExtensionToolName(qualifiedName string) (string, string, bool) {
 		return "", "", false
 	}
 	return parts[0], parts[1], true
-}
-
-// makeWASMHandler 创建将工具调用路由到 WASM 的 handler
-func (b *Bridge) makeWASMHandler(extName, toolName string) ai.ToolHandlerFunc {
-	return func(ctx context.Context, args map[string]any) (string, error) {
-		if b.host == nil {
-			return "", fmt.Errorf("extension host not initialized")
-		}
-		plugin := b.host.GetPlugin(extName)
-		if plugin == nil {
-			return "", fmt.Errorf("extension %q not loaded", extName)
-		}
-		argsJSON, err := json.Marshal(args)
-		if err != nil {
-			return "", fmt.Errorf("marshal args: %w", err)
-		}
-		result, err := plugin.CallTool(ctx, toolName, argsJSON)
-		if err != nil {
-			return "", err
-		}
-		return string(result), nil
-	}
-}
-
-// convertJSONSchemaToParams 将 JSON Schema 转换为 ai.ParamDef 列表
-func convertJSONSchemaToParams(schema json.RawMessage) []ai.ParamDef {
-	if schema == nil {
-		return nil
-	}
-	var s struct {
-		Properties map[string]struct {
-			Type        string `json:"type"`
-			Description string `json:"description"`
-		} `json:"properties"`
-		Required []string `json:"required"`
-	}
-	if json.Unmarshal(schema, &s) != nil || s.Properties == nil {
-		return nil
-	}
-
-	requiredSet := make(map[string]bool, len(s.Required))
-	for _, r := range s.Required {
-		requiredSet[r] = true
-	}
-
-	var params []ai.ParamDef
-	for name, prop := range s.Properties {
-		paramType := ai.ParamString
-		if prop.Type == "number" || prop.Type == "integer" {
-			paramType = ai.ParamNumber
-		}
-		params = append(params, ai.ParamDef{
-			Name:        name,
-			Type:        paramType,
-			Description: prop.Description,
-			Required:    requiredSet[name],
-		})
-	}
-	return params
 }

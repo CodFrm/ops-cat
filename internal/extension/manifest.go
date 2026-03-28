@@ -21,6 +21,7 @@ type Manifest struct {
 	Tools         []ToolDef      `json:"tools"`
 	Policies      PolicyDef      `json:"policies"`
 	Frontend      FrontendConfig `json:"frontend"`
+	PromptFile    string         `json:"prompt_file"` // relative path to prompt file, e.g. "prompt.md"
 }
 
 // BackendConfig 后端配置

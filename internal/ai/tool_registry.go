@@ -206,6 +206,19 @@ func AllToolDefs() []ToolDef {
 				return ""
 			},
 		},
+		{
+			Name:        "ext_exec",
+			Description: "Execute an extension tool. Check the extension information in the system message for available extensions, tools and their parameters.",
+			Params: []ParamDef{
+				{Name: "extension", Type: ParamString, Description: "Extension name (e.g., 'oss')", Required: true},
+				{Name: "tool", Type: ParamString, Description: "Tool name to execute (e.g., 'list_buckets')", Required: true},
+				{Name: "args", Type: ParamString, Description: "Tool arguments as JSON string", Required: true},
+			},
+			Handler: handleExtExec,
+			CommandExtractor: func(args map[string]any) string {
+				return argString(args, "extension") + "." + argString(args, "tool")
+			},
+		},
 	}
 }
 

@@ -45,10 +45,6 @@ func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
 
 	config := ai.NewDefaultConfig()
 	config.ContextWindow = contextWindow
-	// 合并扩展工具
-	if a.extBridge != nil {
-		config.Tools = a.extBridge.MergeToolDefs(ai.AllToolDefs())
-	}
 	a.aiAgent = ai.NewAgent(provider, func() ai.ToolExecutor {
 		return ai.NewAuditingExecutor(ai.NewDefaultToolExecutor(), ai.NewDefaultAuditWriter())
 	}, checker, config)
@@ -202,10 +198,17 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 		lang = "zh-cn"
 	}
 	builder := ai.NewPromptBuilder(lang, aiCtx)
+	systemPrompt := builder.Build()
+	// 注入扩展 prompt
+	if a.extBridge != nil {
+		if extPrompts := a.extBridge.GetExtensionPrompts(); extPrompts != "" {
+			systemPrompt += extPrompts
+		}
+	}
 	fullMessages := make([]ai.Message, 0, 1+len(messages))
 	fullMessages = append(fullMessages, ai.Message{
 		Role:    ai.RoleSystem,
-		Content: builder.Build(),
+		Content: systemPrompt,
 	})
 	fullMessages = append(fullMessages, messages...)
 
@@ -215,6 +218,10 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 	chatCtx = ai.WithSessionID(chatCtx, fmt.Sprintf("conv_%d", convID))
 	if a.sshPool != nil {
 		chatCtx = ai.WithSSHPool(chatCtx, a.sshPool)
+	}
+	// 注入扩展桥接
+	if a.extBridge != nil {
+		chatCtx = ai.WithExtBridge(chatCtx, a.extBridge)
 	}
 
 	// 注入 Sub Agent 依赖

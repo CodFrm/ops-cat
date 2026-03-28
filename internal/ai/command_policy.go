@@ -66,6 +66,11 @@ func withCheckResult(ctx context.Context, r *CheckResult) context.Context {
 	return context.WithValue(ctx, checkResultKey{}, r)
 }
 
+// SetCheckResult 在工具 handler 中设置决策结果（导出，供 extension bridge 等外部包使用）
+func SetCheckResult(ctx context.Context, result CheckResult) {
+	setCheckResult(ctx, result)
+}
+
 // setCheckResult 在工具 handler 中设置决策结果
 func setCheckResult(ctx context.Context, result CheckResult) {
 	if r, ok := ctx.Value(checkResultKey{}).(*CheckResult); ok && r != nil {

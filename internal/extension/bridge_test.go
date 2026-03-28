@@ -2,55 +2,52 @@ package extension
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
-
-	"github.com/opskat/opskat/internal/ai"
 
 	. "github.com/smartystreets/goconvey/convey"
 )
 
 func TestBridge(t *testing.T) {
 	Convey("Bridge", t, func() {
-		Convey("MergeToolDefs 合并扩展工具到内置工具列表", func() {
-			builtinTools := []ai.ToolDef{
-				{Name: "list_assets", Description: "List assets"},
-			}
+		Convey("ExecuteTool 扩展未注册时返回错误", func() {
+			bridge := NewBridge(nil)
+			_, err := bridge.ExecuteTool(t.Context(), "nonexistent", "some_tool", json.RawMessage("{}"))
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "not registered")
+		})
 
-			extInfo := &ExtensionInfo{
+		Convey("ExecuteTool 工具不存在时返回错误", func() {
+			ext := &ExtensionInfo{
 				Manifest: &Manifest{
 					Name: "oss",
 					Tools: []ToolDef{
-						{
-							Name:        "list_buckets",
-							Description: "列出存储桶",
-							Parameters:  json.RawMessage(`{"type":"object","properties":{"prefix":{"type":"string"}}}`),
-						},
-						{
-							Name:        "upload_object",
-							Description: "上传对象",
-							Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
-						},
+						{Name: "list_buckets", Description: "List buckets"},
 					},
 				},
 			}
-
 			bridge := NewBridge(nil)
-			bridge.RegisterExtension(extInfo)
-			merged := bridge.MergeToolDefs(builtinTools)
-
-			So(len(merged), ShouldEqual, 3)
-			So(merged[0].Name, ShouldEqual, "list_assets")
-			So(merged[1].Name, ShouldEqual, "oss.list_buckets")
-			So(merged[2].Name, ShouldEqual, "oss.upload_object")
+			bridge.RegisterExtension(ext)
+			_, err := bridge.ExecuteTool(t.Context(), "oss", "nonexistent_tool", json.RawMessage("{}"))
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "not found")
 		})
 
-		Convey("MergeToolDefs 无扩展时返回原始列表", func() {
-			builtinTools := []ai.ToolDef{
-				{Name: "list_assets", Description: "List assets"},
+		Convey("ExecuteTool 插件未加载时返回错误", func() {
+			ext := &ExtensionInfo{
+				Manifest: &Manifest{
+					Name: "oss",
+					Tools: []ToolDef{
+						{Name: "list_buckets", Description: "List buckets"},
+					},
+				},
 			}
 			bridge := NewBridge(nil)
-			merged := bridge.MergeToolDefs(builtinTools)
-			So(len(merged), ShouldEqual, 1)
+			bridge.RegisterExtension(ext)
+			_, err := bridge.ExecuteTool(t.Context(), "oss", "list_buckets", json.RawMessage("{}"))
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "host not initialized")
 		})
 
 		Convey("ExtensionNames 返回已注册扩展名列表", func() {
@@ -65,6 +62,77 @@ func TestBridge(t *testing.T) {
 			So(len(names), ShouldEqual, 2)
 			So(names, ShouldContain, "oss")
 			So(names, ShouldContain, "k8s")
+		})
+	})
+}
+
+func TestGetExtensionPrompts(t *testing.T) {
+	Convey("GetExtensionPrompts", t, func() {
+		Convey("无扩展时返回空字符串", func() {
+			bridge := NewBridge(nil)
+			So(bridge.GetExtensionPrompts(), ShouldEqual, "")
+		})
+
+		Convey("从 prompt_file 加载", func() {
+			tmpDir := t.TempDir()
+			promptContent := "This is a custom prompt for the OSS extension."
+			err := os.WriteFile(filepath.Join(tmpDir, "prompt.md"), []byte(promptContent), 0o644)
+			So(err, ShouldBeNil)
+
+			ext := &ExtensionInfo{
+				Manifest: &Manifest{
+					Name:       "oss",
+					PromptFile: "prompt.md",
+				},
+				Dir: tmpDir,
+			}
+			bridge := NewBridge(nil)
+			bridge.RegisterExtension(ext)
+			prompts := bridge.GetExtensionPrompts()
+			So(prompts, ShouldContainSubstring, "Extensions")
+			So(prompts, ShouldContainSubstring, "oss")
+			So(prompts, ShouldContainSubstring, promptContent)
+		})
+
+		Convey("自动从工具定义生成 prompt", func() {
+			ext := &ExtensionInfo{
+				Manifest: &Manifest{
+					Name:        "oss",
+					Description: "OSS extension",
+					Tools: []ToolDef{
+						{
+							Name:        "list_buckets",
+							Description: "列出存储桶",
+							Parameters:  json.RawMessage(`{"type":"object","properties":{"prefix":{"type":"string"}}}`),
+						},
+						{
+							Name:        "upload_object",
+							Description: "上传对象",
+						},
+					},
+				},
+				Dir: t.TempDir(),
+			}
+			bridge := NewBridge(nil)
+			bridge.RegisterExtension(ext)
+			prompts := bridge.GetExtensionPrompts()
+			So(prompts, ShouldContainSubstring, "Extensions")
+			So(prompts, ShouldContainSubstring, "list_buckets")
+			So(prompts, ShouldContainSubstring, "upload_object")
+			So(prompts, ShouldContainSubstring, "OSS extension")
+		})
+
+		Convey("扩展无工具且无 prompt_file 时跳过", func() {
+			ext := &ExtensionInfo{
+				Manifest: &Manifest{
+					Name: "empty_ext",
+				},
+				Dir: t.TempDir(),
+			}
+			bridge := NewBridge(nil)
+			bridge.RegisterExtension(ext)
+			prompts := bridge.GetExtensionPrompts()
+			So(prompts, ShouldEqual, "")
 		})
 	})
 }
