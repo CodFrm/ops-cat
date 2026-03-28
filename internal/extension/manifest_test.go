@@ -77,11 +77,39 @@ func TestParseManifest(t *testing.T) {
 			So(len(m.Frontend.Pages), ShouldEqual, 1)
 		})
 
-		Convey("缺少必填字段返回错误", func() {
-			data := []byte(`{"displayName": "test"}`)
+		Convey("缺少 name 返回错误", func() {
+			data := []byte(`{"version":"1.0.0","backend":{"runtime":"wasm","binary":"main.wasm"}}`)
 			_, err := ParseManifest(data)
 			So(err, ShouldNotBeNil)
-			So(err.Error(), ShouldContainSubstring, "name")
+			So(err.Error(), ShouldContainSubstring, "name is required")
+		})
+
+		Convey("缺少 version 返回错误", func() {
+			data := []byte(`{"name":"test","backend":{"runtime":"wasm","binary":"main.wasm"}}`)
+			_, err := ParseManifest(data)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "version")
+		})
+
+		Convey("缺少 backend.runtime 返回错误", func() {
+			data := []byte(`{"name":"test","version":"1.0.0","backend":{"binary":"main.wasm"}}`)
+			_, err := ParseManifest(data)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "backend.runtime")
+		})
+
+		Convey("缺少 backend.binary 返回错误", func() {
+			data := []byte(`{"name":"test","version":"1.0.0","backend":{"runtime":"wasm"}}`)
+			_, err := ParseManifest(data)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "backend.binary")
+		})
+
+		Convey("version 格式无效返回错误", func() {
+			data := []byte(`{"name":"test","version":"invalid","backend":{"runtime":"wasm","binary":"main.wasm"}}`)
+			_, err := ParseManifest(data)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "not a valid semver")
 		})
 
 		Convey("无效 JSON 返回错误", func() {

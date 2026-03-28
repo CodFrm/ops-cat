@@ -89,6 +89,14 @@ func (m *Manifest) Validate() error {
 	if m.Backend.Binary == "" {
 		return fmt.Errorf("manifest: backend.binary is required")
 	}
+	if _, ok := parseSemanticVersion(m.Version); !ok {
+		return fmt.Errorf("manifest: version %q is not a valid semver (expected x.y.z)", m.Version)
+	}
+	if m.MinAppVersion != "" {
+		if _, ok := parseSemanticVersion(m.MinAppVersion); !ok {
+			return fmt.Errorf("manifest: minAppVersion %q is not a valid semver (expected x.y.z)", m.MinAppVersion)
+		}
+	}
 	return nil
 }
 
@@ -105,7 +113,7 @@ func CheckAppVersionCompatibility(appVersion, minAppVersion string) bool {
 	if !ok {
 		return false
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if appParts[i] > minParts[i] {
 			return true
 		}
