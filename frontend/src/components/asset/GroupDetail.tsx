@@ -18,7 +18,7 @@ export function GroupDetail({ group }: GroupDetailProps) {
 
   const [allowList, setAllowList] = useState<string[]>([]);
   const [denyList, setDenyList] = useState<string[]>([]);
-  const [policyGroups, setPolicyGroups] = useState<number[]>([]);
+  const [policyGroups, setPolicyGroups] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -38,7 +38,7 @@ export function GroupDetail({ group }: GroupDetailProps) {
   const parentGroup = groups.find((g) => g.ID === group.ParentID);
   const assetCount = assets.filter((a) => a.GroupID === group.ID).length;
 
-  const savePolicy = async (newAllow: string[], newDeny: string[], groups?: number[]) => {
+  const savePolicy = async (newAllow: string[], newDeny: string[], groups?: string[]) => {
     const grps = groups ?? policyGroups;
     const policyObj: Record<string, unknown> = {};
     if (newAllow.length > 0) policyObj.allow_list = newAllow;
@@ -57,7 +57,7 @@ export function GroupDetail({ group }: GroupDetailProps) {
     }
   };
 
-  const handleGroupsChange = (newGroups: number[]) => {
+  const handleGroupsChange = (newGroups: string[]) => {
     setPolicyGroups(newGroups);
     savePolicy(allowList, denyList, newGroups);
   };
@@ -105,7 +105,7 @@ export function GroupDetail({ group }: GroupDetailProps) {
         {/* Command Policy */}
         <CommandPolicyCard
           title={t("asset.cmdPolicy")}
-          policyType="ssh"
+          policyType="command"
           lists={[
             {
               key: "allow_list",

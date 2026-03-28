@@ -24,7 +24,7 @@ func TestCommandPolicyIsEmpty(t *testing.T) {
 		})
 
 		Convey("有 Groups 时返回 false", func() {
-			p := &CommandPolicy{Groups: []int64{BuiltinLinuxReadOnly}}
+			p := &CommandPolicy{Groups: []string{BuiltinLinuxReadOnly}}
 			So(p.IsEmpty(), ShouldBeFalse)
 		})
 	})
@@ -53,7 +53,7 @@ func TestQueryPolicyIsEmpty(t *testing.T) {
 		})
 
 		Convey("有 Groups 时返回 false", func() {
-			p := &QueryPolicy{Groups: []int64{BuiltinSQLReadOnly}}
+			p := &QueryPolicy{Groups: []string{BuiltinSQLReadOnly}}
 			So(p.IsEmpty(), ShouldBeFalse)
 		})
 	})
@@ -77,7 +77,7 @@ func TestRedisPolicyIsEmpty(t *testing.T) {
 		})
 
 		Convey("有 Groups 时返回 false", func() {
-			p := &RedisPolicy{Groups: []int64{BuiltinRedisReadOnly}}
+			p := &RedisPolicy{Groups: []string{BuiltinRedisReadOnly}}
 			So(p.IsEmpty(), ShouldBeFalse)
 		})
 	})

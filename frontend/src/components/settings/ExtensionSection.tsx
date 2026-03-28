@@ -4,11 +4,11 @@ import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Puzzle, Trash2, Info } from "lucide-react";
-import { useExtensionStore } from "@/stores/extensionStore";
+import { useExtensionStore, extLocalized } from "@/stores/extensionStore";
 import { SelectExtensionDir } from "../../../wailsjs/go/app/App";
 
 export function ExtensionSection() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const extensions = useExtensionStore((s) => s.extensions);
   const installExtension = useExtensionStore((s) => s.installExtension);
   const removeExtension = useExtensionStore((s) => s.removeExtension);
@@ -16,10 +16,13 @@ export function ExtensionSection() {
   const [removing, setRemoving] = useState<string | null>(null);
 
   const handleInstall = async () => {
+    setInstalling(true);
     try {
       const dir = await SelectExtensionDir();
-      if (!dir) return;
-      setInstalling(true);
+      if (!dir) {
+        setInstalling(false);
+        return;
+      }
       await installExtension(dir);
       toast.success(t("extension.installSuccess"));
     } catch (e: unknown) {
@@ -70,10 +73,14 @@ export function ExtensionSection() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">{ext.displayName || ext.name}</span>
+                    <span className="text-sm font-medium">
+                      {extLocalized(ext.displayName || ext.name, ext.displayName_zh, i18n.language)}
+                    </span>
                     <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">v{ext.version}</span>
                   </div>
-                  <p className="text-xs text-muted-foreground truncate">{ext.description}</p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {extLocalized(ext.description, ext.description_zh, i18n.language)}
+                  </p>
                 </div>
                 <div className="flex items-center gap-4 shrink-0">
                   <div className="flex items-center gap-1.5">

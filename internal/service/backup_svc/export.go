@@ -11,7 +11,7 @@ import (
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/model/entity/group_entity"
-	"github.com/opskat/opskat/internal/model/entity/policy_group_entity"
+	"github.com/opskat/opskat/internal/model/entity/policy"
 	"github.com/opskat/opskat/internal/repository/asset_repo"
 	"github.com/opskat/opskat/internal/repository/credential_repo"
 	"github.com/opskat/opskat/internal/repository/forward_repo"
@@ -202,21 +202,21 @@ func collectPolicyGroupIDs(assets []*asset_entity.Asset, groups []*group_entity.
 	return ids
 }
 
-// collectPolicyIDs 从策略 JSON 中提取 Groups 字段的 ID
+// collectPolicyIDs 从策略 JSON 中提取 Groups 字段的用户自定义组 ID
 func collectPolicyIDs(policyJSON string, ids map[int64]bool) {
 	if policyJSON == "" {
 		return
 	}
-	// 尝试解析为含 Groups 字段的结构
 	var p struct {
-		Groups []int64 `json:"groups"`
+		Groups []string `json:"groups"`
 	}
 	if err := json.Unmarshal([]byte(policyJSON), &p); err != nil {
 		return
 	}
 	for _, id := range p.Groups {
-		if !policy_group_entity.IsBuiltinID(id) {
-			ids[id] = true
+		// 只收集用户自定义组（数字 ID），跳过内置和扩展组
+		if dbID, ok := policy.ParseUserID(id); ok {
+			ids[dbID] = true
 		}
 	}
 }

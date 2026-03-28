@@ -12,8 +12,8 @@ import (
 	"github.com/opskat/opskat/internal/repository/policy_group_repo"
 )
 
-// resolveCommandGroups 解析引用的权限组，返回合并后的 allow/deny 规则
-func resolveCommandGroups(ctx context.Context, groupIDs []int64) (allow, deny []string) {
+// resolveCommandGroups 解析引用的权��组，返回合并��的 allow/deny 规则
+func resolveCommandGroups(ctx context.Context, groupIDs []string) (allow, deny []string) {
 	if len(groupIDs) == 0 {
 		return
 	}
@@ -23,7 +23,7 @@ func resolveCommandGroups(ctx context.Context, groupIDs []int64) (allow, deny []
 		}
 		var p policy.CommandPolicy
 		if err := json.Unmarshal([]byte(pg.Policy), &p); err != nil {
-			logger.Default().Warn("unmarshal policy group command policy", zap.Int64("id", pg.ID), zap.Error(err))
+			logger.Default().Warn("unmarshal policy group command policy", zap.String("id", pg.GetStringID()), zap.Error(err))
 			continue
 		}
 		allow = append(allow, p.AllowList...)
@@ -33,7 +33,7 @@ func resolveCommandGroups(ctx context.Context, groupIDs []int64) (allow, deny []
 }
 
 // resolveQueryGroups 解析引用的 Query 权限组，返回合并后的规则
-func resolveQueryGroups(ctx context.Context, groupIDs []int64) (allowTypes, denyTypes, denyFlags []string) {
+func resolveQueryGroups(ctx context.Context, groupIDs []string) (allowTypes, denyTypes, denyFlags []string) {
 	if len(groupIDs) == 0 {
 		return
 	}
@@ -43,7 +43,7 @@ func resolveQueryGroups(ctx context.Context, groupIDs []int64) (allowTypes, deny
 		}
 		var p policy.QueryPolicy
 		if err := json.Unmarshal([]byte(pg.Policy), &p); err != nil {
-			logger.Default().Warn("unmarshal policy group query policy", zap.Int64("id", pg.ID), zap.Error(err))
+			logger.Default().Warn("unmarshal policy group query policy", zap.String("id", pg.GetStringID()), zap.Error(err))
 			continue
 		}
 		allowTypes = append(allowTypes, p.AllowTypes...)
@@ -54,7 +54,7 @@ func resolveQueryGroups(ctx context.Context, groupIDs []int64) (allowTypes, deny
 }
 
 // resolveRedisGroups 解析引用的 Redis 权限组，返回合并后的 allow/deny 规则
-func resolveRedisGroups(ctx context.Context, groupIDs []int64) (allow, deny []string) {
+func resolveRedisGroups(ctx context.Context, groupIDs []string) (allow, deny []string) {
 	if len(groupIDs) == 0 {
 		return
 	}
@@ -64,7 +64,7 @@ func resolveRedisGroups(ctx context.Context, groupIDs []int64) (allow, deny []st
 		}
 		var p policy.RedisPolicy
 		if err := json.Unmarshal([]byte(pg.Policy), &p); err != nil {
-			logger.Default().Warn("unmarshal policy group redis policy", zap.Int64("id", pg.ID), zap.Error(err))
+			logger.Default().Warn("unmarshal policy group redis policy", zap.String("id", pg.GetStringID()), zap.Error(err))
 			continue
 		}
 		allow = append(allow, p.AllowList...)
@@ -73,18 +73,39 @@ func resolveRedisGroups(ctx context.Context, groupIDs []int64) (allow, deny []st
 	return
 }
 
-// fetchPolicyGroups 按 ID 列表获取权限组（内置组从代码，用户组从 DB）
-func fetchPolicyGroups(ctx context.Context, ids []int64) []*policy_group_entity.PolicyGroup {
+// resolveExtensionGroups 解析扩展权限组，返回合并后的 allow/deny 规则
+func resolveExtensionGroups(ctx context.Context, groupIDs []string) (allow, deny []string) {
+	if len(groupIDs) == 0 {
+		return
+	}
+	for _, pg := range fetchPolicyGroups(ctx, groupIDs) {
+		var p policy.ExtensionPolicy
+		if err := json.Unmarshal([]byte(pg.Policy), &p); err != nil {
+			logger.Default().Warn("unmarshal extension policy group", zap.String("id", pg.GetStringID()), zap.Error(err))
+			continue
+		}
+		allow = append(allow, p.AllowList...)
+		deny = append(deny, p.DenyList...)
+	}
+	return
+}
+
+// fetchPolicyGroups 按字符串 ID 列表获取权限组（内置从代码，扩展从内存，用户从 DB）
+func fetchPolicyGroups(ctx context.Context, ids []string) []*policy_group_entity.PolicyGroup {
 	var result []*policy_group_entity.PolicyGroup
 	var dbIDs []int64
 
 	for _, id := range ids {
-		if policy_group_entity.IsBuiltinID(id) {
+		if policy.IsBuiltinID(id) {
 			if pg := policy_group_entity.FindBuiltin(id); pg != nil {
 				result = append(result, pg)
 			}
-		} else {
-			dbIDs = append(dbIDs, id)
+		} else if policy.IsExtensionID(id) {
+			if pg := policy_group_entity.FindExtensionGroup(id); pg != nil {
+				result = append(result, pg)
+			}
+		} else if dbID, ok := policy.ParseUserID(id); ok {
+			dbIDs = append(dbIDs, dbID)
 		}
 	}
 

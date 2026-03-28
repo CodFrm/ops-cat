@@ -39,7 +39,7 @@ func TestTestSSHPolicy(t *testing.T) {
 
 		Convey("引用内置权限组 — 高危拒绝", func() {
 			p := &asset_entity.CommandPolicy{
-				Groups: []int64{policy.BuiltinDangerousDeny},
+				Groups: []string{policy.BuiltinDangerousDeny},
 			}
 			out := testSSHPolicy(ctx, p, nil, "rm -rf /tmp")
 			So(out.Decision, ShouldEqual, Deny)
@@ -47,7 +47,7 @@ func TestTestSSHPolicy(t *testing.T) {
 
 		Convey("引用内置权限组 — Linux 只读允许", func() {
 			p := &asset_entity.CommandPolicy{
-				Groups: []int64{policy.BuiltinLinuxReadOnly},
+				Groups: []string{policy.BuiltinLinuxReadOnly},
 			}
 			out := testSSHPolicy(ctx, p, nil, "ls -la")
 			So(out.Decision, ShouldEqual, Allow)
@@ -56,7 +56,7 @@ func TestTestSSHPolicy(t *testing.T) {
 		Convey("引用组 + 内联规则共存", func() {
 			p := &asset_entity.CommandPolicy{
 				AllowList: []string{"my-custom-cmd *"},
-				Groups:    []int64{policy.BuiltinLinuxReadOnly, policy.BuiltinDangerousDeny},
+				Groups:    []string{policy.BuiltinLinuxReadOnly, policy.BuiltinDangerousDeny},
 			}
 			out := testSSHPolicy(ctx, p, nil, "my-custom-cmd foo")
 			So(out.Decision, ShouldEqual, Allow)
@@ -122,7 +122,7 @@ func TestTestRedisPolicy(t *testing.T) {
 
 		Convey("引用内置组 — 拒绝 FLUSHDB", func() {
 			p := &asset_entity.RedisPolicy{
-				Groups: []int64{policy.BuiltinRedisDangerousDeny},
+				Groups: []string{policy.BuiltinRedisDangerousDeny},
 			}
 			out := testRedisPolicy(ctx, p, nil, "FLUSHDB")
 			So(out.Decision, ShouldEqual, Deny)
@@ -130,7 +130,7 @@ func TestTestRedisPolicy(t *testing.T) {
 
 		Convey("引用内置组 — 允许 GET", func() {
 			p := &asset_entity.RedisPolicy{
-				Groups: []int64{policy.BuiltinRedisReadOnly},
+				Groups: []string{policy.BuiltinRedisReadOnly},
 			}
 			out := testRedisPolicy(ctx, p, nil, "GET user:1")
 			So(out.Decision, ShouldEqual, Allow)
@@ -210,7 +210,7 @@ func TestTestQueryPolicy(t *testing.T) {
 
 		Convey("引用内置组 — SQL 只读允许 SELECT", func() {
 			p := &asset_entity.QueryPolicy{
-				Groups: []int64{policy.BuiltinSQLReadOnly},
+				Groups: []string{policy.BuiltinSQLReadOnly},
 			}
 			out := testQueryPolicy(ctx, p, nil, "SELECT * FROM users")
 			So(out.Decision, ShouldEqual, Allow)
@@ -218,7 +218,7 @@ func TestTestQueryPolicy(t *testing.T) {
 
 		Convey("引用内置组 — SQL 高危拒绝 DROP TABLE", func() {
 			p := &asset_entity.QueryPolicy{
-				Groups: []int64{policy.BuiltinSQLDangerousDeny},
+				Groups: []string{policy.BuiltinSQLDangerousDeny},
 			}
 			out := testQueryPolicy(ctx, p, nil, "DROP TABLE users")
 			So(out.Decision, ShouldEqual, Deny)

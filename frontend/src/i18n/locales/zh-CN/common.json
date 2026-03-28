@@ -231,7 +231,17 @@
       "copySuccess": "权限组已复制",
       "deleteSuccess": "权限组已删除",
       "deleteConfirmTitle": "确认删除权限组",
-      "deleteConfirm": "确定删除权限组 \"{{name}}\"？此操作不可撤销。"
+      "deleteConfirm": "确定删除权限组 \"{{name}}\"？此操作不可撤销。",
+      "builtin": {
+        "builtin.linux_readonly": { "name": "Linux 常用只读", "description": "常用 Linux 只读命令" },
+        "builtin.k8s_readonly": { "name": "Kubernetes 只读", "description": "Kubernetes 只读操作命令" },
+        "builtin.docker_readonly": { "name": "Docker 只读", "description": "Docker 只读操作命令" },
+        "builtin.dangerous_deny": { "name": "高危命令拒绝", "description": "拒绝执行高危系统命令" },
+        "builtin.sql_readonly": { "name": "SQL 只读", "description": "只允许查询类 SQL 语句" },
+        "builtin.sql_dangerous_deny": { "name": "SQL 高危拒绝", "description": "拒绝高危 SQL 操作" },
+        "builtin.redis_readonly": { "name": "Redis 只读", "description": "只允许 Redis 只读命令" },
+        "builtin.redis_dangerous_deny": { "name": "Redis 高危拒绝", "description": "拒绝 Redis 高危命令" }
+      }
     }
   },
   "sshKey": {

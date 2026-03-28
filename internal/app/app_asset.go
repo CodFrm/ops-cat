@@ -111,7 +111,12 @@ func (a *App) GetDefaultPolicy(assetType string) (string, error) {
 		}
 		return string(data), nil
 	default:
-		return "", fmt.Errorf("unsupported asset type: %s", assetType)
+		// 扩展类型：查询已注册的扩展默认权限组
+		defaultPolicy := getExtensionDefaultPolicy(assetType)
+		if defaultPolicy == "" {
+			return "{}", nil
+		}
+		return defaultPolicy, nil
 	}
 }
 
@@ -136,12 +141,12 @@ func (a *App) UpdatePolicyGroup(pg policy_group_entity.PolicyGroup) error {
 }
 
 // DeletePolicyGroup 删除自定义权限组
-func (a *App) DeletePolicyGroup(id int64) error {
+func (a *App) DeletePolicyGroup(id string) error {
 	return policy_group_svc.PolicyGroup().Delete(a.langCtx(), id)
 }
 
 // CopyPolicyGroup 复制权限组（内置或自定义）
-func (a *App) CopyPolicyGroup(id int64, name string) (*policy_group_entity.PolicyGroup, error) {
+func (a *App) CopyPolicyGroup(id string, name string) (*policy_group_entity.PolicyGroup, error) {
 	return policy_group_svc.PolicyGroup().Copy(a.langCtx(), id, name)
 }
 

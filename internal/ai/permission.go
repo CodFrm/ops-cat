@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
@@ -34,7 +35,8 @@ func CheckPermission(ctx context.Context, assetType string, assetID int64, comma
 	case asset_entity.AssetTypeRedis:
 		return checkRedisPermission(ctx, assetID, command)
 	default:
-		return CheckResult{Decision: NeedConfirm}
+		// 扩展类型：action 匹配
+		return checkExtensionPermission(ctx, assetID, command)
 	}
 }
 
@@ -177,6 +179,68 @@ func checkRedisPermission(ctx context.Context, assetID int64, command string) Ch
 		result.HintRules = merged.AllowList
 	}
 	return result
+}
+
+// --- Extension ---
+
+func checkExtensionPermission(ctx context.Context, assetID int64, action string) CheckResult {
+	asset, err := asset_svc.Asset().Get(ctx, assetID)
+	if err != nil {
+		logger.Default().Warn("get asset for extension permission check", zap.Int64("assetID", assetID), zap.Error(err))
+		return CheckResult{Decision: NeedConfirm}
+	}
+
+	// 解析扩展策略
+	var allowList, denyList []string
+	if asset.CmdPolicy != "" {
+		var raw struct {
+			AllowList []string `json:"allow_list"`
+			DenyList  []string `json:"deny_list"`
+			Groups    []string `json:"groups"`
+		}
+		if json.Unmarshal([]byte(asset.CmdPolicy), &raw) == nil {
+			allowList = raw.AllowList
+			denyList = raw.DenyList
+			// 解析引用的权限组
+			if len(raw.Groups) > 0 {
+				grpAllow, grpDeny := resolveExtensionGroups(ctx, raw.Groups)
+				allowList = append(allowList, grpAllow...)
+				denyList = append(denyList, grpDeny...)
+			}
+		}
+	}
+
+	assetName := ""
+	if asset != nil {
+		assetName = asset.Name
+	}
+
+	// deny 检查（精确 action 匹配 + 通配符）
+	for _, d := range denyList {
+		if d == action || d == "*" {
+			reason := policyMsg(ctx, "action blocked by policy", "操作被策略禁止执行")
+			msg := formatDenyMessage(ctx, assetName, action, reason, allowList)
+			return CheckResult{Decision: Deny, Message: msg, HintRules: allowList, DecisionSource: SourcePolicyDeny, MatchedPattern: d}
+		}
+	}
+
+	// allow 检查
+	for _, a := range allowList {
+		if a == action || a == "*" {
+			return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow, MatchedPattern: a}
+		}
+	}
+
+	// DB Grant 匹配
+	var groups []*group_entity.Group
+	if asset != nil && asset.GroupID > 0 {
+		groups = resolveGroupChain(ctx, asset.GroupID)
+	}
+	if grantPattern := matchGrantPatterns(ctx, assetID, groups, []string{action}); grantPattern != "" {
+		return CheckResult{Decision: Allow, DecisionSource: SourceGrantAllow, MatchedPattern: grantPattern}
+	}
+
+	return CheckResult{Decision: NeedConfirm, HintRules: allowList}
 }
 
 // --- Grant 匹配辅助 ---

@@ -4,24 +4,40 @@ import { GetExtensions, InstallExtension, RemoveExtension } from "../../wailsjs/
 export interface ExtensionAssetType {
   type: string;
   name: string;
-  name_en: string;
+  name_zh?: string;
+  namePlaceholder?: string;
+  testConnection?: boolean;
   configSchema: Record<string, unknown>;
 }
 
 export interface ExtensionPage {
   id: string;
   name: string;
+  name_zh?: string;
   component: string;
 }
 
 export interface ExtensionInfo {
   name: string;
   displayName: string;
+  displayName_zh?: string;
   version: string;
   icon: string;
   description: string;
+  description_zh?: string;
   assetTypes: ExtensionAssetType[];
   pages: ExtensionPage[];
+  policyType?: string;
+  policyActions?: string[];
+}
+
+/**
+ * Get localized text from extension manifest fields.
+ * English is the default (no suffix), Chinese uses _zh suffix.
+ */
+export function extLocalized(text: string, textZh: string | undefined, lang: string): string {
+  if ((lang === "zh" || lang === "zh-CN" || lang.startsWith("zh")) && textZh) return textZh;
+  return text;
 }
 
 interface ExtensionState {

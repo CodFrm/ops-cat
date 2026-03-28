@@ -32,7 +32,7 @@ export function ConnectSSH(arg1:app.SSHConnectRequest):Promise<string>;
 
 export function ConnectSSHAsync(arg1:app.SSHConnectRequest):Promise<string>;
 
-export function CopyPolicyGroup(arg1:number,arg2:string):Promise<policy_group_entity.PolicyGroup>;
+export function CopyPolicyGroup(arg1:string,arg2:string):Promise<policy_group_entity.PolicyGroup>;
 
 export function CreateAIProvider(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:number,arg7:number):Promise<app.AIProviderInfo>;
 
@@ -60,7 +60,7 @@ export function DeleteForwardConfig(arg1:number):Promise<void>;
 
 export function DeleteGroup(arg1:number,arg2:boolean):Promise<void>;
 
-export function DeletePolicyGroup(arg1:number):Promise<void>;
+export function DeletePolicyGroup(arg1:string):Promise<void>;
 
 export function DetectOpsctl():Promise<app.OpsctlInfo>;
 
@@ -152,8 +152,6 @@ export function InitAIProvider():Promise<void>;
 
 export function InstallExtension(arg1:string):Promise<void>;
 
-export function SelectExtensionDir():Promise<string>;
-
 export function InstallOpsctl(arg1:string):Promise<string>;
 
 export function InstallSkills():Promise<void>;
@@ -236,6 +234,8 @@ export function SaveConversationMessages(arg1:number,arg2:Array<app.Conversation
 
 export function SaveGitHubToken(arg1:string,arg2:string):Promise<void>;
 
+export function SelectExtensionDir():Promise<string>;
+
 export function SelectImportFile():Promise<app.ImportFileInfo>;
 
 export function SelectSSHKeyFile():Promise<app.LocalSSHKeyInfo>;
@@ -263,6 +263,8 @@ export function StopForwardConfig(arg1:number):Promise<void>;
 export function SwitchConversation(arg1:number):Promise<Array<app.ConversationDisplayMessage>>;
 
 export function TestDatabaseConnection(arg1:string,arg2:string):Promise<void>;
+
+export function TestExtensionConnection(arg1:string,arg2:string):Promise<void>;
 
 export function TestPolicyRule(arg1:app.PolicyTestRequest):Promise<app.PolicyTestResult>;
 

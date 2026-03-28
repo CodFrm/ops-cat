@@ -13,13 +13,9 @@ import App from "./App";
   jsxRuntime,
   api: {
     callTool: async (name: string, args: Record<string, unknown>) => {
-      try {
-        const { CallExtensionTool } = await import("../wailsjs/go/app/App");
-        const result = await CallExtensionTool(name, JSON.stringify(args));
-        return JSON.parse(result);
-      } catch {
-        throw new Error("CallExtensionTool binding not available");
-      }
+      const { CallExtensionTool } = await import("../wailsjs/go/app/App");
+      const result = await CallExtensionTool(name, JSON.stringify(args));
+      return JSON.parse(result);
     },
   },
 };

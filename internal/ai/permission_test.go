@@ -443,7 +443,11 @@ func TestCheckPermission_TypeAlias(t *testing.T) {
 	Convey("CheckPermission type alias mapping", t, func() {
 		_, mockAsset, _ := setupPolicyTest(t)
 
-		Convey("unknown type → NeedConfirm", func() {
+		Convey("unknown type → NeedConfirm (extension path)", func() {
+			// Extension permission check will try to fetch the asset
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(&asset_entity.Asset{
+				ID: 1, Type: "unknown",
+			}, nil).AnyTimes()
 			result := CheckPermission(context.Background(), "unknown", 1, "anything")
 			So(result.Decision, ShouldEqual, NeedConfirm)
 		})

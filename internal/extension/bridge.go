@@ -82,7 +82,7 @@ func (b *Bridge) ExecuteTool(ctx context.Context, extName, toolName string, args
 
 	// 如果 check_policy 返回了 action，检查资产策略
 	if policyResult != nil && policyResult.Action != "" {
-		checkResult := b.checkExtensionToolPolicy(ctx, argsJSON, policyResult.Action, policyResult.Resource)
+		checkResult := b.checkExtensionToolPolicy(ctx, extName, argsJSON, policyResult.Action, policyResult.Resource)
 		ai.SetCheckResult(ctx, checkResult)
 		if checkResult.Decision == ai.Deny {
 			return checkResult.Message, nil
@@ -110,7 +110,7 @@ func (b *Bridge) ExecuteTool(ctx context.Context, extName, toolName string, args
 }
 
 // checkExtensionToolPolicy 检查扩展工具的策略
-func (b *Bridge) checkExtensionToolPolicy(ctx context.Context, argsJSON json.RawMessage, action, resource string) ai.CheckResult {
+func (b *Bridge) checkExtensionToolPolicy(ctx context.Context, extName string, argsJSON json.RawMessage, action, _ string) ai.CheckResult {
 	// 从参数中尝试提取 asset_id
 	var args struct {
 		AssetID int64 `json:"asset_id"`
@@ -120,9 +120,23 @@ func (b *Bridge) checkExtensionToolPolicy(ctx context.Context, argsJSON json.Raw
 		return ai.CheckResult{Decision: ai.NeedConfirm}
 	}
 
-	// 检查资产的 CmdPolicy
-	result := ai.CheckPermission(ctx, "exec", args.AssetID, action)
+	// 查找扩展声明的资产类型，使用实际类型检查权限
+	assetType := b.findExtensionAssetType(extName)
+	result := ai.CheckPermission(ctx, assetType, args.AssetID, action)
 	return result
+}
+
+// findExtensionAssetType 查找扩展声明的第一个资产类型
+func (b *Bridge) findExtensionAssetType(extName string) string {
+	for _, ext := range b.extensions {
+		if ext.Manifest.Name == extName {
+			if len(ext.Manifest.AssetTypes) > 0 {
+				return ext.Manifest.AssetTypes[0].Type
+			}
+			break
+		}
+	}
+	return extName
 }
 
 // GetExtensionPrompts 收集所有扩展的 prompt 文本，用于注入 AI 系统消息
@@ -177,16 +191,16 @@ func (b *Bridge) autoGeneratePrompt(ext *ExtensionInfo) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("### Extension: %s\n", ext.Manifest.Name))
+	fmt.Fprintf(&sb, "### Extension: %s\n", ext.Manifest.Name)
 	if ext.Manifest.Description != "" {
 		sb.WriteString(ext.Manifest.Description)
 		sb.WriteString("\n")
 	}
 	sb.WriteString("\nAvailable tools:\n")
 	for _, tool := range ext.Manifest.Tools {
-		sb.WriteString(fmt.Sprintf("- **%s**: %s\n", tool.Name, tool.Description))
+		fmt.Fprintf(&sb, "- **%s**: %s\n", tool.Name, tool.Description)
 		if tool.Parameters != nil {
-			sb.WriteString(fmt.Sprintf("  Parameters: %s\n", string(tool.Parameters)))
+			fmt.Fprintf(&sb, "  Parameters: %s\n", string(tool.Parameters))
 		}
 	}
 	return sb.String()

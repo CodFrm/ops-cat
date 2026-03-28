@@ -2,15 +2,36 @@ package asset_svc
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/model/entity/policy_group_entity"
 	"github.com/opskat/opskat/internal/pkg/sortutil"
 	"github.com/opskat/opskat/internal/repository/asset_repo"
 )
+
+// getExtensionDefaultPolicyJSON 获取扩展类型的默认策略 JSON
+func getExtensionDefaultPolicyJSON(assetType string) string {
+	extGroups := policy_group_entity.ExtensionGroups()
+	var groupIDs []string
+	for _, pg := range extGroups {
+		if pg.PolicyType == assetType {
+			groupIDs = append(groupIDs, pg.StringID)
+		}
+	}
+	if len(groupIDs) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(map[string]any{"groups": groupIDs})
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
 
 // AssetSvc 资产业务接口
 type AssetSvc interface {
@@ -50,7 +71,7 @@ func (s *assetSvc) Create(ctx context.Context, asset *asset_entity.Asset) error 
 	asset.Createtime = now
 	asset.Updatetime = now
 	asset.Status = asset_entity.StatusActive
-	// 未设置命令策略时，根据资产类型应用默认拒绝列表
+	// 未设置命令策略时，根据资产类型应用默认策略
 	if asset.CmdPolicy == "" {
 		switch asset.Type {
 		case asset_entity.AssetTypeDatabase:
@@ -61,9 +82,14 @@ func (s *assetSvc) Create(ctx context.Context, asset *asset_entity.Asset) error 
 			if err := asset.SetRedisPolicy(asset_entity.DefaultRedisPolicy()); err != nil {
 				logger.Default().Error("set default redis policy", zap.Error(err))
 			}
-		default:
+		case asset_entity.AssetTypeSSH:
 			if err := asset.SetCommandPolicy(asset_entity.DefaultCommandPolicy()); err != nil {
 				logger.Default().Error("set default command policy", zap.Error(err))
+			}
+		default:
+			// 扩展类型：查找扩展默认权限组
+			if defaultPolicy := getExtensionDefaultPolicyJSON(asset.Type); defaultPolicy != "" {
+				asset.CmdPolicy = defaultPolicy
 			}
 		}
 	}

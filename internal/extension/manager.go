@@ -10,22 +10,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// ExtensionInfo 已加载的扩展信息
-type ExtensionInfo struct {
-	Manifest *Manifest
-	Dir      string // 扩展目录的绝对路径
-}
-
-// HasTool 检查扩展是否声明了指定的工具
-func (e *ExtensionInfo) HasTool(name string) bool {
-	for _, t := range e.Manifest.Tools {
-		if t.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
 // Manager 扩展管理器，负责发现、加载、安装/卸载扩展
 type Manager struct {
 	extensionsDir string

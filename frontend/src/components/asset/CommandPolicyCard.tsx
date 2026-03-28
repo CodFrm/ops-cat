@@ -8,7 +8,7 @@ import { PolicyGroupManager } from "@/components/asset/PolicyGroupManager";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
-type PolicyType = "ssh" | "database" | "redis";
+// policyType maps to backend PolicyType: "command", "query", "redis", or extension types like "oss"
 
 export interface PolicyList {
   key: string;
@@ -22,7 +22,7 @@ export interface PolicyList {
 
 interface CommandPolicyCardProps {
   title: string;
-  policyType: PolicyType;
+  policyType: string;
   lists: PolicyList[];
   buildPolicyJSON: () => string;
   hint?: string;
@@ -30,8 +30,8 @@ interface CommandPolicyCardProps {
   assetID?: number;
   groupID?: number;
   onReset?: () => void;
-  referencedGroups?: number[];
-  onGroupsChange?: (ids: number[]) => void;
+  referencedGroups?: string[];
+  onGroupsChange?: (ids: string[]) => void;
 }
 
 export function CommandPolicyCard({
@@ -56,8 +56,9 @@ export function CommandPolicyCard({
   const denyLists = lists.filter((l) => l.variant !== "allow");
   const isGroup = !!groupID;
 
-  const managerTab =
-    policyType === "ssh" ? ("command" as const) : policyType === "database" ? ("query" as const) : ("redis" as const);
+  // Map asset-facing policyType to backend PolicyType for the manager dialog
+  const policyTypeToManagerTab: Record<string, string> = { ssh: "command", database: "query", redis: "redis" };
+  const managerTab = policyTypeToManagerTab[policyType] || policyType;
 
   return (
     <div className="rounded-xl border bg-card p-4">

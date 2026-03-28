@@ -3,6 +3,8 @@ package policy_group_entity
 import (
 	"encoding/json"
 	"errors"
+	"strings"
+	"sync"
 
 	"github.com/opskat/opskat/internal/model/entity/policy"
 )
@@ -14,15 +16,25 @@ const (
 	PolicyTypeRedis   = "redis"
 )
 
+// 权限组来源常量
+const (
+	SourceBuiltin   = "builtin"
+	SourceExtension = "extension"
+	SourceUser      = "user"
+)
+
 // PolicyGroup 权限组实体
 type PolicyGroup struct {
-	ID          int64  `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
-	Name        string `gorm:"column:name;type:varchar(255);not null" json:"name"`
-	Description string `gorm:"column:description;type:text" json:"description"`
-	PolicyType  string `gorm:"column:policy_type;type:varchar(50);not null" json:"policyType"`
-	Policy      string `gorm:"column:policy;type:text;not null" json:"policy"`
-	Createtime  int64  `gorm:"column:createtime" json:"createtime"`
-	Updatetime  int64  `gorm:"column:updatetime" json:"updatetime"`
+	ID            int64  `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	StringID      string `gorm:"-" json:"-"` // 非 DB: 用于内存中的 builtin/extension 组
+	Name          string `gorm:"column:name;type:varchar(255);not null" json:"name"`
+	NameZh        string `gorm:"-" json:"-"` // 非 DB: 扩展组国际化
+	Description   string `gorm:"column:description;type:text" json:"description"`
+	DescriptionZh string `gorm:"-" json:"-"` // 非 DB: 扩展组国际化
+	PolicyType    string `gorm:"column:policy_type;type:varchar(50);not null" json:"policyType"`
+	Policy        string `gorm:"column:policy;type:text;not null" json:"policy"`
+	Createtime    int64  `gorm:"column:createtime" json:"createtime"`
+	Updatetime    int64  `gorm:"column:updatetime" json:"updatetime"`
 }
 
 // TableName GORM 表名
@@ -30,42 +42,52 @@ func (PolicyGroup) TableName() string {
 	return "policy_groups"
 }
 
+// GetStringID 返回字符串 ID：builtin/extension 使用 StringID，用户组使用数字字符串
+func (pg *PolicyGroup) GetStringID() string {
+	if pg.StringID != "" {
+		return pg.StringID
+	}
+	return policy.FormatUserID(pg.ID)
+}
+
 // Validate 校验
 func (pg *PolicyGroup) Validate() error {
 	if pg.Name == "" {
 		return errors.New("权限组名称不能为空")
 	}
-	switch pg.PolicyType {
-	case PolicyTypeCommand, PolicyTypeQuery, PolicyTypeRedis:
-	default:
+	if !IsValidPolicyType(pg.PolicyType) {
 		return errors.New("无效的策略类型")
 	}
 	return nil
 }
 
-// PolicyGroupItem 返回给前端的权限组项，含 Builtin 标识
+// PolicyGroupItem 返回给前端的权限组项
 type PolicyGroupItem struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	PolicyType  string `json:"policyType"`
-	Policy      string `json:"policy"`
-	Builtin     bool   `json:"builtin"`
-	Createtime  int64  `json:"createtime"`
-	Updatetime  int64  `json:"updatetime"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	NameZh        string `json:"name_zh,omitempty"`
+	Description   string `json:"description"`
+	DescriptionZh string `json:"description_zh,omitempty"`
+	PolicyType    string `json:"policyType"`
+	Policy        string `json:"policy"`
+	Source        string `json:"source"` // "builtin", "extension", "user"
+	Createtime    int64  `json:"createtime"`
+	Updatetime    int64  `json:"updatetime"`
 }
 
 // ToItem 转为 PolicyGroupItem
-func (pg *PolicyGroup) ToItem(builtin bool) *PolicyGroupItem {
+func (pg *PolicyGroup) ToItem(source string) *PolicyGroupItem {
 	return &PolicyGroupItem{
-		ID:          pg.ID,
-		Name:        pg.Name,
-		Description: pg.Description,
-		PolicyType:  pg.PolicyType,
-		Policy:      pg.Policy,
-		Builtin:     builtin,
-		Createtime:  pg.Createtime,
-		Updatetime:  pg.Updatetime,
+		ID:            pg.GetStringID(),
+		Name:          pg.Name,
+		NameZh:        pg.NameZh,
+		Description:   pg.Description,
+		DescriptionZh: pg.DescriptionZh,
+		PolicyType:    pg.PolicyType,
+		Policy:        pg.Policy,
+		Source:        source,
+		Createtime:    pg.Createtime,
+		Updatetime:    pg.Updatetime,
 	}
 }
 
@@ -84,7 +106,7 @@ func BuiltinGroups() []*PolicyGroup {
 	return []*PolicyGroup{
 		// SSH command 类型
 		{
-			ID:          policy.BuiltinLinuxReadOnly,
+			StringID:    policy.BuiltinLinuxReadOnly,
 			Name:        "Linux 常用只读",
 			Description: "常用 Linux 只读命令",
 			PolicyType:  PolicyTypeCommand,
@@ -104,7 +126,7 @@ func BuiltinGroups() []*PolicyGroup {
 			}),
 		},
 		{
-			ID:          policy.BuiltinK8sReadOnly,
+			StringID:    policy.BuiltinK8sReadOnly,
 			Name:        "Kubernetes 只读",
 			Description: "Kubernetes 只读操作命令",
 			PolicyType:  PolicyTypeCommand,
@@ -120,7 +142,7 @@ func BuiltinGroups() []*PolicyGroup {
 			}),
 		},
 		{
-			ID:          policy.BuiltinDockerReadOnly,
+			StringID:    policy.BuiltinDockerReadOnly,
 			Name:        "Docker 只读",
 			Description: "Docker 只读操作命令",
 			PolicyType:  PolicyTypeCommand,
@@ -137,7 +159,7 @@ func BuiltinGroups() []*PolicyGroup {
 			}),
 		},
 		{
-			ID:          policy.BuiltinDangerousDeny,
+			StringID:    policy.BuiltinDangerousDeny,
 			Name:        "高危命令拒绝",
 			Description: "拒绝执行高危系统命令",
 			PolicyType:  PolicyTypeCommand,
@@ -155,7 +177,7 @@ func BuiltinGroups() []*PolicyGroup {
 		},
 		// Database query 类型
 		{
-			ID:          policy.BuiltinSQLReadOnly,
+			StringID:    policy.BuiltinSQLReadOnly,
 			Name:        "SQL 只读",
 			Description: "只允许查询类 SQL 语句",
 			PolicyType:  PolicyTypeQuery,
@@ -166,7 +188,7 @@ func BuiltinGroups() []*PolicyGroup {
 			}),
 		},
 		{
-			ID:          policy.BuiltinSQLDangerousDeny,
+			StringID:    policy.BuiltinSQLDangerousDeny,
 			Name:        "SQL 高危拒绝",
 			Description: "拒绝高危 SQL 操作",
 			PolicyType:  PolicyTypeQuery,
@@ -185,7 +207,7 @@ func BuiltinGroups() []*PolicyGroup {
 		},
 		// Redis 类型
 		{
-			ID:          policy.BuiltinRedisReadOnly,
+			StringID:    policy.BuiltinRedisReadOnly,
 			Name:        "Redis 只读",
 			Description: "只允许 Redis 只读命令",
 			PolicyType:  PolicyTypeRedis,
@@ -202,7 +224,7 @@ func BuiltinGroups() []*PolicyGroup {
 			}),
 		},
 		{
-			ID:          policy.BuiltinRedisDangerousDeny,
+			StringID:    policy.BuiltinRedisDangerousDeny,
 			Name:        "Redis 高危拒绝",
 			Description: "拒绝 Redis 高危命令",
 			PolicyType:  PolicyTypeRedis,
@@ -221,21 +243,120 @@ func BuiltinGroups() []*PolicyGroup {
 }
 
 // builtinMap 内置组缓存
-var builtinMap map[int64]*PolicyGroup
+var builtinMap map[string]*PolicyGroup
 
 func init() {
-	builtinMap = make(map[int64]*PolicyGroup)
+	builtinMap = make(map[string]*PolicyGroup)
 	for _, pg := range BuiltinGroups() {
-		builtinMap[pg.ID] = pg
+		builtinMap[pg.StringID] = pg
 	}
 }
 
-// FindBuiltin 按 ID 查找内置权限组
-func FindBuiltin(id int64) *PolicyGroup {
+// FindBuiltin 按字符串 ID 查找内置权限组
+func FindBuiltin(id string) *PolicyGroup {
 	return builtinMap[id]
 }
 
-// IsBuiltinID 检查 ID 是否为内置权限组
-func IsBuiltinID(id int64) bool {
-	return id < 0
+// --- 扩展权限组 ---
+
+var (
+	extensionGroupsMu sync.RWMutex
+	extensionGroups   = make(map[string]*PolicyGroup)
+)
+
+// RegisterExtensionGroups 注册扩展权限组（扩展加载时调用）
+func RegisterExtensionGroups(extName string, groups []*PolicyGroup) {
+	extensionGroupsMu.Lock()
+	defer extensionGroupsMu.Unlock()
+	for _, g := range groups {
+		extensionGroups[g.StringID] = g
+	}
+}
+
+// UnregisterExtensionGroups 注销指定扩展的所有权限组
+func UnregisterExtensionGroups(extName string) {
+	extensionGroupsMu.Lock()
+	defer extensionGroupsMu.Unlock()
+	prefix := "ext." + extName + "."
+	for k := range extensionGroups {
+		if strings.HasPrefix(k, prefix) {
+			delete(extensionGroups, k)
+		}
+	}
+}
+
+// FindExtensionGroup 按字符串 ID 查找扩展权限组
+func FindExtensionGroup(id string) *PolicyGroup {
+	extensionGroupsMu.RLock()
+	defer extensionGroupsMu.RUnlock()
+	return extensionGroups[id]
+}
+
+// ExtensionGroups 返回所有已注册的扩展权限组
+func ExtensionGroups() []*PolicyGroup {
+	extensionGroupsMu.RLock()
+	defer extensionGroupsMu.RUnlock()
+	result := make([]*PolicyGroup, 0, len(extensionGroups))
+	for _, pg := range extensionGroups {
+		result = append(result, pg)
+	}
+	return result
+}
+
+// ExtensionGroupsByType 返回指定扩展名的所有权限组字符串 ID
+func ExtensionGroupsByType(extName string) []string {
+	extensionGroupsMu.RLock()
+	defer extensionGroupsMu.RUnlock()
+	prefix := "ext." + extName + "."
+	var ids []string
+	for k := range extensionGroups {
+		if strings.HasPrefix(k, prefix) {
+			ids = append(ids, k)
+		}
+	}
+	return ids
+}
+
+// --- 扩展策略类型注册 ---
+
+var (
+	extPolicyTypesMu sync.RWMutex
+	extPolicyTypes   = make(map[string]struct{})
+)
+
+// RegisterExtensionPolicyType 注册扩展策略类型
+func RegisterExtensionPolicyType(policyType string) {
+	extPolicyTypesMu.Lock()
+	defer extPolicyTypesMu.Unlock()
+	extPolicyTypes[policyType] = struct{}{}
+}
+
+// UnregisterExtensionPolicyType 注销扩展策略类型
+func UnregisterExtensionPolicyType(policyType string) {
+	extPolicyTypesMu.Lock()
+	defer extPolicyTypesMu.Unlock()
+	delete(extPolicyTypes, policyType)
+}
+
+// IsExtensionPolicyType 检查是否为扩展策略类型
+func IsExtensionPolicyType(policyType string) bool {
+	extPolicyTypesMu.RLock()
+	defer extPolicyTypesMu.RUnlock()
+	_, ok := extPolicyTypes[policyType]
+	return ok
+}
+
+// IsValidPolicyType 检查策略类型是否有效（内置 + 扩展）
+func IsValidPolicyType(policyType string) bool {
+	switch policyType {
+	case PolicyTypeCommand, PolicyTypeQuery, PolicyTypeRedis:
+		return true
+	default:
+		return IsExtensionPolicyType(policyType)
+	}
+}
+
+// ParseGroupID 解析权限组 ID，返回 DB int64 ID（仅用户自定义组有效）
+func ParseGroupID(id string) (int64, bool) {
+	return policy.ParseUserID(id)
 }

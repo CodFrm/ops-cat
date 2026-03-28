@@ -70,13 +70,14 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
   const { t } = useTranslation();
   const { assets, updateAsset } = useAssetStore();
   const isExtensionAssetType = useExtensionStore((s) => s.isExtensionAssetType);
+  const getExtensionForAssetType = useExtensionStore((s) => s.getExtensionForAssetType);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
 
-  // SSH Command policy
+  // SSH Command policy / Extension policy
   const [allowList, setAllowList] = useState<string[]>([]);
   const [denyList, setDenyList] = useState<string[]>([]);
-  const [policyGroups, setPolicyGroups] = useState<number[]>([]);
+  const [policyGroups, setPolicyGroups] = useState<string[]>([]);
 
   // Database Query policy
   const [queryAllowTypes, setQueryAllowTypes] = useState<string[]>([]);
@@ -89,18 +90,19 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
 
   useEffect(() => {
     try {
-      const policy = JSON.parse(asset.CmdPolicy || "{}");
-      setPolicyGroups(policy.groups || []);
+      const policyData = JSON.parse(asset.CmdPolicy || "{}");
+      setPolicyGroups(policyData.groups || []);
       if (asset.Type === "database") {
-        setQueryAllowTypes(policy.allow_types || []);
-        setQueryDenyTypes(policy.deny_types || []);
-        setQueryDenyFlags(policy.deny_flags || []);
+        setQueryAllowTypes(policyData.allow_types || []);
+        setQueryDenyTypes(policyData.deny_types || []);
+        setQueryDenyFlags(policyData.deny_flags || []);
       } else if (asset.Type === "redis") {
-        setRedisAllowList(policy.allow_list || []);
-        setRedisDenyList(policy.deny_list || []);
+        setRedisAllowList(policyData.allow_list || []);
+        setRedisDenyList(policyData.deny_list || []);
       } else {
-        setAllowList(policy.allow_list || []);
-        setDenyList(policy.deny_list || []);
+        // SSH and extension types both use allow_list/deny_list
+        setAllowList(policyData.allow_list || []);
+        setDenyList(policyData.deny_list || []);
       }
     } catch {
       setAllowList([]);
@@ -115,7 +117,7 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
     // input states are managed internally by PolicyTagEditor
   }, [asset.ID, asset.CmdPolicy, asset.Type]);
 
-  const savePolicy = async (policyObj: Record<string, unknown>, groups?: number[]) => {
+  const savePolicy = async (policyObj: Record<string, unknown>, groups?: string[]) => {
     // Remove empty arrays (except groups which is managed separately)
     const cleaned: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(policyObj)) {
@@ -135,7 +137,7 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
     }
   };
 
-  const handleSaveSSHPolicy = async (newAllow: string[], newDeny: string[], groups?: number[]) => {
+  const handleSaveSSHPolicy = async (newAllow: string[], newDeny: string[], groups?: string[]) => {
     await savePolicy({ allow_list: newAllow, deny_list: newDeny }, groups);
   };
 
@@ -143,22 +145,23 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
     newAllowTypes: string[],
     newDenyTypes: string[],
     newDenyFlags: string[],
-    groups?: number[]
+    groups?: string[]
   ) => {
     await savePolicy({ allow_types: newAllowTypes, deny_types: newDenyTypes, deny_flags: newDenyFlags }, groups);
   };
 
-  const handleSaveRedisPolicy = async (newAllow: string[], newDeny: string[], groups?: number[]) => {
+  const handleSaveRedisPolicy = async (newAllow: string[], newDeny: string[], groups?: string[]) => {
     await savePolicy({ allow_list: newAllow, deny_list: newDeny }, groups);
   };
 
-  const handleGroupsChange = (newGroups: number[]) => {
+  const handleGroupsChange = (newGroups: string[]) => {
     setPolicyGroups(newGroups);
     if (asset.Type === "database") {
       handleSaveQueryPolicy(queryAllowTypes, queryDenyTypes, queryDenyFlags, newGroups);
     } else if (asset.Type === "redis") {
       handleSaveRedisPolicy(redisAllowList, redisDenyList, newGroups);
     } else {
+      // SSH and extension types
       handleSaveSSHPolicy(allowList, denyList, newGroups);
     }
   };
@@ -199,7 +202,7 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
     const parsed = JSON.parse(asset.Config || "{}");
     if (asset.Type === "database") dbConfig = parsed;
     else if (asset.Type === "redis") redisConfig = parsed;
-    else sshConfig = parsed;
+    else if (asset.Type === "ssh") sshConfig = parsed;
   } catch {
     /* ignore */
   }
@@ -382,7 +385,7 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
         {asset.Type === "ssh" && (
           <CommandPolicyCard
             title={t("asset.cmdPolicy")}
-            policyType="ssh"
+            policyType="command"
             lists={[
               {
                 key: "allow_list",
@@ -439,7 +442,7 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
         {asset.Type === "database" && (
           <CommandPolicyCard
             title={t("asset.queryPolicy")}
-            policyType="database"
+            policyType="query"
             lists={[
               {
                 key: "allow_types",
@@ -567,8 +570,65 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
           />
         )}
 
-        {/* Extension Panel */}
-        {isExtensionAssetType(asset.Type) && <ExtensionPanel assetType={asset.Type} assetId={asset.ID} />}
+        {/* Extension Policy + Panel */}
+        {isExtensionAssetType(asset.Type) && (
+          <>
+            <CommandPolicyCard
+              title={t("asset.cmdPolicy")}
+              policyType={getExtensionForAssetType(asset.Type)?.policyType || asset.Type}
+              lists={[
+                {
+                  key: "allow_list",
+                  label: t("asset.cmdPolicyAllowList"),
+                  items: allowList,
+                  onAdd: (vals: string[]) => {
+                    const next = [...allowList, ...vals];
+                    setAllowList(next);
+                    handleSaveSSHPolicy(next, denyList);
+                  },
+                  onRemove: (i) => {
+                    const next = allowList.filter((_, idx) => idx !== i);
+                    setAllowList(next);
+                    handleSaveSSHPolicy(next, denyList);
+                  },
+                  placeholder: t("asset.cmdPolicyPlaceholder"),
+                  variant: "allow",
+                },
+                {
+                  key: "deny_list",
+                  label: t("asset.cmdPolicyDenyList"),
+                  items: denyList,
+                  onAdd: (vals: string[]) => {
+                    const next = [...denyList, ...vals];
+                    setDenyList(next);
+                    handleSaveSSHPolicy(allowList, next);
+                  },
+                  onRemove: (i) => {
+                    const next = denyList.filter((_, idx) => idx !== i);
+                    setDenyList(next);
+                    handleSaveSSHPolicy(allowList, next);
+                  },
+                  placeholder: t("asset.cmdPolicyPlaceholder"),
+                  variant: "deny",
+                },
+              ]}
+              buildPolicyJSON={() =>
+                JSON.stringify({
+                  allow_list: allowList,
+                  deny_list: denyList,
+                  ...(policyGroups.length > 0 ? { groups: policyGroups } : {}),
+                })
+              }
+              hint={t("asset.cmdPolicyHint")}
+              saving={savingPolicy}
+              assetID={asset.ID}
+              onReset={handleResetPolicy}
+              referencedGroups={policyGroups}
+              onGroupsChange={handleGroupsChange}
+            />
+            <ExtensionPanel assetType={asset.Type} assetId={asset.ID} />
+          </>
+        )}
 
         {asset.Description && (
           <>

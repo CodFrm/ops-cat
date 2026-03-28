@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 
+	"github.com/opskat/opskat/internal/model/entity/policy"
 	"github.com/opskat/opskat/internal/model/entity/policy_group_entity"
 	"github.com/opskat/opskat/internal/repository/policy_group_repo"
 )
@@ -16,11 +18,11 @@ import (
 // PolicyGroupSvc 权限组业务接口
 type PolicyGroupSvc interface {
 	List(ctx context.Context, policyType string) ([]*policy_group_entity.PolicyGroupItem, error)
-	Get(ctx context.Context, id int64) (*policy_group_entity.PolicyGroupItem, error)
+	Get(ctx context.Context, id string) (*policy_group_entity.PolicyGroupItem, error)
 	Create(ctx context.Context, pg *policy_group_entity.PolicyGroup) error
 	Update(ctx context.Context, pg *policy_group_entity.PolicyGroup) error
-	Delete(ctx context.Context, id int64) error
-	Copy(ctx context.Context, id int64, name string) (*policy_group_entity.PolicyGroup, error)
+	Delete(ctx context.Context, id string) error
+	Copy(ctx context.Context, id string, name string) (*policy_group_entity.PolicyGroup, error)
 }
 
 type policyGroupSvc struct{}
@@ -39,7 +41,15 @@ func (s *policyGroupSvc) List(ctx context.Context, policyType string) ([]*policy
 		if policyType != "" && pg.PolicyType != policyType {
 			continue
 		}
-		items = append(items, pg.ToItem(true))
+		items = append(items, pg.ToItem(policy_group_entity.SourceBuiltin))
+	}
+
+	// 扩展组
+	for _, pg := range policy_group_entity.ExtensionGroups() {
+		if policyType != "" && pg.PolicyType != policyType {
+			continue
+		}
+		items = append(items, pg.ToItem(policy_group_entity.SourceExtension))
 	}
 
 	// 用户自定义组
@@ -56,25 +66,36 @@ func (s *policyGroupSvc) List(ctx context.Context, policyType string) ([]*policy
 		return items, nil
 	}
 	for _, pg := range userGroups {
-		items = append(items, pg.ToItem(false))
+		items = append(items, pg.ToItem(policy_group_entity.SourceUser))
 	}
 
 	return items, nil
 }
 
-func (s *policyGroupSvc) Get(ctx context.Context, id int64) (*policy_group_entity.PolicyGroupItem, error) {
-	if policy_group_entity.IsBuiltinID(id) {
+func (s *policyGroupSvc) Get(ctx context.Context, id string) (*policy_group_entity.PolicyGroupItem, error) {
+	if policy.IsBuiltinID(id) {
 		pg := policy_group_entity.FindBuiltin(id)
 		if pg == nil {
 			return nil, errors.New("内置权限组不存在")
 		}
-		return pg.ToItem(true), nil
+		return pg.ToItem(policy_group_entity.SourceBuiltin), nil
 	}
-	pg, err := policy_group_repo.PolicyGroup().Find(ctx, id)
+	if policy.IsExtensionID(id) {
+		pg := policy_group_entity.FindExtensionGroup(id)
+		if pg == nil {
+			return nil, errors.New("扩展权限组不存在")
+		}
+		return pg.ToItem(policy_group_entity.SourceExtension), nil
+	}
+	dbID, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return nil, errors.New("无效的权限组 ID")
+	}
+	pg, err := policy_group_repo.PolicyGroup().Find(ctx, dbID)
 	if err != nil {
 		return nil, err
 	}
-	return pg.ToItem(false), nil
+	return pg.ToItem(policy_group_entity.SourceUser), nil
 }
 
 func (s *policyGroupSvc) Create(ctx context.Context, pg *policy_group_entity.PolicyGroup) error {
@@ -88,8 +109,12 @@ func (s *policyGroupSvc) Create(ctx context.Context, pg *policy_group_entity.Pol
 }
 
 func (s *policyGroupSvc) Update(ctx context.Context, pg *policy_group_entity.PolicyGroup) error {
-	if policy_group_entity.IsBuiltinID(pg.ID) {
+	sid := pg.GetStringID()
+	if policy.IsBuiltinID(sid) {
 		return errors.New("内置权限组不可修改")
+	}
+	if policy.IsExtensionID(sid) {
+		return errors.New("扩展权限组不可修改")
 	}
 	if err := pg.Validate(); err != nil {
 		return err
@@ -98,23 +123,38 @@ func (s *policyGroupSvc) Update(ctx context.Context, pg *policy_group_entity.Pol
 	return policy_group_repo.PolicyGroup().Update(ctx, pg)
 }
 
-func (s *policyGroupSvc) Delete(ctx context.Context, id int64) error {
-	if policy_group_entity.IsBuiltinID(id) {
+func (s *policyGroupSvc) Delete(ctx context.Context, id string) error {
+	if policy.IsBuiltinID(id) {
 		return errors.New("内置权限组不可删除")
 	}
-	return policy_group_repo.PolicyGroup().Delete(ctx, id)
+	if policy.IsExtensionID(id) {
+		return errors.New("扩展权限组不可删除")
+	}
+	dbID, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return errors.New("无效的权限组 ID")
+	}
+	return policy_group_repo.PolicyGroup().Delete(ctx, dbID)
 }
 
-func (s *policyGroupSvc) Copy(ctx context.Context, id int64, name string) (*policy_group_entity.PolicyGroup, error) {
+func (s *policyGroupSvc) Copy(ctx context.Context, id string, name string) (*policy_group_entity.PolicyGroup, error) {
 	var source *policy_group_entity.PolicyGroup
-	if policy_group_entity.IsBuiltinID(id) {
+	if policy.IsBuiltinID(id) {
 		source = policy_group_entity.FindBuiltin(id)
 		if source == nil {
 			return nil, errors.New("内置权限组不存在")
 		}
+	} else if policy.IsExtensionID(id) {
+		source = policy_group_entity.FindExtensionGroup(id)
+		if source == nil {
+			return nil, errors.New("扩展权限组不存在")
+		}
 	} else {
-		var err error
-		source, err = policy_group_repo.PolicyGroup().Find(ctx, id)
+		dbID, err := strconv.ParseInt(id, 10, 64)
+		if err != nil {
+			return nil, errors.New("无效的权限组 ID")
+		}
+		source, err = policy_group_repo.PolicyGroup().Find(ctx, dbID)
 		if err != nil {
 			return nil, err
 		}

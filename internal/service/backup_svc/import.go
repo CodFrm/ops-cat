@@ -12,7 +12,7 @@ import (
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/model/entity/group_entity"
-	"github.com/opskat/opskat/internal/model/entity/policy_group_entity"
+	"github.com/opskat/opskat/internal/model/entity/policy"
 )
 
 // Import 导入备份数据
@@ -333,7 +333,7 @@ func remapAssetPolicyGroupIDs(a *asset_entity.Asset, pgIDMap map[int64]int64) {
 	a.CmdPolicy = remapPolicyGroupRefs(a.CmdPolicy, pgIDMap)
 }
 
-// remapPolicyGroupRefs 替换策略 JSON 中的 groups ID 引用
+// remapPolicyGroupRefs 替换策略 JSON 中的 groups ID 引用（字符串格式）
 func remapPolicyGroupRefs(policyJSON string, pgIDMap map[int64]int64) string {
 	if policyJSON == "" || len(pgIDMap) == 0 {
 		return policyJSON
@@ -346,18 +346,22 @@ func remapPolicyGroupRefs(policyJSON string, pgIDMap map[int64]int64) string {
 	if !ok {
 		return policyJSON
 	}
-	var groups []int64
+	var groups []string
 	if err := json.Unmarshal(groupsRaw, &groups); err != nil {
 		return policyJSON
 	}
 	changed := false
 	for i, id := range groups {
-		if policy_group_entity.IsBuiltinID(id) {
+		// 跳过内置组和扩展组
+		if policy.IsBuiltinID(id) || policy.IsExtensionID(id) {
 			continue
 		}
-		if newID, ok := pgIDMap[id]; ok {
-			groups[i] = newID
-			changed = true
+		// 用户自定义组：尝试 remap
+		if dbID, parseOK := policy.ParseUserID(id); parseOK {
+			if newID, mapOK := pgIDMap[dbID]; mapOK {
+				groups[i] = policy.FormatUserID(newID)
+				changed = true
+			}
 		}
 	}
 	if !changed {

@@ -3,10 +3,39 @@ package asset_entity
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/opskat/opskat/internal/model/entity/policy"
 	"github.com/opskat/opskat/internal/pkg/jsonfield"
 )
+
+// 扩展资产类型注册表
+var (
+	extAssetTypesMu sync.RWMutex
+	extAssetTypes   = make(map[string]struct{})
+)
+
+// RegisterExtensionAssetType 注册扩展提供的资产类型
+func RegisterExtensionAssetType(assetType string) {
+	extAssetTypesMu.Lock()
+	defer extAssetTypesMu.Unlock()
+	extAssetTypes[assetType] = struct{}{}
+}
+
+// UnregisterExtensionAssetType 注销扩展提供的资产类型
+func UnregisterExtensionAssetType(assetType string) {
+	extAssetTypesMu.Lock()
+	defer extAssetTypesMu.Unlock()
+	delete(extAssetTypes, assetType)
+}
+
+// IsExtensionAssetType 检查是否为已注册的扩展资产类型
+func IsExtensionAssetType(assetType string) bool {
+	extAssetTypesMu.RLock()
+	defer extAssetTypesMu.RUnlock()
+	_, ok := extAssetTypes[assetType]
+	return ok
+}
 
 // 资产类型常量
 const (
@@ -260,6 +289,10 @@ func (a *Asset) Validate() error {
 	case AssetTypeRedis:
 		return a.validateRedis()
 	default:
+		// 扩展提供的资产类型，配置校验由扩展自行处理
+		if IsExtensionAssetType(a.Type) {
+			return nil
+		}
 		return fmt.Errorf("无效的资产类型: %s", a.Type)
 	}
 }

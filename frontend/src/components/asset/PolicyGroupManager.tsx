@@ -17,23 +17,21 @@ import {
 } from "../../../wailsjs/go/app/App";
 import { policy_group_entity } from "../../../wailsjs/go/models";
 
-type TabType = "command" | "query" | "redis";
-
 interface PolicyGroupManagerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onGroupsChanged?: () => void;
-  initialTab?: TabType;
+  initialTab?: string;
 }
 
-const tabs: { key: TabType; label: string }[] = [
+const defaultTabs: { key: string; label: string }[] = [
   { key: "command", label: "SSH" },
   { key: "query", label: "Database" },
   { key: "redis", label: "Redis" },
 ];
 
 interface EditState {
-  id: number;
+  id: string;
   name: string;
   description: string;
   policyType: string;
@@ -72,10 +70,10 @@ function serializePolicy(policy: Record<string, string[]>): string {
 
 export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initialTab }: PolicyGroupManagerProps) {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<TabType>(initialTab || "command");
+  const [activeTab, setActiveTab] = useState<string>(initialTab || "command");
   const [groups, setGroups] = useState<policy_group_entity.PolicyGroupItem[]>([]);
   const [editState, setEditState] = useState<EditState | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; name: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
   const changedRef = useRef(false);
 
   const fetchGroups = useCallback(async () => {
@@ -104,7 +102,7 @@ export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initia
     onOpenChange(newOpen);
   };
 
-  const handleCopy = async (id: number) => {
+  const handleCopy = async (id: string) => {
     try {
       await CopyPolicyGroup(id, "");
       toast.success(t("asset.policyGroup.copySuccess"));
@@ -115,7 +113,7 @@ export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initia
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     try {
       await DeletePolicyGroup(id);
       toast.success(t("asset.policyGroup.deleteSuccess"));
@@ -129,7 +127,7 @@ export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initia
 
   const handleCreate = () => {
     setEditState({
-      id: 0,
+      id: "",
       name: "",
       description: "",
       policyType: activeTab,
@@ -171,7 +169,7 @@ export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initia
 
     try {
       const policyJSON = serializePolicy(editState.policy);
-      if (editState.id === 0) {
+      if (editState.id === "") {
         await CreatePolicyGroup(
           new policy_group_entity.PolicyGroup({
             name: editState.name,
@@ -209,8 +207,8 @@ export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initia
     });
   };
 
-  const builtinGroups = groups.filter((g) => g.builtin);
-  const customGroups = groups.filter((g) => !g.builtin);
+  const builtinGroups = groups.filter((g) => g.source !== "user");
+  const customGroups = groups.filter((g) => g.source === "user");
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -221,7 +219,7 @@ export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initia
 
         {/* Tabs */}
         <div className="flex gap-1 border-b">
-          {tabs.map((tab) => (
+          {defaultTabs.map((tab) => (
             <button
               key={tab.key}
               className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
@@ -262,9 +260,13 @@ export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initia
                     )}
                     <Lock className="h-3 w-3 text-muted-foreground shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium truncate">{g.name}</div>
+                      <div className="text-xs font-medium truncate">
+                        {t(`asset.policyGroup.builtin.${g.id}.name`, { defaultValue: g.name })}
+                      </div>
                       {g.description && (
-                        <div className="text-[10px] text-muted-foreground truncate">{g.description}</div>
+                        <div className="text-[10px] text-muted-foreground truncate">
+                          {t(`asset.policyGroup.builtin.${g.id}.description`, { defaultValue: g.description })}
+                        </div>
                       )}
                     </div>
                     <Button

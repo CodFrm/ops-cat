@@ -5,30 +5,23 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ListPolicyGroups } from "../../../wailsjs/go/app/App";
 import type { policy_group_entity } from "../../../wailsjs/go/models";
-
-type PolicyType = "ssh" | "database" | "redis";
+import { extLocalized } from "@/stores/extensionStore";
 
 interface PolicyGroupSelectorProps {
-  policyType: PolicyType;
-  selectedIds: number[];
-  onChange: (ids: number[]) => void;
+  policyType: string;
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
   refreshKey?: number;
 }
 
-const policyTypeMap: Record<PolicyType, string> = {
-  ssh: "command",
-  database: "query",
-  redis: "redis",
-};
-
 export function PolicyGroupSelector({ policyType, selectedIds, onChange, refreshKey }: PolicyGroupSelectorProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [groups, setGroups] = useState<policy_group_entity.PolicyGroupItem[]>([]);
   const [open, setOpen] = useState(false);
 
   const fetchGroups = async () => {
     try {
-      const items = await ListPolicyGroups(policyTypeMap[policyType]);
+      const items = await ListPolicyGroups(policyType);
       setGroups(items || []);
     } catch {
       setGroups([]);
@@ -43,12 +36,34 @@ export function PolicyGroupSelector({ policyType, selectedIds, onChange, refresh
   const selectedGroups = groups.filter((g) => selectedIds.includes(g.id));
   const availableGroups = groups.filter((g) => !selectedIds.includes(g.id));
 
-  const handleAdd = (id: number) => {
+  const handleAdd = (id: string) => {
     onChange([...selectedIds, id]);
   };
 
-  const handleRemove = (id: number) => {
+  const handleRemove = (id: string) => {
     onChange(selectedIds.filter((i) => i !== id));
+  };
+
+  const isImmutable = (g: policy_group_entity.PolicyGroupItem) => g.source === "builtin" || g.source === "extension";
+
+  const getGroupName = (g: policy_group_entity.PolicyGroupItem) => {
+    if (g.source === "builtin") {
+      return t(`asset.policyGroup.builtin.${g.id}.name`, { defaultValue: g.name });
+    }
+    if (g.source === "extension") {
+      return extLocalized(g.name, g.name_zh, i18n.language);
+    }
+    return g.name;
+  };
+
+  const getGroupDescription = (g: policy_group_entity.PolicyGroupItem) => {
+    if (g.source === "builtin") {
+      return t(`asset.policyGroup.builtin.${g.id}.description`, { defaultValue: g.description });
+    }
+    if (g.source === "extension") {
+      return extLocalized(g.description, g.description_zh, i18n.language);
+    }
+    return g.description;
   };
 
   return (
@@ -64,8 +79,8 @@ export function PolicyGroupSelector({ policyType, selectedIds, onChange, refresh
             key={g.id}
             className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950 dark:text-indigo-300"
           >
-            {g.builtin && <Lock className="h-2.5 w-2.5" />}
-            {g.name}
+            {isImmutable(g) && <Lock className="h-2.5 w-2.5" />}
+            {getGroupName(g)}
             <button
               onClick={() => handleRemove(g.id)}
               className="ml-0.5 rounded-sm hover:bg-indigo-200 dark:hover:bg-indigo-800"
@@ -95,10 +110,12 @@ export function PolicyGroupSelector({ policyType, selectedIds, onChange, refresh
                       setOpen(false);
                     }}
                   >
-                    {g.builtin && <Lock className="h-3 w-3 text-muted-foreground shrink-0" />}
+                    {isImmutable(g) && <Lock className="h-3 w-3 text-muted-foreground shrink-0" />}
                     <div className="flex-1 text-left">
-                      <div className="font-medium">{g.name}</div>
-                      {g.description && <div className="text-[10px] text-muted-foreground">{g.description}</div>}
+                      <div className="font-medium">{getGroupName(g)}</div>
+                      {g.description && (
+                        <div className="text-[10px] text-muted-foreground">{getGroupDescription(g)}</div>
+                      )}
                     </div>
                   </button>
                 ))}

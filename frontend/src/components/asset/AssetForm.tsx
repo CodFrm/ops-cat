@@ -19,13 +19,14 @@ import {
   TestSSHConnection,
   TestDatabaseConnection,
   TestRedisConnection,
+  TestExtensionConnection,
 } from "../../../wailsjs/go/app/App";
 import { app } from "../../../wailsjs/go/models";
 import { SSHConfigSection } from "@/components/asset/SSHConfigSection";
 import { DatabaseConfigSection } from "@/components/asset/DatabaseConfigSection";
 import { RedisConfigSection } from "@/components/asset/RedisConfigSection";
-import { useExtensionStore } from "@/stores/extensionStore";
-import { ExtensionConfigForm } from "@/components/extension/ExtensionConfigForm";
+import { useExtensionStore, extLocalized } from "@/stores/extensionStore";
+import { ExtensionConfigForm, getPasswordFields } from "@/components/extension/ExtensionConfigForm";
 
 interface AssetFormProps {
   open: boolean;
@@ -96,7 +97,7 @@ const DEFAULT_ICONS: Record<string, string> = {
 };
 
 export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }: AssetFormProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { createAsset, updateAsset } = useAssetStore();
   const extensions = useExtensionStore((s) => s.extensions);
 
@@ -154,6 +155,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
 
   // Extension config
   const [extensionConfig, setExtensionConfig] = useState<Record<string, unknown>>({});
+  // Original encrypted config for password fields (edit mode)
+  const [originalEncryptedConfig, setOriginalEncryptedConfig] = useState<Record<string, unknown>>({});
 
   // Exclude self from jump host / SSH tunnel selection
   const jumpHostExcludeIds = editAsset?.ID ? [editAsset.ID] : undefined;
@@ -192,11 +195,19 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         } else if (editType === "redis") {
           loadRedisConfig(editAsset);
         } else {
-          // Extension asset type
+          // Extension asset type — clear password fields for display
           try {
-            setExtensionConfig(JSON.parse(editAsset.Config || "{}"));
+            const parsed = JSON.parse(editAsset.Config || "{}") as Record<string, unknown>;
+            setOriginalEncryptedConfig(parsed);
+            const ext = extensions.find((e) => e.assetTypes?.some((at) => at.type === editType));
+            const atDef = ext?.assetTypes?.find((at) => at.type === editType);
+            const pwdKeys = getPasswordFields(atDef?.configSchema as Record<string, unknown> | undefined);
+            const display = { ...parsed };
+            for (const k of pwdKeys) delete display[k];
+            setExtensionConfig(display);
           } catch {
             setExtensionConfig({});
+            setOriginalEncryptedConfig({});
           }
         }
       } else {
@@ -379,6 +390,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setPasswordCredentialId(0);
     setIcon(newType === "database" ? DEFAULT_ICONS[driver] || "mysql" : DEFAULT_ICONS[newType] || "server");
     setExtensionConfig({});
+    setOriginalEncryptedConfig({});
   };
 
   const handleDriverChange = (newDriver: string) => {
@@ -454,6 +466,18 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setTesting(true);
     try {
       await TestRedisConnection(JSON.stringify(cfg), password);
+      toast.success(t("asset.testConnectionSuccess"));
+    } catch (e) {
+      toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleTestExtensionConnection = async () => {
+    setTesting(true);
+    try {
+      await TestExtensionConnection(assetType, JSON.stringify(extensionConfig));
       toast.success(t("asset.testConnectionSuccess"));
     } catch (e) {
       toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
@@ -564,8 +588,27 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       if (redisSshAssetId > 0) redisConfig.ssh_asset_id = redisSshAssetId;
       config = JSON.stringify(redisConfig);
     } else {
-      // Extension asset types
-      config = JSON.stringify(extensionConfig);
+      // Extension asset types — encrypt password-format fields
+      const ext = extensions.find((e) => e.assetTypes?.some((at) => at.type === assetType));
+      const assetTypeDef = ext?.assetTypes?.find((at) => at.type === assetType);
+      const pwdFields = getPasswordFields(assetTypeDef?.configSchema as Record<string, unknown> | undefined);
+      const configCopy = { ...extensionConfig };
+      for (const field of pwdFields) {
+        const val = configCopy[field];
+        if (typeof val === "string" && val) {
+          // User entered a new value — encrypt it
+          try {
+            configCopy[field] = await EncryptPassword(val);
+          } catch {
+            toast.error(`Failed to encrypt ${field}`);
+            return;
+          }
+        } else if (originalEncryptedConfig[field]) {
+          // User didn't change — keep original encrypted value
+          configCopy[field] = originalEncryptedConfig[field];
+        }
+      }
+      config = JSON.stringify(configCopy);
     }
 
     const asset = new asset_entity.Asset({
@@ -601,7 +644,10 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         ? t("asset.typeDatabase")
         : assetType === "redis"
           ? t("asset.typeRedis")
-          : (extensions.flatMap((e) => e.assetTypes || []).find((at) => at.type === assetType)?.name ?? assetType);
+          : (() => {
+              const at = extensions.flatMap((e) => e.assetTypes || []).find((a) => a.type === assetType);
+              return at ? extLocalized(at.name, at.name_zh, i18n.language) : assetType;
+            })();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -627,7 +673,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                   {extensions.flatMap((ext) =>
                     (ext.assetTypes || []).map((at) => (
                       <SelectItem key={at.type} value={at.type}>
-                        {at.name}
+                        {extLocalized(at.name, at.name_zh, i18n.language)}
                       </SelectItem>
                     ))
                   )}
@@ -642,7 +688,16 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={assetType === "ssh" ? "web-01" : assetType === "database" ? "prod-db" : "cache-01"}
+              placeholder={
+                assetType === "ssh"
+                  ? "web-01"
+                  : assetType === "database"
+                    ? "prod-db"
+                    : assetType === "redis"
+                      ? "cache-01"
+                      : (extensions.flatMap((e) => e.assetTypes || []).find((a) => a.type === assetType)
+                          ?.namePlaceholder ?? assetType)
+              }
             />
           </div>
 
@@ -787,7 +842,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             );
           })()}
 
-          {/* Test Connection - only for built-in asset types */}
+          {/* Test Connection */}
           {(assetType === "ssh" || assetType === "database" || assetType === "redis") && (
             <Button
               type="button"
@@ -807,6 +862,23 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
               {testing ? t("asset.testing") : t("asset.testConnection")}
             </Button>
           )}
+          {(() => {
+            const extAt = extensions.flatMap((e) => e.assetTypes || []).find((at) => at.type === assetType);
+            if (!extAt?.testConnection) return null;
+            return (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleTestExtensionConnection}
+                disabled={testing}
+                className="gap-1 w-fit"
+              >
+                {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+                {testing ? t("asset.testing") : t("asset.testConnection")}
+              </Button>
+            );
+          })()}
 
           {/* Group - Tree Selector */}
           <div className="grid gap-2">

@@ -293,6 +293,56 @@ export namespace app {
 		    return a;
 		}
 	}
+	export class ExtensionListItem {
+	    name: string;
+	    displayName: string;
+	    displayName_zh: string;
+	    version: string;
+	    icon: string;
+	    description: string;
+	    description_zh: string;
+	    assetTypes: extension.AssetTypeDef[];
+	    pages: extension.PageDef[];
+	    policyType?: string;
+	    policyActions?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ExtensionListItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.displayName = source["displayName"];
+	        this.displayName_zh = source["displayName_zh"];
+	        this.version = source["version"];
+	        this.icon = source["icon"];
+	        this.description = source["description"];
+	        this.description_zh = source["description_zh"];
+	        this.assetTypes = this.convertValues(source["assetTypes"], extension.AssetTypeDef);
+	        this.pages = this.convertValues(source["pages"], extension.PageDef);
+	        this.policyType = source["policyType"];
+	        this.policyActions = source["policyActions"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class RuleWithStatus {
 	    id: number;
 	    configId: number;
@@ -500,93 +550,17 @@ export namespace app {
 	    name: string;
 	    installed: boolean;
 	    path: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SkillTarget(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.installed = source["installed"];
 	        this.path = source["path"];
 	    }
-	}
-	export class ExtensionAssetType {
-	    type: string;
-	    name: string;
-	    name_en: string;
-	    configSchema: any;
-
-	    static createFrom(source: any = {}) {
-	        return new ExtensionAssetType(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.type = source["type"];
-	        this.name = source["name"];
-	        this.name_en = source["name_en"];
-	        this.configSchema = source["configSchema"];
-	    }
-	}
-	export class ExtensionPage {
-	    id: string;
-	    name: string;
-	    component: string;
-
-	    static createFrom(source: any = {}) {
-	        return new ExtensionPage(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.name = source["name"];
-	        this.component = source["component"];
-	    }
-	}
-	export class ExtensionListItem {
-	    name: string;
-	    displayName: string;
-	    version: string;
-	    icon: string;
-	    description: string;
-	    assetTypes: ExtensionAssetType[];
-	    pages: ExtensionPage[];
-
-	    static createFrom(source: any = {}) {
-	        return new ExtensionListItem(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.displayName = source["displayName"];
-	        this.version = source["version"];
-	        this.icon = source["icon"];
-	        this.description = source["description"];
-	        this.assetTypes = this.convertValues(source["assetTypes"], ExtensionAssetType);
-	        this.pages = this.convertValues(source["pages"], ExtensionPage);
-	    }
-
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 
 }
@@ -957,6 +931,51 @@ export namespace credential_entity {
 
 }
 
+export namespace extension {
+	
+	export class AssetTypeDef {
+	    type: string;
+	    name: string;
+	    name_zh: string;
+	    namePlaceholder: string;
+	    testConnection: boolean;
+	    configSchema: number[];
+	
+	    static createFrom(source: any = {}) {
+	        return new AssetTypeDef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.name = source["name"];
+	        this.name_zh = source["name_zh"];
+	        this.namePlaceholder = source["namePlaceholder"];
+	        this.testConnection = source["testConnection"];
+	        this.configSchema = source["configSchema"];
+	    }
+	}
+	export class PageDef {
+	    id: string;
+	    name: string;
+	    name_zh: string;
+	    component: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PageDef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.name_zh = source["name_zh"];
+	        this.component = source["component"];
+	    }
+	}
+
+}
+
 export namespace forward_entity {
 	
 	export class ForwardConfig {
@@ -1207,12 +1226,14 @@ export namespace policy_group_entity {
 	    }
 	}
 	export class PolicyGroupItem {
-	    id: number;
+	    id: string;
 	    name: string;
+	    name_zh?: string;
 	    description: string;
+	    description_zh?: string;
 	    policyType: string;
 	    policy: string;
-	    builtin: boolean;
+	    source: string;
 	    createtime: number;
 	    updatetime: number;
 	
@@ -1224,10 +1245,12 @@ export namespace policy_group_entity {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.name = source["name"];
+	        this.name_zh = source["name_zh"];
 	        this.description = source["description"];
+	        this.description_zh = source["description_zh"];
 	        this.policyType = source["policyType"];
 	        this.policy = source["policy"];
-	        this.builtin = source["builtin"];
+	        this.source = source["source"];
 	        this.createtime = source["createtime"];
 	        this.updatetime = source["updatetime"];
 	    }

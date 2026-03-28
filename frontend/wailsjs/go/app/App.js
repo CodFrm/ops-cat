@@ -274,10 +274,6 @@ export function InstallExtension(arg1) {
   return window['go']['app']['App']['InstallExtension'](arg1);
 }
 
-export function SelectExtensionDir() {
-  return window['go']['app']['App']['SelectExtensionDir']();
-}
-
 export function InstallOpsctl(arg1) {
   return window['go']['app']['App']['InstallOpsctl'](arg1);
 }
@@ -442,6 +438,10 @@ export function SaveGitHubToken(arg1, arg2) {
   return window['go']['app']['App']['SaveGitHubToken'](arg1, arg2);
 }
 
+export function SelectExtensionDir() {
+  return window['go']['app']['App']['SelectExtensionDir']();
+}
+
 export function SelectImportFile() {
   return window['go']['app']['App']['SelectImportFile']();
 }
@@ -496,6 +496,10 @@ export function SwitchConversation(arg1) {
 
 export function TestDatabaseConnection(arg1, arg2) {
   return window['go']['app']['App']['TestDatabaseConnection'](arg1, arg2);
+}
+
+export function TestExtensionConnection(arg1, arg2) {
+  return window['go']['app']['App']['TestExtensionConnection'](arg1, arg2);
 }
 
 export function TestPolicyRule(arg1) {

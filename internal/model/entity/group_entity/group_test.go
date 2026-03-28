@@ -47,7 +47,7 @@ func TestGroup_CommandPolicy(t *testing.T) {
 			p := &policy.CommandPolicy{
 				AllowList: []string{"ls", "pwd"},
 				DenyList:  []string{"rm -rf"},
-				Groups:    []int64{-1, -4},
+				Groups:    []string{policy.BuiltinLinuxReadOnly, policy.BuiltinDangerousDeny},
 			}
 			err := g.SetCommandPolicy(p)
 			assert.NoError(t, err)
@@ -94,7 +94,7 @@ func TestGroup_QueryPolicy(t *testing.T) {
 				AllowTypes: []string{"SELECT", "SHOW"},
 				DenyTypes:  []string{"DROP"},
 				DenyFlags:  []string{"no_where_delete"},
-				Groups:     []int64{-5},
+				Groups:     []string{policy.BuiltinSQLReadOnly},
 			}
 			err := g.SetQueryPolicy(p)
 			assert.NoError(t, err)
@@ -140,7 +140,7 @@ func TestGroup_RedisPolicy(t *testing.T) {
 			p := &policy.RedisPolicy{
 				AllowList: []string{"GET", "SET"},
 				DenyList:  []string{"CONFIG SET", "FLUSHALL"},
-				Groups:    []int64{-7, -8},
+				Groups:    []string{policy.BuiltinRedisReadOnly, policy.BuiltinRedisDangerousDeny},
 			}
 			err := g.SetRedisPolicy(p)
 			assert.NoError(t, err)
