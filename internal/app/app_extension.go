@@ -1,15 +1,22 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
 	"path/filepath"
 
 	"github.com/opskat/opskat/internal/bootstrap"
 	"github.com/opskat/opskat/internal/extension"
 	"github.com/opskat/opskat/internal/repository/extension_data_repo"
+	"github.com/opskat/opskat/internal/service/asset_svc"
+	"github.com/opskat/opskat/internal/service/credential_resolver"
 
 	"github.com/cago-frame/cago/configs"
 	"github.com/cago-frame/cago/pkg/logger"
+	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"go.uber.org/zap"
 )
 
@@ -100,5 +107,96 @@ func (s *appHostServices) KVSet(ctx context.Context, ext, key string, value []by
 }
 
 func (s *appHostServices) EmitEvent(event string, data any) {
-	// Phase 2 实现前端事件推送
+	if s.app.ctx != nil {
+		wailsRuntime.EventsEmit(s.app.ctx, event, data)
+	}
+}
+
+func (s *appHostServices) HTTPRequest(ctx context.Context, method, url string, headers map[string]string, body []byte) (int, map[string]string, []byte, error) {
+	var bodyReader io.Reader
+	if len(body) > 0 {
+		bodyReader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Default().Warn("close http response body", zap.Error(closeErr))
+		}
+	}()
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	respHeaders := make(map[string]string, len(resp.Header))
+	for k := range resp.Header {
+		respHeaders[k] = resp.Header.Get(k)
+	}
+	return resp.StatusCode, respHeaders, respBody, nil
+}
+
+func (s *appHostServices) GetCredential(ctx context.Context, assetID int64) (map[string]string, error) {
+	asset, err := asset_svc.Asset().Get(ctx, assetID)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string)
+	switch {
+	case asset.IsSSH():
+		sshCfg, err := asset.GetSSHConfig()
+		if err != nil {
+			return nil, err
+		}
+		password, key, err := credential_resolver.Default().ResolveSSHCredentials(ctx, sshCfg)
+		if err != nil {
+			return nil, err
+		}
+		result["username"] = sshCfg.Username
+		result["password"] = password
+		if key != "" {
+			result["private_key"] = key
+		}
+	case asset.IsDatabase():
+		dbCfg, err := asset.GetDatabaseConfig()
+		if err != nil {
+			return nil, err
+		}
+		password, err := credential_resolver.Default().ResolveDatabasePassword(ctx, dbCfg)
+		if err != nil {
+			return nil, err
+		}
+		result["username"] = dbCfg.Username
+		result["password"] = password
+	case asset.IsRedis():
+		redisCfg, err := asset.GetRedisConfig()
+		if err != nil {
+			return nil, err
+		}
+		password, err := credential_resolver.Default().ResolveRedisPassword(ctx, redisCfg)
+		if err != nil {
+			return nil, err
+		}
+		result["password"] = password
+	}
+	return result, nil
+}
+
+func (s *appHostServices) GetAssetConfig(ctx context.Context, assetID int64) (json.RawMessage, error) {
+	asset, err := asset_svc.Asset().Get(ctx, assetID)
+	if err != nil {
+		return nil, err
+	}
+	if asset.Config == "" {
+		return json.RawMessage("{}"), nil
+	}
+	return json.RawMessage(asset.Config), nil
 }

@@ -19,6 +19,12 @@ type HostServices interface {
 	KVGet(ctx context.Context, extension, key string) ([]byte, error)
 	KVSet(ctx context.Context, extension, key string, value []byte) error
 	EmitEvent(event string, data any)
+	// HTTPRequest 代理 HTTP 请求
+	HTTPRequest(ctx context.Context, method, url string, headers map[string]string, body []byte) (statusCode int, respHeaders map[string]string, respBody []byte, err error)
+	// GetCredential 获取资产的解密凭据
+	GetCredential(ctx context.Context, assetID int64) (map[string]string, error)
+	// GetAssetConfig 获取资产配置 JSON
+	GetAssetConfig(ctx context.Context, assetID int64) (json.RawMessage, error)
 }
 
 // LoadedPlugin 已加载的 WASM 插件
@@ -263,6 +269,127 @@ func (h *ExtensionHost) buildHostFunctions(extName string) []extism.HostFunction
 		[]extism.ValueType{extism.ValueTypeI64},
 	)
 	funcs = append(funcs, kvSetFn)
+
+	// host_http_request: HTTP 代理请求
+	httpRequestFn := extism.NewHostFunctionWithStack(
+		"host_http_request",
+		func(ctx context.Context, p *extism.CurrentPlugin, stack []uint64) {
+			input, err := p.ReadBytes(stack[0])
+			if err != nil {
+				offset, _ := p.WriteBytes([]byte(`{"error":"read input failed"}`))
+				stack[0] = offset
+				return
+			}
+			var req struct {
+				Method  string            `json:"method"`
+				URL     string            `json:"url"`
+				Headers map[string]string `json:"headers"`
+				Body    []byte            `json:"body"`
+			}
+			if json.Unmarshal(input, &req) != nil {
+				offset, _ := p.WriteBytes([]byte(`{"error":"invalid input"}`))
+				stack[0] = offset
+				return
+			}
+			if h.services == nil {
+				offset, _ := p.WriteBytes([]byte(`{"error":"http service unavailable"}`))
+				stack[0] = offset
+				return
+			}
+			statusCode, respHeaders, respBody, httpErr := h.services.HTTPRequest(ctx, req.Method, req.URL, req.Headers, req.Body)
+			if httpErr != nil {
+				offset, _ := p.WriteBytes([]byte(fmt.Sprintf(`{"error":%q}`, httpErr.Error())))
+				stack[0] = offset
+				return
+			}
+			result, _ := json.Marshal(map[string]any{
+				"status_code": statusCode,
+				"headers":     respHeaders,
+				"body":        respBody,
+			})
+			offset, _ := p.WriteBytes(result)
+			stack[0] = offset
+		},
+		[]extism.ValueType{extism.ValueTypeI64},
+		[]extism.ValueType{extism.ValueTypeI64},
+	)
+	funcs = append(funcs, httpRequestFn)
+
+	// host_credential_get: 获取资产凭据
+	credentialGetFn := extism.NewHostFunctionWithStack(
+		"host_credential_get",
+		func(ctx context.Context, p *extism.CurrentPlugin, stack []uint64) {
+			input, err := p.ReadBytes(stack[0])
+			if err != nil {
+				offset, _ := p.WriteBytes([]byte(`{"error":"read input failed"}`))
+				stack[0] = offset
+				return
+			}
+			var req struct {
+				AssetID int64 `json:"asset_id"`
+			}
+			if json.Unmarshal(input, &req) != nil {
+				offset, _ := p.WriteBytes([]byte(`{"error":"invalid input"}`))
+				stack[0] = offset
+				return
+			}
+			if h.services == nil {
+				offset, _ := p.WriteBytes([]byte(`{"error":"credential service unavailable"}`))
+				stack[0] = offset
+				return
+			}
+			cred, credErr := h.services.GetCredential(ctx, req.AssetID)
+			if credErr != nil {
+				offset, _ := p.WriteBytes([]byte(fmt.Sprintf(`{"error":%q}`, credErr.Error())))
+				stack[0] = offset
+				return
+			}
+			result, _ := json.Marshal(cred)
+			offset, _ := p.WriteBytes(result)
+			stack[0] = offset
+		},
+		[]extism.ValueType{extism.ValueTypeI64},
+		[]extism.ValueType{extism.ValueTypeI64},
+	)
+	funcs = append(funcs, credentialGetFn)
+
+	// host_asset_get_config: 获取资产配置 JSON
+	assetGetConfigFn := extism.NewHostFunctionWithStack(
+		"host_asset_get_config",
+		func(ctx context.Context, p *extism.CurrentPlugin, stack []uint64) {
+			input, err := p.ReadBytes(stack[0])
+			if err != nil {
+				offset, _ := p.WriteBytes([]byte(`{"error":"read input failed"}`))
+				stack[0] = offset
+				return
+			}
+			var req struct {
+				AssetID int64 `json:"asset_id"`
+			}
+			if json.Unmarshal(input, &req) != nil {
+				offset, _ := p.WriteBytes([]byte(`{"error":"invalid input"}`))
+				stack[0] = offset
+				return
+			}
+			if h.services == nil {
+				offset, _ := p.WriteBytes([]byte(`{"error":"asset config service unavailable"}`))
+				stack[0] = offset
+				return
+			}
+			config, cfgErr := h.services.GetAssetConfig(ctx, req.AssetID)
+			if cfgErr != nil {
+				offset, _ := p.WriteBytes([]byte(fmt.Sprintf(`{"error":%q}`, cfgErr.Error())))
+				stack[0] = offset
+				return
+			}
+			result, _ := json.Marshal(map[string]any{"config": config})
+			offset, _ := p.WriteBytes(result)
+			stack[0] = offset
+		},
+		[]extism.ValueType{extism.ValueTypeI64},
+		[]extism.ValueType{extism.ValueTypeI64},
+	)
+	funcs = append(funcs, assetGetConfigFn)
 
 	return funcs
 }
