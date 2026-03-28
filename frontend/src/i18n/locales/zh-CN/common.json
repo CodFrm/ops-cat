@@ -907,6 +907,10 @@
     "noExtensions": "暂无已安装的扩展",
     "loaded": "已加载",
     "loadFailed": "加载失败",
-    "restartHint": "安装或卸载扩展后需要重启应用才能生效"
+    "restartHint": "安装或卸载扩展后需要重启应用才能生效",
+    "installSuccess": "扩展安装成功，重启应用后生效",
+    "installFailed": "扩展安装失败",
+    "removeSuccess": "扩展已卸载，重启应用后生效",
+    "removeFailed": "扩展卸载失败"
   }
 }

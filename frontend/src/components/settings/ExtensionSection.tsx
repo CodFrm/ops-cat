@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Puzzle, Trash2, Info } from "lucide-react";
@@ -20,8 +21,10 @@ export function ExtensionSection() {
       if (!dir) return;
       setInstalling(true);
       await installExtension(dir);
+      toast.success(t("extension.installSuccess"));
     } catch (e: unknown) {
-      console.error("Install extension failed:", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(t("extension.installFailed"), { description: msg });
     } finally {
       setInstalling(false);
     }
@@ -31,8 +34,10 @@ export function ExtensionSection() {
     try {
       setRemoving(name);
       await removeExtension(name);
+      toast.success(t("extension.removeSuccess"));
     } catch (e: unknown) {
-      console.error("Remove extension failed:", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(t("extension.removeFailed"), { description: msg });
     } finally {
       setRemoving(null);
     }

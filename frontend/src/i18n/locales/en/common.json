@@ -907,6 +907,10 @@
     "noExtensions": "No extensions installed",
     "loaded": "Loaded",
     "loadFailed": "Load failed",
-    "restartHint": "Extensions require app restart after install/uninstall to take effect"
+    "restartHint": "Extensions require app restart after install/uninstall to take effect",
+    "installSuccess": "Extension installed successfully. Restart to activate.",
+    "installFailed": "Extension install failed",
+    "removeSuccess": "Extension removed. Restart to take effect.",
+    "removeFailed": "Extension removal failed"
   }
 }
