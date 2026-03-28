@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -50,6 +51,19 @@ func (a *App) GetExtensions() []ExtensionListItem {
 		})
 	}
 	return items
+}
+
+// CallExtensionTool 调用扩展工具（Wails binding）
+func (a *App) CallExtensionTool(name string, argsJSON string) (string, error) {
+	if a.extBridge == nil {
+		return "", fmt.Errorf("extension system not initialized")
+	}
+	extName, toolName, ok := extension.ParseExtensionToolName(name)
+	if !ok {
+		return "", fmt.Errorf("invalid extension tool name %q, expected format: ext.tool", name)
+	}
+	ctx := a.langCtx()
+	return a.extBridge.ExecuteTool(ctx, extName, toolName, json.RawMessage(argsJSON))
 }
 
 // initExtensions 启动时加载扩展系统

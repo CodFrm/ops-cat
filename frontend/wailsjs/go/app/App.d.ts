@@ -18,6 +18,8 @@ import {sftp_svc} from '../models';
 
 export function CancelGitHubAuth():Promise<void>;
 
+export function CallExtensionTool(arg1:string,arg2:string):Promise<string>;
+
 export function CancelSSHConnect(arg1:string):Promise<void>;
 
 export function CheckForUpdate():Promise<update_svc.UpdateInfo>;
@@ -89,6 +91,8 @@ export function FetchAIModels(arg1:string,arg2:string,arg3:string):Promise<Array
 export function GenerateSSHKey(arg1:string,arg2:string,arg3:string,arg4:number):Promise<credential_entity.Credential>;
 
 export function GetActiveAIProvider():Promise<app.AIProviderInfo>;
+
+export function GetExtensions():Promise<Array<app.ExtensionListItem>>;
 
 export function GetAppVersion():Promise<string>;
 

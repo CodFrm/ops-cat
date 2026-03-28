@@ -500,17 +500,93 @@ export namespace app {
 	    name: string;
 	    installed: boolean;
 	    path: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SkillTarget(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.installed = source["installed"];
 	        this.path = source["path"];
 	    }
+	}
+	export class ExtensionAssetType {
+	    type: string;
+	    name: string;
+	    name_en: string;
+	    configSchema: any;
+
+	    static createFrom(source: any = {}) {
+	        return new ExtensionAssetType(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.name = source["name"];
+	        this.name_en = source["name_en"];
+	        this.configSchema = source["configSchema"];
+	    }
+	}
+	export class ExtensionPage {
+	    id: string;
+	    name: string;
+	    component: string;
+
+	    static createFrom(source: any = {}) {
+	        return new ExtensionPage(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.component = source["component"];
+	    }
+	}
+	export class ExtensionListItem {
+	    name: string;
+	    displayName: string;
+	    version: string;
+	    icon: string;
+	    description: string;
+	    assetTypes: ExtensionAssetType[];
+	    pages: ExtensionPage[];
+
+	    static createFrom(source: any = {}) {
+	        return new ExtensionListItem(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.displayName = source["displayName"];
+	        this.version = source["version"];
+	        this.icon = source["icon"];
+	        this.description = source["description"];
+	        this.assetTypes = this.convertValues(source["assetTypes"], ExtensionAssetType);
+	        this.pages = this.convertValues(source["pages"], ExtensionPage);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

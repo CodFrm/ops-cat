@@ -6,6 +6,10 @@ export function CancelGitHubAuth() {
   return window['go']['app']['App']['CancelGitHubAuth']();
 }
 
+export function CallExtensionTool(arg1, arg2) {
+  return window['go']['app']['App']['CallExtensionTool'](arg1, arg2);
+}
+
 export function CancelSSHConnect(arg1) {
   return window['go']['app']['App']['CancelSSHConnect'](arg1);
 }
@@ -148,6 +152,10 @@ export function GenerateSSHKey(arg1, arg2, arg3, arg4) {
 
 export function GetActiveAIProvider() {
   return window['go']['app']['App']['GetActiveAIProvider']();
+}
+
+export function GetExtensions() {
+  return window['go']['app']['App']['GetExtensions']();
 }
 
 export function GetAppVersion() {
