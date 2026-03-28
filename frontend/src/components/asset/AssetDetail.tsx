@@ -568,9 +568,7 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
         )}
 
         {/* Extension Panel */}
-        {isExtensionAssetType(asset.Type) && (
-          <ExtensionPanel assetType={asset.Type} assetId={asset.ID} />
-        )}
+        {isExtensionAssetType(asset.Type) && <ExtensionPanel assetType={asset.Type} assetId={asset.ID} />}
 
         {asset.Description && (
           <>

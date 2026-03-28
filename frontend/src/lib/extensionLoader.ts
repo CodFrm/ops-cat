@@ -25,7 +25,8 @@ export function loadExtensionModule(extName: string): Promise<ExtensionModule> {
     script.src = `/extensions/${extName}/frontend/index.js`;
     script.onload = () => {
       const globalName = `__OPSKAT_EXT_${extName}__`;
-      const mod = (window as unknown as Record<string, unknown>)[globalName] as ExtensionModule | undefined;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mod = (window as any)[globalName] as ExtensionModule | undefined;
       if (mod) {
         loadedModules.set(extName, mod);
         loadingPromises.delete(extName);

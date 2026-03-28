@@ -6,7 +6,8 @@ import "./styles/globals.css";
 import App from "./App";
 
 // 暴露共享依赖给扩展前端
-(window as unknown as { __OPSKAT_EXT__: unknown }).__OPSKAT_EXT__ = {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(window as any).__OPSKAT_EXT__ = {
   React,
   ReactDOM,
   jsxRuntime,
