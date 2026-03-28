@@ -194,6 +194,10 @@ export function GetDownloadMirror() {
   return window['go']['app']['App']['GetDownloadMirror']();
 }
 
+export function GetExtensionAssetPassword(arg1, arg2) {
+  return window['go']['app']['App']['GetExtensionAssetPassword'](arg1, arg2);
+}
+
 export function GetExtensions() {
   return window['go']['app']['App']['GetExtensions']();
 }

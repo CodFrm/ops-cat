@@ -838,6 +838,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                 schema={assetTypeDef.configSchema}
                 value={extensionConfig}
                 onChange={setExtensionConfig}
+                editAssetId={editAsset?.ID}
+                hasExistingPasswords={!!editAsset && Object.keys(originalEncryptedConfig).length > 0}
               />
             );
           })()}

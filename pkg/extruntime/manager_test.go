@@ -149,7 +149,7 @@ func TestManager(t *testing.T) {
 				So(os.WriteFile(filepath.Join(extDir, "manifest.json"), []byte("{bad"), 0o644), ShouldBeNil)
 
 				mgr := NewManager(tmpDir) // no WithLogger
-				So(func() { mgr.Scan() }, ShouldNotPanic)
+				So(func() { _ = mgr.Scan() }, ShouldNotPanic)
 			})
 		})
 	})

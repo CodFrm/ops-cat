@@ -112,6 +112,8 @@ export function GetDefaultPolicy(arg1:string):Promise<string>;
 
 export function GetDownloadMirror():Promise<string>;
 
+export function GetExtensionAssetPassword(arg1:number,arg2:string):Promise<string>;
+
 export function GetExtensions():Promise<Array<app.ExtensionListItem>>;
 
 export function GetGitHubToken():Promise<string>;

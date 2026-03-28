@@ -4,9 +4,9 @@ import "github.com/opskat/opskat/pkg/extruntime"
 
 // Type aliases for backward compatibility.
 type (
-	ExtDecision      = extruntime.ExtDecision
-	ExtPolicyResult  = extruntime.ExtPolicyResult
-	ExtensionPolicy  = extruntime.ExtensionPolicy
+	ExtDecision     = extruntime.ExtDecision
+	ExtPolicyResult = extruntime.ExtPolicyResult
+	ExtensionPolicy = extruntime.ExtensionPolicy
 )
 
 // Constant re-exports.

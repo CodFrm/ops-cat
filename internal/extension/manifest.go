@@ -17,6 +17,6 @@ type (
 
 // Function re-exports
 var (
-	ParseManifest               = extruntime.ParseManifest
+	ParseManifest                = extruntime.ParseManifest
 	CheckAppVersionCompatibility = extruntime.CheckAppVersionCompatibility
 )

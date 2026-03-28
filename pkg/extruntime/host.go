@@ -18,7 +18,7 @@ type HostServices interface {
 	KVSet(ctx context.Context, extension, key string, value []byte) error
 	EmitEvent(event string, data any)
 	// HTTPRequest 代理 HTTP 请求
-	HTTPRequest(ctx context.Context, method, url string, headers map[string]string, body []byte) (statusCode int, respHeaders map[string]string, respBody []byte, err error)
+	HTTPRequest(ctx context.Context, method, url string, headers map[string][]string, body []byte) (statusCode int, respHeaders map[string][]string, respBody []byte, err error)
 	// GetCredential 获取资产的解密凭据
 	GetCredential(ctx context.Context, assetID int64) (map[string]string, error)
 	// GetAssetConfig 获取资产配置 JSON，自动解密 password-format 字段
@@ -342,10 +342,10 @@ func (h *ExtensionHost) buildHostFunctions(extName string) []extism.HostFunction
 				return
 			}
 			var req struct {
-				Method  string            `json:"method"`
-				URL     string            `json:"url"`
-				Headers map[string]string `json:"headers"`
-				Body    []byte            `json:"body"`
+				Method  string              `json:"method"`
+				URL     string              `json:"url"`
+				Headers map[string][]string `json:"headers"`
+				Body    []byte              `json:"body"`
 			}
 			if json.Unmarshal(input, &req) != nil {
 				offset, _ := p.WriteBytes([]byte(`{"error":"invalid input"}`))

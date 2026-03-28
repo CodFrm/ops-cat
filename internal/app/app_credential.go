@@ -1,8 +1,10 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
 
+	"github.com/opskat/opskat/internal/extension"
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/model/entity/credential_entity"
 	"github.com/opskat/opskat/internal/repository/asset_repo"
@@ -53,8 +55,99 @@ func (a *App) GetAssetPassword(assetID int64) (string, error) {
 		return resolver.ResolveRedisPassword(ctx, cfg)
 
 	default:
-		return "", fmt.Errorf("unsupported asset type: %s", asset.Type)
+		// Extension asset type — decrypt the primary password field
+		return a.getExtensionAssetPassword(asset, "")
 	}
+}
+
+// GetExtensionAssetPassword 获取扩展资产指定字段的解密密码
+func (a *App) GetExtensionAssetPassword(assetID int64, fieldName string) (string, error) {
+	ctx := a.langCtx()
+	asset, err := asset_repo.Asset().Find(ctx, assetID)
+	if err != nil {
+		return "", fmt.Errorf("asset not found: %w", err)
+	}
+	return a.getExtensionAssetPassword(asset, fieldName)
+}
+
+func (a *App) getExtensionAssetPassword(asset *asset_entity.Asset, fieldName string) (string, error) {
+	if asset.Config == "" {
+		return "", nil
+	}
+	if a.extManager == nil {
+		return "", fmt.Errorf("extension system not initialized")
+	}
+
+	// Find the extension that owns this asset type
+	var ext *extension.ExtensionInfo
+	for _, e := range a.extManager.Extensions() {
+		for _, at := range e.Manifest.AssetTypes {
+			if at.Type == asset.Type {
+				ext = e
+				break
+			}
+		}
+		if ext != nil {
+			break
+		}
+	}
+	if ext == nil {
+		return "", fmt.Errorf("extension not found for asset type: %s", asset.Type)
+	}
+
+	// Find password fields from configSchema
+	pwdFields := make(map[string]bool)
+	for _, at := range ext.Manifest.AssetTypes {
+		if at.ConfigSchema == nil {
+			continue
+		}
+		var schema struct {
+			Properties map[string]struct {
+				Format string `json:"format"`
+			} `json:"properties"`
+		}
+		if json.Unmarshal(at.ConfigSchema, &schema) != nil {
+			continue
+		}
+		for name, prop := range schema.Properties {
+			if prop.Format == "password" {
+				pwdFields[name] = true
+			}
+		}
+	}
+
+	if fieldName != "" {
+		if !pwdFields[fieldName] {
+			return "", fmt.Errorf("field %q is not a password field", fieldName)
+		}
+	}
+
+	var configMap map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(asset.Config), &configMap); err != nil {
+		return "", fmt.Errorf("parse config failed: %w", err)
+	}
+
+	// If fieldName specified, decrypt that field; otherwise decrypt the first password field
+	if fieldName == "" {
+		for f := range pwdFields {
+			fieldName = f
+			break
+		}
+	}
+	if fieldName == "" {
+		return "", nil
+	}
+
+	raw, ok := configMap[fieldName]
+	if !ok {
+		return "", nil
+	}
+	var encrypted string
+	_ = json.Unmarshal(raw, &encrypted)
+	if encrypted == "" {
+		return "", nil
+	}
+	return credential_svc.Default().Decrypt(encrypted)
 }
 
 // --- 密钥管理 ---

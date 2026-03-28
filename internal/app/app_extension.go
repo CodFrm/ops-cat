@@ -281,7 +281,7 @@ func (s *appHostServices) EmitEvent(event string, data any) {
 	}
 }
 
-func (s *appHostServices) HTTPRequest(ctx context.Context, method, url string, headers map[string]string, body []byte) (int, map[string]string, []byte, error) {
+func (s *appHostServices) HTTPRequest(ctx context.Context, method, url string, headers map[string][]string, body []byte) (int, map[string][]string, []byte, error) {
 	var bodyReader io.Reader
 	if len(body) > 0 {
 		bodyReader = bytes.NewReader(body)
@@ -290,9 +290,7 @@ func (s *appHostServices) HTTPRequest(ctx context.Context, method, url string, h
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
+	req.Header = http.Header(headers)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return 0, nil, nil, err
@@ -306,11 +304,7 @@ func (s *appHostServices) HTTPRequest(ctx context.Context, method, url string, h
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	respHeaders := make(map[string]string, len(resp.Header))
-	for k := range resp.Header {
-		respHeaders[k] = resp.Header.Get(k)
-	}
-	return resp.StatusCode, respHeaders, respBody, nil
+	return resp.StatusCode, map[string][]string(resp.Header), respBody, nil
 }
 
 func (s *appHostServices) GetCredential(ctx context.Context, assetID int64) (map[string]string, error) {
