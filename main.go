@@ -57,13 +57,16 @@ func main() {
 		PluginMarketplaceJSON: skillplugin.PluginMarketplaceJSON,
 	})
 
+	extensionsDir := filepath.Join(dataDir, "extensions")
+
 	err = wails.Run(&options.App{
 		Title:     "OpsKat",
 		Width:     1280,
 		Height:    800,
 		Frameless: runtime.GOOS == "windows",
 		AssetServer: &assetserver.Options{
-			Assets: assets,
+			Assets:  assets,
+			Handler: app.NewExtensionAssetHandler(extensionsDir),
 		},
 		OnStartup:  a.Startup,
 		OnShutdown: func(ctx context.Context) { a.Cleanup() },
