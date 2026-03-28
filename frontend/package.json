@@ -38,7 +38,8 @@
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.0.0",
-    "zustand": "^5.0.0"
+    "zustand": "^5.0.0",
+    "@opskat/ext-shared": "workspace:*"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
