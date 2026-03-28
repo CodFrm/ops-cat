@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/cago-frame/cago/configs"
+	"github.com/opskat/opskat/internal/approval"
 	"github.com/opskat/opskat/internal/bootstrap"
 	"github.com/opskat/opskat/internal/extension"
 )
@@ -122,6 +123,53 @@ func cmdExtExec(ctx context.Context, args []string) int {
 		return 1
 	}
 
+	// 尝试委托模式：桌面 App 运行时通过 approval socket 执行
+	dataDir := bootstrap.AppDataDir()
+	socketPath := filepath.Join(dataDir, "approval.sock")
+	if _, err := os.Stat(socketPath); err == nil {
+		return cmdExtExecDelegate(ctx, socketPath, extName, toolName, *argsJSON)
+	}
+
+	// 本地模式：直接加载 WASM 执行
+	return cmdExtExecLocal(ctx, extName, toolName, *argsJSON)
+}
+
+func cmdExtExecDelegate(ctx context.Context, socketPath, extName, toolName, argsJSON string) int {
+	dataDir := bootstrap.AppDataDir()
+	authToken, err := bootstrap.ReadAuthToken(dataDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Delegate failed (falling back to local): %v\n", err)
+		return cmdExtExecLocal(ctx, extName, toolName, argsJSON)
+	}
+
+	resp, err := approval.RequestApprovalWithToken(socketPath, authToken, approval.ApprovalRequest{
+		Type:      "ext_tool",
+		Extension: extName,
+		Tool:      toolName,
+		ArgsJSON:  argsJSON,
+		Detail:    fmt.Sprintf("opsctl ext exec %s %s", extName, toolName),
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Delegate failed (falling back to local): %v\n", err)
+		return cmdExtExecLocal(ctx, extName, toolName, argsJSON)
+	}
+	if !resp.Approved {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Reason)
+		return 1
+	}
+
+	// Pretty-print result
+	var obj any
+	if json.Unmarshal([]byte(resp.Result), &obj) == nil {
+		pretty, _ := json.MarshalIndent(obj, "", "  ")
+		fmt.Println(string(pretty))
+	} else {
+		fmt.Println(resp.Result)
+	}
+	return 0
+}
+
+func cmdExtExecLocal(ctx context.Context, extName, toolName, argsJSON string) int {
 	mgr := newExtManager()
 	if err := mgr.Scan(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error scanning extensions: %v\n", err)
@@ -142,7 +190,7 @@ func cmdExtExec(ctx context.Context, args []string) int {
 		return 1
 	}
 
-	result, err := plugin.CallTool(ctx, toolName, json.RawMessage(*argsJSON))
+	result, err := plugin.CallTool(ctx, toolName, json.RawMessage(argsJSON))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1

@@ -23,7 +23,7 @@ type BatchItem struct {
 // ApprovalRequest is sent from opsctl to the desktop app.
 type ApprovalRequest struct {
 	Token       string      `json:"token,omitempty"` // 认证 token
-	Type        string      `json:"type"`            // "exec"|"cp"|"create"|"update"|"grant"|"batch"
+	Type        string      `json:"type"`            // "exec"|"cp"|"create"|"update"|"grant"|"batch"|"ext_tool"
 	AssetID     int64       `json:"asset_id,omitempty"`
 	AssetName   string      `json:"asset_name,omitempty"`
 	Command     string      `json:"command,omitempty"`
@@ -32,6 +32,10 @@ type ApprovalRequest struct {
 	GrantItems  []GrantItem `json:"grant_items,omitempty"` // type="grant" 时使用
 	BatchItems  []BatchItem `json:"batch_items,omitempty"` // type="batch" 时使用
 	Description string      `json:"description,omitempty"` // 授权描述
+	// ext_tool 扩展字段
+	Extension string `json:"extension,omitempty"` // 扩展名，如 "oss"
+	Tool      string `json:"tool,omitempty"`      // 工具名，如 "list_buckets"
+	ArgsJSON  string `json:"args_json,omitempty"` // 工具参数 JSON
 }
 
 // GrantItem 授权中的单条操作
@@ -53,6 +57,8 @@ type ApprovalResponse struct {
 	ApproveGrant   bool        `json:"approve_grant,omitempty"`   // 用户选择了"记住并允许"
 	MatchedPattern string      `json:"matched_pattern,omitempty"` // session 匹配时命中的规则模式
 	EditedItems    []GrantItem `json:"edited_items,omitempty"`    // 用户编辑后的 grant items
+	// ext_tool 响应
+	Result string `json:"result,omitempty"` // 工具执行结果
 }
 
 // SocketPath returns the approval socket path for the given data directory.

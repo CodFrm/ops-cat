@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -38,6 +39,11 @@ func (a *App) startApprovalServer(authToken string) {
 		// 批量执行审批
 		if req.Type == "batch" {
 			return a.handleBatchApproval(req)
+		}
+
+		// 扩展工具执行
+		if req.Type == "ext_tool" {
+			return a.handleExtToolApproval(req)
 		}
 
 		// 单条审批
@@ -273,6 +279,22 @@ func (a *App) handleGrantApproval(req approval.ApprovalRequest) approval.Approva
 		}
 		return approval.ApprovalResponse{Approved: false, Reason: "app shutting down"}
 	}
+}
+
+// handleExtToolApproval 处理扩展工具执行请求
+func (a *App) handleExtToolApproval(req approval.ApprovalRequest) approval.ApprovalResponse {
+	if a.extHost == nil {
+		return approval.ApprovalResponse{Approved: false, Reason: "extension system not initialized"}
+	}
+	plugin := a.extHost.GetPlugin(req.Extension)
+	if plugin == nil {
+		return approval.ApprovalResponse{Approved: false, Reason: fmt.Sprintf("extension %q not loaded", req.Extension)}
+	}
+	result, err := plugin.CallTool(context.Background(), req.Tool, json.RawMessage(req.ArgsJSON))
+	if err != nil {
+		return approval.ApprovalResponse{Approved: false, Reason: err.Error()}
+	}
+	return approval.ApprovalResponse{Approved: true, Result: string(result)}
 }
 
 // RespondOpsctlApproval 前端响应 opsctl 审批请求（统一入口）
