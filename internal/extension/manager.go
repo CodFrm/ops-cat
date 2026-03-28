@@ -88,7 +88,7 @@ func (m *Manager) GetExtension(name string) *ExtensionInfo {
 
 // Install 从 sourceDir 安装扩展到 extensions 目录
 func (m *Manager) Install(sourceDir string) (*ExtensionInfo, error) {
-	manifestPath := filepath.Join(sourceDir, "manifest.json")
+	manifestPath := filepath.Clean(filepath.Join(sourceDir, "manifest.json"))
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return nil, fmt.Errorf("read manifest: %w", err)
@@ -123,7 +123,7 @@ func (m *Manager) Remove(name string) error {
 }
 
 func (m *Manager) loadExtension(dir string) (*ExtensionInfo, error) {
-	manifestPath := filepath.Join(dir, "manifest.json")
+	manifestPath := filepath.Clean(filepath.Join(dir, "manifest.json"))
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return nil, fmt.Errorf("read manifest.json: %w", err)
@@ -149,10 +149,10 @@ func copyDir(src, dst string) error {
 		if info.IsDir() {
 			return os.MkdirAll(target, info.Mode())
 		}
-		data, readErr := os.ReadFile(path)
+		data, readErr := os.ReadFile(path) //nolint:gosec // filepath.Walk 提供的路径
 		if readErr != nil {
 			return readErr
 		}
-		return os.WriteFile(target, data, info.Mode())
+		return os.WriteFile(target, data, info.Mode()) //nolint:gosec // 目标路径由 filepath.Join 构造
 	})
 }

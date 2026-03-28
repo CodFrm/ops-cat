@@ -103,7 +103,7 @@ func NewExtensionHost(services HostServices) *ExtensionHost {
 
 // LoadPlugin 加载单个扩展的 WASM 模块
 func (h *ExtensionHost) LoadPlugin(ctx context.Context, ext *ExtensionInfo) (*LoadedPlugin, error) {
-	wasmPath := filepath.Join(ext.Dir, ext.Manifest.Backend.Binary)
+	wasmPath := filepath.Clean(filepath.Join(ext.Dir, ext.Manifest.Backend.Binary))
 	wasmBytes, err := os.ReadFile(wasmPath)
 	if err != nil {
 		return nil, fmt.Errorf("read WASM binary %s: %w", wasmPath, err)
