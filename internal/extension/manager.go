@@ -97,6 +97,7 @@ func (m *Manager) GetExtension(name string) *ExtensionInfo {
 }
 
 // Install 从 sourceDir 安装扩展到 extensions 目录
+// 只复制运行时必需的文件：manifest.json、prompt 文件、dist/ 目录
 func (m *Manager) Install(sourceDir string) (*ExtensionInfo, error) {
 	manifestPath := filepath.Clean(filepath.Join(sourceDir, "manifest.json"))
 	data, err := os.ReadFile(manifestPath)
@@ -109,8 +110,31 @@ func (m *Manager) Install(sourceDir string) (*ExtensionInfo, error) {
 	}
 
 	targetDir := filepath.Join(m.extensionsDir, manifest.Name)
-	if err := copyDir(sourceDir, targetDir); err != nil {
-		return nil, fmt.Errorf("copy extension: %w", err)
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create target dir: %w", err)
+	}
+
+	// 复制 manifest.json
+	if err := copyFile(manifestPath, filepath.Join(targetDir, "manifest.json")); err != nil {
+		return nil, fmt.Errorf("copy manifest: %w", err)
+	}
+
+	// 复制 prompt 文件（如果声明了）
+	if manifest.PromptFile != "" {
+		promptSrc := filepath.Clean(filepath.Join(sourceDir, manifest.PromptFile))
+		if _, statErr := os.Stat(promptSrc); statErr == nil {
+			if err := copyFile(promptSrc, filepath.Join(targetDir, manifest.PromptFile)); err != nil {
+				return nil, fmt.Errorf("copy prompt file: %w", err)
+			}
+		}
+	}
+
+	// 复制 dist/ 目录（编译产物：WASM + 前端）
+	distSrc := filepath.Join(sourceDir, "dist")
+	if _, statErr := os.Stat(distSrc); statErr == nil {
+		if err := copyDir(distSrc, filepath.Join(targetDir, "dist")); err != nil {
+			return nil, fmt.Errorf("copy dist: %w", err)
+		}
 	}
 
 	// 重新扫描
@@ -146,6 +170,18 @@ func (m *Manager) loadExtension(dir string) (*ExtensionInfo, error) {
 		return nil, fmt.Errorf("requires app version >= %s (current: %s)", manifest.MinAppVersion, m.appVersion)
 	}
 	return &ExtensionInfo{Manifest: manifest, Dir: dir}, nil
+}
+
+// copyFile 复制单个文件
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(filepath.Clean(src))
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o644) //nolint:gosec // 目标路径由调用方构造
 }
 
 // copyDir 递归复制目录
