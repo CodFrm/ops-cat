@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -123,10 +124,70 @@ func (p *LoadedPlugin) Close(ctx context.Context) {
 	}
 }
 
+// StreamManager 管理所有活跃的 stream
+type StreamManager struct {
+	mu      sync.RWMutex
+	streams map[string]io.ReadWriteCloser
+	counter uint64
+}
+
+func NewStreamManager() *StreamManager {
+	return &StreamManager{
+		streams: make(map[string]io.ReadWriteCloser),
+	}
+}
+
+func (m *StreamManager) Register(rw io.ReadWriteCloser) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.counter++
+	id := fmt.Sprintf("stream_%d", m.counter)
+	m.streams[id] = rw
+	return id
+}
+
+func (m *StreamManager) RegisterReader(r io.ReadCloser) string {
+	return m.Register(&readOnlyStream{ReadCloser: r})
+}
+
+func (m *StreamManager) RegisterWriter(w io.WriteCloser) string {
+	return m.Register(&writeOnlyStream{WriteCloser: w})
+}
+
+func (m *StreamManager) Get(id string) (io.ReadWriteCloser, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	s, ok := m.streams[id]
+	return s, ok
+}
+
+func (m *StreamManager) Remove(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.streams, id)
+}
+
+type readOnlyStream struct {
+	io.ReadCloser
+}
+
+func (r *readOnlyStream) Write([]byte) (int, error) {
+	return 0, fmt.Errorf("stream is read-only")
+}
+
+type writeOnlyStream struct {
+	io.WriteCloser
+}
+
+func (w *writeOnlyStream) Read([]byte) (int, error) {
+	return 0, fmt.Errorf("stream is write-only")
+}
+
 // ExtensionHost 扩展宿主，管理 WASM 加载和 Host Function 注入
 type ExtensionHost struct {
 	services HostServices
 	plugins  map[string]*LoadedPlugin
+	streams  *StreamManager
 	mu       sync.RWMutex
 }
 
@@ -135,6 +196,7 @@ func NewExtensionHost(services HostServices) *ExtensionHost {
 	return &ExtensionHost{
 		services: services,
 		plugins:  make(map[string]*LoadedPlugin),
+		streams:  NewStreamManager(),
 	}
 }
 
@@ -451,6 +513,131 @@ func (h *ExtensionHost) buildHostFunctions(extName string) []extism.HostFunction
 		[]extism.ValueType{extism.ValueTypeI64},
 	)
 	funcs = append(funcs, assetGetConfigFn)
+
+	// host_stream_read: 通用 stream 读
+	streamReadFn := extism.NewHostFunctionWithStack(
+		"host_stream_read",
+		func(ctx context.Context, p *extism.CurrentPlugin, stack []uint64) {
+			input, err := p.ReadBytes(stack[0])
+			if err != nil {
+				offset, _ := p.WriteBytes([]byte(`{"error":"read input failed"}`))
+				stack[0] = offset
+				return
+			}
+			var req struct {
+				StreamID string `json:"stream_id"`
+				Size     int    `json:"size"`
+			}
+			if json.Unmarshal(input, &req) != nil {
+				offset, _ := p.WriteBytes([]byte(`{"error":"invalid input"}`))
+				stack[0] = offset
+				return
+			}
+			stream, ok := h.streams.Get(req.StreamID)
+			if !ok {
+				offset, _ := p.WriteBytes([]byte(`{"error":"stream not found"}`))
+				stack[0] = offset
+				return
+			}
+			buf := make([]byte, req.Size)
+			n, readErr := stream.Read(buf)
+			eof := false
+			if readErr != nil {
+				if readErr == io.EOF {
+					eof = true
+				} else {
+					offset, _ := p.WriteBytes([]byte(fmt.Sprintf(`{"error":%q}`, readErr.Error())))
+					stack[0] = offset
+					return
+				}
+			}
+			result, _ := json.Marshal(map[string]any{
+				"data": buf[:n],
+				"eof":  eof,
+			})
+			offset, _ := p.WriteBytes(result)
+			stack[0] = offset
+		},
+		[]extism.ValueType{extism.ValueTypeI64},
+		[]extism.ValueType{extism.ValueTypeI64},
+	)
+	funcs = append(funcs, streamReadFn)
+
+	// host_stream_write: 通用 stream 写
+	streamWriteFn := extism.NewHostFunctionWithStack(
+		"host_stream_write",
+		func(ctx context.Context, p *extism.CurrentPlugin, stack []uint64) {
+			input, err := p.ReadBytes(stack[0])
+			if err != nil {
+				offset, _ := p.WriteBytes([]byte(`{"error":"read input failed"}`))
+				stack[0] = offset
+				return
+			}
+			var req struct {
+				StreamID string `json:"stream_id"`
+				Data     []byte `json:"data"`
+			}
+			if json.Unmarshal(input, &req) != nil {
+				offset, _ := p.WriteBytes([]byte(`{"error":"invalid input"}`))
+				stack[0] = offset
+				return
+			}
+			stream, ok := h.streams.Get(req.StreamID)
+			if !ok {
+				offset, _ := p.WriteBytes([]byte(`{"error":"stream not found"}`))
+				stack[0] = offset
+				return
+			}
+			n, writeErr := stream.Write(req.Data)
+			if writeErr != nil {
+				offset, _ := p.WriteBytes([]byte(fmt.Sprintf(`{"error":%q}`, writeErr.Error())))
+				stack[0] = offset
+				return
+			}
+			result, _ := json.Marshal(map[string]any{"n": n})
+			offset, _ := p.WriteBytes(result)
+			stack[0] = offset
+		},
+		[]extism.ValueType{extism.ValueTypeI64},
+		[]extism.ValueType{extism.ValueTypeI64},
+	)
+	funcs = append(funcs, streamWriteFn)
+
+	// host_stream_close: 通用 stream 关闭
+	streamCloseFn := extism.NewHostFunctionWithStack(
+		"host_stream_close",
+		func(ctx context.Context, p *extism.CurrentPlugin, stack []uint64) {
+			input, err := p.ReadBytes(stack[0])
+			if err != nil {
+				offset, _ := p.WriteBytes([]byte(`{"error":"read input failed"}`))
+				stack[0] = offset
+				return
+			}
+			var req struct {
+				StreamID string `json:"stream_id"`
+			}
+			if json.Unmarshal(input, &req) != nil {
+				offset, _ := p.WriteBytes([]byte(`{"error":"invalid input"}`))
+				stack[0] = offset
+				return
+			}
+			stream, ok := h.streams.Get(req.StreamID)
+			if !ok {
+				offset, _ := p.WriteBytes([]byte(`{}`))
+				stack[0] = offset
+				return
+			}
+			if closeErr := stream.Close(); closeErr != nil {
+				slog.Warn("close stream", "stream_id", req.StreamID, "error", closeErr)
+			}
+			h.streams.Remove(req.StreamID)
+			offset, _ := p.WriteBytes([]byte(`{}`))
+			stack[0] = offset
+		},
+		[]extism.ValueType{extism.ValueTypeI64},
+		[]extism.ValueType{extism.ValueTypeI64},
+	)
+	funcs = append(funcs, streamCloseFn)
 
 	return funcs
 }
