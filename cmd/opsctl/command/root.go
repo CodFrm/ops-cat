@@ -129,6 +129,8 @@ func Execute() int {
 		return cmdGrant(ctx, args, resolvedSession)
 	case "session":
 		return cmdSession(args)
+	case "ext":
+		return cmdExt(ctx, args)
 	default:
 		fmt.Fprintf(os.Stderr, "Error: unknown command %q\n\nRun 'opsctl help' for usage.\n", verb)
 		return 1
@@ -154,6 +156,7 @@ Commands:
   batch     Execute multiple commands in parallel (exec/sql/redis)
   grant     Submit a batch grant for approval
   session   Manage approval sessions (start, end, status)
+  ext       Manage WASM extensions (list, install, remove, exec)
   version   Print version information
   help      Show this help message
 
