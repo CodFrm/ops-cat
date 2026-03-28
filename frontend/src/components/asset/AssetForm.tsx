@@ -24,6 +24,8 @@ import { app } from "../../../wailsjs/go/models";
 import { SSHConfigSection } from "@/components/asset/SSHConfigSection";
 import { DatabaseConfigSection } from "@/components/asset/DatabaseConfigSection";
 import { RedisConfigSection } from "@/components/asset/RedisConfigSection";
+import { useExtensionStore } from "@/stores/extensionStore";
+import { ExtensionConfigForm } from "@/components/extension/ExtensionConfigForm";
 
 interface AssetFormProps {
   open: boolean;
@@ -77,7 +79,7 @@ interface RedisConfig {
   ssh_asset_id?: number;
 }
 
-type AssetType = "ssh" | "database" | "redis";
+type AssetType = string;
 
 const DEFAULT_PORTS: Record<string, number> = {
   ssh: 22,
@@ -96,6 +98,7 @@ const DEFAULT_ICONS: Record<string, string> = {
 export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }: AssetFormProps) {
   const { t } = useTranslation();
   const { createAsset, updateAsset } = useAssetStore();
+  const extensions = useExtensionStore((s) => s.extensions);
 
   // Asset type
   const [assetType, setAssetType] = useState<AssetType>("ssh");
@@ -149,6 +152,9 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   const [tls, setTls] = useState(false);
   const [redisSshAssetId, setRedisSshAssetId] = useState(0);
 
+  // Extension config
+  const [extensionConfig, setExtensionConfig] = useState<Record<string, any>>({});
+
   // Exclude self from jump host / SSH tunnel selection
   const jumpHostExcludeIds = editAsset?.ID ? [editAsset.ID] : undefined;
 
@@ -185,6 +191,13 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
           loadDatabaseConfig(editAsset);
         } else if (editType === "redis") {
           loadRedisConfig(editAsset);
+        } else {
+          // Extension asset type
+          try {
+            setExtensionConfig(JSON.parse(editAsset.Config || "{}"));
+          } catch {
+            setExtensionConfig({});
+          }
         }
       } else {
         setAssetType("ssh");
@@ -365,6 +378,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setPasswordSource("inline");
     setPasswordCredentialId(0);
     setIcon(newType === "database" ? DEFAULT_ICONS[driver] || "mysql" : DEFAULT_ICONS[newType] || "server");
+    setExtensionConfig({});
   };
 
   const handleDriverChange = (newDriver: string) => {
@@ -549,6 +563,9 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       if (tls) redisConfig.tls = true;
       if (redisSshAssetId > 0) redisConfig.ssh_asset_id = redisSshAssetId;
       config = JSON.stringify(redisConfig);
+    } else {
+      // Extension asset types
+      config = JSON.stringify(extensionConfig);
     }
 
     const asset = new asset_entity.Asset({
@@ -582,7 +599,9 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       ? t("asset.typeSSH")
       : assetType === "database"
         ? t("asset.typeDatabase")
-        : t("asset.typeRedis");
+        : assetType === "redis"
+          ? t("asset.typeRedis")
+          : (extensions.flatMap((e) => e.assetTypes || []).find((at) => at.type === assetType)?.name ?? assetType);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -605,6 +624,13 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                   <SelectItem value="ssh">{t("asset.typeSSH")}</SelectItem>
                   <SelectItem value="database">{t("asset.typeDatabase")}</SelectItem>
                   <SelectItem value="redis">{t("asset.typeRedis")}</SelectItem>
+                  {extensions.flatMap((ext) =>
+                    (ext.assetTypes || []).map((at) => (
+                      <SelectItem key={at.type} value={at.type}>
+                        {at.name}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -748,24 +774,39 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             />
           )}
 
-          {/* Test Connection */}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={
-              assetType === "ssh"
-                ? handleTestConnection
-                : assetType === "database"
-                  ? handleTestDatabaseConnection
-                  : handleTestRedisConnection
-            }
-            disabled={testing || !host}
-            className="gap-1 w-fit"
-          >
-            {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
-            {testing ? t("asset.testing") : t("asset.testConnection")}
-          </Button>
+          {(() => {
+            const ext = extensions.find((e) => e.assetTypes?.some((at) => at.type === assetType));
+            const assetTypeDef = ext?.assetTypes?.find((at) => at.type === assetType);
+            if (!assetTypeDef?.configSchema) return null;
+            return (
+              <ExtensionConfigForm
+                schema={assetTypeDef.configSchema}
+                value={extensionConfig}
+                onChange={setExtensionConfig}
+              />
+            );
+          })()}
+
+          {/* Test Connection - only for built-in asset types */}
+          {(assetType === "ssh" || assetType === "database" || assetType === "redis") && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={
+                assetType === "ssh"
+                  ? handleTestConnection
+                  : assetType === "database"
+                    ? handleTestDatabaseConnection
+                    : handleTestRedisConnection
+              }
+              disabled={testing || !host}
+              className="gap-1 w-fit"
+            >
+              {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+              {testing ? t("asset.testing") : t("asset.testConnection")}
+            </Button>
+          )}
 
           {/* Group - Tree Selector */}
           <div className="grid gap-2">
@@ -783,7 +824,14 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t("action.cancel")}
           </Button>
-          <Button onClick={handleSubmit} disabled={saving || !name || !host}>
+          <Button
+            onClick={handleSubmit}
+            disabled={
+              saving ||
+              !name ||
+              (assetType === "ssh" || assetType === "database" || assetType === "redis" ? !host : false)
+            }
+          >
             {t("action.save")}
           </Button>
         </DialogFooter>

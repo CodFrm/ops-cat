@@ -25,7 +25,7 @@ export interface QueryTabMeta {
   assetId: number;
   assetName: string;
   assetIcon: string;
-  assetType: "database" | "redis";
+  assetType: string;
   driver?: string;
   defaultDatabase?: string;
 }

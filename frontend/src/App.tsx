@@ -20,12 +20,19 @@ import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { useTabStore, type InfoTabMeta } from "@/stores/tabStore";
+import { useExtensionStore } from "@/stores/extensionStore";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { asset_entity, group_entity } from "../wailsjs/go/models";
 import { EventsOn, WindowToggleMaximise } from "../wailsjs/runtime/runtime";
 
 function App() {
   const { t } = useTranslation();
+  const fetchExtensions = useExtensionStore((s) => s.fetchExtensions);
+
+  // 加载扩展列表
+  useEffect(() => {
+    fetchExtensions();
+  }, []);
 
   // 监听外部数据变更（opsctl 等），自动刷新 UI
   useEffect(() => {

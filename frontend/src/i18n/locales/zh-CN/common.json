@@ -896,5 +896,9 @@
     "showDetail": "查看详情",
     "hideDetail": "收起详情",
     "count": "{{count}} 个问题"
+  },
+  "extension": {
+    "notFound": "扩展未找到",
+    "loading": "加载扩展中..."
   }
 }

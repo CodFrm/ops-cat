@@ -896,5 +896,9 @@
     "showDetail": "Show detail",
     "hideDetail": "Hide detail",
     "count": "{{count}} issue(s)"
+  },
+  "extension": {
+    "notFound": "Extension not found",
+    "loading": "Loading extension..."
   }
 }

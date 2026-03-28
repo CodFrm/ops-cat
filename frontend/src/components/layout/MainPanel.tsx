@@ -17,6 +17,7 @@ import { PortForwardPage } from "@/components/forward/PortForwardPage";
 import { AIChatContent } from "@/components/ai/AIChatContent";
 import { DatabasePanel } from "@/components/query/DatabasePanel";
 import { RedisPanel } from "@/components/query/RedisPanel";
+import { ExtensionPanel } from "@/components/extension/ExtensionPanel";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTabStore, type Tab, type QueryTabMeta, type PageTabMeta, type InfoTabMeta } from "@/stores/tabStore";
@@ -480,7 +481,13 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPa
                 pointerEvents: isActive ? "auto" : "none",
               }}
             >
-              {meta.assetType === "database" ? <DatabasePanel tabId={tab.id} /> : <RedisPanel tabId={tab.id} />}
+              {meta.assetType === "database" ? (
+                <DatabasePanel tabId={tab.id} />
+              ) : meta.assetType === "redis" ? (
+                <RedisPanel tabId={tab.id} />
+              ) : (
+                <ExtensionPanel assetType={meta.assetType} assetId={meta.assetId} />
+              )}
             </div>
           );
         })}

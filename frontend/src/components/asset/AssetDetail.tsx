@@ -13,6 +13,8 @@ import { useAssetStore } from "@/stores/assetStore";
 import { CommandPolicyCard } from "@/components/asset/CommandPolicyCard";
 import { asset_entity } from "../../../wailsjs/go/models";
 import { GetDefaultPolicy } from "../../../wailsjs/go/app/App";
+import { useExtensionStore } from "@/stores/extensionStore";
+import { ExtensionPanel } from "@/components/extension/ExtensionPanel";
 
 interface SSHConfig {
   host: string;
@@ -67,6 +69,7 @@ interface AssetDetailProps {
 export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }: AssetDetailProps) {
   const { t } = useTranslation();
   const { assets, updateAsset } = useAssetStore();
+  const isExtensionAssetType = useExtensionStore((s) => s.isExtensionAssetType);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
 
@@ -562,6 +565,11 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
             referencedGroups={policyGroups}
             onGroupsChange={handleGroupsChange}
           />
+        )}
+
+        {/* Extension Panel */}
+        {isExtensionAssetType(asset.Type) && (
+          <ExtensionPanel assetType={asset.Type} assetId={asset.ID} />
         )}
 
         {asset.Description && (
