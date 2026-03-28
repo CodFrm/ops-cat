@@ -16,9 +16,9 @@ import {audit_repo} from '../models';
 import {ai} from '../models';
 import {sftp_svc} from '../models';
 
-export function CancelGitHubAuth():Promise<void>;
-
 export function CallExtensionTool(arg1:string,arg2:string):Promise<string>;
+
+export function CancelGitHubAuth():Promise<void>;
 
 export function CancelSSHConnect(arg1:string):Promise<void>;
 
@@ -92,8 +92,6 @@ export function GenerateSSHKey(arg1:string,arg2:string,arg3:string,arg4:number):
 
 export function GetActiveAIProvider():Promise<app.AIProviderInfo>;
 
-export function GetExtensions():Promise<Array<app.ExtensionListItem>>;
-
 export function GetAppVersion():Promise<string>;
 
 export function GetAsset(arg1:number):Promise<asset_entity.Asset>;
@@ -113,6 +111,8 @@ export function GetDataDir():Promise<string>;
 export function GetDefaultPolicy(arg1:string):Promise<string>;
 
 export function GetDownloadMirror():Promise<string>;
+
+export function GetExtensions():Promise<Array<app.ExtensionListItem>>;
 
 export function GetGitHubToken():Promise<string>;
 
@@ -149,6 +149,10 @@ export function ImportSSHKeyPEM(arg1:string,arg2:string,arg3:string):Promise<cre
 export function ImportTabbySelected(arg1:Array<number>,arg2:string,arg3:boolean):Promise<import_svc.ImportResult>;
 
 export function InitAIProvider():Promise<void>;
+
+export function InstallExtension(arg1:string):Promise<void>;
+
+export function SelectExtensionDir():Promise<string>;
 
 export function InstallOpsctl(arg1:string):Promise<string>;
 
@@ -195,6 +199,8 @@ export function PreviewSSHConfig():Promise<import_svc.PreviewResult>;
 export function PreviewTabbyConfig():Promise<import_svc.PreviewResult>;
 
 export function QueueAIMessage(arg1:number,arg2:string):Promise<void>;
+
+export function RemoveExtension(arg1:string):Promise<void>;
 
 export function ResizeSSH(arg1:string,arg2:number,arg3:number):Promise<void>;
 

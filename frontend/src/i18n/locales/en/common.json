@@ -898,7 +898,15 @@
     "count": "{{count}} issue(s)"
   },
   "extension": {
+    "title": "Extensions",
     "notFound": "Extension not found",
-    "loading": "Loading extension..."
+    "loading": "Loading extension...",
+    "installed": "Installed Extensions",
+    "installedDesc": "Manage your installed WASM extensions",
+    "install": "Install",
+    "noExtensions": "No extensions installed",
+    "loaded": "Loaded",
+    "loadFailed": "Load failed",
+    "restartHint": "Extensions require app restart after install/uninstall to take effect"
   }
 }

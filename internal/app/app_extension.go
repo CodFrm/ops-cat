@@ -53,6 +53,30 @@ func (a *App) GetExtensions() []ExtensionListItem {
 	return items
 }
 
+// SelectExtensionDir 弹出目录选择对话框，返回所选目录路径（Wails binding）
+func (a *App) SelectExtensionDir() (string, error) {
+	return wailsRuntime.OpenDirectoryDialog(a.ctx, wailsRuntime.OpenDialogOptions{
+		Title: "选择扩展目录",
+	})
+}
+
+// InstallExtension 从本地路径安装扩展（Wails binding）
+func (a *App) InstallExtension(sourcePath string) error {
+	if a.extManager == nil {
+		return fmt.Errorf("extension system not initialized")
+	}
+	_, err := a.extManager.Install(sourcePath)
+	return err
+}
+
+// RemoveExtension 卸载扩展（Wails binding）
+func (a *App) RemoveExtension(name string) error {
+	if a.extManager == nil {
+		return fmt.Errorf("extension system not initialized")
+	}
+	return a.extManager.Remove(name)
+}
+
 // CallExtensionTool 调用扩展工具（Wails binding）
 func (a *App) CallExtensionTool(name string, argsJSON string) (string, error) {
 	if a.extBridge == nil {

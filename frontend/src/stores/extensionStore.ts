@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { GetExtensions } from "../../wailsjs/go/app/App";
+import { GetExtensions, InstallExtension, RemoveExtension } from "../../wailsjs/go/app/App";
 
 export interface ExtensionAssetType {
   type: string;
@@ -28,6 +28,8 @@ interface ExtensionState {
   extensions: ExtensionInfo[];
   loading: boolean;
   fetchExtensions: () => Promise<void>;
+  installExtension: (sourcePath: string) => Promise<void>;
+  removeExtension: (name: string) => Promise<void>;
   getExtensionForAssetType: (type: string) => ExtensionInfo | undefined;
   isExtensionAssetType: (type: string) => boolean;
 }
@@ -47,6 +49,18 @@ export const useExtensionStore = create<ExtensionState>((set, get) => ({
     } finally {
       set({ loading: false });
     }
+  },
+
+  installExtension: async (sourcePath: string) => {
+    await InstallExtension(sourcePath);
+    await get().fetchExtensions();
+  },
+
+  removeExtension: async (name: string) => {
+    await RemoveExtension(name);
+    set((state) => ({
+      extensions: state.extensions.filter((e) => e.name !== name),
+    }));
   },
 
   getExtensionForAssetType: (type: string) => {
