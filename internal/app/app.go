@@ -9,6 +9,7 @@ import (
 	"github.com/opskat/opskat/internal/ai"
 	"github.com/opskat/opskat/internal/approval"
 	"github.com/opskat/opskat/internal/bootstrap"
+	"github.com/opskat/opskat/internal/extension"
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/service/credential_resolver"
 	"github.com/opskat/opskat/internal/service/sftp_svc"
@@ -72,6 +73,9 @@ type App struct {
 	connCounter             int64                      // 连接ID计数器
 	currentConversationID   int64                      // 当前活跃会话ID
 	runners                 sync.Map                   // map[int64]*ai.ConversationRunner
+	extManager              *extension.Manager
+	extHost                 *extension.ExtensionHost
+	extBridge               *extension.Bridge
 }
 
 // NewApp 创建App实例
@@ -103,6 +107,7 @@ func (a *App) Startup(ctx context.Context) {
 	a.startApprovalServer(authToken)
 	a.startSSHPoolServer(authToken)
 	a.startAutoUpdateCheck()
+	a.initExtensions()
 	a.InitAIProvider()
 	a.emitSystemStatus()
 }
@@ -111,6 +116,10 @@ func (a *App) Startup(ctx context.Context) {
 func (a *App) Cleanup() {
 	// 先发送关闭信号，解除所有阻塞等待（审批、权限确认等），避免 wg.Wait 死锁
 	close(a.shutdownCh)
+
+	if a.extHost != nil {
+		a.extHost.Close(context.Background())
+	}
 
 	if a.sshProxyServer != nil {
 		a.sshProxyServer.Stop()

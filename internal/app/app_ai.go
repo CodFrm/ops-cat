@@ -45,6 +45,10 @@ func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
 
 	config := ai.NewDefaultConfig()
 	config.ContextWindow = contextWindow
+	// 合并扩展工具
+	if a.extBridge != nil {
+		config.Tools = a.extBridge.MergeToolDefs(ai.AllToolDefs())
+	}
 	a.aiAgent = ai.NewAgent(provider, func() ai.ToolExecutor {
 		return ai.NewAuditingExecutor(ai.NewDefaultToolExecutor(), ai.NewDefaultAuditWriter())
 	}, checker, config)
