@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log"
+	"path/filepath"
 	"sync"
 
 	"github.com/opskat/opskat/internal/ai"
@@ -14,6 +15,7 @@ import (
 	"github.com/opskat/opskat/internal/service/sftp_svc"
 	"github.com/opskat/opskat/internal/service/ssh_svc"
 	"github.com/opskat/opskat/internal/sshpool"
+	"github.com/opskat/opskat/pkg/extension"
 
 	"github.com/cago-frame/cago/pkg/i18n"
 	"github.com/cago-frame/cago/pkg/logger"
@@ -72,6 +74,8 @@ type App struct {
 	connCounter             int64                      // 连接ID计数器
 	currentConversationID   int64                      // 当前活跃会话ID
 	runners                 sync.Map                   // map[int64]*ai.ConversationRunner
+	extManager              *extension.Manager
+	extBridge               *extension.Bridge
 }
 
 // NewApp 创建App实例
@@ -105,6 +109,27 @@ func (a *App) Startup(ctx context.Context) {
 	a.startAutoUpdateCheck()
 	a.InitAIProvider()
 	a.emitSystemStatus()
+
+	// Initialize extension system
+	extDir := filepath.Join(dataDir, "extensions")
+	a.extBridge = extension.NewBridge()
+	a.extManager = extension.NewManager(extDir, func() extension.HostProvider {
+		return extension.NewDefaultHostProvider(extension.DefaultHostConfig{
+			Logger: zap.L(),
+		})
+	}, zap.L())
+
+	if _, err := a.extManager.Scan(ctx); err != nil {
+		zap.L().Error("scan extensions failed", zap.Error(err))
+	}
+
+	// Register loaded extensions into bridge
+	for _, ext := range a.extManager.ListExtensions() {
+		a.extBridge.Register(ext)
+	}
+
+	// Wire exec_tool handler
+	ai.SetExecToolExecutor(a.extBridge)
 }
 
 // Cleanup 关闭审批服务等资源
@@ -120,6 +145,9 @@ func (a *App) Cleanup() {
 	}
 	if a.approvalServer != nil {
 		a.approvalServer.Stop()
+	}
+	if a.extManager != nil {
+		a.extManager.Close(context.Background())
 	}
 }
 

@@ -198,6 +198,17 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 		lang = "zh-cn"
 	}
 	builder := ai.NewPromptBuilder(lang, aiCtx)
+
+	// Inject extension SKILL.md based on connected asset types
+	if a.extBridge != nil {
+		for _, tab := range aiCtx.OpenTabs {
+			if skillMD := a.extBridge.GetSkillMD(tab.Type); skillMD != "" {
+				builder.SetExtensionSkillMD(skillMD)
+				break
+			}
+		}
+	}
+
 	fullMessages := make([]ai.Message, 0, 1+len(messages))
 	fullMessages = append(fullMessages, ai.Message{
 		Role:    ai.RoleSystem,
