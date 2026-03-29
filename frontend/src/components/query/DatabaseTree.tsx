@@ -11,15 +11,15 @@ import {
   AlertCircle,
   Search,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  Button,
+  ScrollArea,
   ContextMenu,
   ContextMenuTrigger,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
-} from "@/components/ui/context-menu";
+} from "@opskat/ui";
 import { useQueryStore } from "@/stores/queryStore";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 

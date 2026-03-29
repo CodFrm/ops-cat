@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
+import { Button } from "@opskat/ui";
 import { useAIStore } from "@/stores/aiStore";
 import { CreateAIProvider, SetActiveAIProvider } from "../../../wailsjs/go/app/App";
 import { Bot, Zap, Sparkles, ArrowRight, Settings, SquareTerminal } from "lucide-react";

@@ -21,14 +21,14 @@ import { useTerminalStore } from "@/stores/terminalStore";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTabStore, type Tab, type QueryTabMeta, type PageTabMeta, type InfoTabMeta } from "@/stores/tabStore";
 import { useSFTPStore } from "@/stores/sftpStore";
-import { cn } from "@/lib/utils";
 import {
+  cn,
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+} from "@opskat/ui";
 import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
 import { asset_entity } from "../../../wailsjs/go/models";
 

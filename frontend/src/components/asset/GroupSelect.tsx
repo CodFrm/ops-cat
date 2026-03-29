@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Folder } from "lucide-react";
-import { TreeSelect, type TreeNode } from "@/components/ui/tree-select";
+import { TreeSelect, type TreeNode } from "@opskat/ui";
 import { useAssetStore } from "@/stores/assetStore";
 
 interface GroupSelectProps {

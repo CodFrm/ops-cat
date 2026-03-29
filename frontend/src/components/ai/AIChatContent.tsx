@@ -5,9 +5,9 @@ import { useTranslation } from "react-i18next";
 import Markdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  Button,
+  ScrollArea,
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -16,7 +16,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+} from "@opskat/ui";
 import { useAIStore, useAISendOnEnter, type ChatMessage, type ContentBlock } from "@/stores/aiStore";
 import { ToolBlock } from "@/components/ai/ToolBlock";
 import { ThinkingBlock } from "@/components/ai/ThinkingBlock";

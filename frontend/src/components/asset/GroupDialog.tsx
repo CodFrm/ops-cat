@@ -1,11 +1,17 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  Button,
+  Input,
+  Textarea,
+  Label,
+} from "@opskat/ui";
 import { IconPicker } from "@/components/asset/IconPicker";
 import { GroupSelect } from "@/components/asset/GroupSelect";
 import { useAssetStore } from "@/stores/assetStore";

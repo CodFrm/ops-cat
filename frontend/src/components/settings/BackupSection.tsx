@@ -1,18 +1,27 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  cn,
+  Button,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from "@opskat/ui";
 import { useAssetStore } from "@/stores/assetStore";
 import {
   SelectImportFile,
@@ -34,7 +43,6 @@ import { BackupImportDialog } from "@/components/settings/BackupImportDialog";
 import { Download, Upload, Github, LogOut, Loader2, Copy, ExternalLink, Eye, EyeOff, Shuffle } from "lucide-react";
 import { toast } from "sonner";
 import { BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
-import { cn } from "@/lib/utils";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 

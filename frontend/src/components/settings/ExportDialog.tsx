@@ -19,12 +19,18 @@ import {
   Shuffle,
   AlertTriangle,
 } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  Button,
+  Input,
+  Label,
+  Switch,
+  ScrollArea,
+} from "@opskat/ui";
 import { backup_svc } from "../../../wailsjs/go/models";
 import { ExportToFile } from "../../../wailsjs/go/app/App";
 import { useAssetStore } from "@/stores/assetStore";

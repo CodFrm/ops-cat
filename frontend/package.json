@@ -13,6 +13,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@opskat/ui": "workspace:*",
     "@iconify-icons/logos": "^1.2.36",
     "@iconify-icons/simple-icons": "^1.2.74",
     "@iconify-icons/tdesign": "^1.2.0",

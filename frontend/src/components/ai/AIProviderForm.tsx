@@ -1,11 +1,19 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Button,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  ScrollArea,
+} from "@opskat/ui";
 import { Check, ChevronsUpDown, Loader2, RefreshCw } from "lucide-react";
 import { FetchAIModels, GetModelDefaults } from "../../../wailsjs/go/app/App";
 import { app } from "../../../wailsjs/go/models";

@@ -4,11 +4,13 @@ import { Server, Database, Pencil, Trash2, TerminalSquare, Loader2 } from "lucid
 import Markdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import {
+  cn,
+  Button,
+  Separator,
+  ConfirmDialog,
+} from "@opskat/ui";
 import { toast } from "sonner";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { cn } from "@/lib/utils";
 import { useAssetStore } from "@/stores/assetStore";
 import { CommandPolicyCard } from "@/components/asset/CommandPolicyCard";
 import { asset_entity } from "../../../wailsjs/go/models";

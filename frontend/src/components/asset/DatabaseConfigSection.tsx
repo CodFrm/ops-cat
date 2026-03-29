@@ -1,8 +1,14 @@
 import { useTranslation } from "react-i18next";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+import {
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+} from "@opskat/ui";
 import { AssetSelect } from "@/components/asset/AssetSelect";
 import { PasswordSourceField } from "@/components/asset/PasswordSourceField";
 import { credential_entity } from "../../../wailsjs/go/models";

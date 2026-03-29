@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { X, Plus, ShieldCheck, ShieldX, ShieldAlert } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, Input } from "@opskat/ui";
 
 type PolicyVariant = "allow" | "deny" | "warn";
 

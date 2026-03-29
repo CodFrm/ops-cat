@@ -1,14 +1,16 @@
 import { useState, useEffect, useMemo } from "react";
 import { Plus, Trash2, Bot, PanelRightClose, MessageSquare } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import {
+  cn,
+  Button,
+  ScrollArea,
+  ConfirmDialog,
+} from "@opskat/ui";
 import { useAIStore } from "@/stores/aiStore";
 import { useTabStore, type AITabMeta } from "@/stores/tabStore";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { useResizeHandle } from "@/hooks/useResizeHandle";
-import { cn } from "@/lib/utils";
 
 // resize constants kept near usage for clarity
 

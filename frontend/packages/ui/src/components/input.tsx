@@ -1,8 +1,8 @@
 import * as React from "react";
 import { useCallback } from "react";
 
-import { cn } from "@/lib/utils";
-import { useIMEComposing } from "@/hooks/useIMEComposing";
+import { cn } from "../lib/utils";
+import { useIMEComposing } from "../hooks/useIMEComposing";
 
 function Input({
   className,

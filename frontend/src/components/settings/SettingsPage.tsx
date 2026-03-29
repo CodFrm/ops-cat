@@ -1,6 +1,15 @@
 import { useTranslation } from "react-i18next";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@opskat/ui";
 import { Bot, Palette, HardDrive, Import, Keyboard, MonitorDot, Info, Activity } from "lucide-react";
 import { ShortcutSettings } from "@/components/settings/ShortcutSettings";
 import { AISettingsSection } from "@/components/settings/AISettingsSection";

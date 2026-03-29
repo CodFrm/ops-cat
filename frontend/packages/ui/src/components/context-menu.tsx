@@ -1,7 +1,7 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 
-import { cn } from "@/lib/utils";
+import { cn } from "../lib/utils";
 
 // --- Custom ContextMenu with smart positioning ---
 // Replaces Radix ContextMenu which hardcodes side/sideOffset/align

@@ -21,9 +21,9 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  Button,
+  ScrollArea,
   AlertDialog,
   AlertDialogContent,
   AlertDialogDescription,
@@ -32,15 +32,13 @@ import {
   AlertDialogTitle,
   AlertDialogCancel,
   AlertDialogAction,
-} from "@/components/ui/alert-dialog";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import {
+  ConfirmDialog,
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+} from "@opskat/ui";
 import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
 import { pinyinMatch } from "@/lib/pinyin";
 import { useAssetStore } from "@/stores/assetStore";

@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Check, Search } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { pinyinMatch } from "@/lib/pinyin";
+import { Button } from "./button";
+import { cn } from "../lib/utils";
+import { pinyinMatch } from "../lib/pinyin";
 
 export interface TreeNode {
   id: number;

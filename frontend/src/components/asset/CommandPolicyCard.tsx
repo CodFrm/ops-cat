@@ -5,8 +5,7 @@ import { PolicyTagEditor, type PolicyVariant } from "@/components/asset/PolicyTa
 import { PolicyTestPanel } from "@/components/asset/PolicyTestPanel";
 import { PolicyGroupSelector } from "@/components/asset/PolicyGroupSelector";
 import { PolicyGroupManager } from "@/components/asset/PolicyGroupManager";
-import { Button } from "@/components/ui/button";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Button, ConfirmDialog } from "@opskat/ui";
 
 type PolicyType = "ssh" | "database" | "redis";
 

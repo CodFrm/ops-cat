@@ -1,9 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { X, ChevronUp, ChevronDown, CaseSensitive, WholeWord, Regex } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, Input, Button } from "@opskat/ui";
 import type { SearchAddon } from "@xterm/addon-search";
 
 const SEARCH_DECORATIONS = {
