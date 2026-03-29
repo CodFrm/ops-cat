@@ -13,8 +13,8 @@ export interface RedisConfigSectionProps {
   setUsername: (v: string) => void;
   tls: boolean;
   setTls: (v: boolean) => void;
-  redisSshAssetId: number;
-  setRedisSshAssetId: (v: number) => void;
+  sshTunnelId: number;
+  setSshTunnelId: (v: number) => void;
   // Password fields
   password: string;
   setPassword: (v: string) => void;
@@ -36,8 +36,8 @@ export function RedisConfigSection({
   setUsername,
   tls,
   setTls,
-  redisSshAssetId,
-  setRedisSshAssetId,
+  sshTunnelId,
+  setSshTunnelId,
   password,
   setPassword,
   encryptedPassword,
@@ -99,8 +99,8 @@ export function RedisConfigSection({
       <div className="grid gap-2">
         <Label>{t("asset.sshTunnel")}</Label>
         <AssetSelect
-          value={redisSshAssetId}
-          onValueChange={setRedisSshAssetId}
+          value={sshTunnelId}
+          onValueChange={setSshTunnelId}
           filterType="ssh"
           placeholder={t("asset.sshTunnelNone")}
         />

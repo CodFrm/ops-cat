@@ -528,14 +528,15 @@ export namespace asset_entity {
 	    Config: string;
 	    CmdPolicy: string;
 	    SortOrder: number;
+	    sshTunnelId: number;
 	    Status: number;
 	    Createtime: number;
 	    Updatetime: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Asset(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -548,6 +549,7 @@ export namespace asset_entity {
 	        this.Config = source["Config"];
 	        this.CmdPolicy = source["CmdPolicy"];
 	        this.SortOrder = source["SortOrder"];
+	        this.sshTunnelId = source["sshTunnelId"];
 	        this.Status = source["Status"];
 	        this.Createtime = source["Createtime"];
 	        this.Updatetime = source["Updatetime"];

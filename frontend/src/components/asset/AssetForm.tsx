@@ -139,7 +139,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   const [localKeys, setLocalKeys] = useState<app.LocalSSHKeyInfo[]>([]);
   const [selectedKeyPaths, setSelectedKeyPaths] = useState<string[]>([]);
   const [scanningKeys, setScanningKeys] = useState(false);
-  const [jumpHostId, setJumpHostId] = useState(0);
+  const [sshTunnelId, setSshTunnelId] = useState(0);
   const [proxyType, setProxyType] = useState("socks5");
   const [proxyHost, setProxyHost] = useState("");
   const [proxyPort, setProxyPort] = useState(1080);
@@ -152,12 +152,10 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   const [database, setDatabase] = useState("");
   const [sslMode, setSslMode] = useState("disable");
   const [readOnly, setReadOnly] = useState(false);
-  const [dbSshAssetId, setDbSshAssetId] = useState(0);
   const [params, setParams] = useState("");
 
   // Redis fields
   const [tls, setTls] = useState(false);
-  const [redisSshAssetId, setRedisSshAssetId] = useState(0);
 
   // Exclude self from jump host / SSH tunnel selection
   const jumpHostExcludeIds = editAsset?.ID ? [editAsset.ID] : undefined;
@@ -231,9 +229,12 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       setKeySource(cfg.private_keys && cfg.private_keys.length > 0 ? "file" : "managed");
       setCredentialId(cfg.auth_type === "key" ? cfg.credential_id || 0 : 0);
       setSelectedKeyPaths(cfg.private_keys || []);
-      setJumpHostId(cfg.jump_host_id || 0);
 
-      if (cfg.jump_host_id) {
+      // Unified SSH tunnel: prefer asset-level field, fall back to config
+      const tunnelId = asset.sshTunnelId || cfg.jump_host_id || 0;
+      setSshTunnelId(tunnelId);
+
+      if (tunnelId) {
         setConnectionType("jumphost");
       } else if (cfg.proxy) {
         setConnectionType("proxy");
@@ -268,7 +269,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       setSslMode(cfg.ssl_mode || "disable");
       setTls(cfg.tls || false);
       setReadOnly(cfg.read_only || false);
-      setDbSshAssetId(cfg.ssh_asset_id || 0);
+      setSshTunnelId(asset.sshTunnelId || cfg.ssh_asset_id || 0);
       setParams(cfg.params || "");
 
       if (cfg.credential_id) {
@@ -295,7 +296,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       setPort(cfg.port || 6379);
       setUsername(cfg.username || "");
       setTls(cfg.tls || false);
-      setRedisSshAssetId(cfg.ssh_asset_id || 0);
+      setSshTunnelId(asset.sshTunnelId || cfg.ssh_asset_id || 0);
 
       if (cfg.credential_id) {
         setPasswordSource("managed");
@@ -341,7 +342,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setCredentialId(0);
     setSelectedKeyPaths([]);
     setConnectionType("direct");
-    setJumpHostId(0);
+    setSshTunnelId(0);
     resetProxyFields();
   };
 
@@ -352,14 +353,12 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setSslMode("disable");
     setTls(false);
     setReadOnly(false);
-    setDbSshAssetId(0);
     setParams("");
   };
 
   // Redis-exclusive fields only
   const resetRedisFields = () => {
     setTls(false);
-    setRedisSshAssetId(0);
   };
 
   const handleTypeChange = (newType: AssetType) => {
@@ -400,7 +399,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     if (!password && encryptedPassword) {
       sshConfig.password = encryptedPassword;
     }
-    if (connectionType === "jumphost" && jumpHostId > 0) sshConfig.jump_host_id = jumpHostId;
+    if (connectionType === "jumphost" && sshTunnelId > 0) sshConfig.jump_host_id = sshTunnelId;
     if (connectionType === "proxy" && proxyHost) {
       sshConfig.proxy = {
         type: proxyType,
@@ -427,7 +426,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     if (driver === "postgresql" && sslMode !== "disable") cfg.ssl_mode = sslMode;
     if (driver === "mysql" && tls) cfg.tls = true;
     if (readOnly) cfg.read_only = true;
-    if (dbSshAssetId > 0) cfg.ssh_asset_id = dbSshAssetId;
+    if (sshTunnelId > 0) cfg.ssh_asset_id = sshTunnelId;
     if (params) cfg.params = params;
     if (!password && encryptedPassword) cfg.password = encryptedPassword;
     setTesting(true);
@@ -445,7 +444,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     const cfg: RedisConfig = { host, port };
     if (username) cfg.username = username;
     if (tls) cfg.tls = true;
-    if (redisSshAssetId > 0) cfg.ssh_asset_id = redisSshAssetId;
+    if (sshTunnelId > 0) cfg.ssh_asset_id = sshTunnelId;
     if (!password && encryptedPassword) cfg.password = encryptedPassword;
     setTesting(true);
     try {
@@ -510,7 +509,6 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         if (keySource === "file" && selectedKeyPaths.length > 0) sshConfig.private_keys = selectedKeyPaths;
       }
 
-      if (connectionType === "jumphost" && jumpHostId > 0) sshConfig.jump_host_id = jumpHostId;
       if (connectionType === "proxy" && proxyHost) {
         const encProxy = await encryptProxyPassword();
         sshConfig.proxy = {
@@ -540,7 +538,6 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       if (driver === "postgresql" && sslMode !== "disable") dbConfig.ssl_mode = sslMode;
       if (driver === "mysql" && tls) dbConfig.tls = true;
       if (readOnly) dbConfig.read_only = true;
-      if (dbSshAssetId > 0) dbConfig.ssh_asset_id = dbSshAssetId;
       if (params) dbConfig.params = params;
       config = JSON.stringify(dbConfig);
     } else if (assetType === "redis") {
@@ -557,7 +554,6 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         if (encrypted) redisConfig.password = encrypted;
       }
       if (tls) redisConfig.tls = true;
-      if (redisSshAssetId > 0) redisConfig.ssh_asset_id = redisSshAssetId;
       config = JSON.stringify(redisConfig);
     }
 
@@ -569,6 +565,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       Icon: icon,
       Description: description,
       Config: config,
+      sshTunnelId: sshTunnelId > 0 ? sshTunnelId : 0,
     });
 
     setSaving(true);
@@ -683,8 +680,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
               selectedKeyPaths={selectedKeyPaths}
               setSelectedKeyPaths={setSelectedKeyPaths}
               scanningKeys={scanningKeys}
-              jumpHostId={jumpHostId}
-              setJumpHostId={setJumpHostId}
+              sshTunnelId={sshTunnelId}
+              setSshTunnelId={setSshTunnelId}
               jumpHostExcludeIds={jumpHostExcludeIds}
               proxyType={proxyType}
               setProxyType={setProxyType}
@@ -718,8 +715,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
               setTls={setTls}
               readOnly={readOnly}
               setReadOnly={setReadOnly}
-              dbSshAssetId={dbSshAssetId}
-              setDbSshAssetId={setDbSshAssetId}
+              sshTunnelId={sshTunnelId}
+              setSshTunnelId={setSshTunnelId}
               params={params}
               setParams={setParams}
               password={password}
@@ -744,8 +741,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
               setUsername={setUsername}
               tls={tls}
               setTls={setTls}
-              redisSshAssetId={redisSshAssetId}
-              setRedisSshAssetId={setRedisSshAssetId}
+              sshTunnelId={sshTunnelId}
+              setSshTunnelId={setSshTunnelId}
               password={password}
               setPassword={setPassword}
               encryptedPassword={encryptedPassword}

@@ -29,8 +29,8 @@ export interface DatabaseConfigSectionProps {
   setTls: (v: boolean) => void;
   readOnly: boolean;
   setReadOnly: (v: boolean) => void;
-  dbSshAssetId: number;
-  setDbSshAssetId: (v: number) => void;
+  sshTunnelId: number;
+  setSshTunnelId: (v: number) => void;
   params: string;
   setParams: (v: string) => void;
   // Password fields
@@ -61,8 +61,8 @@ export function DatabaseConfigSection({
   setTls,
   readOnly,
   setReadOnly,
-  dbSshAssetId,
-  setDbSshAssetId,
+  sshTunnelId,
+  setSshTunnelId,
   params,
   setParams,
   password,
@@ -164,8 +164,8 @@ export function DatabaseConfigSection({
       <div className="grid gap-2">
         <Label>{t("asset.sshTunnel")}</Label>
         <AssetSelect
-          value={dbSshAssetId}
-          onValueChange={setDbSshAssetId}
+          value={sshTunnelId}
+          onValueChange={setSshTunnelId}
           filterType="ssh"
           placeholder={t("asset.sshTunnelNone")}
         />
