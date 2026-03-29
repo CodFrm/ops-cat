@@ -3,8 +3,25 @@ package ai
 import (
 	"testing"
 
+	"github.com/opskat/opskat/pkg/extension"
 	. "github.com/smartystreets/goconvey/convey"
 )
+
+// mockExtToolExecutor implements ExtensionToolExecutor for testing.
+type mockExtToolExecutor struct {
+	ext *extension.Extension
+}
+
+func (m *mockExtToolExecutor) FindExtensionByTool(extName, toolName string) *extension.Extension {
+	return m.ext
+}
+
+func (m *mockExtToolExecutor) GetExtensionPolicyGroups(extName, assetType string, assetID int64) []string {
+	return nil
+}
+
+// Compile-time interface check.
+var _ ExtensionToolExecutor = (*mockExtToolExecutor)(nil)
 
 func TestExecToolHandler(t *testing.T) {
 	Convey("handleExecTool", t, func() {
@@ -39,6 +56,18 @@ func TestExecToolHandler(t *testing.T) {
 			})
 			So(err, ShouldNotBeNil)
 			So(err.Error(), ShouldContainSubstring, "tool")
+		})
+
+		Convey("should return error when tool not found in extension", func() {
+			execToolExecutor = &mockExtToolExecutor{ext: nil}
+			_, err := handleExecTool(t.Context(), map[string]any{
+				"extension": "oss",
+				"tool":      "nonexistent",
+				"args":      map[string]any{},
+			})
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "not found")
+			So(err.Error(), ShouldContainSubstring, "nonexistent")
 		})
 	})
 }

@@ -144,6 +144,15 @@ func (b *Bridge) GetSkillMD(assetType string) string {
 	return b.skillMDs[assetType]
 }
 
+func (b *Bridge) GetExtensionPolicyGroups(extName, assetType string, assetID int64) []string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if groups, ok := b.defaultPolicies[assetType]; ok {
+		return groups
+	}
+	return nil
+}
+
 func (b *Bridge) FindExtensionByTool(extName, toolName string) *Extension {
 	b.mu.RLock()
 	defer b.mu.RUnlock()

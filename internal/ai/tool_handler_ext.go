@@ -11,6 +11,7 @@ import (
 // ExtensionToolExecutor provides extension tool execution to the AI system.
 type ExtensionToolExecutor interface {
 	FindExtensionByTool(extName, toolName string) *extension.Extension
+	GetExtensionPolicyGroups(extName, assetType string, assetID int64) []string
 }
 
 var execToolExecutor ExtensionToolExecutor
@@ -43,6 +44,29 @@ func handleExecTool(ctx context.Context, args map[string]any) (string, error) {
 	argsJSON, err := json.Marshal(toolArgs)
 	if err != nil {
 		return "", fmt.Errorf("exec_tool: marshal args: %w", err)
+	}
+
+	assetID := argInt64(args, "asset_id")
+	if assetID > 0 && ext.Manifest.Policies.Type != "" {
+		action, resource, err := ext.Plugin.CheckPolicy(ctx, toolName, argsJSON)
+		if err == nil && action != "" {
+			policyGroups := execToolExecutor.GetExtensionPolicyGroups(
+				extName, ext.Manifest.Policies.Type, assetID,
+			)
+			result := checkExtensionPolicy(ctx, policyGroups, action, resource)
+			switch result.Decision {
+			case Deny:
+				return "", fmt.Errorf("exec_tool: policy denied: %s", result.Message)
+			case NeedConfirm:
+				checker := GetPolicyChecker(ctx)
+				if checker != nil {
+					confirmResult := checker.handleConfirm(ctx, assetID, ext.Manifest.Policies.Type, extName+"."+toolName)
+					if confirmResult.Decision != Allow {
+						return "", fmt.Errorf("exec_tool: user denied: %s.%s", extName, toolName)
+					}
+				}
+			}
+		}
 	}
 
 	result, err := ext.Plugin.CallTool(ctx, toolName, argsJSON)

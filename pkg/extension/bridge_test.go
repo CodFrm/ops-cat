@@ -69,6 +69,16 @@ func TestBridge(t *testing.T) {
 			So(md, ShouldBeEmpty)
 		})
 
+		Convey("GetExtensionPolicyGroups returns defaults for known type", func() {
+			groups := bridge.GetExtensionPolicyGroups("oss", "oss", 1)
+			So(groups, ShouldResemble, []string{"ext:oss:readonly"})
+		})
+
+		Convey("GetExtensionPolicyGroups returns nil for unknown type", func() {
+			groups := bridge.GetExtensionPolicyGroups("oss", "unknown", 1)
+			So(groups, ShouldBeNil)
+		})
+
 		Convey("FindExtensionByTool returns extension by tool", func() {
 			found := bridge.FindExtensionByTool("oss", "list_buckets")
 			So(found, ShouldNotBeNil)

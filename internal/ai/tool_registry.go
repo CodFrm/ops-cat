@@ -213,6 +213,7 @@ func AllToolDefs() []ToolDef {
 				{Name: "extension", Type: ParamString, Description: `Extension name (e.g. "oss")`, Required: true},
 				{Name: "tool", Type: ParamString, Description: `Tool name (e.g. "list_buckets")`, Required: true},
 				{Name: "args", Type: ParamString, Description: "Tool arguments as JSON object", Required: true},
+				{Name: "asset_id", Type: ParamNumber, Description: "Asset ID for policy checking", Required: false},
 			},
 			Handler: handleExecTool,
 			CommandExtractor: func(args map[string]any) string {
