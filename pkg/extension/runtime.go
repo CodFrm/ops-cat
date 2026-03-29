@@ -145,9 +145,10 @@ func (p *Plugin) call(ctx context.Context, fnName string, input []byte) (json.Ra
 func registerHostModule(ctx context.Context, r wazero.Runtime, host HostProvider) error {
 	_, err := r.NewHostModuleBuilder("opskat").
 		NewFunctionBuilder().
-		WithFunc(func() {
-			// host_log placeholder - actual implementation needs memory access
-			// Will be properly implemented when guest SDK defines the ABI
+		WithFunc(func(level, msg uint32) {
+			// host_log placeholder - uses host to route logs
+			// Actual memory-based implementation in Phase 2
+			_ = host
 		}).Export("host_log").
 		Instantiate(ctx)
 	return err
