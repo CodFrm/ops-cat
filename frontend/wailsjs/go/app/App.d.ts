@@ -279,3 +279,15 @@ export function UpdatePolicyGroup(arg1:policy_group_entity.PolicyGroup):Promise<
 export function WaitGitHubDeviceAuth(arg1:string,arg2:number):Promise<string>;
 
 export function WriteSSH(arg1:string,arg2:string):Promise<void>;
+
+export function CallExtensionAction(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function CallExtensionTool(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function GetAvailableAssetTypes():Promise<Array<any>>;
+
+export function GetExtensionManifest(arg1:string):Promise<any>;
+
+export function ListInstalledExtensions():Promise<Array<any>>;
+
+export function ReloadExtensions():Promise<void>;

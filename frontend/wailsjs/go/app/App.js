@@ -529,3 +529,27 @@ export function WaitGitHubDeviceAuth(arg1, arg2) {
 export function WriteSSH(arg1, arg2) {
   return window['go']['app']['App']['WriteSSH'](arg1, arg2);
 }
+
+export function CallExtensionAction(arg1, arg2, arg3) {
+  return window['go']['app']['App']['CallExtensionAction'](arg1, arg2, arg3);
+}
+
+export function CallExtensionTool(arg1, arg2, arg3) {
+  return window['go']['app']['App']['CallExtensionTool'](arg1, arg2, arg3);
+}
+
+export function GetAvailableAssetTypes() {
+  return window['go']['app']['App']['GetAvailableAssetTypes']();
+}
+
+export function GetExtensionManifest(arg1) {
+  return window['go']['app']['App']['GetExtensionManifest'](arg1);
+}
+
+export function ListInstalledExtensions() {
+  return window['go']['app']['App']['ListInstalledExtensions']();
+}
+
+export function ReloadExtensions() {
+  return window['go']['app']['App']['ReloadExtensions']();
+}

@@ -19,7 +19,7 @@ import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { useTabStore, type InfoTabMeta } from "@/stores/tabStore";
-import { useExtensionStore } from "@/extension";
+import { useExtensionStore, initExtensions } from "@/extension";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { asset_entity, group_entity } from "../wailsjs/go/models";
 import { EventsOn, WindowToggleMaximise } from "../wailsjs/runtime/runtime";
@@ -76,6 +76,11 @@ function App() {
     });
     return () => cancel();
   }, [t]);
+
+  // Bootstrap extension system
+  useEffect(() => {
+    initExtensions().catch(console.error);
+  }, []);
 
   // 双击拖拽区域最大化/还原窗口
   useEffect(() => {
