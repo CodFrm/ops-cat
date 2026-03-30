@@ -31,7 +31,7 @@ func (g *appCredentialGetter) GetCredential(assetID int64) (string, error) {
 		CredentialID int64  `json:"credential_id"`
 	}
 	if err := json.Unmarshal([]byte(asset.Config), &cfg); err != nil {
-		return "", nil
+		return "", err
 	}
 	if cfg.Password != "" {
 		return credential_svc.Default().Decrypt(cfg.Password)
@@ -99,7 +99,7 @@ type appKVStore struct {
 func (s *appKVStore) Get(key string) ([]byte, error) {
 	val, err := extension_data_repo.ExtData().Get(context.Background(), s.extName, key)
 	if err != nil {
-		return nil, nil // KV miss returns nil, not error
+		return nil, nil //nolint:nilerr // KV miss returns nil, not error
 	}
 	return val, nil
 }

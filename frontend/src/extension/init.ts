@@ -21,7 +21,7 @@ async function refreshExtensions(): Promise<void> {
     const extensions = await ListInstalledExtensions();
     const store = useExtensionStore.getState();
 
-    const newNames = new Set((extensions || []).map((e: any) => e.name));
+    const newNames = new Set((extensions || []).map((e: { name: string }) => e.name));
     for (const name of Object.keys(store.extensions)) {
       if (!newNames.has(name)) {
         store.unregister(name);

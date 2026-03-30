@@ -492,7 +492,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   };
 
   const handleSubmit = async () => {
-    let config = "";
+    let config: string;
 
     if (assetType === "ssh") {
       const sshConfig: SSHConfig = {
@@ -776,41 +776,36 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
           )}
 
           {/* Extension type config */}
-          {assetType !== "ssh" && assetType !== "database" && assetType !== "redis" && (() => {
-            const extInfo = useExtensionStore.getState().getExtensionForAssetType(assetType);
-            if (!extInfo) return null;
-            const configPage = extInfo.manifest.frontend?.pages.find(
-              (p) => p.component === "ConfigForm",
-            );
-            if (!configPage) return null;
-            return (
-              <ExtensionPage
-                extensionName={extInfo.name}
-                pageId={configPage.id}
-                assetId={editAsset?.ID}
-              />
-            );
-          })()}
+          {assetType !== "ssh" &&
+            assetType !== "database" &&
+            assetType !== "redis" &&
+            (() => {
+              const extInfo = useExtensionStore.getState().getExtensionForAssetType(assetType);
+              if (!extInfo) return null;
+              const configPage = extInfo.manifest.frontend?.pages.find((p) => p.component === "ConfigForm");
+              if (!configPage) return null;
+              return <ExtensionPage extensionName={extInfo.name} pageId={configPage.id} assetId={editAsset?.ID} />;
+            })()}
 
           {/* Test Connection */}
           {(assetType === "ssh" || assetType === "database" || assetType === "redis") && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={
-              assetType === "ssh"
-                ? handleTestConnection
-                : assetType === "database"
-                  ? handleTestDatabaseConnection
-                  : handleTestRedisConnection
-            }
-            disabled={testing || !host}
-            className="gap-1 w-fit"
-          >
-            {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
-            {testing ? t("asset.testing") : t("asset.testConnection")}
-          </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={
+                assetType === "ssh"
+                  ? handleTestConnection
+                  : assetType === "database"
+                    ? handleTestDatabaseConnection
+                    : handleTestRedisConnection
+              }
+              disabled={testing || !host}
+              className="gap-1 w-fit"
+            >
+              {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+              {testing ? t("asset.testing") : t("asset.testConnection")}
+            </Button>
           )}
 
           {/* Group - Tree Selector */}
