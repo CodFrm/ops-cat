@@ -136,6 +136,13 @@ func (a *App) Startup(ctx context.Context) {
 
 	// Wire exec_tool handler
 	ai.SetExecToolExecutor(a.extBridge)
+
+	// Start hot-reload watcher
+	if err := a.extManager.Watch(ctx, a.extBridge, func() {
+		wailsRuntime.EventsEmit(a.ctx, "ext:reload", nil)
+	}); err != nil {
+		zap.L().Warn("extension watcher failed", zap.Error(err))
+	}
 }
 
 // Cleanup 关闭审批服务等资源

@@ -116,6 +116,16 @@ func (b *Bridge) Unregister(name string) {
 	}
 }
 
+func (b *Bridge) ListNames() []string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	names := make([]string, 0, len(b.extensions))
+	for name := range b.extensions {
+		names = append(names, name)
+	}
+	return names
+}
+
 func (b *Bridge) GetAssetTypes() []ExtAssetType {
 	b.mu.RLock()
 	defer b.mu.RUnlock()

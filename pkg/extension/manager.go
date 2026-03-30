@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/fsnotify/fsnotify"
 	"go.uber.org/zap"
 )
 
@@ -105,6 +106,72 @@ func (m *Manager) Close(ctx context.Context) {
 			ext.Plugin.Close(ctx)
 		}
 	}
+}
+
+// Watch monitors the extensions directory for changes and reloads.
+func (m *Manager) Watch(ctx context.Context, bridge *Bridge, onReload func()) error {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return fmt.Errorf("create watcher: %w", err)
+	}
+
+	if err := os.MkdirAll(m.dir, 0755); err != nil {
+		watcher.Close()
+		return fmt.Errorf("create extensions dir: %w", err)
+	}
+
+	if err := watcher.Add(m.dir); err != nil {
+		watcher.Close()
+		return fmt.Errorf("watch extensions dir: %w", err)
+	}
+
+	go func() {
+		defer watcher.Close()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				if event.Op&(fsnotify.Create|fsnotify.Remove|fsnotify.Write|fsnotify.Rename) != 0 {
+					m.logger.Info("extension directory changed, reloading",
+						zap.String("file", event.Name),
+						zap.String("op", event.Op.String()))
+					m.reload(ctx, bridge)
+					if onReload != nil {
+						onReload()
+					}
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				m.logger.Error("fsnotify error", zap.Error(err))
+			}
+		}
+	}()
+
+	return nil
+}
+
+func (m *Manager) reload(ctx context.Context, bridge *Bridge) {
+	m.Close(ctx)
+
+	if _, err := m.Scan(ctx); err != nil {
+		m.logger.Error("reload scan failed", zap.Error(err))
+		return
+	}
+
+	for _, name := range bridge.ListNames() {
+		bridge.Unregister(name)
+	}
+	for _, ext := range m.ListExtensions() {
+		bridge.Register(ext)
+	}
+
+	m.logger.Info("extensions reloaded", zap.Int("count", len(m.ListExtensions())))
 }
 
 func (m *Manager) loadExtension(ctx context.Context, dir string) (*Manifest, error) {
