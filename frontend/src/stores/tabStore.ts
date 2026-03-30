@@ -32,7 +32,9 @@ export interface QueryTabMeta {
 
 export interface PageTabMeta {
   type: "page";
-  pageId: string; // "settings" | "forward" | "sshkeys" | "audit"
+  pageId: string;
+  extensionName?: string;
+  assetId?: number;
 }
 
 export interface InfoTabMeta {
