@@ -78,6 +78,7 @@ type FrontendDef struct {
 
 type PageDef struct {
 	ID        string   `json:"id"`
+	Slot      string   `json:"slot,omitempty"`
 	I18n      I18nName `json:"i18n"`
 	Component string   `json:"component"`
 }

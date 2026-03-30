@@ -99,6 +99,25 @@ func TestParseManifest(t *testing.T) {
 			So(err.Error(), ShouldContainSubstring, "minAppVersion")
 		})
 
+		Convey("should parse page slot field", func() {
+			data := []byte(`{
+				"name": "oss",
+				"version": "1.0.0",
+				"frontend": {
+					"pages": [{
+						"id": "connect",
+						"slot": "asset.connect",
+						"i18n": { "name": "pages.connect.name" },
+						"component": "ConnectPage"
+					}]
+				}
+			}`)
+			m, err := ParseManifest(data)
+			So(err, ShouldBeNil)
+			So(len(m.Frontend.Pages), ShouldEqual, 1)
+			So(m.Frontend.Pages[0].Slot, ShouldEqual, "asset.connect")
+		})
+
 		Convey("should reject policy group without ext: prefix", func() {
 			data := []byte(`{
 				"name": "x", "version": "1.0.0", "minAppVersion": "1.0.0",
