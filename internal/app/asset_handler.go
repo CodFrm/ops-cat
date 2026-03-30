@@ -25,7 +25,11 @@ func NewExtensionAssetHandler(extensionsDir string, defaultHandler http.Handler)
 
 func (h *ExtensionAssetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(r.URL.Path, "/extensions/") {
-		h.defaultHandler.ServeHTTP(w, r)
+		if h.defaultHandler != nil {
+			h.defaultHandler.ServeHTTP(w, r)
+		} else {
+			http.NotFound(w, r)
+		}
 		return
 	}
 
