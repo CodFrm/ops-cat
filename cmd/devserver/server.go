@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -83,7 +84,26 @@ func (s *Server) registerRoutes() {
 	}
 
 	// DevServer frontend SPA (embedded static files)
-	s.mux.HandleFunc("/", s.handleSPA)
+	staticFS, _ := fs.Sub(staticAssets, "static/assets")
+	fileServer := http.FileServer(http.FS(staticFS))
+	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// SPA: serve index.html for non-asset paths
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws/") {
+			http.NotFound(w, r)
+			return
+		}
+		// Try serving the file; fall back to index.html for SPA routes
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if path != "" {
+			if _, err := fs.Stat(staticFS, path); err == nil {
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+		}
+		// Serve index.html for SPA
+		r.URL.Path = "/"
+		fileServer.ServeHTTP(w, r)
+	})
 }
 
 // ServeHTTP implements http.Handler.
@@ -214,15 +234,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-}
-
-func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws/") {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(`<!doctype html><html><body><h1>DevServer</h1><p>Frontend not built yet.</p></body></html>`))
 }
 
 func (s *Server) broadcast(msg any) {

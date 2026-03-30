@@ -1,15 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Button,
-  Input,
-  Label,
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@opskat/ui";
+import { Button, Input, Label, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@opskat/ui";
 import { TerminalTheme } from "@/data/terminalThemes";
 import { toast } from "sonner";
 

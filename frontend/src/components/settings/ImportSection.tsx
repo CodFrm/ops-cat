@@ -1,13 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@opskat/ui";
+import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@opskat/ui";
 import {
   PreviewTabbyConfig,
   ImportTabbySelected,

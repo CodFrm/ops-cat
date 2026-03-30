@@ -114,7 +114,7 @@ type cliKVStore struct {
 }
 
 func (s *cliKVStore) Get(key string) ([]byte, error) {
-	val, err := extension_data_repo.ExtData().Get(context.Background(), s.extName, key)
+	val, err := extension_data_repo.ExtensionData().Get(context.Background(), s.extName, key)
 	if err != nil {
 		return nil, nil //nolint:nilerr // KV miss returns nil, not error
 	}
@@ -122,7 +122,7 @@ func (s *cliKVStore) Get(key string) ([]byte, error) {
 }
 
 func (s *cliKVStore) Set(key string, value []byte) error {
-	return extension_data_repo.ExtData().Set(context.Background(), s.extName, key, value)
+	return extension_data_repo.ExtensionData().Set(context.Background(), s.extName, key, value)
 }
 
 // cliActionEventHandler is a no-op — action events not supported in CLI.

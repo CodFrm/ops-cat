@@ -43,10 +43,7 @@ export function LogPanel() {
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Logs</h2>
-        <button
-          onClick={() => setLogs([])}
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
+        <button onClick={() => setLogs([])} className="text-sm text-muted-foreground hover:text-foreground">
           Clear
         </button>
       </div>
@@ -59,12 +56,8 @@ export function LogPanel() {
         )}
         {logs.map((log, i) => (
           <div key={i} className="py-0.5">
-            <span className="text-muted-foreground">
-              {log.timestamp.split("T")[1]?.slice(0, 12)}
-            </span>{" "}
-            <span className={`font-semibold ${levelColors[log.level] ?? ""}`}>
-              [{log.level.toUpperCase()}]
-            </span>{" "}
+            <span className="text-muted-foreground">{log.timestamp.split("T")[1]?.slice(0, 12)}</span>{" "}
+            <span className={`font-semibold ${levelColors[log.level] ?? ""}`}>[{log.level.toUpperCase()}]</span>{" "}
             {log.message}
           </div>
         ))}

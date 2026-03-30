@@ -97,7 +97,7 @@ type appKVStore struct {
 }
 
 func (s *appKVStore) Get(key string) ([]byte, error) {
-	val, err := extension_data_repo.ExtData().Get(context.Background(), s.extName, key)
+	val, err := extension_data_repo.ExtensionData().Get(context.Background(), s.extName, key)
 	if err != nil {
 		return nil, nil //nolint:nilerr // KV miss returns nil, not error
 	}
@@ -105,7 +105,7 @@ func (s *appKVStore) Get(key string) ([]byte, error) {
 }
 
 func (s *appKVStore) Set(key string, value []byte) error {
-	return extension_data_repo.ExtData().Set(context.Background(), s.extName, key, value)
+	return extension_data_repo.ExtensionData().Set(context.Background(), s.extName, key, value)
 }
 
 // appActionEventHandler implements extension.ActionEventHandler

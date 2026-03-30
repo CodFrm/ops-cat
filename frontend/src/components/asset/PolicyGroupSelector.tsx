@@ -1,12 +1,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, X, Shield, Lock } from "lucide-react";
-import {
-  Button,
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@opskat/ui";
+import { Button, Popover, PopoverContent, PopoverTrigger } from "@opskat/ui";
 import { ListPolicyGroups } from "../../../wailsjs/go/app/App";
 import type { policy_group_entity } from "../../../wailsjs/go/models";
 

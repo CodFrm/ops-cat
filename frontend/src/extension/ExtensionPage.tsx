@@ -26,12 +26,8 @@ class ExtensionErrorBoundary extends React.Component<
       return (
         <div className="flex items-center justify-center h-full">
           <div className="text-center">
-            <p className="text-destructive font-medium">
-              Extension &ldquo;{this.props.extensionName}&rdquo; crashed
-            </p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {this.state.error.message}
-            </p>
+            <p className="text-destructive font-medium">Extension &ldquo;{this.props.extensionName}&rdquo; crashed</p>
+            <p className="text-sm text-muted-foreground mt-1">{this.state.error.message}</p>
           </div>
         </div>
       );
@@ -105,9 +101,7 @@ export function ExtensionPage({ extensionName, pageId, assetId }: ExtensionPageP
   if (!Component) {
     return (
       <div className="flex items-center justify-center h-full">
-        <p className="text-destructive">
-          Component &ldquo;{page.component}&rdquo; not exported by extension
-        </p>
+        <p className="text-destructive">Component &ldquo;{page.component}&rdquo; not exported by extension</p>
       </div>
     );
   }

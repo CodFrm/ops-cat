@@ -67,9 +67,7 @@ export function ActionPanel() {
       </div>
 
       <div>
-        <label className="block text-sm font-medium mb-1">
-          Arguments (JSON)
-        </label>
+        <label className="block text-sm font-medium mb-1">Arguments (JSON)</label>
         <textarea
           value={args}
           onChange={(e) => setArgs(e.target.value)}
@@ -87,17 +85,12 @@ export function ActionPanel() {
 
       {events.length > 0 && (
         <div>
-          <label className="block text-sm font-medium mb-1">
-            Events ({events.length})
-          </label>
+          <label className="block text-sm font-medium mb-1">Events ({events.length})</label>
           <div className="border rounded max-h-48 overflow-auto">
             {events.map((e, i) => (
               <div key={i} className="px-3 py-1 border-b text-sm font-mono">
-                <span className="text-muted-foreground">
-                  {e.timestamp.split("T")[1]?.slice(0, 8)}
-                </span>{" "}
-                <span className="font-semibold">{e.type}</span>{" "}
-                {JSON.stringify(e.data)}
+                <span className="text-muted-foreground">{e.timestamp.split("T")[1]?.slice(0, 8)}</span>{" "}
+                <span className="font-semibold">{e.type}</span> {JSON.stringify(e.data)}
               </div>
             ))}
           </div>
@@ -107,9 +100,7 @@ export function ActionPanel() {
       {result && (
         <div>
           <label className="block text-sm font-medium mb-1">Result</label>
-          <pre className="border rounded p-3 bg-muted text-sm font-mono overflow-auto max-h-64">
-            {result}
-          </pre>
+          <pre className="border rounded p-3 bg-muted text-sm font-mono overflow-auto max-h-64">{result}</pre>
         </div>
       )}
     </div>

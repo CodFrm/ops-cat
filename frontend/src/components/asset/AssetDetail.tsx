@@ -4,12 +4,7 @@ import { Server, Database, Pencil, Trash2, TerminalSquare, Loader2 } from "lucid
 import Markdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
-import {
-  cn,
-  Button,
-  Separator,
-  ConfirmDialog,
-} from "@opskat/ui";
+import { cn, Button, Separator, ConfirmDialog } from "@opskat/ui";
 import { toast } from "sonner";
 import { useAssetStore } from "@/stores/assetStore";
 import { CommandPolicyCard } from "@/components/asset/CommandPolicyCard";

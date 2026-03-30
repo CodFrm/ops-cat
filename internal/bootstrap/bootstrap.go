@@ -116,7 +116,7 @@ func registerRepositories() {
 	forward_repo.RegisterForward(forward_repo.NewForward())
 	policy_group_repo.RegisterPolicyGroup(policy_group_repo.NewPolicyGroup())
 	ai_provider_repo.RegisterAIProvider(ai_provider_repo.NewAIProvider())
-	extension_data_repo.Register(extension_data_repo.New())
+	extension_data_repo.RegisterExtensionData(extension_data_repo.NewExtensionData())
 }
 
 // resolveKDFSalt 从 config.json 获取 salt，不存在则生成并持久化

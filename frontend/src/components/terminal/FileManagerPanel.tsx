@@ -17,13 +17,7 @@ import {
   XCircle,
   FolderOpen,
 } from "lucide-react";
-import {
-  cn,
-  Button,
-  Input,
-  ScrollArea,
-  ConfirmDialog,
-} from "@opskat/ui";
+import { cn, Button, Input, ScrollArea, ConfirmDialog } from "@opskat/ui";
 import { SFTPListDir, SFTPGetwd, SFTPDelete } from "../../../wailsjs/go/app/App";
 import { OnFileDrop, OnFileDropOff } from "../../../wailsjs/runtime/runtime";
 import { useSFTPStore } from "@/stores/sftpStore";

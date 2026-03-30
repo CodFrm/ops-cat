@@ -1,12 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { Plus, Trash2, Bot, PanelRightClose, MessageSquare } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import {
-  cn,
-  Button,
-  ScrollArea,
-  ConfirmDialog,
-} from "@opskat/ui";
+import { cn, Button, ScrollArea, ConfirmDialog } from "@opskat/ui";
 import { useAIStore } from "@/stores/aiStore";
 import { useTabStore, type AITabMeta } from "@/stores/tabStore";
 import { useFullscreen } from "@/hooks/useFullscreen";

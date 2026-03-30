@@ -38,36 +38,26 @@ export function ConfigPanel() {
       <h2 className="text-lg font-semibold">Mock Configuration</h2>
 
       <div className="space-y-2">
-        <label className="block text-sm font-medium">
-          Asset Config (JSON)
-        </label>
+        <label className="block text-sm font-medium">Asset Config (JSON)</label>
         <textarea
           value={config}
           onChange={(e) => setConfig(e.target.value)}
           className="w-full border rounded px-3 py-2 font-mono text-sm bg-background h-48"
         />
-        <button
-          onClick={saveConfig}
-          className="px-4 py-2 bg-primary text-primary-foreground rounded"
-        >
+        <button onClick={saveConfig} className="px-4 py-2 bg-primary text-primary-foreground rounded">
           {configSaved ? "Saved!" : "Save Config"}
         </button>
       </div>
 
       <div className="space-y-2">
-        <label className="block text-sm font-medium">
-          Credential (JSON string)
-        </label>
+        <label className="block text-sm font-medium">Credential (JSON string)</label>
         <textarea
           value={credential}
           onChange={(e) => setCredential(e.target.value)}
           className="w-full border rounded px-3 py-2 font-mono text-sm bg-background h-24"
           placeholder={'"access_key:secret_key"'}
         />
-        <button
-          onClick={saveCredential}
-          className="px-4 py-2 bg-primary text-primary-foreground rounded"
-        >
+        <button onClick={saveCredential} className="px-4 py-2 bg-primary text-primary-foreground rounded">
           {credSaved ? "Saved!" : "Save Credential"}
         </button>
       </div>

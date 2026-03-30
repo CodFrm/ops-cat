@@ -1,8 +1,5 @@
 // frontend/src/extension/api.ts
-import {
-  CallExtensionAction,
-  CallExtensionTool,
-} from "../../wailsjs/go/app/App";
+import { CallExtensionAction, CallExtensionTool } from "../../wailsjs/go/app/App";
 import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
 import type { ExtAPI, ExtEvent } from "./types";
 
@@ -23,16 +20,12 @@ export function createExtensionAPI(): ExtAPI {
       extName: string,
       action: string,
       args: unknown,
-      onEvent?: (e: ExtEvent) => void,
+      onEvent?: (e: ExtEvent) => void
     ): Promise<unknown> {
       let cleanup: (() => void) | undefined;
 
       if (onEvent) {
-        const handler = (event: {
-          extension: string;
-          eventType: string;
-          data: unknown;
-        }) => {
+        const handler = (event: { extension: string; eventType: string; data: unknown }) => {
           if (event.extension === extName) {
             onEvent({ eventType: event.eventType, data: event.data });
           }

@@ -63,9 +63,7 @@ export function ToolPanel() {
       </div>
 
       <div>
-        <label className="block text-sm font-medium mb-1">
-          Arguments (JSON)
-        </label>
+        <label className="block text-sm font-medium mb-1">Arguments (JSON)</label>
         <textarea
           value={args}
           onChange={(e) => setArgs(e.target.value)}
@@ -84,16 +82,12 @@ export function ToolPanel() {
       {result && (
         <div>
           <label className="block text-sm font-medium mb-1">Result</label>
-          <pre className="border rounded p-3 bg-muted text-sm font-mono overflow-auto max-h-64">
-            {result}
-          </pre>
+          <pre className="border rounded p-3 bg-muted text-sm font-mono overflow-auto max-h-64">{result}</pre>
         </div>
       )}
 
       {error && (
-        <div className="border border-destructive rounded p-3 bg-destructive/10 text-destructive text-sm">
-          {error}
-        </div>
+        <div className="border border-destructive rounded p-3 bg-destructive/10 text-destructive text-sm">{error}</div>
       )}
     </div>
   );

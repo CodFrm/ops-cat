@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"slices"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
@@ -47,23 +48,19 @@ func checkExtensionPolicy(ctx context.Context, groupIDs []string, action, resour
 	}
 
 	// Deny takes precedence
-	for _, d := range allDeny {
-		if d == action {
-			return CheckResult{
-				Decision:       Deny,
-				DecisionSource: SourcePolicyDeny,
-				Message:        "action denied by extension policy: " + action,
-			}
+	if slices.Contains(allDeny, action) {
+		return CheckResult{
+			Decision:       Deny,
+			DecisionSource: SourcePolicyDeny,
+			Message:        "action denied by extension policy: " + action,
 		}
 	}
 
 	// Then check allow
-	for _, a := range allAllow {
-		if a == action {
-			return CheckResult{
-				Decision:       Allow,
-				DecisionSource: SourcePolicyAllow,
-			}
+	if slices.Contains(allAllow, action) {
+		return CheckResult{
+			Decision:       Allow,
+			DecisionSource: SourcePolicyAllow,
 		}
 	}
 

@@ -33,7 +33,7 @@ function injectDevServerAPI(): void {
         _extName: string,
         action: string,
         args: unknown,
-        onEvent?: (e: { eventType: string; data: unknown }) => void,
+        onEvent?: (e: { eventType: string; data: unknown }) => void
       ) {
         let ws: WebSocket | null = null;
         if (onEvent) {
@@ -45,7 +45,9 @@ function injectDevServerAPI(): void {
               if (data.type === "event") {
                 onEvent({ eventType: data.eventType, data: data.data });
               }
-            } catch { /* ignore */ }
+            } catch {
+              /* ignore */
+            }
           };
           await new Promise<void>((resolve) => {
             ws!.onopen = () => resolve();
@@ -100,13 +102,9 @@ export function ExtensionPanel() {
           document.head.appendChild(link);
         }
 
-        const mod = await import(
-          /* @vite-ignore */ `/extensions/${m.name}/${m.frontend.entry}`
-        );
+        const mod = await import(/* @vite-ignore */ `/extensions/${m.name}/${m.frontend.entry}`);
 
-        const page =
-          m.frontend.pages.find((p) => p.slot === "asset.connect") ||
-          m.frontend.pages[0];
+        const page = m.frontend.pages.find((p) => p.slot === "asset.connect") || m.frontend.pages[0];
         if (page && mod[page.component]) {
           setComponent(() => mod[page.component]);
         } else {

@@ -1,15 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, Save, Undo2, Loader2, RefreshCw, ChevronsLeft, ChevronsRight } from "lucide-react";
-import {
-  Button,
-  Input,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@opskat/ui";
+import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@opskat/ui";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { ExecuteSQL } from "../../../wailsjs/go/app/App";
 import { QueryResultTable, CellEdit } from "./QueryResultTable";

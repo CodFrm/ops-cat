@@ -4,10 +4,7 @@ import type { ExtManifest, LoadedExtension } from "./types";
 
 const cache = new Map<string, LoadedExtension>();
 
-export async function loadExtension(
-  name: string,
-  manifest: ExtManifest,
-): Promise<LoadedExtension> {
+export async function loadExtension(name: string, manifest: ExtManifest): Promise<LoadedExtension> {
   const cached = cache.get(name);
   if (cached) return cached;
 

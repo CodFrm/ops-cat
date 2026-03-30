@@ -58,10 +58,5 @@ export interface ExtEvent {
 
 export interface ExtAPI {
   callTool(extName: string, tool: string, args: unknown): Promise<unknown>;
-  executeAction(
-    extName: string,
-    action: string,
-    args: unknown,
-    onEvent?: (e: ExtEvent) => void,
-  ): Promise<unknown>;
+  executeAction(extName: string, action: string, args: unknown, onEvent?: (e: ExtEvent) => void): Promise<unknown>;
 }

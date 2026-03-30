@@ -2,18 +2,8 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { RefreshCw, Puzzle } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  Button,
-} from "@opskat/ui";
-import {
-  ListInstalledExtensions,
-  ReloadExtensions,
-} from "../../../wailsjs/go/app/App";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, Button } from "@opskat/ui";
+import { ListInstalledExtensions, ReloadExtensions } from "../../../wailsjs/go/app/App";
 
 interface ExtInfo {
   name: string;
@@ -65,13 +55,7 @@ export function ExtensionSection() {
               : t("extension.noExtensionsDesc")}
           </CardDescription>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleReload}
-          disabled={reloading}
-          className="gap-1"
-        >
+        <Button variant="outline" size="sm" onClick={handleReload} disabled={reloading} className="gap-1">
           <RefreshCw className={`h-3.5 w-3.5 ${reloading ? "animate-spin" : ""}`} />
           {t("extension.reload")}
         </Button>
@@ -85,10 +69,7 @@ export function ExtensionSection() {
         ) : (
           <div className="space-y-3">
             {extensions.map((ext) => (
-              <div
-                key={ext.name}
-                className="flex items-center justify-between p-3 border rounded-lg"
-              >
+              <div key={ext.name} className="flex items-center justify-between p-3 border rounded-lg">
                 <div className="flex items-center gap-3">
                   <div className="h-8 w-8 rounded bg-muted flex items-center justify-center">
                     <Puzzle className="h-4 w-4 text-muted-foreground" />

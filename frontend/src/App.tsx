@@ -259,9 +259,7 @@ function App() {
     // Check if this is an extension asset type
     const ext = useExtensionStore.getState().getExtensionForAssetType(asset.Type);
     if (ext) {
-      const connectPage = ext.manifest.frontend?.pages.find(
-        (p) => p.slot === "asset.connect",
-      );
+      const connectPage = ext.manifest.frontend?.pages.find((p) => p.slot === "asset.connect");
       if (connectPage) {
         useTabStore.getState().openTab({
           id: `ext-${asset.ID}-${connectPage.id}`,

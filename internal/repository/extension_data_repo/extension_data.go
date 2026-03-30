@@ -4,19 +4,10 @@ import (
 	"context"
 	"time"
 
+	"github.com/opskat/opskat/internal/model/entity/extension_data_entity"
+
 	"github.com/cago-frame/cago/database/db"
 )
-
-type ExtensionData struct {
-	ExtensionName string `gorm:"column:extension_name;primaryKey"`
-	Key           string `gorm:"column:key;primaryKey"`
-	Value         []byte `gorm:"column:value;type:blob"`
-	Updatetime    int64  `gorm:"column:updatetime"`
-}
-
-func (ExtensionData) TableName() string {
-	return "extension_data"
-}
 
 type ExtensionDataRepo interface {
 	Get(ctx context.Context, extName, key string) ([]byte, error)
@@ -27,22 +18,22 @@ type ExtensionDataRepo interface {
 
 var defaultRepo ExtensionDataRepo
 
-func ExtData() ExtensionDataRepo {
+func ExtensionData() ExtensionDataRepo {
 	return defaultRepo
 }
 
-func Register(r ExtensionDataRepo) {
+func RegisterExtensionData(r ExtensionDataRepo) {
 	defaultRepo = r
 }
 
 type extensionDataRepo struct{}
 
-func New() ExtensionDataRepo {
+func NewExtensionData() ExtensionDataRepo {
 	return &extensionDataRepo{}
 }
 
 func (r *extensionDataRepo) Get(ctx context.Context, extName, key string) ([]byte, error) {
-	var row ExtensionData
+	var row extension_data_entity.ExtensionData
 	err := db.Ctx(ctx).Where("extension_name = ? AND key = ?", extName, key).First(&row).Error
 	if err != nil {
 		return nil, err
@@ -51,19 +42,28 @@ func (r *extensionDataRepo) Get(ctx context.Context, extName, key string) ([]byt
 }
 
 func (r *extensionDataRepo) Set(ctx context.Context, extName, key string, value []byte) error {
-	row := ExtensionData{
+	var existing extension_data_entity.ExtensionData
+	now := time.Now().Unix()
+	err := db.Ctx(ctx).Where("extension_name = ? AND key = ?", extName, key).First(&existing).Error
+	if err == nil {
+		return db.Ctx(ctx).Model(&existing).Updates(map[string]any{
+			"value":      value,
+			"updatetime": now,
+		}).Error
+	}
+	row := extension_data_entity.ExtensionData{
 		ExtensionName: extName,
 		Key:           key,
 		Value:         value,
-		Updatetime:    time.Now().Unix(),
+		Updatetime:    now,
 	}
-	return db.Ctx(ctx).Save(&row).Error
+	return db.Ctx(ctx).Create(&row).Error
 }
 
 func (r *extensionDataRepo) Delete(ctx context.Context, extName, key string) error {
-	return db.Ctx(ctx).Where("extension_name = ? AND key = ?", extName, key).Delete(&ExtensionData{}).Error
+	return db.Ctx(ctx).Where("extension_name = ? AND key = ?", extName, key).Delete(&extension_data_entity.ExtensionData{}).Error
 }
 
 func (r *extensionDataRepo) DeleteAll(ctx context.Context, extName string) error {
-	return db.Ctx(ctx).Where("extension_name = ?", extName).Delete(&ExtensionData{}).Error
+	return db.Ctx(ctx).Where("extension_name = ?", extName).Delete(&extension_data_entity.ExtensionData{}).Error
 }

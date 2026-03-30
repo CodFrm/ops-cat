@@ -370,13 +370,7 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPa
             );
           default:
             if (meta.extensionName) {
-              return (
-                <ExtensionPage
-                  extensionName={meta.extensionName}
-                  pageId={meta.pageId}
-                  assetId={meta.assetId}
-                />
-              );
+              return <ExtensionPage extensionName={meta.extensionName} pageId={meta.pageId} assetId={meta.assetId} />;
             }
             return null;
         }
