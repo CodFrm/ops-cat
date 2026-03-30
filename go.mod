@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/cago-frame/cago v0.0.0-20260307042250-c4ff92923947
+	github.com/coder/websocket v1.8.14
 	github.com/go-gormigrate/gormigrate/v2 v2.1.2
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
@@ -26,7 +27,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/gorm v1.25.12
 	mvdan.cc/sh/v3 v3.13.0
-	nhooyr.io/websocket v1.8.17
 )
 
 require (

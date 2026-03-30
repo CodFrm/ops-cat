@@ -15,8 +15,8 @@ import (
 
 	"github.com/opskat/opskat/pkg/extension"
 	"go.uber.org/zap"
-	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 )
 
 // Server serves the DevServer HTTP API, WebSocket event streaming, and extension frontend.
