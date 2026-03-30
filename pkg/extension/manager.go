@@ -22,13 +22,13 @@ type Extension struct {
 // Manager handles extension discovery, loading, and lifecycle.
 type Manager struct {
 	dir        string
-	newHost    func() HostProvider
+	newHost    func(extName string) HostProvider
 	logger     *zap.Logger
 	mu         sync.RWMutex
 	extensions map[string]*Extension
 }
 
-func NewManager(dir string, newHost func() HostProvider, logger *zap.Logger) *Manager {
+func NewManager(dir string, newHost func(extName string) HostProvider, logger *zap.Logger) *Manager {
 	return &Manager{
 		dir:        dir,
 		newHost:    newHost,
@@ -130,7 +130,7 @@ func (m *Manager) loadExtension(ctx context.Context, dir string) (*Manifest, err
 		skillMD = string(skillData)
 	}
 
-	host := m.newHost()
+	host := m.newHost(manifest.Name)
 	plugin, err := LoadPlugin(ctx, manifest, wasmBytes, host)
 	if err != nil {
 		host.CloseAll()

@@ -17,7 +17,7 @@ func TestManager(t *testing.T) {
 		dir := t.TempDir()
 		logger := zap.NewNop()
 
-		newHost := func() HostProvider {
+		newHost := func(extName string) HostProvider {
 			return NewDefaultHostProvider(DefaultHostConfig{Logger: logger})
 		}
 

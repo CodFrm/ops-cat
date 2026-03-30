@@ -113,9 +113,15 @@ func (a *App) Startup(ctx context.Context) {
 	// Initialize extension system
 	extDir := filepath.Join(dataDir, "extensions")
 	a.extBridge = extension.NewBridge()
-	a.extManager = extension.NewManager(extDir, func() extension.HostProvider {
+	a.extManager = extension.NewManager(extDir, func(extName string) extension.HostProvider {
 		return extension.NewDefaultHostProvider(extension.DefaultHostConfig{
-			Logger: zap.L(),
+			Logger:       zap.L(),
+			Credentials:  &appCredentialGetter{},
+			AssetConfigs: &appAssetConfigGetter{},
+			FileDialogs:  &appFileDialogOpener{ctx: a.ctx},
+			KV:           &appKVStore{extName: extName},
+			ActionEvents: &appActionEventHandler{ctx: a.ctx, extName: extName},
+			TunnelDialer: &appTunnelDialer{app: a},
 		})
 	}, zap.L())
 
