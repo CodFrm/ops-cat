@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -38,6 +39,11 @@ func (a *App) startApprovalServer(authToken string) {
 		// 批量执行审批
 		if req.Type == "batch" {
 			return a.handleBatchApproval(req)
+		}
+
+		// 扩展工具执行
+		if req.Type == "ext_tool" {
+			return a.handleExtToolExec(req)
 		}
 
 		// 单条审批
@@ -273,6 +279,33 @@ func (a *App) handleGrantApproval(req approval.ApprovalRequest) approval.Approva
 		}
 		return approval.ApprovalResponse{Approved: false, Reason: "app shutting down"}
 	}
+}
+
+// handleExtToolExec 处理 opsctl ext exec 的委托执行请求
+func (a *App) handleExtToolExec(req approval.ApprovalRequest) approval.ApprovalResponse {
+	if a.extManager == nil {
+		return approval.ApprovalResponse{ToolError: "extension system not initialized"}
+	}
+
+	ext := a.extManager.GetExtension(req.Extension)
+	if ext == nil {
+		return approval.ApprovalResponse{ToolError: fmt.Sprintf("extension %q not found", req.Extension)}
+	}
+	if ext.Plugin == nil {
+		return approval.ApprovalResponse{ToolError: fmt.Sprintf("extension %q has no backend plugin", req.Extension)}
+	}
+
+	args := req.ToolArgs
+	if len(args) == 0 {
+		args = json.RawMessage("{}")
+	}
+
+	result, err := ext.Plugin.CallTool(a.langCtx(), req.Tool, args)
+	if err != nil {
+		return approval.ApprovalResponse{ToolError: fmt.Sprintf("call tool %s/%s: %v", req.Extension, req.Tool, err)}
+	}
+
+	return approval.ApprovalResponse{Approved: true, ToolResult: string(result)}
 }
 
 // RespondOpsctlApproval 前端响应 opsctl 审批请求（统一入口）
