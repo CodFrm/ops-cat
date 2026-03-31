@@ -10,6 +10,7 @@ import (
 	"github.com/opskat/opskat/internal/ai"
 	"github.com/opskat/opskat/internal/approval"
 	"github.com/opskat/opskat/internal/bootstrap"
+	"github.com/opskat/opskat/internal/repository/extension_state_repo"
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/service/credential_resolver"
 	"github.com/opskat/opskat/internal/service/sftp_svc"
@@ -116,8 +117,7 @@ func (a *App) Startup(ctx context.Context) {
 	a.extManager = extension.NewManager(extDir, func(extName string) extension.HostProvider {
 		return extension.NewDefaultHostProvider(extension.DefaultHostConfig{
 			Logger:       zap.L(),
-			Credentials:  &appCredentialGetter{},
-			AssetConfigs: &appAssetConfigGetter{},
+			AssetConfigs: &appAssetConfigGetter{bridge: a.extBridge},
 			FileDialogs:  &appFileDialogOpener{ctx: a.ctx},
 			KV:           &appKVStore{extName: extName},
 			ActionEvents: &appActionEventHandler{ctx: a.ctx, extName: extName},
@@ -136,6 +136,18 @@ func (a *App) Startup(ctx context.Context) {
 
 	// Wire exec_tool handler
 	ai.SetExecToolExecutor(a.extBridge)
+
+	// Unload disabled extensions
+	{
+		ctx2 := context.Background()
+		states, _ := extension_state_repo.ExtensionState().FindAll(ctx2)
+		for _, state := range states {
+			if !state.Enabled {
+				a.extBridge.Unregister(state.Name)
+				_ = a.extManager.Unload(ctx, state.Name)
+			}
+		}
+	}
 
 	// Start hot-reload watcher
 	if err := a.extManager.Watch(ctx, a.extBridge, func() {
