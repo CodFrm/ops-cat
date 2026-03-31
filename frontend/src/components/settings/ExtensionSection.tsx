@@ -1,14 +1,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import {
-  RefreshCw,
-  Puzzle,
-  Plus,
-  MoreVertical,
-  Info,
-  Trash2,
-} from "lucide-react";
+import { RefreshCw, Puzzle, Plus, MoreVertical, Info, Trash2 } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -150,9 +143,7 @@ export function ExtensionSection() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
-            <CardTitle className="text-base">
-              {t("extension.installed")}
-            </CardTitle>
+            <CardTitle className="text-base">{t("extension.installed")}</CardTitle>
             <CardDescription>
               {extensions.length > 0
                 ? `${extensions.length} ${t("extension.title").toLowerCase()}`
@@ -160,26 +151,12 @@ export function ExtensionSection() {
             </CardDescription>
           </div>
           <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleInstall}
-              disabled={installing}
-              className="gap-1"
-            >
+            <Button variant="outline" size="sm" onClick={handleInstall} disabled={installing} className="gap-1">
               <Plus className="h-3.5 w-3.5" />
               {t("extension.install")}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleReload}
-              disabled={reloading}
-              className="gap-1"
-            >
-              <RefreshCw
-                className={`h-3.5 w-3.5 ${reloading ? "animate-spin" : ""}`}
-              />
+            <Button variant="outline" size="sm" onClick={handleReload} disabled={reloading} className="gap-1">
+              <RefreshCw className={`h-3.5 w-3.5 ${reloading ? "animate-spin" : ""}`} />
               {t("extension.reload")}
             </Button>
           </div>
@@ -205,9 +182,7 @@ export function ExtensionSection() {
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <p className="font-medium text-sm">
-                          {ext.displayName || ext.name}
-                        </p>
+                        <p className="font-medium text-sm">{ext.displayName || ext.name}</p>
                         {!ext.enabled && (
                           <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                             {t("extension.disabled")}
@@ -221,10 +196,7 @@ export function ExtensionSection() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Switch
-                      checked={ext.enabled}
-                      onCheckedChange={() => handleToggle(ext)}
-                    />
+                    <Switch checked={ext.enabled} onCheckedChange={() => handleToggle(ext)} />
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
@@ -236,10 +208,7 @@ export function ExtensionSection() {
                           <Info className="h-4 w-4 mr-2" />
                           {t("extension.detail")}
                         </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => setUninstallTarget(ext)}
-                          className="text-destructive"
-                        >
+                        <DropdownMenuItem onClick={() => setUninstallTarget(ext)} className="text-destructive">
                           <Trash2 className="h-4 w-4 mr-2" />
                           {t("extension.uninstall")}
                         </DropdownMenuItem>
@@ -273,39 +242,26 @@ export function ExtensionSection() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex items-center gap-3 py-2">
-            <Switch
-              id="clean-data"
-              checked={cleanData}
-              onCheckedChange={setCleanData}
-            />
+            <Switch id="clean-data" checked={cleanData} onCheckedChange={setCleanData} />
             <div>
               <label htmlFor="clean-data" className="text-sm font-medium cursor-pointer">
                 {t("extension.cleanData")}
               </label>
-              <p className="text-xs text-muted-foreground">
-                {t("extension.cleanDataDesc")}
-              </p>
+              <p className="text-xs text-muted-foreground">{t("extension.cleanDataDesc")}</p>
             </div>
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleUninstall}>
-              {t("extension.uninstall")}
-            </AlertDialogAction>
+            <AlertDialogAction onClick={handleUninstall}>{t("extension.uninstall")}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
       {/* Detail Dialog */}
-      <Dialog
-        open={!!detailTarget}
-        onOpenChange={(open) => !open && setDetailTarget(null)}
-      >
+      <Dialog open={!!detailTarget} onOpenChange={(open) => !open && setDetailTarget(null)}>
         <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              {detailTarget?.displayName || detailTarget?.name}
-            </DialogTitle>
+            <DialogTitle>{detailTarget?.displayName || detailTarget?.name}</DialogTitle>
           </DialogHeader>
           {detailTarget && <ExtensionDetail ext={detailTarget} />}
         </DialogContent>
@@ -325,12 +281,9 @@ function ExtensionDetail({ ext }: { ext: ExtInfo }) {
       {/* Basic Info */}
       <div className="space-y-1 text-sm">
         <p>
-          <span className="text-muted-foreground">{t("extension.version")}:</span>{" "}
-          {ext.version}
+          <span className="text-muted-foreground">{t("extension.version")}:</span> {ext.version}
         </p>
-        {ext.description && (
-          <p className="text-muted-foreground">{ext.description}</p>
-        )}
+        {ext.description && <p className="text-muted-foreground">{ext.description}</p>}
       </div>
 
       <Separator />
@@ -345,9 +298,7 @@ function ExtensionDetail({ ext }: { ext: ExtInfo }) {
             {tools.map((tool) => (
               <div key={tool.name} className="flex justify-between text-xs p-2 rounded bg-muted/50">
                 <span className="font-mono">{tool.name}</span>
-                <span className="text-muted-foreground ml-2 text-right">
-                  {tool.i18n?.description || ""}
-                </span>
+                <span className="text-muted-foreground ml-2 text-right">{tool.i18n?.description || ""}</span>
               </div>
             ))}
           </div>
@@ -368,12 +319,8 @@ function ExtensionDetail({ ext }: { ext: ExtInfo }) {
                 <span className="font-medium">{pg.i18n?.name || pg.id}</span>
                 {pg.policy && (
                   <div className="mt-1 text-muted-foreground">
-                    {pg.policy.allow_list && (
-                      <span>Allow: {pg.policy.allow_list.join(", ")}</span>
-                    )}
-                    {pg.policy.deny_list && (
-                      <span className="ml-2">Deny: {pg.policy.deny_list.join(", ")}</span>
-                    )}
+                    {pg.policy.allow_list && <span>Allow: {pg.policy.allow_list.join(", ")}</span>}
+                    {pg.policy.deny_list && <span className="ml-2">Deny: {pg.policy.deny_list.join(", ")}</span>}
                   </div>
                 )}
               </div>
