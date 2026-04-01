@@ -35,6 +35,7 @@ import {
   UninstallExtension,
   EnableExtension,
   DisableExtension,
+  GetExtensionDetail,
 } from "../../../wailsjs/go/app/App";
 
 interface ExtInfo {
@@ -138,6 +139,17 @@ export function ExtensionSection() {
     }
   };
 
+  const openDetail = async (name: string) => {
+    try {
+      const detail = await GetExtensionDetail(name);
+      if (detail) {
+        setDetailTarget(detail as ExtInfo);
+      }
+    } catch (e) {
+      toast.error(String(e));
+    }
+  };
+
   return (
     <>
       <Card>
@@ -204,7 +216,7 @@ export function ExtensionSection() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => setDetailTarget(ext)}>
+                        <DropdownMenuItem onClick={() => openDetail(ext.name)}>
                           <Info className="h-4 w-4 mr-2" />
                           {t("extension.detail")}
                         </DropdownMenuItem>
@@ -272,9 +284,12 @@ export function ExtensionSection() {
 
 function ExtensionDetail({ ext }: { ext: ExtInfo }) {
   const { t } = useTranslation();
-  const tools = ext.manifest?.tools || [];
-  const policyGroups = ext.manifest?.policies?.groups || [];
-  const pages = ext.manifest?.frontend?.pages || [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const manifest = ext.manifest as Record<string, any> | undefined;
+  const tools: { name: string; i18n?: { description?: string } }[] = manifest?.tools || [];
+  const policyGroups: { id: string; i18n?: { name?: string }; policy?: Record<string, string[]> }[] =
+    manifest?.policies?.groups || [];
+  const pages: { id: string; i18n?: { name?: string }; slot?: string }[] = manifest?.frontend?.pages || [];
 
   return (
     <div className="space-y-4">
