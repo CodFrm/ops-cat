@@ -1,12 +1,16 @@
 package extension
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/opskat/opskat/internal/model/entity/policy"
+)
 
 // ExtAssetType represents an extension-provided asset type.
 type ExtAssetType struct {
 	Type          string
 	ExtensionName string
-	ConfigSchema  []byte
+	ConfigSchema  map[string]any
 	I18n          I18nName
 }
 
@@ -16,7 +20,7 @@ type ExtPolicyGroup struct {
 	ExtensionName string
 	PolicyType    string
 	I18n          I18nNameDesc
-	Policy        []byte
+	Policy        map[string]any
 }
 
 // Bridge connects loaded extensions to the main app's tool, policy, and frontend systems.
@@ -58,6 +62,10 @@ func (b *Bridge) Register(ext *Extension) {
 		}
 		if len(m.Policies.Default) > 0 {
 			b.defaultPolicies[at.Type] = m.Policies.Default
+			groups := m.Policies.Default // capture for closure
+			policy.RegisterDefaultPolicy(at.Type, func() any {
+				return &policy.CommandPolicy{Groups: groups}
+			})
 		}
 	}
 
@@ -112,6 +120,7 @@ func (b *Bridge) Unregister(name string) {
 		if !found {
 			delete(b.skillMDs, key)
 			delete(b.defaultPolicies, key)
+			policy.UnregisterDefaultPolicy(key)
 		}
 	}
 }

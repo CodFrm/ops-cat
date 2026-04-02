@@ -1,10 +1,11 @@
 package extension
 
 import (
-	"encoding/json"
 	"testing"
 
 	. "github.com/smartystreets/goconvey/convey"
+
+	"github.com/opskat/opskat/internal/model/entity/policy"
 )
 
 func TestBridge(t *testing.T) {
@@ -27,7 +28,7 @@ func TestBridge(t *testing.T) {
 					{
 						ID:     "ext:oss:readonly",
 						I18n:   I18nNameDesc{Name: "n", Description: "d"},
-						Policy: json.RawMessage(`{"allow_list":["list","read"]}`),
+						Policy: map[string]any{"allow_list": []any{"list", "read"}},
 					},
 				},
 				Default: []string{"ext:oss:readonly"},
@@ -88,6 +89,20 @@ func TestBridge(t *testing.T) {
 		Convey("FindExtensionByTool returns nil for unknown tool", func() {
 			found := bridge.FindExtensionByTool("oss", "nonexistent")
 			So(found, ShouldBeNil)
+		})
+
+		Convey("Register syncs default policy to policy registry", func() {
+			p, ok := policy.GetDefaultPolicyOf("oss")
+			So(ok, ShouldBeTrue)
+			cp, ok := p.(*policy.CommandPolicy)
+			So(ok, ShouldBeTrue)
+			So(cp.Groups, ShouldResemble, []string{"ext:oss:readonly"})
+		})
+
+		Convey("Unregister removes from policy registry", func() {
+			bridge.Unregister("oss")
+			_, ok := policy.GetDefaultPolicyOf("oss")
+			So(ok, ShouldBeFalse)
 		})
 
 		Convey("Unregister removes extension", func() {
