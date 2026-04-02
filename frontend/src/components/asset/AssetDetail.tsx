@@ -4,12 +4,10 @@ import { Server, Database, Pencil, Trash2, TerminalSquare, Loader2 } from "lucid
 import Markdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { cn, Button, Separator, ConfirmDialog } from "@opskat/ui";
 import { toast } from "sonner";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { cn } from "@/lib/utils";
 import { useAssetStore } from "@/stores/assetStore";
+import { useExtensionStore } from "@/extension";
 import { CommandPolicyCard } from "@/components/asset/CommandPolicyCard";
 import { asset_entity } from "../../../wailsjs/go/models";
 import { GetDefaultPolicy } from "../../../wailsjs/go/app/App";
@@ -194,11 +192,27 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
   let redisConfig: RedisConfig | null = null;
   try {
     const parsed = JSON.parse(asset.Config || "{}");
-    if (asset.Type === "database") dbConfig = parsed;
+    if (asset.Type === "ssh") sshConfig = parsed;
+    else if (asset.Type === "database") dbConfig = parsed;
     else if (asset.Type === "redis") redisConfig = parsed;
-    else sshConfig = parsed;
   } catch {
     /* ignore */
+  }
+
+  // Extension asset info — subscribe to ready so we re-render when extensions load
+  const extensionReady = useExtensionStore((s) => s.ready);
+  const extInfo = extensionReady ? useExtensionStore.getState().getExtensionForAssetType(asset.Type) : undefined;
+  const extAssetTypeDef = extInfo?.manifest.assetTypes?.find((at) => at.type === asset.Type);
+  const hasConnectPage = !!extInfo?.manifest.frontend?.pages.find((p) => p.slot === "asset.connect");
+  const isExtensionType = asset.Type !== "ssh" && asset.Type !== "database" && asset.Type !== "redis";
+
+  // Show loading while extensions are initializing for extension asset types
+  if (isExtensionType && !extensionReady) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
 
   const jumpHostName = sshConfig?.jump_host_id
@@ -225,7 +239,7 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
           </div>
         </div>
         <div className="flex gap-1.5">
-          {asset.Type === "ssh" && (
+          {(asset.Type === "ssh" || asset.Type === "database" || asset.Type === "redis" || hasConnectPage) && (
             <Button size="sm" className="h-8 gap-1.5" onClick={onConnect} disabled={isConnecting}>
               {isConnecting ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -374,6 +388,55 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
             )}
           </div>
         )}
+
+        {/* Extension Config Info */}
+        {extAssetTypeDef?.configSchema &&
+          (() => {
+            const schema = extAssetTypeDef.configSchema as {
+              propertyOrder?: string[];
+              properties?: Record<string, { title?: string; format?: string; type?: string }>;
+            };
+            const props = schema.properties ?? {};
+            const order = schema.propertyOrder;
+            const keys = order ? order.filter((k) => k in props) : Object.keys(props);
+            let parsed: Record<string, unknown> = {};
+            try {
+              parsed = JSON.parse(asset.Config || "{}");
+            } catch {
+              /* ignore */
+            }
+            return (
+              <div className="rounded-xl border bg-card p-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                  {extInfo?.manifest.i18n.displayName || asset.Type}
+                </h3>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  {keys.map((key) => {
+                    const prop = props[key];
+                    if (!prop) return null;
+                    const val = parsed[key];
+                    if (val === undefined || val === null || val === "") return null;
+                    return (
+                      <InfoItem
+                        key={key}
+                        label={prop.title || key}
+                        value={
+                          prop.format === "password"
+                            ? "●●●●●●"
+                            : prop.type === "boolean"
+                              ? val
+                                ? "✓"
+                                : "✗"
+                              : String(val)
+                        }
+                        mono={prop.type !== "boolean"}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
         {/* SSH Command Policy */}
         {asset.Type === "ssh" && (
@@ -556,6 +619,62 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
               })
             }
             hint={t("asset.redisPolicyHint")}
+            saving={savingPolicy}
+            assetID={asset.ID}
+            onReset={handleResetPolicy}
+            referencedGroups={policyGroups}
+            onGroupsChange={handleGroupsChange}
+          />
+        )}
+
+        {/* Extension Policy */}
+        {extInfo?.manifest.policies && isExtensionType && (
+          <CommandPolicyCard
+            title={extInfo.manifest.i18n.displayName || asset.Type}
+            policyType={extInfo.manifest.policies.type}
+            lists={[
+              {
+                key: "allow_list",
+                label: t("asset.cmdPolicyAllowList"),
+                items: allowList,
+                onAdd: (vals: string[]) => {
+                  const next = [...allowList, ...vals];
+                  setAllowList(next);
+                  handleSaveSSHPolicy(next, denyList);
+                },
+                onRemove: (i) => {
+                  const next = allowList.filter((_, idx) => idx !== i);
+                  setAllowList(next);
+                  handleSaveSSHPolicy(next, denyList);
+                },
+                placeholder: extInfo.manifest.policies.actions.join(", "),
+                variant: "allow",
+              },
+              {
+                key: "deny_list",
+                label: t("asset.cmdPolicyDenyList"),
+                items: denyList,
+                onAdd: (vals: string[]) => {
+                  const next = [...denyList, ...vals];
+                  setDenyList(next);
+                  handleSaveSSHPolicy(allowList, next);
+                },
+                onRemove: (i) => {
+                  const next = denyList.filter((_, idx) => idx !== i);
+                  setDenyList(next);
+                  handleSaveSSHPolicy(allowList, next);
+                },
+                placeholder: extInfo.manifest.policies.actions.join(", "),
+                variant: "deny",
+              },
+            ]}
+            buildPolicyJSON={() =>
+              JSON.stringify({
+                allow_list: allowList,
+                deny_list: denyList,
+                ...(policyGroups.length > 0 ? { groups: policyGroups } : {}),
+              })
+            }
             saving={savingPolicy}
             assetID={asset.ID}
             onReset={handleResetPolicy}

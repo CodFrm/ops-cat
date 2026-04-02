@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Columns2, Rows2, RotateCcw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@opskat/ui";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useTabStore, type TerminalTabMeta } from "@/stores/tabStore";
 

@@ -1,16 +1,12 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FlaskConical, ShieldCheck, ShieldX, ShieldAlert, Loader2 } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { cn, Input, Button } from "@opskat/ui";
 import { TestPolicyRule } from "../../../wailsjs/go/app/App";
 import { app } from "../../../wailsjs/go/models";
-import { cn } from "@/lib/utils";
-
-type PolicyType = "ssh" | "database" | "redis";
 
 interface PolicyTestPanelProps {
-  policyType: PolicyType;
+  policyType: string;
   buildPolicyJSON: () => string;
   assetID?: number;
   groupID?: number;
@@ -23,7 +19,7 @@ interface TestResult {
   message: string;
 }
 
-const PLACEHOLDER_MAP: Record<PolicyType, string> = {
+const PLACEHOLDER_MAP: Record<string, string> = {
   ssh: "asset.policyTestPlaceholder",
   database: "asset.policyTestSqlPlaceholder",
   redis: "asset.policyTestRedisPlaceholder",

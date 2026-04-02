@@ -1,7 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+import { Input, Label, Switch } from "@opskat/ui";
 import { AssetSelect } from "@/components/asset/AssetSelect";
 import { PasswordSourceField } from "@/components/asset/PasswordSourceField";
 import { credential_entity } from "../../../wailsjs/go/models";
@@ -15,8 +13,8 @@ export interface RedisConfigSectionProps {
   setUsername: (v: string) => void;
   tls: boolean;
   setTls: (v: boolean) => void;
-  redisSshAssetId: number;
-  setRedisSshAssetId: (v: number) => void;
+  sshTunnelId: number;
+  setSshTunnelId: (v: number) => void;
   // Password fields
   password: string;
   setPassword: (v: string) => void;
@@ -38,8 +36,8 @@ export function RedisConfigSection({
   setUsername,
   tls,
   setTls,
-  redisSshAssetId,
-  setRedisSshAssetId,
+  sshTunnelId,
+  setSshTunnelId,
   password,
   setPassword,
   encryptedPassword,
@@ -101,8 +99,8 @@ export function RedisConfigSection({
       <div className="grid gap-2">
         <Label>{t("asset.sshTunnel")}</Label>
         <AssetSelect
-          value={redisSshAssetId}
-          onValueChange={setRedisSshAssetId}
+          value={sshTunnelId}
+          onValueChange={setSshTunnelId}
           filterType="ssh"
           placeholder={t("asset.sshTunnelNone")}
         />

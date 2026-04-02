@@ -27,13 +27,13 @@ func migration202603290001() *gormigrate.Migration {
 	return &gormigrate.Migration{
 		ID: "202603290001",
 		Migrate: func(tx *gorm.DB) error {
-			// 迁移 assets 表的 cmd_policy 字段
-			if err := migratePolicyColumn(tx, "assets", "cmd_policy"); err != nil {
-				return fmt.Errorf("migrate assets.cmd_policy: %w", err)
+			// 迁移 assets 表的 command_policy 字段
+			if err := migratePolicyColumn(tx, "assets", "command_policy"); err != nil {
+				return fmt.Errorf("migrate assets.command_policy: %w", err)
 			}
 
-			// 迁移 groups 表的 cmd_policy、qry_policy、rds_policy 字段
-			for _, col := range []string{"cmd_policy", "qry_policy", "rds_policy"} {
+			// 迁移 groups 表的 command_policy、query_policy、redis_policy 字段
+			for _, col := range []string{"command_policy", "query_policy", "redis_policy"} {
 				if err := migratePolicyColumn(tx, "groups", col); err != nil {
 					return fmt.Errorf("migrate groups.%s: %w", col, err)
 				}

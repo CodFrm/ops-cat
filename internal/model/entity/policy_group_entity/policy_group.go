@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/opskat/opskat/internal/model/entity/policy"
 )
@@ -26,8 +27,9 @@ type PolicyGroup struct {
 	Createtime  int64  `gorm:"column:createtime" json:"createtime"`
 	Updatetime  int64  `gorm:"column:updatetime" json:"updatetime"`
 
-	// 非数据库字段，仅内置组使用
-	BuiltinID string `gorm:"-" json:"-"`
+	// 非数据库字段，仅内置组/扩展组使用
+	BuiltinID     string `gorm:"-" json:"-"`
+	ExtensionName string `gorm:"-" json:"-"` // 扩展名称（如 "oss"）
 }
 
 // TableName GORM 表名
@@ -43,32 +45,36 @@ func (pg *PolicyGroup) Validate() error {
 	switch pg.PolicyType {
 	case PolicyTypeCommand, PolicyTypeQuery, PolicyTypeRedis:
 	default:
-		return errors.New("无效的策略类型")
+		if !hasExtensionPolicyType(pg.PolicyType) {
+			return errors.New("无效的策略类型")
+		}
 	}
 	return nil
 }
 
 // PolicyGroupItem 返回给前端的权限组项
 type PolicyGroupItem struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	PolicyType  string `json:"policyType"`
-	Policy      string `json:"policy"`
-	Builtin     bool   `json:"builtin"`
-	Createtime  int64  `json:"createtime"`
-	Updatetime  int64  `json:"updatetime"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	PolicyType    string `json:"policyType"`
+	Policy        string `json:"policy"`
+	Builtin       bool   `json:"builtin"`
+	ExtensionName string `json:"extensionName,omitempty"`
+	Createtime    int64  `json:"createtime"`
+	Updatetime    int64  `json:"updatetime"`
 }
 
 // ToItem 转为 PolicyGroupItem
 func (pg *PolicyGroup) ToItem() *PolicyGroupItem {
 	item := &PolicyGroupItem{
-		Name:        pg.Name,
-		Description: pg.Description,
-		PolicyType:  pg.PolicyType,
-		Policy:      pg.Policy,
-		Createtime:  pg.Createtime,
-		Updatetime:  pg.Updatetime,
+		Name:          pg.Name,
+		Description:   pg.Description,
+		PolicyType:    pg.PolicyType,
+		Policy:        pg.Policy,
+		ExtensionName: pg.ExtensionName,
+		Createtime:    pg.Createtime,
+		Updatetime:    pg.Updatetime,
 	}
 	if pg.BuiltinID != "" {
 		item.ID = pg.BuiltinID
@@ -248,4 +254,75 @@ func FindBuiltin(id string) *PolicyGroup {
 // IsBuiltinID 检查 ID 是否为内置权限组
 func IsBuiltinID(id string) bool {
 	return strings.HasPrefix(id, policy.BuiltinPrefix)
+}
+
+const ExtensionPrefix = "ext:"
+
+var (
+	extensionGroupMu  sync.RWMutex
+	extensionGroupMap = make(map[string]*PolicyGroup)
+)
+
+// IsExtensionID returns true if the ID has the ext: prefix.
+func IsExtensionID(id string) bool {
+	return strings.HasPrefix(id, ExtensionPrefix)
+}
+
+// RegisterExtensionGroup registers an extension-provided policy group.
+func RegisterExtensionGroup(pg *PolicyGroup) {
+	extensionGroupMu.Lock()
+	defer extensionGroupMu.Unlock()
+	extensionGroupMap[pg.BuiltinID] = pg
+}
+
+// FindExtensionGroup looks up an extension policy group by ID.
+func FindExtensionGroup(id string) *PolicyGroup {
+	extensionGroupMu.RLock()
+	defer extensionGroupMu.RUnlock()
+	return extensionGroupMap[id]
+}
+
+// hasExtensionPolicyType checks if any extension group uses the given policy type.
+func hasExtensionPolicyType(policyType string) bool {
+	extensionGroupMu.RLock()
+	defer extensionGroupMu.RUnlock()
+	for _, pg := range extensionGroupMap {
+		if pg.PolicyType == policyType {
+			return true
+		}
+	}
+	return false
+}
+
+// ExtensionGroups returns all registered extension policy groups.
+func ExtensionGroups() []*PolicyGroup {
+	extensionGroupMu.RLock()
+	defer extensionGroupMu.RUnlock()
+	groups := make([]*PolicyGroup, 0, len(extensionGroupMap))
+	for _, pg := range extensionGroupMap {
+		groups = append(groups, pg)
+	}
+	return groups
+}
+
+// UnregisterExtensionGroups removes all extension groups for a given policy type.
+func UnregisterExtensionGroups(policyType string) {
+	extensionGroupMu.Lock()
+	defer extensionGroupMu.Unlock()
+	for id, pg := range extensionGroupMap {
+		if pg.PolicyType == policyType {
+			delete(extensionGroupMap, id)
+		}
+	}
+}
+
+// UnregisterExtensionGroupsByExtension removes all extension groups for a given extension name.
+func UnregisterExtensionGroupsByExtension(extName string) {
+	extensionGroupMu.Lock()
+	defer extensionGroupMu.Unlock()
+	for id, pg := range extensionGroupMap {
+		if pg.ExtensionName == extName {
+			delete(extensionGroupMap, id)
+		}
+	}
 }

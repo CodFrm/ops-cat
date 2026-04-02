@@ -1,19 +1,31 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Loader2, PlugZap } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  Button,
+  Input,
+  Label,
+  Textarea,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@opskat/ui";
 import { IconPicker } from "@/components/asset/IconPicker";
 import { GroupSelect } from "@/components/asset/GroupSelect";
 import { useAssetStore } from "@/stores/assetStore";
 import { asset_entity, credential_entity } from "../../../wailsjs/go/models";
 import {
   EncryptPassword,
+  GetAvailableAssetTypes,
+  GetDecryptedExtensionConfig,
   ListCredentialsByType,
   ListLocalSSHKeys,
   TestSSHConnection,
@@ -24,6 +36,8 @@ import { app } from "../../../wailsjs/go/models";
 import { SSHConfigSection } from "@/components/asset/SSHConfigSection";
 import { DatabaseConfigSection } from "@/components/asset/DatabaseConfigSection";
 import { RedisConfigSection } from "@/components/asset/RedisConfigSection";
+import { useExtensionStore } from "@/extension";
+import { ExtensionConfigForm } from "@/components/asset/ExtensionConfigForm";
 
 interface AssetFormProps {
   open: boolean;
@@ -77,7 +91,7 @@ interface RedisConfig {
   ssh_asset_id?: number;
 }
 
-type AssetType = "ssh" | "database" | "redis";
+type AssetType = "ssh" | "database" | "redis" | (string & {});
 
 const DEFAULT_PORTS: Record<string, number> = {
   ssh: 22,
@@ -99,6 +113,14 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
 
   // Asset type
   const [assetType, setAssetType] = useState<AssetType>("ssh");
+  const [availableTypes, setAvailableTypes] = useState<
+    { type: string; extensionName?: string; displayName: string; sshTunnel?: boolean }[]
+  >([]);
+
+  // Extension display name is already translated by the backend
+  const resolveExtDisplayName = useCallback((at: { displayName: string }) => {
+    return at.displayName;
+  }, []);
 
   // Basic fields
   const [name, setName] = useState("");
@@ -129,7 +151,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   const [localKeys, setLocalKeys] = useState<app.LocalSSHKeyInfo[]>([]);
   const [selectedKeyPaths, setSelectedKeyPaths] = useState<string[]>([]);
   const [scanningKeys, setScanningKeys] = useState(false);
-  const [jumpHostId, setJumpHostId] = useState(0);
+  const [sshTunnelId, setSshTunnelId] = useState(0);
   const [proxyType, setProxyType] = useState("socks5");
   const [proxyHost, setProxyHost] = useState("");
   const [proxyPort, setProxyPort] = useState(1080);
@@ -142,12 +164,13 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   const [database, setDatabase] = useState("");
   const [sslMode, setSslMode] = useState("disable");
   const [readOnly, setReadOnly] = useState(false);
-  const [dbSshAssetId, setDbSshAssetId] = useState(0);
   const [params, setParams] = useState("");
 
   // Redis fields
   const [tls, setTls] = useState(false);
-  const [redisSshAssetId, setRedisSshAssetId] = useState(0);
+
+  // Extension config
+  const [extConfig, setExtConfig] = useState<Record<string, unknown>>({});
 
   // Exclude self from jump host / SSH tunnel selection
   const jumpHostExcludeIds = editAsset?.ID ? [editAsset.ID] : undefined;
@@ -166,6 +189,9 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         .then((keys) => setLocalKeys(keys || []))
         .catch(() => setLocalKeys([]))
         .finally(() => setScanningKeys(false));
+      GetAvailableAssetTypes()
+        .then((types) => setAvailableTypes(types || []))
+        .catch(() => setAvailableTypes([]));
     }
   }, [open]);
 
@@ -185,6 +211,16 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
           loadDatabaseConfig(editAsset);
         } else if (editType === "redis") {
           loadRedisConfig(editAsset);
+        } else {
+          // Extension type: load decrypted config
+          const extInfo = useExtensionStore.getState().getExtensionForAssetType(editType);
+          if (extInfo && editAsset.ID) {
+            GetDecryptedExtensionConfig(editAsset.ID, extInfo.name)
+              .then((cfg) => setExtConfig(JSON.parse(cfg || "{}")))
+              .catch(() => setExtConfig(JSON.parse(editAsset.Config || "{}")));
+          } else {
+            setExtConfig(JSON.parse(editAsset.Config || "{}"));
+          }
         }
       } else {
         setAssetType("ssh");
@@ -196,6 +232,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         resetSSHFields();
         resetDatabaseFields();
         resetRedisFields();
+        setExtConfig({});
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -221,9 +258,12 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       setKeySource(cfg.private_keys && cfg.private_keys.length > 0 ? "file" : "managed");
       setCredentialId(cfg.auth_type === "key" ? cfg.credential_id || 0 : 0);
       setSelectedKeyPaths(cfg.private_keys || []);
-      setJumpHostId(cfg.jump_host_id || 0);
 
-      if (cfg.jump_host_id) {
+      // Unified SSH tunnel: prefer asset-level field, fall back to config
+      const tunnelId = asset.sshTunnelId || cfg.jump_host_id || 0;
+      setSshTunnelId(tunnelId);
+
+      if (tunnelId) {
         setConnectionType("jumphost");
       } else if (cfg.proxy) {
         setConnectionType("proxy");
@@ -258,7 +298,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       setSslMode(cfg.ssl_mode || "disable");
       setTls(cfg.tls || false);
       setReadOnly(cfg.read_only || false);
-      setDbSshAssetId(cfg.ssh_asset_id || 0);
+      setSshTunnelId(asset.sshTunnelId || cfg.ssh_asset_id || 0);
       setParams(cfg.params || "");
 
       if (cfg.credential_id) {
@@ -285,7 +325,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       setPort(cfg.port || 6379);
       setUsername(cfg.username || "");
       setTls(cfg.tls || false);
-      setRedisSshAssetId(cfg.ssh_asset_id || 0);
+      setSshTunnelId(asset.sshTunnelId || cfg.ssh_asset_id || 0);
 
       if (cfg.credential_id) {
         setPasswordSource("managed");
@@ -331,7 +371,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setCredentialId(0);
     setSelectedKeyPaths([]);
     setConnectionType("direct");
-    setJumpHostId(0);
+    setSshTunnelId(0);
     resetProxyFields();
   };
 
@@ -342,14 +382,12 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setSslMode("disable");
     setTls(false);
     setReadOnly(false);
-    setDbSshAssetId(0);
     setParams("");
   };
 
   // Redis-exclusive fields only
   const resetRedisFields = () => {
     setTls(false);
-    setRedisSshAssetId(0);
   };
 
   const handleTypeChange = (newType: AssetType) => {
@@ -390,7 +428,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     if (!password && encryptedPassword) {
       sshConfig.password = encryptedPassword;
     }
-    if (connectionType === "jumphost" && jumpHostId > 0) sshConfig.jump_host_id = jumpHostId;
+    if (connectionType === "jumphost" && sshTunnelId > 0) sshConfig.jump_host_id = sshTunnelId;
     if (connectionType === "proxy" && proxyHost) {
       sshConfig.proxy = {
         type: proxyType,
@@ -417,7 +455,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     if (driver === "postgresql" && sslMode !== "disable") cfg.ssl_mode = sslMode;
     if (driver === "mysql" && tls) cfg.tls = true;
     if (readOnly) cfg.read_only = true;
-    if (dbSshAssetId > 0) cfg.ssh_asset_id = dbSshAssetId;
+    if (sshTunnelId > 0) cfg.ssh_asset_id = sshTunnelId;
     if (params) cfg.params = params;
     if (!password && encryptedPassword) cfg.password = encryptedPassword;
     setTesting(true);
@@ -435,7 +473,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     const cfg: RedisConfig = { host, port };
     if (username) cfg.username = username;
     if (tls) cfg.tls = true;
-    if (redisSshAssetId > 0) cfg.ssh_asset_id = redisSshAssetId;
+    if (sshTunnelId > 0) cfg.ssh_asset_id = sshTunnelId;
     if (!password && encryptedPassword) cfg.password = encryptedPassword;
     setTesting(true);
     try {
@@ -475,7 +513,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   };
 
   const handleSubmit = async () => {
-    let config = "";
+    let config: string;
 
     if (assetType === "ssh") {
       const sshConfig: SSHConfig = {
@@ -500,7 +538,6 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         if (keySource === "file" && selectedKeyPaths.length > 0) sshConfig.private_keys = selectedKeyPaths;
       }
 
-      if (connectionType === "jumphost" && jumpHostId > 0) sshConfig.jump_host_id = jumpHostId;
       if (connectionType === "proxy" && proxyHost) {
         const encProxy = await encryptProxyPassword();
         sshConfig.proxy = {
@@ -530,7 +567,6 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       if (driver === "postgresql" && sslMode !== "disable") dbConfig.ssl_mode = sslMode;
       if (driver === "mysql" && tls) dbConfig.tls = true;
       if (readOnly) dbConfig.read_only = true;
-      if (dbSshAssetId > 0) dbConfig.ssh_asset_id = dbSshAssetId;
       if (params) dbConfig.params = params;
       config = JSON.stringify(dbConfig);
     } else if (assetType === "redis") {
@@ -547,8 +583,24 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         if (encrypted) redisConfig.password = encrypted;
       }
       if (tls) redisConfig.tls = true;
-      if (redisSshAssetId > 0) redisConfig.ssh_asset_id = redisSshAssetId;
       config = JSON.stringify(redisConfig);
+    } else {
+      // Extension type: encrypt password fields from configSchema before saving
+      const extInfo = useExtensionStore.getState().getExtensionForAssetType(assetType);
+      const schema = extInfo?.manifest.assetTypes?.find((at) => at.type === assetType)?.configSchema as
+        | { properties?: Record<string, { format?: string }> }
+        | undefined;
+      const configCopy = { ...extConfig };
+      if (schema?.properties) {
+        for (const [key, prop] of Object.entries(schema.properties)) {
+          if (prop.format === "password" && configCopy[key]) {
+            const encrypted = await EncryptPassword(String(configCopy[key]));
+            if (encrypted === undefined) return;
+            configCopy[key] = encrypted;
+          }
+        }
+      }
+      config = JSON.stringify(configCopy);
     }
 
     const asset = new asset_entity.Asset({
@@ -559,6 +611,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       Icon: icon,
       Description: description,
       Config: config,
+      sshTunnelId: sshTunnelId > 0 ? sshTunnelId : 0,
     });
 
     setSaving(true);
@@ -582,7 +635,12 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       ? t("asset.typeSSH")
       : assetType === "database"
         ? t("asset.typeDatabase")
-        : t("asset.typeRedis");
+        : assetType === "redis"
+          ? t("asset.typeRedis")
+          : (() => {
+              const found = availableTypes.find((at) => at.type === assetType);
+              return found ? resolveExtDisplayName(found) : assetType;
+            })();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -605,6 +663,13 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                   <SelectItem value="ssh">{t("asset.typeSSH")}</SelectItem>
                   <SelectItem value="database">{t("asset.typeDatabase")}</SelectItem>
                   <SelectItem value="redis">{t("asset.typeRedis")}</SelectItem>
+                  {availableTypes
+                    .filter((at) => !!at.extensionName)
+                    .map((at) => (
+                      <SelectItem key={at.type} value={at.type}>
+                        {resolveExtDisplayName(at)}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
@@ -616,7 +681,15 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={assetType === "ssh" ? "web-01" : assetType === "database" ? "prod-db" : "cache-01"}
+              placeholder={
+                assetType === "ssh"
+                  ? "web-01"
+                  : assetType === "database"
+                    ? "prod-db"
+                    : assetType === "redis"
+                      ? "cache-01"
+                      : `my-${assetType}`
+              }
             />
           </div>
 
@@ -673,8 +746,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
               selectedKeyPaths={selectedKeyPaths}
               setSelectedKeyPaths={setSelectedKeyPaths}
               scanningKeys={scanningKeys}
-              jumpHostId={jumpHostId}
-              setJumpHostId={setJumpHostId}
+              sshTunnelId={sshTunnelId}
+              setSshTunnelId={setSshTunnelId}
               jumpHostExcludeIds={jumpHostExcludeIds}
               proxyType={proxyType}
               setProxyType={setProxyType}
@@ -708,8 +781,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
               setTls={setTls}
               readOnly={readOnly}
               setReadOnly={setReadOnly}
-              dbSshAssetId={dbSshAssetId}
-              setDbSshAssetId={setDbSshAssetId}
+              sshTunnelId={sshTunnelId}
+              setSshTunnelId={setSshTunnelId}
               params={params}
               setParams={setParams}
               password={password}
@@ -734,8 +807,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
               setUsername={setUsername}
               tls={tls}
               setTls={setTls}
-              redisSshAssetId={redisSshAssetId}
-              setRedisSshAssetId={setRedisSshAssetId}
+              sshTunnelId={sshTunnelId}
+              setSshTunnelId={setSshTunnelId}
               password={password}
               setPassword={setPassword}
               encryptedPassword={encryptedPassword}
@@ -748,24 +821,46 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             />
           )}
 
+          {/* Extension type config */}
+          {assetType !== "ssh" &&
+            assetType !== "database" &&
+            assetType !== "redis" &&
+            (() => {
+              const extInfo = useExtensionStore.getState().getExtensionForAssetType(assetType);
+              if (!extInfo) return null;
+              const assetTypeDef = extInfo.manifest.assetTypes?.find((at) => at.type === assetType);
+              if (!assetTypeDef?.configSchema) return null;
+              return (
+                <ExtensionConfigForm
+                  extensionName={extInfo.name}
+                  configSchema={assetTypeDef.configSchema as Record<string, unknown>}
+                  value={extConfig}
+                  onChange={setExtConfig}
+                  hasBackend={!!extInfo.manifest.backend}
+                />
+              );
+            })()}
+
           {/* Test Connection */}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={
-              assetType === "ssh"
-                ? handleTestConnection
-                : assetType === "database"
-                  ? handleTestDatabaseConnection
-                  : handleTestRedisConnection
-            }
-            disabled={testing || !host}
-            className="gap-1 w-fit"
-          >
-            {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
-            {testing ? t("asset.testing") : t("asset.testConnection")}
-          </Button>
+          {(assetType === "ssh" || assetType === "database" || assetType === "redis") && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={
+                assetType === "ssh"
+                  ? handleTestConnection
+                  : assetType === "database"
+                    ? handleTestDatabaseConnection
+                    : handleTestRedisConnection
+              }
+              disabled={testing || !host}
+              className="gap-1 w-fit"
+            >
+              {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+              {testing ? t("asset.testing") : t("asset.testConnection")}
+            </Button>
+          )}
 
           {/* Group - Tree Selector */}
           <div className="grid gap-2">
@@ -783,7 +878,10 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t("action.cancel")}
           </Button>
-          <Button onClick={handleSubmit} disabled={saving || !name || !host}>
+          <Button
+            onClick={handleSubmit}
+            disabled={saving || !name || (["ssh", "database", "redis"].includes(assetType) && !host)}
+          >
             {t("action.save")}
           </Button>
         </DialogFooter>

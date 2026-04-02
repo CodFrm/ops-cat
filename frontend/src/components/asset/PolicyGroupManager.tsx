@@ -1,12 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Lock, Copy, Trash2, Plus, Save, ChevronDown, ChevronRight } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
+import { Lock, Copy, Trash2, Plus, Save, ChevronDown, ChevronRight, Puzzle } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, Button, Input, Separator, ConfirmDialog } from "@opskat/ui";
 import { PolicyTagEditor } from "@/components/asset/PolicyTagEditor";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { toast } from "sonner";
 import {
   ListPolicyGroups,
@@ -15,22 +11,23 @@ import {
   DeletePolicyGroup,
   CopyPolicyGroup,
 } from "../../../wailsjs/go/app/App";
+import { loadExtensionLocales } from "@/extension/i18n";
 import { policy_group_entity } from "../../../wailsjs/go/models";
-
-type TabType = "command" | "query" | "redis";
 
 interface PolicyGroupManagerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onGroupsChanged?: () => void;
-  initialTab?: TabType;
+  initialTab?: string;
 }
 
-const tabs: { key: TabType; label: string }[] = [
+const builtinTabs: { key: string; label: string }[] = [
   { key: "command", label: "SSH" },
   { key: "query", label: "Database" },
   { key: "redis", label: "Redis" },
 ];
+
+const builtinTabKeys = new Set(builtinTabs.map((t) => t.key));
 
 interface EditState {
   id: string;
@@ -77,27 +74,61 @@ function serializePolicy(policy: Record<string, string[]>): string {
 
 export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initialTab }: PolicyGroupManagerProps) {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<TabType>(initialTab || "command");
+  const [activeTab, setActiveTab] = useState<string>(initialTab || "command");
   const [groups, setGroups] = useState<policy_group_entity.PolicyGroupItem[]>([]);
+  const [tabs, setTabs] = useState(builtinTabs);
   const [editState, setEditState] = useState<EditState | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
   const changedRef = useRef(false);
 
   const displayName = useCallback(
-    (g: policy_group_entity.PolicyGroupItem) =>
-      g.builtin ? t(`asset.policyGroup.builtin.${builtinShortId(g.id)}.name`) : g.name,
+    (g: policy_group_entity.PolicyGroupItem) => {
+      if (g.extensionName) return t(g.name, { ns: `ext-${g.extensionName}` });
+      return g.builtin ? t(`asset.policyGroup.builtin.${builtinShortId(g.id)}.name`) : g.name;
+    },
     [t]
   );
 
   const displayDesc = useCallback(
-    (g: policy_group_entity.PolicyGroupItem) =>
-      g.builtin ? t(`asset.policyGroup.builtin.${builtinShortId(g.id)}.desc`) : g.description,
+    (g: policy_group_entity.PolicyGroupItem) => {
+      if (g.extensionName) return t(g.description, { ns: `ext-${g.extensionName}` });
+      return g.builtin ? t(`asset.policyGroup.builtin.${builtinShortId(g.id)}.desc`) : g.description;
+    },
     [t]
   );
+
+  // 发现扩展策略类型并动态添加 tab
+  const discoverTabs = useCallback(async () => {
+    try {
+      const allGroups = await ListPolicyGroups("");
+      const extTypes = new Map<string, string>();
+      for (const g of allGroups || []) {
+        if (g.extensionName && !builtinTabKeys.has(g.policyType) && !extTypes.has(g.policyType)) {
+          extTypes.set(g.policyType, g.policyType.toUpperCase());
+          await loadExtensionLocales(g.extensionName);
+        }
+      }
+      if (extTypes.size > 0) {
+        setTabs([...builtinTabs, ...Array.from(extTypes, ([key, label]) => ({ key, label }))]);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (open) discoverTabs();
+  }, [open, discoverTabs]);
 
   const fetchGroups = useCallback(async () => {
     try {
       const items = await ListPolicyGroups(activeTab);
+      // 先加载扩展 i18n，再 setGroups 触发渲染
+      const extNames = new Set((items || []).filter((g) => g.extensionName).map((g) => g.extensionName!));
+      for (const name of extNames) {
+        await loadExtensionLocales(name);
+      }
       setGroups(items || []);
     } catch {
       setGroups([]);
@@ -226,8 +257,9 @@ export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initia
     });
   };
 
-  const builtinGroups = groups.filter((g) => g.builtin);
-  const customGroups = groups.filter((g) => !g.builtin);
+  const builtinGroups = groups.filter((g) => g.builtin && !g.extensionName);
+  const extensionGroups = groups.filter((g) => !!g.extensionName);
+  const customGroups = groups.filter((g) => !g.builtin && !g.extensionName);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -278,6 +310,51 @@ export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initia
                       <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
                     )}
                     <Lock className="h-3 w-3 text-muted-foreground shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-medium truncate">{displayName(g)}</div>
+                      {displayDesc(g) && (
+                        <div className="text-[10px] text-muted-foreground truncate">{displayDesc(g)}</div>
+                      )}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-[10px] gap-1"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCopy(g.id);
+                      }}
+                    >
+                      <Copy className="h-3 w-3" />
+                      {t("asset.policyGroup.copy")}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Extension groups */}
+          {extensionGroups.length > 0 && (
+            <div>
+              <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                {t("asset.policyGroup.extensionSection")}
+              </div>
+              <div className="space-y-1">
+                {extensionGroups.map((g) => (
+                  <div
+                    key={g.id}
+                    className={`flex items-center gap-2 rounded-md border px-3 py-2 cursor-pointer hover:bg-accent/50 ${
+                      editState?.id === g.id && editState?.readonly ? "border-primary bg-accent/50" : ""
+                    }`}
+                    onClick={() => handleViewBuiltin(g)}
+                  >
+                    {editState?.id === g.id && editState?.readonly ? (
+                      <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+                    ) : (
+                      <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                    )}
+                    <Puzzle className="h-3 w-3 text-muted-foreground shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="text-xs font-medium truncate">{displayName(g)}</div>
                       {displayDesc(g) && (

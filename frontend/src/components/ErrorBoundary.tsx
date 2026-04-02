@@ -1,6 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { withTranslation, type WithTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
+import { Button } from "@opskat/ui";
 
 interface Props extends WithTranslation {
   children: ReactNode;

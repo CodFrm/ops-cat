@@ -129,6 +129,8 @@ func Execute() int {
 		return cmdGrant(ctx, args, resolvedSession)
 	case "session":
 		return cmdSession(args)
+	case "ext":
+		return cmdExt(args)
 	default:
 		fmt.Fprintf(os.Stderr, "Error: unknown command %q\n\nRun 'opsctl help' for usage.\n", verb)
 		return 1
@@ -154,6 +156,7 @@ Commands:
   batch     Execute multiple commands in parallel (exec/sql/redis)
   grant     Submit a batch grant for approval
   session   Manage approval sessions (start, end, status)
+  ext       Manage and execute extension tools (list, exec)
   version   Print version information
   help      Show this help message
 
@@ -193,5 +196,7 @@ Examples:
   opsctl cp ./config.yml web-server:/etc/app/     Upload a file
   opsctl cp 1:/var/log/app.log ./app.log          Download a file
   opsctl --session $ID exec web-01 -- uptime      Use explicit session
+  opsctl ext list                                   List installed extensions
+  opsctl ext exec oss list_buckets --args '{}'       Execute extension tool
 `)
 }

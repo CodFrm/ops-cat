@@ -1,10 +1,7 @@
 import { Trash2, FolderOpen, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@opskat/ui";
 import { AssetSelect } from "@/components/asset/AssetSelect";
 import { PasswordSourceField } from "@/components/asset/PasswordSourceField";
 import { SelectSSHKeyFile } from "../../../wailsjs/go/app/App";
@@ -42,9 +39,9 @@ export interface SSHConfigSectionProps {
   selectedKeyPaths: string[];
   setSelectedKeyPaths: (v: string[]) => void;
   scanningKeys: boolean;
-  // Jump host
-  jumpHostId: number;
-  setJumpHostId: (v: number) => void;
+  // SSH tunnel (jump host)
+  sshTunnelId: number;
+  setSshTunnelId: (v: number) => void;
   jumpHostExcludeIds?: number[];
   // Proxy
   proxyType: string;
@@ -90,8 +87,8 @@ export function SSHConfigSection({
   selectedKeyPaths,
   setSelectedKeyPaths,
   scanningKeys,
-  jumpHostId,
-  setJumpHostId,
+  sshTunnelId,
+  setSshTunnelId,
   jumpHostExcludeIds,
   proxyType,
   setProxyType,
@@ -139,8 +136,8 @@ export function SSHConfigSection({
         <div className="grid gap-2">
           <Label>{t("asset.selectJumpHost")}</Label>
           <AssetSelect
-            value={jumpHostId}
-            onValueChange={setJumpHostId}
+            value={sshTunnelId}
+            onValueChange={setSshTunnelId}
             filterType="ssh"
             excludeIds={jumpHostExcludeIds}
             placeholder={t("asset.jumpHostNone")}

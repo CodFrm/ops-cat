@@ -65,6 +65,7 @@ type Asset struct {
 	Config      string `gorm:"column:config;type:text"`
 	CmdPolicy   string `gorm:"column:command_policy;type:text"`
 	SortOrder   int    `gorm:"column:sort_order;default:0"`
+	SSHTunnelID int64  `gorm:"column:ssh_tunnel_id;default:0" json:"sshTunnelId"`
 	Status      int    `gorm:"column:status;default:1"`
 	Createtime  int64  `gorm:"column:createtime"`
 	Updatetime  int64  `gorm:"column:updatetime"`
@@ -84,7 +85,7 @@ type SSHConfig struct {
 	Password     string       `json:"password,omitempty"`      // 加密后的密码（内联，向后兼容）
 	CredentialID int64        `json:"credential_id,omitempty"` // 统一凭证 ID（密码或密钥）
 	PrivateKeys  []string     `json:"private_keys,omitempty"`  // 本地密钥文件路径（向后兼容）
-	JumpHostID   int64        `json:"jump_host_id,omitempty"`
+	JumpHostID   int64        `json:"jump_host_id,omitempty"`  // Deprecated: use Asset.SSHTunnelID
 	Proxy        *ProxyConfig `json:"proxy,omitempty"`
 }
 
@@ -110,7 +111,7 @@ type DatabaseConfig struct {
 	TLS          bool           `json:"tls,omitempty"`           // mysql: 启用 TLS 加密连接
 	Params       string         `json:"params,omitempty"`        // 额外连接参数
 	ReadOnly     bool           `json:"read_only,omitempty"`     // 连接级只读
-	SSHAssetID   int64          `json:"ssh_asset_id,omitempty"`  // 0=直连, >0=SSH隧道
+	SSHAssetID   int64          `json:"ssh_asset_id,omitempty"`  // Deprecated: use Asset.SSHTunnelID
 }
 
 // RedisConfig Redis类型的特定配置
@@ -122,7 +123,7 @@ type RedisConfig struct {
 	CredentialID int64  `json:"credential_id,omitempty"` // 统一凭证 ID（密码）
 	Database     int    `json:"database,omitempty"`      // DB index
 	TLS          bool   `json:"tls,omitempty"`
-	SSHAssetID   int64  `json:"ssh_asset_id,omitempty"`
+	SSHAssetID   int64  `json:"ssh_asset_id,omitempty"` // Deprecated: use Asset.SSHTunnelID
 }
 
 // QueryPolicy SQL 权限策略（类型别名，定义在 policy 包）
@@ -260,7 +261,8 @@ func (a *Asset) Validate() error {
 	case AssetTypeRedis:
 		return a.validateRedis()
 	default:
-		return fmt.Errorf("无效的资产类型: %s", a.Type)
+		// 扩展资产类型由扩展自行校验
+		return nil
 	}
 }
 

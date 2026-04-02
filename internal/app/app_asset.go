@@ -8,6 +8,7 @@ import (
 	"github.com/opskat/opskat/internal/ai"
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/model/entity/group_entity"
+	"github.com/opskat/opskat/internal/model/entity/policy"
 	"github.com/opskat/opskat/internal/model/entity/policy_group_entity"
 	"github.com/opskat/opskat/internal/service/asset_svc"
 	"github.com/opskat/opskat/internal/service/group_svc"
@@ -91,28 +92,15 @@ func (a *App) TestPolicyRule(req PolicyTestRequest) (*PolicyTestResult, error) {
 
 // GetDefaultPolicy 获取指定资产类型的默认策略 JSON
 func (a *App) GetDefaultPolicy(assetType string) (string, error) {
-	switch assetType {
-	case asset_entity.AssetTypeSSH:
-		data, err := json.Marshal(asset_entity.DefaultCommandPolicy())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
-	case asset_entity.AssetTypeDatabase:
-		data, err := json.Marshal(asset_entity.DefaultQueryPolicy())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
-	case asset_entity.AssetTypeRedis:
-		data, err := json.Marshal(asset_entity.DefaultRedisPolicy())
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
-	default:
+	p, ok := policy.GetDefaultPolicyOf(assetType)
+	if !ok {
 		return "", fmt.Errorf("unsupported asset type: %s", assetType)
 	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // --- 权限组管理 ---

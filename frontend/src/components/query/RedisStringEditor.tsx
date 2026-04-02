@@ -1,9 +1,7 @@
 import { useState, useMemo } from "react";
 import { Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button, Textarea, ScrollArea } from "@opskat/ui";
 import { useQueryStore } from "@/stores/queryStore";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { ExecuteRedisArgs } from "../../../wailsjs/go/app/App";

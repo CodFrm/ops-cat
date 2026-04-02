@@ -2,12 +2,14 @@ package asset_svc
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/model/entity/policy"
 	"github.com/opskat/opskat/internal/pkg/sortutil"
 	"github.com/opskat/opskat/internal/repository/asset_repo"
 )
@@ -52,18 +54,12 @@ func (s *assetSvc) Create(ctx context.Context, asset *asset_entity.Asset) error 
 	asset.Status = asset_entity.StatusActive
 	// 未设置命令策略时，根据资产类型应用默认拒绝列表
 	if asset.CmdPolicy == "" {
-		switch asset.Type {
-		case asset_entity.AssetTypeDatabase:
-			if err := asset.SetQueryPolicy(asset_entity.DefaultQueryPolicy()); err != nil {
-				logger.Default().Error("set default query policy", zap.Error(err))
-			}
-		case asset_entity.AssetTypeRedis:
-			if err := asset.SetRedisPolicy(asset_entity.DefaultRedisPolicy()); err != nil {
-				logger.Default().Error("set default redis policy", zap.Error(err))
-			}
-		default:
-			if err := asset.SetCommandPolicy(asset_entity.DefaultCommandPolicy()); err != nil {
-				logger.Default().Error("set default command policy", zap.Error(err))
+		if p, ok := policy.GetDefaultPolicyOf(asset.Type); ok {
+			data, err := json.Marshal(p)
+			if err != nil {
+				logger.Default().Error("marshal default policy", zap.Error(err))
+			} else {
+				asset.CmdPolicy = string(data)
 			}
 		}
 	}

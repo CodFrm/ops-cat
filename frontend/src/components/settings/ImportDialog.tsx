@@ -2,9 +2,7 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Server, Folder, ChevronDown, ChevronRight, KeyRound } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, Button, ScrollArea } from "@opskat/ui";
 import { import_svc } from "../../../wailsjs/go/models";
 import { useAssetStore } from "@/stores/assetStore";
 

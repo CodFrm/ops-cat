@@ -63,7 +63,8 @@ func main() {
 		Height:    800,
 		Frameless: runtime.GOOS == "windows",
 		AssetServer: &assetserver.Options{
-			Assets: assets,
+			Assets:  assets,
+			Handler: app.NewExtensionAssetHandler(filepath.Join(bootstrap.AppDataDir(), "extensions"), nil),
 		},
 		OnStartup:  a.Startup,
 		OnShutdown: func(ctx context.Context) { a.Cleanup() },

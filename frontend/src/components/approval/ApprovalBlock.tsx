@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ShieldAlert, Terminal, Database, Server, Globe, FolderOpen } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { Button, Input, Textarea } from "@opskat/ui";
 import { RespondAIApproval } from "../../../wailsjs/go/app/App";
 import { ai } from "../../../wailsjs/go/models";
 import type { ContentBlock } from "@/stores/aiStore";

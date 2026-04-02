@@ -23,11 +23,10 @@ func TestAsset_Validate(t *testing.T) {
 			assert.Contains(t, err.Error(), "类型")
 		})
 
-		convey.Convey("无效的资产类型应返回错误", func() {
-			a := &Asset{Name: "test", Type: "unknown"}
+		convey.Convey("扩展资产类型校验应通过", func() {
+			a := &Asset{Name: "test", Type: "oss"}
 			err := a.Validate()
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "类型")
+			assert.NoError(t, err)
 		})
 
 		convey.Convey("SSH类型缺少Config应返回错误", func() {

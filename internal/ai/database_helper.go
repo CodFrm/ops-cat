@@ -93,7 +93,7 @@ func handleExecSQL(ctx context.Context, args map[string]any) (string, error) {
 		cfg.Database = dbOverride
 	}
 
-	db, closer, err := getOrDialDatabase(ctx, assetID, cfg)
+	db, closer, err := getOrDialDatabase(ctx, asset, cfg)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to database: %w", err)
 	}
@@ -118,16 +118,16 @@ func handleExecSQL(ctx context.Context, args map[string]any) (string, error) {
 	return ExecuteSQL(ctx, db, sqlText)
 }
 
-func getOrDialDatabase(ctx context.Context, assetID int64, cfg *asset_entity.DatabaseConfig) (*sql.DB, io.Closer, error) {
+func getOrDialDatabase(ctx context.Context, asset *asset_entity.Asset, cfg *asset_entity.DatabaseConfig) (*sql.DB, io.Closer, error) {
 	dialFn := func() (*sql.DB, io.Closer, error) {
 		password, err := credential_resolver.Default().ResolveDatabasePassword(ctx, cfg)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to resolve credentials: %w", err)
 		}
-		return connpool.DialDatabase(ctx, cfg, password, getSSHPool(ctx))
+		return connpool.DialDatabase(ctx, asset, cfg, password, getSSHPool(ctx))
 	}
 	if cache := getDatabaseCache(ctx); cache != nil {
-		return cache.GetOrDial(assetID, dialFn)
+		return cache.GetOrDial(asset.ID, dialFn)
 	}
 	return dialFn()
 }

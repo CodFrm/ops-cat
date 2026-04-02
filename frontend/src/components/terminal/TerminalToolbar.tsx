@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { FolderOpen, Folder } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@opskat/ui";
 import { useSFTPStore } from "@/stores/sftpStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 

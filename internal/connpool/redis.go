@@ -17,7 +17,7 @@ import (
 
 // DialRedis 创建 Redis 连接（直连或通过 SSH 隧道）
 // password 为已解析的明文密码，由调用方负责解密
-func DialRedis(ctx context.Context, cfg *asset_entity.RedisConfig, password string, sshPool *sshpool.Pool) (*redis.Client, io.Closer, error) {
+func DialRedis(ctx context.Context, asset *asset_entity.Asset, cfg *asset_entity.RedisConfig, password string, sshPool *sshpool.Pool) (*redis.Client, io.Closer, error) {
 	opts := &redis.Options{
 		Addr:     fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 		Username: cfg.Username,
@@ -29,8 +29,12 @@ func DialRedis(ctx context.Context, cfg *asset_entity.RedisConfig, password stri
 	}
 
 	var tunnel *SSHTunnel
-	if cfg.SSHAssetID > 0 && sshPool != nil {
-		tunnel = NewSSHTunnel(cfg.SSHAssetID, cfg.Host, cfg.Port, sshPool)
+	tunnelID := asset.SSHTunnelID
+	if tunnelID == 0 {
+		tunnelID = cfg.SSHAssetID // backward compat
+	}
+	if tunnelID > 0 && sshPool != nil {
+		tunnel = NewSSHTunnel(tunnelID, cfg.Host, cfg.Port, sshPool)
 		opts.Dialer = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return tunnel.Dial(ctx)
 		}

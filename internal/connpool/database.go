@@ -19,14 +19,18 @@ import (
 
 // DialDatabase 创建数据库连接（直连或通过 SSH 隧道）
 // password 为已解析的明文密码，由调用方负责解密
-func DialDatabase(ctx context.Context, cfg *asset_entity.DatabaseConfig, password string, sshPool *sshpool.Pool) (*sql.DB, io.Closer, error) {
+func DialDatabase(ctx context.Context, asset *asset_entity.Asset, cfg *asset_entity.DatabaseConfig, password string, sshPool *sshpool.Pool) (*sql.DB, io.Closer, error) {
 
 	var db *sql.DB
 	var tunnel *SSHTunnel
 	var err error
 
-	if cfg.SSHAssetID > 0 && sshPool != nil {
-		tunnel = NewSSHTunnel(cfg.SSHAssetID, cfg.Host, cfg.Port, sshPool)
+	tunnelID := asset.SSHTunnelID
+	if tunnelID == 0 {
+		tunnelID = cfg.SSHAssetID // backward compat
+	}
+	if tunnelID > 0 && sshPool != nil {
+		tunnel = NewSSHTunnel(tunnelID, cfg.Host, cfg.Port, sshPool)
 		db, err = openWithTunnel(cfg, password, tunnel)
 	} else {
 		db, err = openDirect(cfg, password)

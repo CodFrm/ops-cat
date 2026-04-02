@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { X, Table2, Code2, Database } from "lucide-react";
 import { useQueryStore } from "@/stores/queryStore";
-import { useResizeHandle } from "@/hooks/useResizeHandle";
+import { useResizeHandle } from "@opskat/ui";
 import { DatabaseTree } from "./DatabaseTree";
 import { TableDataTab } from "./TableDataTab";
 import { SqlEditorTab } from "./SqlEditorTab";

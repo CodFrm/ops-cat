@@ -74,8 +74,12 @@ func (a *App) ConnectSSH(req SSHConnectRequest) (string, error) {
 	}
 
 	// 解析跳板机链（递归，最大深度 5）
-	if sshCfg.JumpHostID > 0 {
-		jumpHosts, err := a.resolveJumpHosts(sshCfg.JumpHostID, 5)
+	jumpHostID := asset.SSHTunnelID
+	if jumpHostID == 0 {
+		jumpHostID = sshCfg.JumpHostID // backward compat
+	}
+	if jumpHostID > 0 {
+		jumpHosts, err := a.resolveJumpHosts(jumpHostID, 5)
 		if err != nil {
 			return "", fmt.Errorf("解析跳板机失败: %w", err)
 		}
@@ -220,9 +224,13 @@ func (a *App) ConnectSSHAsync(req SSHConnectRequest) (string, error) {
 		}
 
 		// 解析跳板机链
-		if sshCfg.JumpHostID > 0 {
+		jumpHostID := asset.SSHTunnelID
+		if jumpHostID == 0 {
+			jumpHostID = sshCfg.JumpHostID // backward compat
+		}
+		if jumpHostID > 0 {
 			emitEvent(SSHConnectEvent{Type: "progress", Step: "resolve", Message: "正在解析跳板机链..."})
-			jumpHosts, err := a.resolveJumpHosts(sshCfg.JumpHostID, 5)
+			jumpHosts, err := a.resolveJumpHosts(jumpHostID, 5)
 			if err != nil {
 				emitEvent(SSHConnectEvent{Type: "error", Error: fmt.Sprintf("解析跳板机失败: %s", err.Error())})
 				return

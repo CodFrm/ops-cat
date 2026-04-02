@@ -12,9 +12,8 @@ import {
 import logoLight from "@/assets/images/logo.png";
 import logoDark from "@/assets/images/logo-dark.png";
 import { useTranslation } from "react-i18next";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn, Tooltip, TooltipContent, TooltipTrigger } from "@opskat/ui";
 import { ModeToggle } from "@/components/mode-toggle";
-import { cn } from "@/lib/utils";
 import { useFullscreen } from "@/hooks/useFullscreen";
 
 interface SidebarProps {

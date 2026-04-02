@@ -1,7 +1,16 @@
 import { useTranslation } from "react-i18next";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Bot, Palette, HardDrive, Import, Keyboard, MonitorDot, Info, Activity } from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@opskat/ui";
+import { Bot, Palette, HardDrive, Import, Keyboard, MonitorDot, Info, Activity, Puzzle } from "lucide-react";
 import { ShortcutSettings } from "@/components/settings/ShortcutSettings";
 import { AISettingsSection } from "@/components/settings/AISettingsSection";
 import { ImportSection } from "@/components/settings/ImportSection";
@@ -9,6 +18,7 @@ import { BackupSection } from "@/components/settings/BackupSection";
 import { AppearanceSection, TerminalSection } from "@/components/settings/AppearanceSection";
 import { UpdateSection } from "@/components/settings/UpdateSection";
 import { SystemStatusSection } from "@/components/settings/SystemStatusSection";
+import { ExtensionSection } from "@/components/settings/ExtensionSection";
 
 export function SettingsPage() {
   const { t } = useTranslation();
@@ -52,6 +62,10 @@ export function SettingsPage() {
             <TabsTrigger value="status" className="gap-1">
               <Activity className="h-3.5 w-3.5" />
               {t("systemStatus.title")}
+            </TabsTrigger>
+            <TabsTrigger value="extensions" className="gap-1">
+              <Puzzle className="h-3.5 w-3.5" />
+              {t("extension.title")}
             </TabsTrigger>
           </TabsList>
 
@@ -101,6 +115,11 @@ export function SettingsPage() {
           {/* System Status */}
           <TabsContent value="status" className="space-y-4">
             <SystemStatusSection />
+          </TabsContent>
+
+          {/* Extensions */}
+          <TabsContent value="extensions" className="space-y-4">
+            <ExtensionSection />
           </TabsContent>
         </Tabs>
       </div>

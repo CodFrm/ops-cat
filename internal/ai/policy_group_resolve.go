@@ -84,6 +84,10 @@ func fetchPolicyGroups(ctx context.Context, ids []string) []*policy_group_entity
 			if pg := policy_group_entity.FindBuiltin(id); pg != nil {
 				result = append(result, pg)
 			}
+		} else if policy_group_entity.IsExtensionID(id) {
+			if pg := policy_group_entity.FindExtensionGroup(id); pg != nil {
+				result = append(result, pg)
+			}
 		} else {
 			if dbID, err := strconv.ParseInt(id, 10, 64); err == nil {
 				dbIDs = append(dbIDs, dbID)

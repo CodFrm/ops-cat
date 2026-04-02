@@ -5,10 +5,9 @@ import { PolicyTagEditor, type PolicyVariant } from "@/components/asset/PolicyTa
 import { PolicyTestPanel } from "@/components/asset/PolicyTestPanel";
 import { PolicyGroupSelector } from "@/components/asset/PolicyGroupSelector";
 import { PolicyGroupManager } from "@/components/asset/PolicyGroupManager";
-import { Button } from "@/components/ui/button";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Button, ConfirmDialog } from "@opskat/ui";
 
-type PolicyType = "ssh" | "database" | "redis";
+type PolicyType = string;
 
 export interface PolicyList {
   key: string;
@@ -57,7 +56,13 @@ export function CommandPolicyCard({
   const isGroup = !!groupID;
 
   const managerTab =
-    policyType === "ssh" ? ("command" as const) : policyType === "database" ? ("query" as const) : ("redis" as const);
+    policyType === "ssh"
+      ? ("command" as const)
+      : policyType === "database"
+        ? ("query" as const)
+        : policyType === "redis"
+          ? ("redis" as const)
+          : (policyType as string);
 
   return (
     <div className="rounded-xl border bg-card p-4">

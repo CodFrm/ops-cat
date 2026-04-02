@@ -77,7 +77,7 @@ func handleExecRedis(ctx context.Context, args map[string]any) (string, error) {
 		cfg.Database = int(argInt64(args, "db"))
 	}
 
-	client, closer, err := getOrDialRedis(ctx, assetID, cfg)
+	client, closer, err := getOrDialRedis(ctx, asset, cfg)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to Redis: %w", err)
 	}
@@ -101,16 +101,16 @@ func handleExecRedis(ctx context.Context, args map[string]any) (string, error) {
 	return ExecuteRedis(ctx, client, command)
 }
 
-func getOrDialRedis(ctx context.Context, assetID int64, cfg *asset_entity.RedisConfig) (*redis.Client, io.Closer, error) {
+func getOrDialRedis(ctx context.Context, asset *asset_entity.Asset, cfg *asset_entity.RedisConfig) (*redis.Client, io.Closer, error) {
 	dialFn := func() (*redis.Client, io.Closer, error) {
 		password, err := credential_resolver.Default().ResolveRedisPassword(ctx, cfg)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to resolve credentials: %w", err)
 		}
-		return connpool.DialRedis(ctx, cfg, password, getSSHPool(ctx))
+		return connpool.DialRedis(ctx, asset, cfg, password, getSSHPool(ctx))
 	}
 	if cache := getRedisCache(ctx); cache != nil {
-		return cache.GetOrDial(assetID, dialFn)
+		return cache.GetOrDial(asset.ID, dialFn)
 	}
 	return dialFn()
 }

@@ -8,12 +8,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/opskat/opskat/internal/model/entity/ai_provider_entity"
-	"github.com/opskat/opskat/internal/status"
-
-	"github.com/cago-frame/cago/pkg/logger"
 	"github.com/go-gormigrate/gormigrate/v2"
-	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -22,20 +17,24 @@ func migration202603260001() *gormigrate.Migration {
 		ID: "202603260001",
 		Migrate: func(tx *gorm.DB) error {
 			// 1. 创建 ai_providers 表
-			if err := tx.AutoMigrate(&ai_provider_entity.AIProvider{}); err != nil {
+			if err := tx.Exec(`CREATE TABLE IF NOT EXISTS ai_providers (
+				id         INTEGER PRIMARY KEY AUTOINCREMENT,
+				name       VARCHAR(100) NOT NULL,
+				type       VARCHAR(50)  NOT NULL,
+				api_base   VARCHAR(500) NOT NULL,
+				api_key    TEXT,
+				model      VARCHAR(100),
+				is_active  INTEGER DEFAULT 0,
+				createtime INTEGER,
+				updatetime INTEGER
+			)`).Error; err != nil {
 				return err
 			}
 
 			// 2. Conversation 表新增 provider_id 字段
 			if !tx.Migrator().HasColumn("conversations", "provider_id") {
 				if err := tx.Exec("ALTER TABLE conversations ADD COLUMN provider_id INTEGER DEFAULT 0").Error; err != nil {
-					logger.Default().Warn("migration 202603260001: 添加 conversations.provider_id 列失败", zap.Error(err))
-					status.Add(status.Entry{
-						Level:   status.LevelWarn,
-						Source:  "migration",
-						Message: "添加 conversations.provider_id 列失败",
-						Detail:  err.Error(),
-					})
+					return err
 				}
 			}
 
@@ -43,9 +42,6 @@ func migration202603260001() *gormigrate.Migration {
 			migrateConfigToDB(tx)
 
 			return nil
-		},
-		Rollback: func(tx *gorm.DB) error {
-			return tx.Migrator().DropTable("ai_providers")
 		},
 	}
 }
@@ -76,17 +72,10 @@ func migrateConfigToDB(tx *gorm.DB) {
 	}
 
 	now := time.Now().Unix()
-	provider := &ai_provider_entity.AIProvider{
-		Name:       "OpenAI Compatible",
-		Type:       "openai",
-		APIBase:    cfg.AIAPIBase,
-		APIKey:     cfg.AIAPIKey, // 已加密，直接迁移
-		Model:      cfg.AIModel,
-		IsActive:   true,
-		Createtime: now,
-		Updatetime: now,
-	}
-	if err := tx.Create(provider).Error; err != nil {
+	if err := tx.Exec(
+		"INSERT INTO ai_providers (name, type, api_base, api_key, model, is_active, createtime, updatetime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		"OpenAI Compatible", "openai", cfg.AIAPIBase, cfg.AIAPIKey, cfg.AIModel, 1, now, now,
+	).Error; err != nil {
 		// 最佳努力迁移，config.json 不会丢失
 		fmt.Printf("migrate AI config to database: %v\n", err)
 	}

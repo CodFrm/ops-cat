@@ -9,12 +9,18 @@ import {forward_entity} from '../models';
 import {group_entity} from '../models';
 import {credential_entity} from '../models';
 import {backup_svc} from '../models';
+import {extension_svc} from '../models';
+import {extension} from '../models';
 import {sshpool} from '../models';
 import {status} from '../models';
 import {import_svc} from '../models';
 import {audit_repo} from '../models';
 import {ai} from '../models';
 import {sftp_svc} from '../models';
+
+export function CallExtensionAction(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function CallExtensionTool(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function CancelGitHubAuth():Promise<void>;
 
@@ -64,9 +70,13 @@ export function DetectOpsctl():Promise<app.OpsctlInfo>;
 
 export function DetectSkills():Promise<Array<app.SkillTarget>>;
 
+export function DisableExtension(arg1:string):Promise<void>;
+
 export function DisconnectSSH(arg1:string):Promise<void>;
 
 export function DownloadAndInstallUpdate(arg1:boolean):Promise<void>;
+
+export function EnableExtension(arg1:string):Promise<void>;
 
 export function EncryptPassword(arg1:string):Promise<string>;
 
@@ -96,6 +106,8 @@ export function GetAsset(arg1:number):Promise<asset_entity.Asset>;
 
 export function GetAssetPassword(arg1:number):Promise<string>;
 
+export function GetAvailableAssetTypes():Promise<Array<app.AssetTypeInfo>>;
+
 export function GetAvailableMirrors():Promise<Array<update_svc.MirrorInfo>>;
 
 export function GetCredentialPublicKey(arg1:number):Promise<string>;
@@ -106,9 +118,15 @@ export function GetCurrentConversationID():Promise<number>;
 
 export function GetDataDir():Promise<string>;
 
+export function GetDecryptedExtensionConfig(arg1:number,arg2:string):Promise<string>;
+
 export function GetDefaultPolicy(arg1:string):Promise<string>;
 
 export function GetDownloadMirror():Promise<string>;
+
+export function GetExtensionDetail(arg1:string):Promise<extension_svc.ExtensionInfo>;
+
+export function GetExtensionManifest(arg1:string):Promise<extension.Manifest>;
 
 export function GetGitHubToken():Promise<string>;
 
@@ -146,6 +164,10 @@ export function ImportTabbySelected(arg1:Array<number>,arg2:string,arg3:boolean)
 
 export function InitAIProvider():Promise<void>;
 
+export function InstallExtension():Promise<extension_svc.ExtensionInfo>;
+
+export function InstallExtensionFromDirectory():Promise<extension_svc.ExtensionInfo>;
+
 export function InstallOpsctl(arg1:string):Promise<string>;
 
 export function InstallSkills():Promise<void>;
@@ -170,6 +192,8 @@ export function ListForwardConfigs():Promise<Array<app.ForwardConfigWithStatus>>
 
 export function ListGroups():Promise<Array<group_entity.Group>>;
 
+export function ListInstalledExtensions():Promise<Array<extension_svc.ExtensionInfo>>;
+
 export function ListLocalSSHKeys():Promise<Array<app.LocalSSHKeyInfo>>;
 
 export function ListPolicyGroups(arg1:string):Promise<Array<policy_group_entity.PolicyGroupItem>>;
@@ -191,6 +215,8 @@ export function PreviewSSHConfig():Promise<import_svc.PreviewResult>;
 export function PreviewTabbyConfig():Promise<import_svc.PreviewResult>;
 
 export function QueueAIMessage(arg1:number,arg2:string):Promise<void>;
+
+export function ReloadExtensions():Promise<void>;
 
 export function ResizeSSH(arg1:string,arg2:number,arg3:number):Promise<void>;
 
@@ -259,6 +285,8 @@ export function TestPolicyRule(arg1:app.PolicyTestRequest):Promise<app.PolicyTes
 export function TestRedisConnection(arg1:string,arg2:string):Promise<void>;
 
 export function TestSSHConnection(arg1:string,arg2:string):Promise<void>;
+
+export function UninstallExtension(arg1:string,arg2:boolean):Promise<void>;
 
 export function UpdateAIProvider(arg1:number,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string,arg7:number,arg8:number):Promise<void>;
 

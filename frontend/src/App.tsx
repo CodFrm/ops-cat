@@ -2,8 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { ThemeProvider } from "@/components/theme-provider";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider, Toaster } from "@opskat/ui";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { AssetTree } from "@/components/layout/AssetTree";
 import { MainPanel } from "@/components/layout/MainPanel";
@@ -20,12 +19,27 @@ import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { useTabStore, type InfoTabMeta } from "@/stores/tabStore";
+import { useExtensionStore } from "@/extension";
+import { bootstrapExtensions } from "@/extension/init";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { asset_entity, group_entity } from "../wailsjs/go/models";
 import { EventsOn, WindowToggleMaximise } from "../wailsjs/runtime/runtime";
 
 function App() {
   const { t } = useTranslation();
+
+  // 异步加载数据，不阻塞首屏渲染
+  useEffect(() => {
+    bootstrapExtensions().catch((err) => console.error("Extension bootstrap failed:", err));
+    useAssetStore
+      .getState()
+      .fetchAssets()
+      .catch((err) => console.error("Fetch assets failed:", err));
+    useAssetStore
+      .getState()
+      .fetchGroups()
+      .catch((err) => console.error("Fetch groups failed:", err));
+  }, []);
 
   // 监听外部数据变更（opsctl 等），自动刷新 UI
   useEffect(() => {
@@ -250,6 +264,28 @@ function App() {
       useQueryStore.getState().openQueryTab(asset);
       return;
     }
+
+    // Check if this is an extension asset type
+    const ext = useExtensionStore.getState().getExtensionForAssetType(asset.Type);
+    if (ext) {
+      const connectPage = ext.manifest.frontend?.pages.find((p) => p.slot === "asset.connect");
+      if (connectPage) {
+        useTabStore.getState().openTab({
+          id: `ext-${asset.ID}-${connectPage.id}`,
+          type: "page",
+          label: asset.Name,
+          icon: ext.manifest.icon,
+          meta: {
+            type: "page",
+            pageId: connectPage.id,
+            extensionName: ext.name,
+            assetId: asset.ID,
+          },
+        });
+        return;
+      }
+    }
+
     if (asset.Type !== "ssh") return;
     try {
       await connect(asset);

@@ -1,4 +1,4 @@
-import { useResizeHandle } from "@/hooks/useResizeHandle";
+import { useResizeHandle } from "@opskat/ui";
 import { RedisKeyBrowser } from "./RedisKeyBrowser";
 import { RedisKeyDetail } from "./RedisKeyDetail";
 

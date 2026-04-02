@@ -1,4 +1,4 @@
-.PHONY: dev run build build-embed clean install build-cli install-cli lint test test-cover install-skill
+.PHONY: dev run build build-embed clean install build-cli install-cli lint test test-cover install-skill devserver build-devserver-ui
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
@@ -65,6 +65,21 @@ test-cover:
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "覆盖率报告已生成: coverage.html"
 	@open coverage.html 2>/dev/null || xdg-open coverage.html 2>/dev/null || echo "请手动打开 coverage.html"
+
+# 构建 DevServer UI 前端
+build-devserver-ui:
+	cd frontend/packages/devserver-ui && pnpm build
+	@touch cmd/devserver/embed.go
+
+# 运行扩展 DevServer（需指定 EXT=扩展名，如 make devserver EXT=oss）
+devserver: build-devserver-ui
+ifndef EXT
+	$(error EXT is required. Usage: make devserver EXT=oss)
+endif
+	$(MAKE) -C ../extensions build EXT=$(EXT)
+	go run ./cmd/devserver/ \
+		--ext-dir ../extensions/extensions/$(EXT)/dist \
+		--manifest ../extensions/extensions/$(EXT)/manifest.json
 
 # 安装 Claude Code plugin（创建 symlink，注册 marketplace + plugin）
 install-skill:

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, XCircle, ChevronLeft, ChevronRight, Info, RefreshCw, Unplug, Calendar } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import {
+  Button,
   Select,
   SelectContent,
   SelectGroup,
@@ -10,10 +10,17 @@ import {
   SelectLabel,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+} from "@opskat/ui";
 import { ListAuditLogs, ListAuditSessions, GetSSHPoolConnections } from "../../../wailsjs/go/app/App";
 import { audit_entity, audit_repo, sshpool } from "../../../wailsjs/go/models";
 

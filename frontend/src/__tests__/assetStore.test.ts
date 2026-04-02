@@ -24,6 +24,7 @@ describe("assetStore", () => {
       selectedAssetId: null,
       selectedGroupId: null,
       loading: false,
+      initialized: false,
     });
   });
 
@@ -190,6 +191,33 @@ describe("assetStore", () => {
       useAssetStore.getState().selectAsset(42);
       useAssetStore.getState().selectAsset(null);
       expect(useAssetStore.getState().selectedAssetId).toBeNull();
+    });
+  });
+
+  describe("initialized", () => {
+    it("starts as false", () => {
+      expect(useAssetStore.getState().initialized).toBe(false);
+    });
+
+    it("becomes true after fetchAssets completes", async () => {
+      vi.mocked(ListAssets).mockResolvedValue([]);
+      await useAssetStore.getState().fetchAssets();
+      expect(useAssetStore.getState().initialized).toBe(true);
+    });
+
+    it("becomes true even when fetchAssets returns null", async () => {
+      vi.mocked(ListAssets).mockResolvedValue(null as any);
+      await useAssetStore.getState().fetchAssets();
+      expect(useAssetStore.getState().initialized).toBe(true);
+    });
+
+    it("stays false when fetchAssets throws", async () => {
+      vi.mocked(ListAssets).mockRejectedValue(new Error("fail"));
+      await useAssetStore
+        .getState()
+        .fetchAssets()
+        .catch(() => {});
+      expect(useAssetStore.getState().initialized).toBe(false);
     });
   });
 

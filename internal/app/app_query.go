@@ -35,7 +35,9 @@ func (a *App) TestDatabaseConnection(configJSON string, plainPassword string) er
 	ctx, cancel := context.WithTimeout(a.langCtx(), 10*time.Second)
 	defer cancel()
 
-	db, tunnel, err := connpool.DialDatabase(ctx, &cfg, password, a.sshPool)
+	// 测试连接场景没有持久化的 Asset，使用零值让 backward compat 生效
+	testAsset := &asset_entity.Asset{}
+	db, tunnel, err := connpool.DialDatabase(ctx, testAsset, &cfg, password, a.sshPool)
 	if err != nil {
 		return err
 	}
@@ -71,7 +73,9 @@ func (a *App) TestRedisConnection(configJSON string, plainPassword string) error
 	ctx, cancel := context.WithTimeout(a.langCtx(), 10*time.Second)
 	defer cancel()
 
-	client, tunnel, err := connpool.DialRedis(ctx, &cfg, password, a.sshPool)
+	// 测试连接场景没有持久化的 Asset，使用零值让 backward compat 生效
+	testAsset := &asset_entity.Asset{}
+	client, tunnel, err := connpool.DialRedis(ctx, testAsset, &cfg, password, a.sshPool)
 	if err != nil {
 		return err
 	}
@@ -112,7 +116,7 @@ func (a *App) ExecuteSQL(assetID int64, sqlText string, database string) (string
 	ctx, cancel := context.WithTimeout(a.langCtx(), 30*time.Second)
 	defer cancel()
 
-	db, tunnel, err := connpool.DialDatabase(ctx, cfg, password, a.sshPool)
+	db, tunnel, err := connpool.DialDatabase(ctx, asset, cfg, password, a.sshPool)
 	if err != nil {
 		return "", fmt.Errorf("连接数据库失败: %w", err)
 	}
@@ -152,7 +156,7 @@ func (a *App) ExecuteRedis(assetID int64, command string, db int) (string, error
 	ctx, cancel := context.WithTimeout(a.langCtx(), 30*time.Second)
 	defer cancel()
 
-	client, tunnel, err := connpool.DialRedis(ctx, cfg, password, a.sshPool)
+	client, tunnel, err := connpool.DialRedis(ctx, asset, cfg, password, a.sshPool)
 	if err != nil {
 		return "", fmt.Errorf("连接 Redis 失败: %w", err)
 	}
@@ -192,7 +196,7 @@ func (a *App) ExecuteRedisArgs(assetID int64, args []string, db int) (string, er
 	ctx, cancel := context.WithTimeout(a.langCtx(), 30*time.Second)
 	defer cancel()
 
-	client, tunnel, err := connpool.DialRedis(ctx, cfg, password, a.sshPool)
+	client, tunnel, err := connpool.DialRedis(ctx, asset, cfg, password, a.sshPool)
 	if err != nil {
 		return "", fmt.Errorf("连接 Redis 失败: %w", err)
 	}

@@ -18,6 +18,7 @@ interface AssetState {
   selectedAssetId: number | null;
   selectedGroupId: number | null;
   loading: boolean;
+  initialized: boolean;
 
   fetchAssets: (assetType?: string, groupId?: number) => Promise<void>;
   fetchGroups: () => Promise<void>;
@@ -40,12 +41,13 @@ export const useAssetStore = create<AssetState>((set, get) => ({
   selectedAssetId: null,
   selectedGroupId: null,
   loading: false,
+  initialized: false,
 
   fetchAssets: async (assetType = "", groupId = 0) => {
     set({ loading: true });
     try {
       const assets = await ListAssets(assetType, groupId);
-      set({ assets: assets || [] });
+      set({ assets: assets || [], initialized: true });
     } finally {
       set({ loading: false });
     }

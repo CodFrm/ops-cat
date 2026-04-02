@@ -12,8 +12,7 @@ import {
   AlertTriangle,
   Fingerprint,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button, Input } from "@opskat/ui";
 import { useTerminalStore, type ConnectionState, type ConnectionStep } from "@/stores/terminalStore";
 
 const STEPS: { key: ConnectionStep; icon: typeof Server }[] = [

@@ -7,10 +7,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+  Button,
+  Input,
+  Textarea,
+} from "@opskat/ui";
 import { useWailsEvent } from "@/hooks/useWailsEvent";
 import { RespondOpsctlApproval } from "../../../wailsjs/go/app/App";
 import { ai } from "../../../wailsjs/go/models";

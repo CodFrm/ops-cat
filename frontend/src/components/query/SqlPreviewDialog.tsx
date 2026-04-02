@@ -9,8 +9,8 @@ import {
   AlertDialogFooter,
   AlertDialogCancel,
   AlertDialogAction,
-} from "@/components/ui/alert-dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
+  ScrollArea,
+} from "@opskat/ui";
 
 interface SqlPreviewDialogProps {
   open: boolean;

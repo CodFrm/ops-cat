@@ -4,6 +4,8 @@ go 1.25.0
 
 require (
 	github.com/cago-frame/cago v0.0.0-20260307042250-c4ff92923947
+	github.com/coder/websocket v1.8.14
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-gormigrate/gormigrate/v2 v2.1.2
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
@@ -13,6 +15,7 @@ require (
 	github.com/redis/go-redis/v9 v9.7.0
 	github.com/smartystreets/goconvey v1.8.1
 	github.com/stretchr/testify v1.11.1
+	github.com/tetratelabs/wazero v1.11.0
 	github.com/wailsapp/wails/v2 v2.10.2
 	github.com/zalando/go-keyring v0.2.8
 	go.uber.org/mock v0.6.0

@@ -19,8 +19,14 @@ type AIContext struct {
 
 // PromptBuilder 动态构建 System Prompt
 type PromptBuilder struct {
-	language string
-	context  AIContext
+	language         string
+	context          AIContext
+	extensionSkillMD string
+}
+
+// SetExtensionSkillMD sets the extension SKILL.md content to inject into the system prompt.
+func (b *PromptBuilder) SetExtensionSkillMD(md string) {
+	b.extensionSkillMD = md
 }
 
 // NewPromptBuilder 创建 PromptBuilder
@@ -54,6 +60,11 @@ func (b *PromptBuilder) Build() string {
 
 	// 6. 用户拒绝操作引导
 	parts = append(parts, b.buildUserDenialGuidance())
+
+	// 7. Extension tools guide
+	if b.extensionSkillMD != "" {
+		parts = append(parts, b.extensionSkillMD)
+	}
 
 	return strings.Join(parts, "\n\n")
 }

@@ -96,8 +96,12 @@ func (r *Resolver) ResolveJumpHosts(ctx context.Context, jumpHostID int64, maxDe
 		Key:      key,
 	}
 
-	if jumpCfg.JumpHostID > 0 {
-		parentHosts, err := r.ResolveJumpHosts(ctx, jumpCfg.JumpHostID, maxDepth-1)
+	nextJumpID := jumpAsset.SSHTunnelID
+	if nextJumpID == 0 {
+		nextJumpID = jumpCfg.JumpHostID // backward compat
+	}
+	if nextJumpID > 0 {
+		parentHosts, err := r.ResolveJumpHosts(ctx, nextJumpID, maxDepth-1)
 		if err != nil {
 			return nil, err
 		}
@@ -182,8 +186,12 @@ func (r *Resolver) ResolveSSHConnectConfig(ctx context.Context, assetID int64) (
 	}
 
 	var jumpHosts []ssh_svc.JumpHostEntry
-	if sshCfg.JumpHostID > 0 {
-		jumpHosts, err = r.ResolveJumpHosts(ctx, sshCfg.JumpHostID, 5)
+	jumpHostID := asset.SSHTunnelID
+	if jumpHostID == 0 {
+		jumpHostID = sshCfg.JumpHostID // backward compat
+	}
+	if jumpHostID > 0 {
+		jumpHosts, err = r.ResolveJumpHosts(ctx, jumpHostID, 5)
 		if err != nil {
 			return nil, "", "", nil, fmt.Errorf("解析跳板机失败: %w", err)
 		}

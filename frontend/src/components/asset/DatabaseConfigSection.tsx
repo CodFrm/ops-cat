@@ -1,8 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+import { Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from "@opskat/ui";
 import { AssetSelect } from "@/components/asset/AssetSelect";
 import { PasswordSourceField } from "@/components/asset/PasswordSourceField";
 import { credential_entity } from "../../../wailsjs/go/models";
@@ -23,8 +20,8 @@ export interface DatabaseConfigSectionProps {
   setTls: (v: boolean) => void;
   readOnly: boolean;
   setReadOnly: (v: boolean) => void;
-  dbSshAssetId: number;
-  setDbSshAssetId: (v: number) => void;
+  sshTunnelId: number;
+  setSshTunnelId: (v: number) => void;
   params: string;
   setParams: (v: string) => void;
   // Password fields
@@ -55,8 +52,8 @@ export function DatabaseConfigSection({
   setTls,
   readOnly,
   setReadOnly,
-  dbSshAssetId,
-  setDbSshAssetId,
+  sshTunnelId,
+  setSshTunnelId,
   params,
   setParams,
   password,
@@ -158,8 +155,8 @@ export function DatabaseConfigSection({
       <div className="grid gap-2">
         <Label>{t("asset.sshTunnel")}</Label>
         <AssetSelect
-          value={dbSshAssetId}
-          onValueChange={setDbSshAssetId}
+          value={sshTunnelId}
+          onValueChange={setSshTunnelId}
           filterType="ssh"
           placeholder={t("asset.sshTunnelNone")}
         />

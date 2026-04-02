@@ -23,11 +23,18 @@ import {
   ChevronDown,
   Ban,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Input } from "@/components/ui/input";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Button } from "@/components/ui/button";
+import {
+  cn,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Input,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+  Button,
+} from "@opskat/ui";
 import {
   AwsIcon,
   AzureIcon,
