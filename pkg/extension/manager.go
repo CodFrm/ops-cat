@@ -2,6 +2,8 @@ package extension
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -81,12 +83,14 @@ func LoadLocales(dir string) map[string]map[string]string {
 
 // Manager handles extension discovery, loading, and lifecycle.
 type Manager struct {
-	dir        string
-	newHost    func(extName string) HostProvider
-	logger     *zap.Logger
-	mu         sync.RWMutex
-	extensions map[string]*Extension
-	wasmCache  wazero.CompilationCache
+	dir          string
+	newHost      func(extName string) HostProvider
+	logger       *zap.Logger
+	mu           sync.RWMutex
+	extensions   map[string]*Extension
+	wasmCache    wazero.CompilationCache
+	installMu    sync.Mutex
+	installLocks map[string]*sync.Mutex
 }
 
 func NewManager(dir string, newHost func(extName string) HostProvider, logger *zap.Logger) *Manager {
@@ -96,11 +100,12 @@ func NewManager(dir string, newHost func(extName string) HostProvider, logger *z
 		logger.Warn("failed to create wasm compilation cache, will compile without cache", zap.Error(err))
 	}
 	return &Manager{
-		dir:        dir,
-		newHost:    newHost,
-		logger:     logger,
-		extensions: make(map[string]*Extension),
-		wasmCache:  cache,
+		dir:          dir,
+		newHost:      newHost,
+		logger:       logger,
+		extensions:   make(map[string]*Extension),
+		wasmCache:    cache,
+		installLocks: make(map[string]*sync.Mutex),
 	}
 }
 
@@ -257,6 +262,17 @@ func LoadManifestInfo(dir string) (*ManifestInfo, error) {
 	return &ManifestInfo{Name: manifest.Name, Dir: dir, Manifest: manifest, Locales: LoadLocales(dir)}, nil
 }
 
+func (m *Manager) installLock(name string) *sync.Mutex {
+	m.installMu.Lock()
+	defer m.installMu.Unlock()
+	mu, ok := m.installLocks[name]
+	if !ok {
+		mu = &sync.Mutex{}
+		m.installLocks[name] = mu
+	}
+	return mu
+}
+
 func (m *Manager) LoadExtension(ctx context.Context, dir string) (*Manifest, error) {
 	manifestPath := filepath.Join(dir, "manifest.json")
 	data, err := os.ReadFile(manifestPath) //nolint:gosec // extension directories are trusted
@@ -275,12 +291,23 @@ func (m *Manager) LoadExtension(ctx context.Context, dir string) (*Manifest, err
 		return nil, fmt.Errorf("read wasm binary: %w", err)
 	}
 
+	sum := sha256.Sum256(wasmBytes)
+	actualSHA := hex.EncodeToString(sum[:])
+	if !strings.EqualFold(actualSHA, manifest.BinarySHA256) {
+		return nil, fmt.Errorf("binary sha256 mismatch: manifest=%s actual=%s", manifest.BinarySHA256, actualSHA)
+	}
+
+	const maxSkillMDBytes = 4 * 1024
 	skillMD := ""
 	if skillData, err := os.ReadFile(filepath.Join(dir, "SKILL.md")); err == nil { //nolint:gosec // path constructed from trusted extension directory
+		if len(skillData) > maxSkillMDBytes {
+			return nil, fmt.Errorf("SKILL.md exceeds %d bytes (got %d)", maxSkillMDBytes, len(skillData))
+		}
 		skillMD = string(skillData)
 	}
 
 	host := m.newHost(manifest.Name)
+	host = NewCapabilityHost(host, manifest, dir) // enforce capabilities declared in manifest
 	plugin, err := LoadPlugin(ctx, manifest, wasmBytes, host, m.wasmCache)
 	if err != nil {
 		host.CloseAll()
@@ -380,6 +407,10 @@ func (m *Manager) Install(ctx context.Context, sourcePath string) (*Manifest, er
 	if err != nil {
 		return nil, err
 	}
+
+	lock := m.installLock(manifest.Name)
+	lock.Lock()
+	defer lock.Unlock()
 
 	// Unload existing if already loaded
 	m.mu.RLock()

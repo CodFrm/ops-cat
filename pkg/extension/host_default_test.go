@@ -91,9 +91,10 @@ func TestDefaultHostProvider_IOReadEOF(t *testing.T) {
 		defer host.CloseAll()
 
 		id, _, err := host.IOOpen(IOOpenParams{
-			Type:   "http",
-			Method: "GET",
-			URL:    srv.URL,
+			Type:         "http",
+			Method:       "GET",
+			URL:          srv.URL,
+			AllowPrivate: true, // httptest server binds to loopback
 		})
 		So(err, ShouldBeNil)
 

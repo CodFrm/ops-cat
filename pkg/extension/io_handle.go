@@ -20,7 +20,12 @@ type IOMeta struct {
 	Headers     map[string]string `json:"headers,omitempty"`
 }
 
+// maxIOHandles is the upper bound on handle IDs. We use half the uint32 range
+// to stay safely below the WASM ABI uint32 boundary and allow overflow detection.
+const maxIOHandles = (1 << 31) - 1
+
 type ioEntry struct {
+	id     uint32    // stored for defense-in-depth reuse detection in get()
 	reader io.Reader
 	writer io.Writer
 	closer io.Closer
@@ -83,6 +88,17 @@ func (m *IOHandleManager) OpenFile(path string, mode string) (uint32, IOMeta, er
 	}
 
 	id := m.nextID.Add(1) - 1
+	if id >= maxIOHandles {
+		// Handle IDs are uint32 values passed over the WASM ABI boundary; cap at half
+		// the uint32 range to detect exhaustion before wrapping would cause aliasing.
+		if entry.closer != nil {
+			if closeErr := entry.closer.Close(); closeErr != nil {
+				logger.Default().Warn("close entry after handle exhaustion", zap.Error(closeErr))
+			}
+		}
+		return 0, IOMeta{}, fmt.Errorf("handle ID exhausted")
+	}
+	entry.id = id
 	m.mu.Lock()
 	m.handles[id] = &entry
 	m.mu.Unlock()
@@ -90,12 +106,17 @@ func (m *IOHandleManager) OpenFile(path string, mode string) (uint32, IOMeta, er
 }
 
 // Register adds an externally-created handle entry and returns its ID.
-func (m *IOHandleManager) Register(r io.Reader, w io.Writer, c io.Closer, meta IOMeta) uint32 {
+// Returns 0 and does not register if handle IDs are exhausted.
+func (m *IOHandleManager) Register(r io.Reader, w io.Writer, c io.Closer, meta IOMeta) (uint32, error) {
 	id := m.nextID.Add(1) - 1
+	if id >= maxIOHandles {
+		// Handle IDs passed over WASM ABI are uint32; cap at half range to prevent aliasing.
+		return 0, fmt.Errorf("handle ID exhausted")
+	}
 	m.mu.Lock()
-	m.handles[id] = &ioEntry{reader: r, writer: w, closer: c, meta: meta}
+	m.handles[id] = &ioEntry{id: id, reader: r, writer: w, closer: c, meta: meta}
 	m.mu.Unlock()
-	return id
+	return id, nil
 }
 
 func (m *IOHandleManager) Read(id uint32, buf []byte) (int, error) {
@@ -165,14 +186,23 @@ func (m *IOHandleManager) OpenHTTP(params IOOpenParams, dial DialFunc) (uint32, 
 		return 0, IOMeta{}, err
 	}
 
+	id := m.nextID.Add(1) - 1
+	if id >= maxIOHandles {
+		// Handle IDs passed over WASM ABI are uint32; cap at half range to prevent aliasing.
+		if closeErr := h.Close(); closeErr != nil {
+			logger.Default().Warn("close http handle after exhaustion", zap.Error(closeErr))
+		}
+		return 0, IOMeta{}, fmt.Errorf("handle ID exhausted")
+	}
+
 	entry := &ioEntry{
+		id:     id,
 		reader: &httpReadAdapter{h: h},
 		writer: &httpWriteAdapter{h: h},
 		closer: &httpCloseAdapter{h: h},
 		http:   h,
 	}
 
-	id := m.nextID.Add(1) - 1
 	m.mu.Lock()
 	m.handles[id] = entry
 	m.mu.Unlock()
@@ -197,6 +227,9 @@ func (m *IOHandleManager) get(id uint32) (*ioEntry, error) {
 	e, ok := m.handles[id]
 	if !ok {
 		return nil, fmt.Errorf("handle %d not found", id)
+	}
+	if e.id != id {
+		return nil, fmt.Errorf("handle %d id mismatch (got %d)", id, e.id)
 	}
 	return e, nil
 }

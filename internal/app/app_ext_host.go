@@ -2,9 +2,13 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
+
+	"go.uber.org/zap"
 
 	"github.com/opskat/opskat/internal/repository/asset_repo"
 	"github.com/opskat/opskat/internal/repository/extension_data_repo"
@@ -29,8 +33,20 @@ func (g *appAssetConfigGetter) GetAssetConfig(assetID int64) (json.RawMessage, e
 	if asset.Config == "" {
 		return json.RawMessage("{}"), nil
 	}
+
+	bridge := g.app.extSvc.Bridge()
+	ext := bridge.GetExtensionByAssetType(asset.Type)
+	if ext != nil {
+		zap.L().Info("extension accessed asset config",
+			zap.String("extension", ext.Name),
+			zap.Int64("asset_id", assetID),
+			zap.String("asset_type", asset.Type),
+			zap.Bool("plaintext_allowed", ext.Manifest.CheckCredentialRead() == nil),
+		)
+	}
+
 	raw := json.RawMessage(asset.Config)
-	return decryptConfigPasswordFields(raw, asset.Type, g.app.extSvc.Bridge())
+	return decryptConfigPasswordFields(raw, asset.Type, bridge)
 }
 
 // appFileDialogOpener implements extension.FileDialogOpener
@@ -121,13 +137,19 @@ func getDecryptedExtConfig(assetID int64, bridge *extension.Bridge) (string, err
 }
 
 // decryptConfigPasswordFields decrypts fields marked as format:"password" in the configSchema.
+// When the extension does not declare capabilities.credentials="read", password fields are
+// replaced with opaque credential handles instead of plaintext.
 func decryptConfigPasswordFields(raw json.RawMessage, assetType string, bridge *extension.Bridge) (json.RawMessage, error) {
 	if bridge == nil {
 		return raw, nil
 	}
 	// Find the extension that provides this asset type
-	var schema map[string]any
-	for _, at := range bridge.GetAssetTypes() {
+	ext := bridge.GetExtensionByAssetType(assetType)
+	if ext == nil {
+		return raw, nil
+	}
+	schema := ext.Manifest.AssetTypes[0].ConfigSchema
+	for _, at := range ext.Manifest.AssetTypes {
 		if at.Type == assetType {
 			schema = at.ConfigSchema
 			break
@@ -140,6 +162,8 @@ func decryptConfigPasswordFields(raw json.RawMessage, assetType string, bridge *
 	if len(passwordFields) == 0 {
 		return raw, nil
 	}
+
+	allowPlaintext := ext.Manifest.CheckCredentialRead() == nil
 
 	var cfg map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &cfg); err != nil {
@@ -160,10 +184,27 @@ func decryptConfigPasswordFields(raw json.RawMessage, assetType string, bridge *
 			// May already be plaintext (e.g. test_connection); keep as-is
 			continue
 		}
-		b, _ := json.Marshal(decrypted)
-		cfg[field] = b
+		if allowPlaintext {
+			b, _ := json.Marshal(decrypted)
+			cfg[field] = b
+		} else {
+			handle := credentialHandleFor(ext.Name, assetType, field, encrypted)
+			handleJSON, _ := json.Marshal(map[string]string{
+				"__credential_handle": handle,
+			})
+			cfg[field] = handleJSON
+		}
 	}
 	return json.Marshal(cfg)
+}
+
+// credentialHandleFor creates an opaque handle for a credential field.
+// The handle is a deterministic hash that the host can use internally to
+// resolve the credential without exposing plaintext to the extension.
+// Format: "cred_<16hexchars>"
+func credentialHandleFor(extName, assetType, field, encrypted string) string {
+	h := sha256.Sum256([]byte(extName + ":" + assetType + ":" + field + ":" + encrypted))
+	return "cred_" + hex.EncodeToString(h[:8])
 }
 
 // appTunnelDialer implements extension.TunnelDialer using the SSH pool

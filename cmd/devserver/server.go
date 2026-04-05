@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -136,9 +137,21 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
-	data, _ := io.ReadAll(r.Body)
-	err := os.WriteFile(filepath.Join(s.host.dataDir, "config.json"), data, 0644)
+	// Limit body to 1 MB to prevent memory exhaustion
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	data, err := io.ReadAll(r.Body)
 	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body too large or unreadable"})
+		return
+	}
+	// Validate JSON before writing to prevent persistent corruption
+	var tmp any
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json: " + err.Error()})
+		return
+	}
+	// 0600 — prevent world-readable credentials on shared hosts
+	if err := os.WriteFile(filepath.Join(s.host.dataDir, "config.json"), data, 0600); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -236,10 +249,18 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) broadcast(msg any) {
+	// Snapshot client list under lock, then release before any network I/O
 	s.wsMu.Lock()
-	defer s.wsMu.Unlock()
-	for conn := range s.wsClients {
-		_ = wsjson.Write(context.Background(), conn, msg)
+	conns := make([]*websocket.Conn, 0, len(s.wsClients))
+	for c := range s.wsClients {
+		conns = append(conns, c)
+	}
+	s.wsMu.Unlock()
+
+	for _, c := range conns {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = wsjson.Write(ctx, c, msg)
+		cancel()
 	}
 }
 

@@ -55,20 +55,21 @@ var DefaultCommandPolicy = policy.DefaultCommandPolicy
 
 // Asset 通用资产实体（充血模型）
 type Asset struct {
-	ID          int64  `gorm:"column:id;primaryKey;autoIncrement"`
-	Name        string `gorm:"column:name;type:varchar(255);not null"`
-	Type        string `gorm:"column:type;type:varchar(50);not null;index"`
-	GroupID     int64  `gorm:"column:group_id;index"`
-	Icon        string `gorm:"column:icon;type:varchar(100)"`
-	Tags        string `gorm:"column:tags;type:text"`
-	Description string `gorm:"column:description;type:text"`
-	Config      string `gorm:"column:config;type:text"`
-	CmdPolicy   string `gorm:"column:command_policy;type:text"`
-	SortOrder   int    `gorm:"column:sort_order;default:0"`
-	SSHTunnelID int64  `gorm:"column:ssh_tunnel_id;default:0" json:"sshTunnelId"`
-	Status      int    `gorm:"column:status;default:1"`
-	Createtime  int64  `gorm:"column:createtime"`
-	Updatetime  int64  `gorm:"column:updatetime"`
+	ID            int64  `gorm:"column:id;primaryKey;autoIncrement"`
+	Name          string `gorm:"column:name;type:varchar(255);not null"`
+	Type          string `gorm:"column:type;type:varchar(50);not null;index"`
+	GroupID       int64  `gorm:"column:group_id;index"`
+	Icon          string `gorm:"column:icon;type:varchar(100)"`
+	Tags          string `gorm:"column:tags;type:text"`
+	Description   string `gorm:"column:description;type:text"`
+	Config        string `gorm:"column:config;type:text"`
+	CmdPolicy     string `gorm:"column:command_policy;type:text"`
+	SortOrder     int    `gorm:"column:sort_order;default:0"`
+	SSHTunnelID   int64  `gorm:"column:ssh_tunnel_id;default:0" json:"sshTunnelId"`
+	ExtensionName string `gorm:"column:extension_name;type:varchar(64);index" json:"extensionName,omitempty"`
+	Status        int    `gorm:"column:status;default:1"`
+	Createtime    int64  `gorm:"column:createtime"`
+	Updatetime    int64  `gorm:"column:updatetime"`
 }
 
 // TableName GORM表名

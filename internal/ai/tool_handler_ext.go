@@ -47,7 +47,11 @@ func handleExecTool(ctx context.Context, args map[string]any) (string, error) {
 	}
 
 	assetID := argInt64(args, "asset_id")
-	if assetID > 0 && ext.Manifest.Policies.Type != "" {
+	if ext.Manifest.Policies.Type != "" {
+		if assetID <= 0 {
+			return "", fmt.Errorf("exec_tool: %s.%s requires asset_id (extension declares policy type %q)",
+				extName, toolName, ext.Manifest.Policies.Type)
+		}
 		action, resource, err := ext.Plugin.CheckPolicy(ctx, toolName, argsJSON)
 		if err == nil && action != "" {
 			policyGroups := execToolExecutor.GetExtensionPolicyGroups(

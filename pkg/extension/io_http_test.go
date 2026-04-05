@@ -29,8 +29,9 @@ func TestHTTPHandle(t *testing.T) {
 			defer srv.Close()
 
 			h, err := newHTTPHandle(IOOpenParams{
-				Method: "GET",
-				URL:    srv.URL + "/test",
+				Method:       "GET",
+				URL:          srv.URL + "/test",
+				AllowPrivate: true, // httptest server binds to loopback
 			}, nil)
 			So(err, ShouldBeNil)
 			So(h, ShouldNotBeNil)
@@ -58,9 +59,10 @@ func TestHTTPHandle(t *testing.T) {
 			defer srv.Close()
 
 			h, err := newHTTPHandle(IOOpenParams{
-				Method:  "POST",
-				URL:     srv.URL + "/submit",
-				Headers: map[string]string{"Content-Type": "application/json"},
+				Method:       "POST",
+				URL:          srv.URL + "/submit",
+				Headers:      map[string]string{"Content-Type": "application/json"},
+				AllowPrivate: true, // httptest server binds to loopback
 			}, nil)
 			So(err, ShouldBeNil)
 
@@ -87,8 +89,9 @@ func TestHTTPHandle(t *testing.T) {
 			defer srv.Close()
 
 			h, err := newHTTPHandle(IOOpenParams{
-				Method: "POST",
-				URL:    srv.URL,
+				Method:       "POST",
+				URL:          srv.URL,
+				AllowPrivate: true, // httptest server binds to loopback
 			}, nil)
 			So(err, ShouldBeNil)
 
@@ -110,8 +113,9 @@ func TestHTTPHandle(t *testing.T) {
 			defer srv.Close()
 
 			h, err := newHTTPHandle(IOOpenParams{
-				Method: "GET",
-				URL:    srv.URL,
+				Method:       "GET",
+				URL:          srv.URL,
+				AllowPrivate: true, // httptest server binds to loopback
 			}, nil)
 			So(err, ShouldBeNil)
 
@@ -132,8 +136,9 @@ func TestHTTPHandle(t *testing.T) {
 			defer srv.Close()
 
 			h, err := newHTTPHandle(IOOpenParams{
-				Method: "GET",
-				URL:    srv.URL,
+				Method:       "GET",
+				URL:          srv.URL,
+				AllowPrivate: true, // httptest server binds to loopback
 			}, nil)
 			So(err, ShouldBeNil)
 
@@ -162,9 +167,10 @@ func TestHTTPHandle(t *testing.T) {
 			defer srv.Close()
 
 			h, err := newHTTPHandle(IOOpenParams{
-				Method:  "GET",
-				URL:     srv.URL,
-				Headers: map[string]string{"X-Custom": "test-value"},
+				Method:       "GET",
+				URL:          srv.URL,
+				Headers:      map[string]string{"X-Custom": "test-value"},
+				AllowPrivate: true, // httptest server binds to loopback
 			}, nil)
 			So(err, ShouldBeNil)
 
@@ -189,8 +195,9 @@ func TestHTTPHandle(t *testing.T) {
 			}
 
 			h, err := newHTTPHandle(IOOpenParams{
-				Method: "GET",
-				URL:    srv.URL,
+				Method:       "GET",
+				URL:          srv.URL,
+				AllowPrivate: true, // httptest server binds to loopback
 			}, customDial)
 			So(err, ShouldBeNil)
 
@@ -222,8 +229,9 @@ func TestIOHandleManagerHTTP(t *testing.T) {
 			defer srv.Close()
 
 			id, meta, err := mgr.OpenHTTP(IOOpenParams{
-				Method: "GET",
-				URL:    srv.URL,
+				Method:       "GET",
+				URL:          srv.URL,
+				AllowPrivate: true, // httptest server binds to loopback
 			}, nil)
 			So(err, ShouldBeNil)
 			So(id, ShouldBeGreaterThan, 0)
@@ -245,7 +253,8 @@ func TestIOHandleManagerHTTP(t *testing.T) {
 		Convey("Flush on non-HTTP handle returns error", func() {
 			// Register a plain handle (non-HTTP)
 			r := strings.NewReader("hello")
-			id := mgr.Register(r, nil, io.NopCloser(r), IOMeta{})
+			id, regErr := mgr.Register(r, nil, io.NopCloser(r), IOMeta{})
+			So(regErr, ShouldBeNil)
 
 			_, err := mgr.Flush(id)
 			So(err, ShouldNotBeNil)

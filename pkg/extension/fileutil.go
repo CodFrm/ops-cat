@@ -24,11 +24,19 @@ func extractZip(zipPath, destDir string) error {
 	}()
 
 	for _, f := range r.File {
-		name := filepath.Clean(f.Name)
-		if strings.Contains(name, "..") {
-			return fmt.Errorf("zip contains path traversal: %s", f.Name)
+		name := f.Name
+		// Reject if not a local relative path (handles .., absolute, drive letters)
+		if !filepath.IsLocal(name) {
+			return fmt.Errorf("zip contains unsafe path: %s", f.Name)
 		}
-		target := filepath.Join(destDir, name)
+		cleaned := filepath.Clean(name)
+		target := filepath.Join(destDir, cleaned)
+		// Verify the cleaned target is within destDir
+		absDest, _ := filepath.Abs(destDir)
+		absTarget, _ := filepath.Abs(target)
+		if !strings.HasPrefix(absTarget, absDest+string(filepath.Separator)) && absTarget != absDest {
+			return fmt.Errorf("zip entry escapes dest: %s", f.Name)
+		}
 
 		if f.FileInfo().IsDir() {
 			_ = os.MkdirAll(target, 0755)
@@ -80,6 +88,10 @@ func copyDir(src, dst string) error {
 
 		if info.IsDir() {
 			return os.MkdirAll(target, 0755)
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil // skip symlinks
 		}
 
 		data, err := os.ReadFile(path) //nolint:gosec // path from filepath.Walk within validated src directory

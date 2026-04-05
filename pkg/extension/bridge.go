@@ -25,22 +25,28 @@ type ExtPolicyGroup struct {
 	Policy        map[string]any
 }
 
+// SkillMDWithExtension pairs SKILL.md content with its originating extension name.
+type SkillMDWithExtension struct {
+	ExtensionName string
+	Content       string
+}
+
 // Bridge connects loaded extensions to the main app's tool, policy, and frontend systems.
 type Bridge struct {
 	mu              sync.RWMutex
 	extensions      map[string]*Extension
 	assetTypes      []ExtAssetType
 	policyGroups    []ExtPolicyGroup
-	defaultPolicies map[string][]string              // asset type → default policy group IDs
-	skillMDs        map[string]string                // asset type → SKILL.md content
-	toolIndex       map[string]map[string]*Extension // extName → toolName → Extension
+	defaultPolicies map[string][]string                  // asset type → default policy group IDs
+	skillMDs        map[string]SkillMDWithExtension       // asset type → SKILL.md content + ext name
+	toolIndex       map[string]map[string]*Extension      // extName → toolName → Extension
 }
 
 func NewBridge() *Bridge {
 	return &Bridge{
 		extensions:      make(map[string]*Extension),
 		defaultPolicies: make(map[string][]string),
-		skillMDs:        make(map[string]string),
+		skillMDs:        make(map[string]SkillMDWithExtension),
 		toolIndex:       make(map[string]map[string]*Extension),
 	}
 }
@@ -60,7 +66,15 @@ func (b *Bridge) Register(ext *Extension) {
 			I18n:          at.I18n,
 		})
 		if ext.SkillMD != "" {
-			b.skillMDs[at.Type] = ext.SkillMD
+			if existing, ok := b.skillMDs[at.Type]; ok && existing.ExtensionName != ext.Name {
+				// Collision: another extension already registered SKILL.md for this asset type.
+				// Prefer the first registration; silently skip the duplicate.
+				continue
+			}
+			b.skillMDs[at.Type] = SkillMDWithExtension{
+				ExtensionName: ext.Name,
+				Content:       ext.SkillMD,
+			}
 		}
 		if len(m.Policies.Default) > 0 {
 			b.defaultPolicies[at.Type] = m.Policies.Default
@@ -124,15 +138,8 @@ func (b *Bridge) Unregister(name string) {
 
 	delete(b.toolIndex, name)
 
-	for key := range b.skillMDs {
-		found := false
-		for _, at := range b.assetTypes {
-			if at.Type == key {
-				found = true
-				break
-			}
-		}
-		if !found {
+	for key, entry := range b.skillMDs {
+		if entry.ExtensionName == name {
 			delete(b.skillMDs, key)
 			delete(b.defaultPolicies, key)
 			policy.UnregisterDefaultPolicy(key)
@@ -175,7 +182,19 @@ func (b *Bridge) GetDefaultPolicyGroups(assetType string) []string {
 func (b *Bridge) GetSkillMD(assetType string) string {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return b.skillMDs[assetType]
+	return b.skillMDs[assetType].Content
+}
+
+// GetSkillMDWithExtension returns the SKILL.md content and extension name for an asset type.
+// Returns empty struct if no SKILL.md is registered for the type.
+func (b *Bridge) GetSkillMDWithExtension(assetType string) SkillMDWithExtension {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	entry, ok := b.skillMDs[assetType]
+	if !ok {
+		return SkillMDWithExtension{}
+	}
+	return entry
 }
 
 func (b *Bridge) GetExtensionPolicyGroups(extName, assetType string, assetID int64) []string {
@@ -195,4 +214,17 @@ func (b *Bridge) FindExtensionByTool(extName, toolName string) *Extension {
 		return nil
 	}
 	return tools[toolName]
+}
+
+// GetExtensionByAssetType returns the Extension that registered the given asset type,
+// or nil if no extension owns that type.
+func (b *Bridge) GetExtensionByAssetType(assetType string) *Extension {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for _, at := range b.assetTypes {
+		if at.Type == assetType {
+			return b.extensions[at.ExtensionName]
+		}
+	}
+	return nil
 }

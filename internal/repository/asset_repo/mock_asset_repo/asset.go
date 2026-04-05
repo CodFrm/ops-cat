@@ -170,3 +170,18 @@ func (mr *MockAssetRepoMockRecorder) UpdateSortOrder(ctx, id, sortOrder any) *go
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateSortOrder", reflect.TypeOf((*MockAssetRepo)(nil).UpdateSortOrder), ctx, id, sortOrder)
 }
+
+// CountByTypes mocks base method.
+func (m *MockAssetRepo) CountByTypes(ctx context.Context, types []string) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CountByTypes", ctx, types)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CountByTypes indicates an expected call of CountByTypes.
+func (mr *MockAssetRepoMockRecorder) CountByTypes(ctx, types any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountByTypes", reflect.TypeOf((*MockAssetRepo)(nil).CountByTypes), ctx, types)
+}

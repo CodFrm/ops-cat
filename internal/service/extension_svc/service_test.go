@@ -21,13 +21,17 @@ import (
 // minimalWASM is the smallest valid WASM module (magic + version header).
 var minimalWASM = []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
 
+const testSHA256 = "93a44bbb96c751218e4c00d479e4c14358122a389acca16205b1e4d0dc5f9476"
+
 func writeTestExtension(dir, name string) {
 	extDir := filepath.Join(dir, name)
 	_ = os.MkdirAll(extDir, 0755)
 	manifest := map[string]any{
-		"name":    name,
-		"version": "1.0.0",
-		"backend": map[string]any{"runtime": "wasm", "binary": "main.wasm"},
+		"name":         name,
+		"version":      "1.0.0",
+		"hostABI":      "1.0",
+		"binarySha256": testSHA256,
+		"backend":      map[string]any{"runtime": "wasm", "binary": "main.wasm"},
 		"assetTypes": []map[string]any{
 			{"type": name, "i18n": map[string]any{"name": name + ".name"}},
 		},
@@ -60,7 +64,7 @@ func TestService(t *testing.T) {
 		var reloadCalled int
 		svc := New(
 			newTestManager(dir),
-			stateRepo, dataRepo, logger,
+			stateRepo, dataRepo, nil, logger,
 			func(b *extension.Bridge) { bridgeChanged++ },
 			func() { reloadCalled++ },
 		)
@@ -165,7 +169,7 @@ func TestService(t *testing.T) {
 			stateRepo.EXPECT().Delete(gomock.Any(), "ext-f").Return(nil)
 			dataRepo.EXPECT().DeleteAll(gomock.Any(), "ext-f").Return(nil)
 
-			err = svc.Uninstall(ctx, "ext-f", true)
+			err = svc.Uninstall(ctx, "ext-f", true, false)
 			So(err, ShouldBeNil)
 			So(svc.Bridge().GetAssetTypes(), ShouldBeEmpty)
 		})
@@ -180,7 +184,7 @@ func TestService(t *testing.T) {
 			stateRepo.EXPECT().Delete(gomock.Any(), "ext-g").Return(nil)
 			// dataRepo.DeleteAll should NOT be called
 
-			err = svc.Uninstall(ctx, "ext-g", false)
+			err = svc.Uninstall(ctx, "ext-g", false, false)
 			So(err, ShouldBeNil)
 		})
 

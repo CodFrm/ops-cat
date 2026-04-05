@@ -24,6 +24,20 @@ func main() {
 	logger, _ := zap.NewDevelopment()
 	zap.ReplaceGlobals(logger)
 
+	// Refuse to run in production environment
+	if os.Getenv("OPSKAT_ENV") == "production" {
+		fmt.Fprintln(os.Stderr, "ERROR: devserver cannot run when OPSKAT_ENV=production")
+		os.Exit(1)
+	}
+
+	// Loud warning banner
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "╔══════════════════════════════════════════════════════════════╗")
+	fmt.Fprintln(os.Stderr, "║  WARNING: opskat devserver - DEVELOPMENT USE ONLY           ║")
+	fmt.Fprintln(os.Stderr, "║  Do NOT deploy this binary to production environments.     ║")
+	fmt.Fprintln(os.Stderr, "╚══════════════════════════════════════════════════════════════╝")
+	fmt.Fprintln(os.Stderr, "")
+
 	if *extDir == "" || *manifest == "" {
 		fmt.Fprintln(os.Stderr, "Usage: devserver --ext-dir <dir> --manifest <path> [--port <port>] [--ext-frontend <url>]")
 		os.Exit(1)

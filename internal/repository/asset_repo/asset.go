@@ -19,6 +19,7 @@ type AssetRepo interface {
 	DeleteByGroupID(ctx context.Context, groupID int64) error
 	FindByCredentialID(ctx context.Context, credentialID int64) ([]*asset_entity.Asset, error)
 	UpdateSortOrder(ctx context.Context, id int64, sortOrder int) error
+	CountByTypes(ctx context.Context, types []string) (int64, error)
 }
 
 // ListOptions 列表查询选项
@@ -117,4 +118,15 @@ func (r *assetRepo) FindByCredentialID(ctx context.Context, credentialID int64) 
 		return nil, err
 	}
 	return assets, nil
+}
+
+func (r *assetRepo) CountByTypes(ctx context.Context, types []string) (int64, error) {
+	if len(types) == 0 {
+		return 0, nil
+	}
+	var count int64
+	err := db.Ctx(ctx).Model(&asset_entity.Asset{}).
+		Where("type IN ? AND status = ?", types, asset_entity.StatusActive).
+		Count(&count).Error
+	return count, err
 }

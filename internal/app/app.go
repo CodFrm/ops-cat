@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/opskat/opskat/internal/approval"
 	"github.com/opskat/opskat/internal/bootstrap"
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/repository/asset_repo"
 	"github.com/opskat/opskat/internal/repository/extension_data_repo"
 	"github.com/opskat/opskat/internal/repository/extension_state_repo"
 	"github.com/opskat/opskat/internal/service/credential_resolver"
@@ -112,40 +114,45 @@ func (a *App) Startup(ctx context.Context) {
 	a.InitAIProvider()
 	a.emitSystemStatus()
 
-	// Initialize extension system
-	extDir := filepath.Join(dataDir, "extensions")
-	mgr := extension.NewManager(extDir, func(extName string) extension.HostProvider {
-		return extension.NewDefaultHostProvider(extension.DefaultHostConfig{
-			Logger:       zap.L(),
-			AssetConfigs: &appAssetConfigGetter{app: a},
-			FileDialogs:  &appFileDialogOpener{ctx: a.ctx},
-			KV:           &appKVStore{extName: extName},
-			ActionEvents: &appActionEventHandler{ctx: a.ctx, extName: extName},
-			TunnelDialer: &appTunnelDialer{app: a},
-		})
-	}, zap.L())
+	// Initialize extension system (can be disabled via OPSKAT_EXTENSIONS=0)
+	if os.Getenv("OPSKAT_EXTENSIONS") == "0" {
+		zap.L().Info("extension system disabled via OPSKAT_EXTENSIONS=0")
+	} else {
+		extDir := filepath.Join(dataDir, "extensions")
+		mgr := extension.NewManager(extDir, func(extName string) extension.HostProvider {
+			return extension.NewDefaultHostProvider(extension.DefaultHostConfig{
+				Logger:       zap.L(),
+				AssetConfigs: &appAssetConfigGetter{app: a},
+				FileDialogs:  &appFileDialogOpener{ctx: a.ctx},
+				KV:           &appKVStore{extName: extName},
+				ActionEvents: &appActionEventHandler{ctx: a.ctx, extName: extName},
+				TunnelDialer: &appTunnelDialer{app: a},
+			})
+		}, zap.L())
 
-	a.extSvc = extension_svc.New(
-		mgr,
-		extension_state_repo.ExtensionState(),
-		extension_data_repo.ExtensionData(),
-		zap.L(),
-		func(b *extension.Bridge) { ai.SetExecToolExecutor(b) },
-		func() { wailsRuntime.EventsEmit(a.ctx, "ext:reload", nil) },
-	)
+		a.extSvc = extension_svc.New(
+			mgr,
+			extension_state_repo.ExtensionState(),
+			extension_data_repo.ExtensionData(),
+			asset_repo.Asset(),
+			zap.L(),
+			func(b *extension.Bridge) { ai.SetExecToolExecutor(b) },
+			func() { wailsRuntime.EventsEmit(a.ctx, "ext:reload", nil) },
+		)
 
-	// 异步初始化扩展，避免阻塞 Startup（WASM 编译较慢）
-	go func() {
-		if err := a.extSvc.Init(ctx); err != nil {
-			zap.L().Error("extension init failed", zap.Error(err))
-		}
-		// 通知前端扩展已就绪
-		wailsRuntime.EventsEmit(a.ctx, "ext:ready", nil)
+		// 异步初始化扩展，避免阻塞 Startup（WASM 编译较慢）
+		go func() {
+			if err := a.extSvc.Init(ctx); err != nil {
+				zap.L().Error("extension init failed", zap.Error(err))
+			}
+			// 通知前端扩展已就绪
+			wailsRuntime.EventsEmit(a.ctx, "ext:ready", nil)
 
-		if err := a.extSvc.StartWatch(ctx); err != nil {
-			zap.L().Warn("extension watcher failed", zap.Error(err))
-		}
-	}()
+			if err := a.extSvc.StartWatch(ctx); err != nil {
+				zap.L().Warn("extension watcher failed", zap.Error(err))
+			}
+		}()
+	}
 }
 
 // Cleanup 关闭审批服务等资源

@@ -14,6 +14,38 @@ import (
 	"go.uber.org/zap"
 )
 
+// dialGuard wraps a DialContext function and rejects connections to private/loopback
+// IPs at dial time. This catches DNS rebinding attacks where a hostname resolves to
+// a private IP after the URL-level allowlist check has already passed.
+func dialGuard(origDial func(ctx context.Context, network, addr string) (net.Conn, error), allowPrivate bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			host = addr
+		}
+		if ip := net.ParseIP(host); ip != nil {
+			if IsPrivateIP(ip) && !allowPrivate {
+				return nil, fmt.Errorf("dial denied: private IP %s", ip)
+			}
+		} else {
+			// Resolve hostname to catch DNS rebinding.
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, err
+			}
+			for _, ipa := range ips {
+				if IsPrivateIP(ipa.IP) && !allowPrivate {
+					return nil, fmt.Errorf("dial denied: hostname %q resolves to private IP %s", host, ipa.IP)
+				}
+			}
+		}
+		if origDial != nil {
+			return origDial(ctx, network, addr)
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, addr)
+	}
+}
+
 type httpPhase int
 
 const (
@@ -55,11 +87,16 @@ func newHTTPHandle(params IOOpenParams, dial DialFunc) (*httpHandle, error) {
 
 	// Build transport; clone default so we don't mutate the global one.
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	var baseDial func(ctx context.Context, network, addr string) (net.Conn, error)
 	if dial != nil {
-		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		baseDial = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return dial(network, addr)
 		}
+	} else {
+		baseDial = transport.DialContext
 	}
+	// Always wrap with the dial-time guard to catch DNS rebinding after URL-level checks.
+	transport.DialContext = dialGuard(baseDial, params.AllowPrivate)
 
 	hasBody := method == "POST" || method == "PUT" || method == "PATCH"
 

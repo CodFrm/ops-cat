@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/opskat/opskat/internal/model/entity/extension_state_entity"
+	"github.com/opskat/opskat/internal/repository/asset_repo"
 	"github.com/opskat/opskat/internal/repository/extension_data_repo"
 	"github.com/opskat/opskat/internal/repository/extension_state_repo"
 	"github.com/opskat/opskat/pkg/extension"
@@ -31,6 +32,7 @@ type Service struct {
 	bridge    *extension.Bridge
 	stateRepo extension_state_repo.ExtensionStateRepo
 	dataRepo  extension_data_repo.ExtensionDataRepo
+	assetRepo asset_repo.AssetRepo
 	logger    *zap.Logger
 
 	onBridgeChanged func(bridge *extension.Bridge)
@@ -45,6 +47,7 @@ func New(
 	manager *extension.Manager,
 	stateRepo extension_state_repo.ExtensionStateRepo,
 	dataRepo extension_data_repo.ExtensionDataRepo,
+	assetRepo asset_repo.AssetRepo,
 	logger *zap.Logger,
 	onBridgeChanged func(bridge *extension.Bridge),
 	onReload func(),
@@ -54,6 +57,7 @@ func New(
 		bridge:          extension.NewBridge(),
 		stateRepo:       stateRepo,
 		dataRepo:        dataRepo,
+		assetRepo:       assetRepo,
 		logger:          logger,
 		onBridgeChanged: onBridgeChanged,
 		onReload:        onReload,
@@ -164,9 +168,25 @@ func (s *Service) Install(ctx context.Context, sourcePath string) (*extension.Ma
 }
 
 // Uninstall removes an extension and optionally cleans its data.
-func (s *Service) Uninstall(ctx context.Context, name string, cleanData bool) error {
+// Pass force=true to skip the orphan-asset check.
+func (s *Service) Uninstall(ctx context.Context, name string, cleanData bool, force bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Orphan check: refuse if active assets reference this extension's asset types.
+	if !force && s.assetRepo != nil {
+		ext := s.manager.GetExtension(name)
+		if ext != nil && len(ext.Manifest.AssetTypes) > 0 {
+			assetTypes := make([]string, 0, len(ext.Manifest.AssetTypes))
+			for _, at := range ext.Manifest.AssetTypes {
+				assetTypes = append(assetTypes, at.Type)
+			}
+			count, err := s.assetRepo.CountByTypes(ctx, assetTypes)
+			if err == nil && count > 0 {
+				return fmt.Errorf("cannot uninstall %q: %d asset(s) still reference its asset types %v; delete them first or use force uninstall", name, count, assetTypes)
+			}
+		}
+	}
 
 	s.bridge.Unregister(name)
 	s.notifyBridgeChanged()
@@ -266,6 +286,13 @@ func (s *Service) Close(ctx context.Context) {
 
 // loadAndApplyState is the single source of truth: scan, register bridge, apply DB state.
 func (s *Service) loadAndApplyState(ctx context.Context) error {
+	// Unregister old bridge entries from package-global registries before replacing the bridge.
+	if s.bridge != nil {
+		for _, name := range s.bridge.ListNames() {
+			s.bridge.Unregister(name)
+		}
+	}
+
 	if _, err := s.manager.Scan(ctx); err != nil {
 		s.logger.Error("scan extensions failed", zap.Error(err))
 	}

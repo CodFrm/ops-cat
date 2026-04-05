@@ -190,11 +190,22 @@ func (a *App) installExtensionFromPath(sourcePath string) (*extension_svc.Extens
 }
 
 // UninstallExtension removes an extension and optionally cleans up its data.
+// Returns an error if active assets still reference the extension's asset types.
 func (a *App) UninstallExtension(name string, cleanData bool) error {
 	if a.extSvc == nil {
 		return fmt.Errorf("extension system not initialized")
 	}
-	return a.extSvc.Uninstall(a.langCtx(), name, cleanData)
+	return a.extSvc.Uninstall(a.langCtx(), name, cleanData, false)
+}
+
+// ForceUninstallExtension removes an extension and optionally cleans up its data,
+// bypassing the orphan-asset check. Use when you intend to leave or manually clean
+// assets that reference this extension's asset types.
+func (a *App) ForceUninstallExtension(name string, cleanData bool) error {
+	if a.extSvc == nil {
+		return fmt.Errorf("extension system not initialized")
+	}
+	return a.extSvc.Uninstall(a.langCtx(), name, cleanData, true)
 }
 
 // EnableExtension loads a disabled extension and registers it.

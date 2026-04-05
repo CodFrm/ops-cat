@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"github.com/tetratelabs/wazero"
@@ -22,12 +24,13 @@ type Plugin struct {
 	runtime  wazero.Runtime
 	host     HostProvider
 	mu       sync.Mutex
+	closed   atomic.Bool
 }
 
 // LoadPlugin compiles a WASM binary and prepares it for execution.
 // If cache is non-nil, compiled modules are cached to disk for faster subsequent loads.
 func LoadPlugin(ctx context.Context, manifest *Manifest, wasmBytes []byte, host HostProvider, cache wazero.CompilationCache) (*Plugin, error) {
-	cfg := wazero.NewRuntimeConfig()
+	cfg := wazero.NewRuntimeConfig().WithMemoryLimitPages(256)
 	if cache != nil {
 		cfg = cfg.WithCompilationCache(cache)
 	}
@@ -61,28 +64,37 @@ func LoadPlugin(ctx context.Context, manifest *Manifest, wasmBytes []byte, host 
 
 // CallTool calls execute_tool on the extension.
 func (p *Plugin) CallTool(ctx context.Context, toolName string, args json.RawMessage) (json.RawMessage, error) {
-	input, _ := json.Marshal(map[string]any{
+	input, err := json.Marshal(map[string]any{
 		"tool": toolName,
 		"args": json.RawMessage(args),
 	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal %s input: %w", "execute_tool", err)
+	}
 	return p.call(ctx, "execute_tool", input)
 }
 
 // CallAction calls execute_action on the extension.
 func (p *Plugin) CallAction(ctx context.Context, actionName string, args json.RawMessage) (json.RawMessage, error) {
-	input, _ := json.Marshal(map[string]any{
+	input, err := json.Marshal(map[string]any{
 		"action": actionName,
 		"args":   json.RawMessage(args),
 	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal %s input: %w", "execute_action", err)
+	}
 	return p.call(ctx, "execute_action", input)
 }
 
 // CheckPolicy calls check_policy on the extension.
 func (p *Plugin) CheckPolicy(ctx context.Context, toolName string, args json.RawMessage) (action, resource string, err error) {
-	input, _ := json.Marshal(map[string]any{
+	input, err := json.Marshal(map[string]any{
 		"tool": toolName,
 		"args": json.RawMessage(args),
 	})
+	if err != nil {
+		return "", "", fmt.Errorf("marshal %s input: %w", "check_policy", err)
+	}
 	result, err := p.call(ctx, "check_policy", input)
 	if err != nil {
 		return "", "", err
@@ -118,6 +130,7 @@ type ValidationError struct {
 
 // Close releases the WASM runtime resources.
 func (p *Plugin) Close(ctx context.Context) error {
+	p.closed.Store(true)
 	return p.runtime.Close(ctx)
 }
 
@@ -128,8 +141,15 @@ func (p *Plugin) Manifest() *Manifest {
 
 // call invokes a WASM function using stdin/stdout for I/O.
 func (p *Plugin) call(ctx context.Context, fnName string, input []byte) (json.RawMessage, error) {
+	if p.closed.Load() {
+		return nil, fmt.Errorf("plugin closed")
+	}
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 
 	stdin := &bytesReader{data: input}
 	stdout := &bytesWriter{}
@@ -144,12 +164,12 @@ func (p *Plugin) call(ctx context.Context, fnName string, input []byte) (json.Ra
 		WithSysWalltime().
 		WithSysNanotime()
 
-	mod, err := p.runtime.InstantiateModule(ctx, p.compiled, cfg)
+	mod, err := p.runtime.InstantiateModule(callCtx, p.compiled, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("instantiate module for %s: %w", fnName, err)
 	}
 	defer func() {
-		if err := mod.Close(ctx); err != nil {
+		if err := mod.Close(callCtx); err != nil {
 			logger.Default().Warn("close wasm module", zap.Error(err))
 		}
 	}()

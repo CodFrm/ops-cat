@@ -21,12 +21,13 @@ type HostProvider interface {
 }
 
 type IOOpenParams struct {
-	Type    string            `json:"type"`
-	Path    string            `json:"path"`
-	Mode    string            `json:"mode"`
-	Method  string            `json:"method"`
-	URL     string            `json:"url"`
-	Headers map[string]string `json:"headers"`
+	Type         string            `json:"type"`
+	Path         string            `json:"path"`
+	Mode         string            `json:"mode"`
+	Method       string            `json:"method"`
+	URL          string            `json:"url"`
+	Headers      map[string]string `json:"headers"`
+	AllowPrivate bool              `json:"allowPrivate"` // dial-time guard: allow connections to private/loopback IPs
 }
 
 type DialogOptions struct {

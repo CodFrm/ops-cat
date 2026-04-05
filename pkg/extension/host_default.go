@@ -4,6 +4,7 @@ package extension
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 
 	"go.uber.org/zap"
@@ -76,7 +77,12 @@ func (h *DefaultHostProvider) IORead(handleID uint32, size int) ([]byte, error) 
 	buf := make([]byte, size)
 	n, err := h.io.Read(handleID, buf)
 	if n > 0 {
-		return buf[:n], nil // Return data first; EOF will be seen on the next Read.
+		// Only io.EOF is safe to delay — the guest will get it on the next Read when n==0.
+		if err == nil || err == io.EOF {
+			return buf[:n], nil
+		}
+		// Real error occurred — surface it so the guest sees the failure rather than silent truncation.
+		return nil, fmt.Errorf("read handle %d: %w (had %d bytes)", handleID, err, n)
 	}
 	if err != nil {
 		return nil, err

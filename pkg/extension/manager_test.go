@@ -35,9 +35,11 @@ func TestManager(t *testing.T) {
 			_ = os.MkdirAll(extDir, 0755)
 
 			manifest := map[string]any{
-				"name":    "test-ext",
-				"version": "1.0.0",
-				"backend": map[string]any{"runtime": "wasm", "binary": "main.wasm"},
+				"name":         "test-ext",
+				"version":      "1.0.0",
+				"hostABI":      "1.0",
+				"binarySha256": "93a44bbb96c751218e4c00d479e4c14358122a389acca16205b1e4d0dc5f9476",
+				"backend":      map[string]any{"runtime": "wasm", "binary": "main.wasm"},
 			}
 			data, _ := json.Marshal(manifest)
 			So(os.WriteFile(filepath.Join(extDir, "manifest.json"), data, 0644), ShouldBeNil)
