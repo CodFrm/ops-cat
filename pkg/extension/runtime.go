@@ -30,7 +30,7 @@ type Plugin struct {
 // LoadPlugin compiles a WASM binary and prepares it for execution.
 // If cache is non-nil, compiled modules are cached to disk for faster subsequent loads.
 func LoadPlugin(ctx context.Context, manifest *Manifest, wasmBytes []byte, host HostProvider, cache wazero.CompilationCache) (*Plugin, error) {
-	cfg := wazero.NewRuntimeConfig().WithMemoryLimitPages(256)
+	cfg := wazero.NewRuntimeConfig().WithMemoryLimitPages(1024)
 	if cache != nil {
 		cfg = cfg.WithCompilationCache(cache)
 	}
