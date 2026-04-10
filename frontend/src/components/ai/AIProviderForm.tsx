@@ -12,7 +12,7 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-  ScrollArea,
+  ScrollableContainer,
 } from "@opskat/ui";
 import { Check, ChevronsUpDown, Loader2, RefreshCw } from "lucide-react";
 import { FetchAIModels, GetModelDefaults } from "../../../wailsjs/go/app/App";
@@ -224,7 +224,7 @@ export function AIProviderForm({
                     className="h-8 text-xs"
                   />
                 </div>
-                <ScrollArea className="max-h-[200px]">
+                <ScrollableContainer className="max-h-[200px]">
                   <div className="p-1">
                     {filteredModels.length === 0 ? (
                       <p className="text-xs text-muted-foreground text-center py-2">{t("settings.noModelsFound")}</p>
@@ -242,7 +242,7 @@ export function AIProviderForm({
                       ))
                     )}
                   </div>
-                </ScrollArea>
+                </ScrollableContainer>
               </PopoverContent>
             )}
           </Popover>

@@ -13,6 +13,7 @@ export * from "./components/input";
 export * from "./components/label";
 export * from "./components/popover";
 export * from "./components/scroll-area";
+export * from "./components/scrollable-container";
 export * from "./components/select";
 export * from "./components/separator";
 export * from "./components/sonner";
