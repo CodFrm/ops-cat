@@ -326,9 +326,22 @@ func (a *App) TestSSHConnection(configJSON string, plainPassword string) error {
 	if password == "" {
 		password = storedPassword
 	}
-	// 测试连接时，如果前端传入明文 passphrase（未加密），直接使用
-	keyPassphrase := sshCfg.PrivateKeyPassphrase
-	if keyPassphrase == "" {
+
+	// 处理 passphrase：
+	// 1. 如果前端传入明文 passphrase（用户新输入），直接使用
+	// 2. 如果前端传入加密的 passphrase（存储的），尝试解密
+	// 3. 否则使用 resolver 解析出的 passphrase（托管密钥）
+	var keyPassphrase string
+	if sshCfg.PrivateKeyPassphrase != "" {
+		// 尝试解密，如果解密失败则认为是明文（用户刚输入的）
+		decrypted, err := credential_svc.Default().Decrypt(sshCfg.PrivateKeyPassphrase)
+		if err == nil {
+			keyPassphrase = decrypted
+		} else {
+			// 解密失败，可能是明文 passphrase（用户刚输入）
+			keyPassphrase = sshCfg.PrivateKeyPassphrase
+		}
+	} else {
 		keyPassphrase = passphrase
 	}
 
