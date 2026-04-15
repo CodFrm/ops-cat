@@ -21,9 +21,9 @@ type Credential struct {
 	Name        string `gorm:"column:name;type:varchar(255);not null" json:"name"`
 	Type        string `gorm:"column:type;type:varchar(50);not null" json:"type"` // "password" | "ssh_key"
 	Username    string `gorm:"column:username;type:varchar(255)" json:"username,omitempty"`
-	Password    string `gorm:"column:password;type:text" json:"-"`     // 加密后的密码（type=password）
-	PrivateKey  string `gorm:"column:private_key;type:text" json:"-"`  // 加密后的私钥（type=ssh_key）
-	Passphrase  string `gorm:"column:passphrase;type:text" json:"-"`   // 加密后的私钥密码（type=ssh_key）
+	Password    string `gorm:"column:password;type:text" json:"-"`    // 加密后的密码（type=password）
+	PrivateKey  string `gorm:"column:private_key;type:text" json:"-"` // 加密后的私钥（type=ssh_key）
+	Passphrase  string `gorm:"column:passphrase;type:text" json:"-"`  // 加密后的私钥密码（type=ssh_key）
 	PublicKey   string `gorm:"column:public_key;type:text" json:"publicKey,omitempty"`
 	KeyType     string `gorm:"column:key_type;type:varchar(50)" json:"keyType,omitempty"` // rsa/ed25519/ecdsa
 	KeySize     int    `gorm:"column:key_size" json:"keySize,omitempty"`

@@ -114,8 +114,8 @@ func decryptTabbyVault(vault *tabbyStoredVault, passphrase string) (*tabbyVault,
 
 // vaultSecretInfo 包含密码类型信息
 type vaultSecretInfo struct {
-	Type     string
-	Value    string
+	Type  string
+	Value string
 }
 
 // buildVaultSecretMap 从解密后的 vault 构建 profileID → secretInfo 映射

@@ -135,19 +135,19 @@ func NewManager() *Manager {
 
 // ConnectConfig SSH 连接配置
 type ConnectConfig struct {
-	Host        string
-	Port        int
-	Username    string
-	AuthType    string // password | key | keyboard-interactive
-	Password    string
-	Key         string   // PEM 格式私钥（直接传入）
-	KeyPassphrase string // 私钥密码（用于加密的私钥）
-	PrivateKeys []string // 私钥文件路径列表
-	AssetID     int64
-	Cols        int
-	Rows        int
-	OnData      func(sessionID string, data []byte) // 终端输出回调
-	OnClosed    func(sessionID string)              // 关闭回调
+	Host          string
+	Port          int
+	Username      string
+	AuthType      string // password | key | keyboard-interactive
+	Password      string
+	Key           string   // PEM 格式私钥（直接传入）
+	KeyPassphrase string   // 私钥密码（用于加密的私钥）
+	PrivateKeys   []string // 私钥文件路径列表
+	AssetID       int64
+	Cols          int
+	Rows          int
+	OnData        func(sessionID string, data []byte) // 终端输出回调
+	OnClosed      func(sessionID string)              // 关闭回调
 
 	// 进度回调（异步连接用），step: resolve/connect/auth/shell
 	OnProgress func(step, message string)
