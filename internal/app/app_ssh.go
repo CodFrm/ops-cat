@@ -161,18 +161,18 @@ func (a *App) ConnectSSHAsync(req SSHConnectRequest) (string, error) {
 		}
 
 		connectCfg := ssh_svc.ConnectConfig{
-			Host:        sshCfg.Host,
-			Port:        sshCfg.Port,
-			Username:    sshCfg.Username,
-			AuthType:    sshCfg.AuthType,
-			Password:    password,
-			Key:         key,
+			Host:          sshCfg.Host,
+			Port:          sshCfg.Port,
+			Username:      sshCfg.Username,
+			AuthType:      sshCfg.AuthType,
+			Password:      password,
+			Key:           key,
 			KeyPassphrase: storedPassphrase,
-			PrivateKeys: sshCfg.PrivateKeys,
-			AssetID:     req.AssetID,
-			Cols:        req.Cols,
-			Rows:        req.Rows,
-			Proxy:       a.decryptProxyPassword(sshCfg.Proxy),
+			PrivateKeys:   sshCfg.PrivateKeys,
+			AssetID:       req.AssetID,
+			Cols:          req.Cols,
+			Rows:          req.Rows,
+			Proxy:         a.decryptProxyPassword(sshCfg.Proxy),
 			OnData: func(sid string, data []byte) {
 				wailsRuntime.EventsEmit(a.ctx, "ssh:data:"+sid, base64.StdEncoding.EncodeToString(data))
 			},

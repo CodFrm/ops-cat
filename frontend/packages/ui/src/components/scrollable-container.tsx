@@ -16,11 +16,7 @@ import { cn } from "../lib/utils";
  * { passive: false } wheel listener and drives scrollTop/scrollLeft manually,
  * bypassing the lock.
  */
-function ScrollableContainer({
-  className,
-  children,
-  ...props
-}: Omit<React.ComponentProps<"div">, "ref">) {
+function ScrollableContainer({ className, children, ...props }: Omit<React.ComponentProps<"div">, "ref">) {
   const ref = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
