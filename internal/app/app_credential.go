@@ -126,8 +126,9 @@ func (a *App) UpdateCredentialPassword(id int64, password string) error {
 }
 
 // UpdateCredentialPassphrase 更新 SSH 密钥的 passphrase
-func (a *App) UpdateCredentialPassphrase(id int64, passphrase string) error {
-	return credential_mgr_svc.UpdatePassphrase(a.langCtx(), id, passphrase)
+// 需要提供旧的 passphrase 用于解密 PEM
+func (a *App) UpdateCredentialPassphrase(id int64, oldPassphrase, newPassphrase string) error {
+	return credential_mgr_svc.UpdatePassphrase(a.langCtx(), id, oldPassphrase, newPassphrase)
 }
 
 // GetCredentialUsage 获取引用此凭证的资产名称列表

@@ -885,14 +885,18 @@ function ChangePassphraseDialog({
   onSuccess: () => void;
 }) {
   const { t } = useTranslation();
-  const [passphrase, setPassphrase] = useState("");
+  const [oldPassphrase, setOldPassphrase] = useState("");
+  const [newPassphrase, setNewPassphrase] = useState("");
   const [saving, setSaving] = useState(false);
-  const [visible, setVisible] = useState(false);
+  const [visibleOld, setVisibleOld] = useState(false);
+  const [visibleNew, setVisibleNew] = useState(false);
 
   useEffect(() => {
     if (open) {
-      setPassphrase("");
-      setVisible(false);
+      setOldPassphrase("");
+      setNewPassphrase("");
+      setVisibleOld(false);
+      setVisibleNew(false);
     }
   }, [open]);
 
@@ -900,7 +904,7 @@ function ChangePassphraseDialog({
     if (!credential) return;
     setSaving(true);
     try {
-      await UpdateCredentialPassphrase(credential.id, passphrase);
+      await UpdateCredentialPassphrase(credential.id, oldPassphrase, newPassphrase);
       toast.success(t("sshKey.passphraseChanged"));
       onOpenChange(false);
       onSuccess();
@@ -919,12 +923,12 @@ function ChangePassphraseDialog({
         </DialogHeader>
         <div className="grid gap-4 py-2">
           <div className="grid gap-2">
-            <Label>{t("sshKey.newPassphrase")}</Label>
+            <Label>{t("sshKey.oldPassphrase")}</Label>
             <div className="relative">
               <Input
-                type={visible ? "text" : "password"}
-                value={passphrase}
-                onChange={(e) => setPassphrase(e.target.value)}
+                type={visibleOld ? "text" : "password"}
+                value={oldPassphrase}
+                onChange={(e) => setOldPassphrase(e.target.value)}
                 placeholder={t("sshKey.passphrasePlaceholder")}
                 className="pr-9"
               />
@@ -933,9 +937,30 @@ function ChangePassphraseDialog({
                 variant="ghost"
                 size="icon"
                 className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-                onClick={() => setVisible(!visible)}
+                onClick={() => setVisibleOld(!visibleOld)}
               >
-                {visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                {visibleOld ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+              </Button>
+            </div>
+          </div>
+          <div className="grid gap-2">
+            <Label>{t("sshKey.newPassphrase")}</Label>
+            <div className="relative">
+              <Input
+                type={visibleNew ? "text" : "password"}
+                value={newPassphrase}
+                onChange={(e) => setNewPassphrase(e.target.value)}
+                placeholder={t("sshKey.passphrasePlaceholder")}
+                className="pr-9"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+                onClick={() => setVisibleNew(!visibleNew)}
+              >
+                {visibleNew ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
               </Button>
             </div>
           </div>

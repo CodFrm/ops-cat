@@ -284,6 +284,7 @@
     "passphrasePlaceholderOptional": "Private key password (optional, leave empty for no encryption)",
     "changePassphrase": "Change Passphrase",
     "changePassphraseTitle": "Change SSH Key Passphrase",
+    "oldPassphrase": "Old Passphrase",
     "newPassphrase": "New Passphrase",
     "passphraseChanged": "Passphrase changed",
     "empty": "No keys yet. Use the buttons above to add one."

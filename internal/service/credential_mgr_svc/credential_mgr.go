@@ -421,7 +421,8 @@ func UpdatePassword(ctx context.Context, id int64, password string) error {
 }
 
 // UpdatePassphrase 更新 SSH 密钥的 passphrase
-func UpdatePassphrase(ctx context.Context, id int64, passphrase string) error {
+// 需要同时重新加密 PEM 内容，否则旧 passphrase 加密的 PEM 无法用新 passphrase 解密
+func UpdatePassphrase(ctx context.Context, id int64, oldPassphrase, newPassphrase string) error {
 	cred, err := credential_repo.Credential().Find(ctx, id)
 	if err != nil {
 		return fmt.Errorf("凭证不存在: %w", err)
@@ -430,14 +431,56 @@ func UpdatePassphrase(ctx context.Context, id int64, passphrase string) error {
 		return fmt.Errorf("凭证类型不是 SSH 密钥")
 	}
 
+	// 1. 解密存储的 PrivateKey (AES 解密得到 PEM)
+	decryptedPEM, err := credential_svc.Default().Decrypt(cred.PrivateKey)
+	if err != nil {
+		return fmt.Errorf("解密私钥存储失败: %w", err)
+	}
+
+	// 2. 用旧 passphrase 解析 PEM 得到 crypto.PrivateKey (interface{})
+	var privateKey crypto.PrivateKey
+	if oldPassphrase != "" {
+		privateKey, err = gossh.ParseRawPrivateKeyWithPassphrase([]byte(decryptedPEM), []byte(oldPassphrase))
+	} else {
+		privateKey, err = gossh.ParseRawPrivateKey([]byte(decryptedPEM))
+	}
+	if err != nil {
+		return fmt.Errorf("解析私钥失败（旧 passphrase 可能不正确）: %w", err)
+	}
+
+	// 3. 重新 marshal 私钥，使用新的 passphrase
+	comment := cred.Comment
+	if comment == "" {
+		comment = cred.Name
+	}
+
+	var privateKeyBlock *pem.Block
+	if newPassphrase != "" {
+		privateKeyBlock, err = gossh.MarshalPrivateKeyWithPassphrase(privateKey, comment, []byte(newPassphrase))
+	} else {
+		privateKeyBlock, err = gossh.MarshalPrivateKey(privateKey, comment)
+	}
+	if err != nil {
+		return fmt.Errorf("重新序列化私钥失败: %w", err)
+	}
+	newPEM := pem.EncodeToMemory(privateKeyBlock)
+
+	// 4. 加密新 PEM 和新 passphrase
+	encryptedPrivateKey, err := credential_svc.Default().Encrypt(string(newPEM))
+	if err != nil {
+		return fmt.Errorf("加密私钥失败: %w", err)
+	}
+
 	var encryptedPassphrase string
-	if passphrase != "" {
-		encryptedPassphrase, err = credential_svc.Default().Encrypt(passphrase)
+	if newPassphrase != "" {
+		encryptedPassphrase, err = credential_svc.Default().Encrypt(newPassphrase)
 		if err != nil {
 			return fmt.Errorf("加密 passphrase 失败: %w", err)
 		}
 	}
 
+	// 5. 更新凭证
+	cred.PrivateKey = encryptedPrivateKey
 	cred.Passphrase = encryptedPassphrase
 	cred.Updatetime = time.Now().Unix()
 

@@ -284,6 +284,7 @@
     "passphrasePlaceholderOptional": "私钥密码（可选，留空则不加密）",
     "changePassphrase": "修改 Passphrase",
     "changePassphraseTitle": "修改 SSH 密钥 Passphrase",
+    "oldPassphrase": "旧 Passphrase",
     "newPassphrase": "新 Passphrase",
     "passphraseChanged": "Passphrase 已更新",
     "empty": "暂无密钥，点击上方按钮添加"
