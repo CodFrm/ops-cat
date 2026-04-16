@@ -105,9 +105,7 @@ describe("DatabaseDetailInfoCard", () => {
       username: "admin",
       password: "supersecret",
     });
-    const { container, queryByText } = render(
-      <DatabaseDetailInfoCard asset={asset} sshTunnelName={noopTunnel} />
-    );
+    const { container, queryByText } = render(<DatabaseDetailInfoCard asset={asset} sshTunnelName={noopTunnel} />);
     const view = within(container);
     expect(view.getByText("\u25CF\u25CF\u25CF\u25CF\u25CF\u25CF")).toBeInTheDocument();
     expect(queryByText("supersecret")).not.toBeInTheDocument();
@@ -198,9 +196,7 @@ describe("MongoDBDetailInfoCard", () => {
       port: 27017,
       password: "secretpw",
     });
-    const { container, queryByText } = render(
-      <MongoDBDetailInfoCard asset={asset} sshTunnelName={noopTunnel} />
-    );
+    const { container, queryByText } = render(<MongoDBDetailInfoCard asset={asset} sshTunnelName={noopTunnel} />);
     const view = within(container);
     expect(view.getByText("\u25CF\u25CF\u25CF\u25CF\u25CF\u25CF")).toBeInTheDocument();
     expect(queryByText("secretpw")).not.toBeInTheDocument();

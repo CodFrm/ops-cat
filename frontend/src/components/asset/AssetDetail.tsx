@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Server, Database, Pencil, Trash2, TerminalSquare, Loader2 } from "lucide-react";
+import { Server, Pencil, Trash2, TerminalSquare, Loader2 } from "lucide-react";
 import Markdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
@@ -8,65 +8,10 @@ import { cn, Button, Separator, ConfirmDialog } from "@opskat/ui";
 import { toast } from "sonner";
 import { useAssetStore } from "@/stores/assetStore";
 import { useExtensionStore } from "@/extension";
+import { getAssetType, isBuiltinType } from "@/lib/assetTypes";
 import { CommandPolicyCard } from "@/components/asset/CommandPolicyCard";
 import { asset_entity } from "../../../wailsjs/go/models";
 import { GetDefaultPolicy } from "../../../wailsjs/go/app/App";
-
-interface SSHConfig {
-  host: string;
-  port: number;
-  username: string;
-  auth_type: string;
-  password?: string;
-  credential_id?: number;
-  private_keys?: string[];
-  jump_host_id?: number;
-  proxy?: {
-    type: string;
-    host: string;
-    port: number;
-    username?: string;
-    password?: string;
-  } | null;
-}
-
-interface DatabaseConfig {
-  driver: string;
-  host: string;
-  port: number;
-  username: string;
-  password?: string;
-  database?: string;
-  ssl_mode?: string;
-  tls?: boolean;
-  params?: string;
-  read_only?: boolean;
-  ssh_asset_id?: number;
-}
-
-interface RedisConfig {
-  host: string;
-  port: number;
-  username?: string;
-  password?: string;
-  database?: number;
-  tls?: boolean;
-  ssh_asset_id?: number;
-}
-
-interface MongoDBConfig {
-  connection_uri?: string;
-  host?: string;
-  port?: number;
-  replica_set?: string;
-  username?: string;
-  password?: string;
-  credential_id?: number;
-  database?: string;
-  auth_source?: string;
-  tls?: boolean;
-  ssh_asset_id?: number;
-}
 
 interface AssetDetailProps {
   asset: asset_entity.Asset;
@@ -82,55 +27,31 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
 
-  // SSH Command policy
-  const [allowList, setAllowList] = useState<string[]>([]);
-  const [denyList, setDenyList] = useState<string[]>([]);
+  const [policyFields, setPolicyFields] = useState<Record<string, string[]>>({});
   const [policyGroups, setPolicyGroups] = useState<string[]>([]);
-
-  // Database Query policy
-  const [queryAllowTypes, setQueryAllowTypes] = useState<string[]>([]);
-  const [queryDenyTypes, setQueryDenyTypes] = useState<string[]>([]);
-  const [queryDenyFlags, setQueryDenyFlags] = useState<string[]>([]);
-
-  // Redis policy
-  const [redisAllowList, setRedisAllowList] = useState<string[]>([]);
-  const [redisDenyList, setRedisDenyList] = useState<string[]>([]);
-
-  // MongoDB Query policy
-  const [mongoAllowTypes, setMongoAllowTypes] = useState<string[]>([]);
-  const [mongoDenyTypes, setMongoDenyTypes] = useState<string[]>([]);
 
   useEffect(() => {
     try {
-      const policy = JSON.parse(asset.CmdPolicy || "{}");
-      setPolicyGroups(policy.groups || []);
-      if (asset.Type === "database") {
-        setQueryAllowTypes(policy.allow_types || []);
-        setQueryDenyTypes(policy.deny_types || []);
-        setQueryDenyFlags(policy.deny_flags || []);
-      } else if (asset.Type === "redis") {
-        setRedisAllowList(policy.allow_list || []);
-        setRedisDenyList(policy.deny_list || []);
-      } else if (asset.Type === "mongodb") {
-        setMongoAllowTypes(policy.allow_types || []);
-        setMongoDenyTypes(policy.deny_types || []);
-      } else {
-        setAllowList(policy.allow_list || []);
-        setDenyList(policy.deny_list || []);
+      const parsed = JSON.parse(asset.CmdPolicy || "{}");
+      setPolicyGroups(parsed.groups || []);
+      const def = getAssetType(asset.Type);
+      if (def?.policy) {
+        const fields: Record<string, string[]> = {};
+        for (const f of def.policy.fields) {
+          fields[f.key] = parsed[f.key] || [];
+        }
+        setPolicyFields(fields);
+      } else if (!isBuiltinType(asset.Type)) {
+        // Extension types fallback
+        setPolicyFields({
+          allow_list: parsed.allow_list || [],
+          deny_list: parsed.deny_list || [],
+        });
       }
     } catch {
-      setAllowList([]);
-      setDenyList([]);
+      setPolicyFields({});
       setPolicyGroups([]);
-      setQueryAllowTypes([]);
-      setQueryDenyTypes([]);
-      setQueryDenyFlags([]);
-      setRedisAllowList([]);
-      setRedisDenyList([]);
-      setMongoAllowTypes([]);
-      setMongoDenyTypes([]);
     }
-    // input states are managed internally by PolicyTagEditor
   }, [asset.ID, asset.CmdPolicy, asset.Type]);
 
   const savePolicy = async (policyObj: Record<string, unknown>, groups?: string[]) => {
@@ -153,94 +74,41 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
     }
   };
 
-  const handleSaveSSHPolicy = async (newAllow: string[], newDeny: string[], groups?: string[]) => {
-    await savePolicy({ allow_list: newAllow, deny_list: newDeny }, groups);
-  };
-
-  const handleSaveQueryPolicy = async (
-    newAllowTypes: string[],
-    newDenyTypes: string[],
-    newDenyFlags: string[],
-    groups?: string[]
-  ) => {
-    await savePolicy({ allow_types: newAllowTypes, deny_types: newDenyTypes, deny_flags: newDenyFlags }, groups);
-  };
-
-  const handleSaveRedisPolicy = async (newAllow: string[], newDeny: string[], groups?: string[]) => {
-    await savePolicy({ allow_list: newAllow, deny_list: newDeny }, groups);
-  };
-
-  const handleSaveMongoPolicy = async (newAllowTypes: string[], newDenyTypes: string[], groups?: string[]) => {
-    await savePolicy({ allow_types: newAllowTypes, deny_types: newDenyTypes }, groups);
+  const handleSavePolicyFields = async (updatedFields: Record<string, string[]>, groups?: string[]) => {
+    await savePolicy(updatedFields, groups);
   };
 
   const handleGroupsChange = (newGroups: string[]) => {
     setPolicyGroups(newGroups);
-    if (asset.Type === "database") {
-      handleSaveQueryPolicy(queryAllowTypes, queryDenyTypes, queryDenyFlags, newGroups);
-    } else if (asset.Type === "redis") {
-      handleSaveRedisPolicy(redisAllowList, redisDenyList, newGroups);
-    } else if (asset.Type === "mongodb") {
-      handleSaveMongoPolicy(mongoAllowTypes, mongoDenyTypes, newGroups);
-    } else {
-      handleSaveSSHPolicy(allowList, denyList, newGroups);
-    }
+    handleSavePolicyFields(policyFields, newGroups);
   };
 
   const handleResetPolicy = async () => {
     try {
       const defaultJSON = await GetDefaultPolicy(asset.Type);
-      const policy = JSON.parse(defaultJSON);
-      const groups = policy.groups || [];
+      const parsed = JSON.parse(defaultJSON);
+      const groups = parsed.groups || [];
       setPolicyGroups(groups);
-      if (asset.Type === "database") {
-        setQueryAllowTypes(policy.allow_types || []);
-        setQueryDenyTypes(policy.deny_types || []);
-        setQueryDenyFlags(policy.deny_flags || []);
-        await savePolicy(
-          { allow_types: policy.allow_types, deny_types: policy.deny_types, deny_flags: policy.deny_flags },
-          groups
-        );
-      } else if (asset.Type === "redis") {
-        setRedisAllowList(policy.allow_list || []);
-        setRedisDenyList(policy.deny_list || []);
-        await savePolicy({ allow_list: policy.allow_list, deny_list: policy.deny_list }, groups);
-      } else if (asset.Type === "mongodb") {
-        setMongoAllowTypes(policy.allow_types || []);
-        setMongoDenyTypes(policy.deny_types || []);
-        await savePolicy({ allow_types: policy.allow_types, deny_types: policy.deny_types }, groups);
-      } else {
-        setAllowList(policy.allow_list || []);
-        setDenyList(policy.deny_list || []);
-        await savePolicy({ allow_list: policy.allow_list, deny_list: policy.deny_list }, groups);
+      const def = getAssetType(asset.Type);
+      const fields: Record<string, string[]> = {};
+      if (def?.policy) {
+        for (const f of def.policy.fields) {
+          fields[f.key] = parsed[f.key] || [];
+        }
       }
+      setPolicyFields(fields);
+      await savePolicy(fields, groups);
     } catch (e) {
       toast.error(String(e));
     }
   };
-
-  // Parse config based on type
-  let sshConfig: SSHConfig | null = null;
-  let dbConfig: DatabaseConfig | null = null;
-  let redisConfig: RedisConfig | null = null;
-  let mongoConfig: MongoDBConfig | null = null;
-  try {
-    const parsed = JSON.parse(asset.Config || "{}");
-    if (asset.Type === "ssh") sshConfig = parsed;
-    else if (asset.Type === "database") dbConfig = parsed;
-    else if (asset.Type === "redis") redisConfig = parsed;
-    else if (asset.Type === "mongodb") mongoConfig = parsed;
-  } catch {
-    /* ignore */
-  }
 
   // Extension asset info — subscribe to ready so we re-render when extensions load
   const extensionReady = useExtensionStore((s) => s.ready);
   const extInfo = extensionReady ? useExtensionStore.getState().getExtensionForAssetType(asset.Type) : undefined;
   const extAssetTypeDef = extInfo?.manifest.assetTypes?.find((at) => at.type === asset.Type);
   const hasConnectPage = !!extInfo?.manifest.frontend?.pages.find((p) => p.slot === "asset.connect");
-  const isExtensionType =
-    asset.Type !== "ssh" && asset.Type !== "database" && asset.Type !== "redis" && asset.Type !== "mongodb";
+  const isExtensionType = !isBuiltinType(asset.Type);
 
   // Show loading while extensions are initializing for extension asset types
   if (isExtensionType && !extensionReady) {
@@ -251,16 +119,12 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
     );
   }
 
-  const jumpHostName = sshConfig?.jump_host_id
-    ? assets.find((a) => a.ID === sshConfig!.jump_host_id)?.Name || `ID:${sshConfig.jump_host_id}`
-    : null;
-
   const sshTunnelName = (id?: number) => {
     if (!id) return null;
     return assets.find((a) => a.ID === id)?.Name || `ID:${id}`;
   };
 
-  const HeaderIcon = asset.Type === "database" || asset.Type === "mongodb" ? Database : Server;
+  const HeaderIcon = getAssetType(asset.Type)?.icon ?? Server;
 
   return (
     <div className="flex flex-col h-full">
@@ -275,11 +139,7 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
           </div>
         </div>
         <div className="flex gap-1.5">
-          {(asset.Type === "ssh" ||
-            asset.Type === "database" ||
-            asset.Type === "redis" ||
-            asset.Type === "mongodb" ||
-            hasConnectPage) && (
+          {(getAssetType(asset.Type)?.canConnect || hasConnectPage) && (
             <Button size="sm" className="h-8 gap-1.5" onClick={onConnect} disabled={isConnecting}>
               {isConnecting ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -312,153 +172,13 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
         onConfirm={onDelete}
       />
       <div className="flex-1 p-4 space-y-4 overflow-y-auto">
-        {/* SSH Connection Info */}
-        {sshConfig && (
-          <div className="rounded-xl border bg-card p-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-              SSH Connection
-            </h3>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <InfoItem label={t("asset.host")} value={sshConfig.host} mono />
-              <InfoItem label={t("asset.port")} value={String(sshConfig.port)} mono />
-              <InfoItem label={t("asset.username")} value={sshConfig.username} mono />
-              <InfoItem
-                label={t("asset.authType")}
-                value={
-                  sshConfig.auth_type === "password"
-                    ? t("asset.authPassword") + (sshConfig.password ? " ●" : "")
-                    : sshConfig.auth_type === "key"
-                      ? t("asset.authKey") +
-                        (sshConfig.credential_id
-                          ? ` (${t("asset.keySourceManaged")})`
-                          : sshConfig.private_keys?.length
-                            ? ` (${t("asset.keySourceFile")})`
-                            : "")
-                      : sshConfig.auth_type
-                }
-              />
-            </div>
-          </div>
-        )}
-
-        {/* SSH Private Keys */}
-        {sshConfig?.private_keys && sshConfig.private_keys.length > 0 && (
-          <div className="rounded-xl border bg-card p-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-              {t("asset.privateKeys")}
-            </h3>
-            <div className="space-y-1">
-              {sshConfig.private_keys.map((key, i) => (
-                <p key={i} className="text-sm font-mono text-muted-foreground">
-                  {key}
-                </p>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* SSH Jump Host */}
-        {jumpHostName && (
-          <div className="rounded-xl border bg-card p-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-              {t("asset.jumpHost")}
-            </h3>
-            <p className="text-sm font-mono">{jumpHostName}</p>
-          </div>
-        )}
-
-        {/* SSH Proxy */}
-        {sshConfig?.proxy && (
-          <div className="rounded-xl border bg-card p-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-              {t("asset.proxy")}
-            </h3>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <InfoItem label={t("asset.proxyType")} value={sshConfig.proxy.type.toUpperCase()} />
-              <InfoItem label={t("asset.proxyHost")} value={`${sshConfig.proxy.host}:${sshConfig.proxy.port}`} mono />
-              {sshConfig.proxy.username && (
-                <InfoItem label={t("asset.proxyUsername")} value={sshConfig.proxy.username} />
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Database Connection Info */}
-        {dbConfig && (
-          <div className="rounded-xl border bg-card p-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-              {t("asset.typeDatabase")}
-            </h3>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <InfoItem label={t("asset.driver")} value={dbConfig.driver === "postgresql" ? "PostgreSQL" : "MySQL"} />
-              <InfoItem label={t("asset.host")} value={`${dbConfig.host}:${dbConfig.port}`} mono />
-              <InfoItem label={t("asset.username")} value={dbConfig.username} mono />
-              {dbConfig.database && <InfoItem label={t("asset.database")} value={dbConfig.database} mono />}
-              {dbConfig.password && <InfoItem label={t("asset.password")} value="●●●●●●" />}
-              {dbConfig.ssl_mode && dbConfig.ssl_mode !== "disable" && (
-                <InfoItem label={t("asset.sslMode")} value={dbConfig.ssl_mode} />
-              )}
-              {dbConfig.tls && <InfoItem label="TLS" value="✓" />}
-              {dbConfig.read_only && <InfoItem label={t("asset.readOnly")} value="✓" />}
-              {dbConfig.params && <InfoItem label={t("asset.params")} value={dbConfig.params} mono />}
-            </div>
-            {sshTunnelName(dbConfig.ssh_asset_id) && (
-              <div className="mt-3 pt-3 border-t text-sm">
-                <InfoItem label={t("asset.sshTunnel")} value={sshTunnelName(dbConfig.ssh_asset_id)!} mono />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Redis Connection Info */}
-        {redisConfig && (
-          <div className="rounded-xl border bg-card p-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Redis</h3>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <InfoItem label={t("asset.host")} value={`${redisConfig.host}:${redisConfig.port}`} mono />
-              {redisConfig.username && <InfoItem label={t("asset.username")} value={redisConfig.username} mono />}
-              {redisConfig.password && <InfoItem label={t("asset.password")} value="●●●●●●" />}
-              <InfoItem label={t("asset.redisDatabase")} value={String(redisConfig.database || 0)} mono />
-              {redisConfig.tls && <InfoItem label={t("asset.tls")} value="✓" />}
-            </div>
-            {sshTunnelName(redisConfig.ssh_asset_id) && (
-              <div className="mt-3 pt-3 border-t text-sm">
-                <InfoItem label={t("asset.sshTunnel")} value={sshTunnelName(redisConfig.ssh_asset_id)!} mono />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* MongoDB Connection Info */}
-        {mongoConfig && (
-          <div className="rounded-xl border bg-card p-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">MongoDB</h3>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              {mongoConfig.connection_uri ? (
-                <InfoItem label={t("asset.mongoUri")} value={mongoConfig.connection_uri} mono />
-              ) : (
-                <InfoItem label={t("asset.host")} value={`${mongoConfig.host}:${mongoConfig.port}`} mono />
-              )}
-              {mongoConfig.username && <InfoItem label={t("asset.username")} value={mongoConfig.username} mono />}
-              {mongoConfig.password && <InfoItem label={t("asset.password")} value="●●●●●●" />}
-              {mongoConfig.database && (
-                <InfoItem label={t("asset.mongoDefaultDatabase")} value={mongoConfig.database} mono />
-              )}
-              {mongoConfig.auth_source && (
-                <InfoItem label={t("asset.mongoAuthSource")} value={mongoConfig.auth_source} mono />
-              )}
-              {mongoConfig.replica_set && (
-                <InfoItem label={t("asset.mongoReplicaSet")} value={mongoConfig.replica_set} mono />
-              )}
-              {mongoConfig.tls && <InfoItem label="TLS" value="✓" />}
-            </div>
-            {sshTunnelName(mongoConfig.ssh_asset_id) && (
-              <div className="mt-3 pt-3 border-t text-sm">
-                <InfoItem label={t("asset.sshTunnel")} value={sshTunnelName(mongoConfig.ssh_asset_id)!} mono />
-              </div>
-            )}
-          </div>
-        )}
+        {/* Builtin type Detail Info Card */}
+        {(() => {
+          const def = getAssetType(asset.Type);
+          if (!def) return null;
+          const Card = def.DetailInfoCard;
+          return <Card asset={asset} sshTunnelName={sshTunnelName} />;
+        })()}
 
         {/* Extension Config Info */}
         {extAssetTypeDef?.configSchema &&
@@ -509,251 +229,50 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
             );
           })()}
 
-        {/* SSH Command Policy */}
-        {asset.Type === "ssh" && (
-          <CommandPolicyCard
-            title={t("asset.cmdPolicy")}
-            policyType="ssh"
-            lists={[
-              {
-                key: "allow_list",
-                label: t("asset.cmdPolicyAllowList"),
-                items: allowList,
+        {/* Builtin type Policy Card */}
+        {(() => {
+          const def = getAssetType(asset.Type);
+          if (!def?.policy) return null;
+          const pol = def.policy;
+          return (
+            <CommandPolicyCard
+              title={t(pol.titleKey)}
+              policyType={pol.policyType}
+              lists={pol.fields.map((f) => ({
+                key: f.key,
+                label: t(f.labelKey),
+                items: policyFields[f.key] || [],
                 onAdd: (vals: string[]) => {
-                  const next = [...allowList, ...vals];
-                  setAllowList(next);
-                  handleSaveSSHPolicy(next, denyList);
+                  const next = { ...policyFields, [f.key]: [...(policyFields[f.key] || []), ...vals] };
+                  setPolicyFields(next);
+                  handleSavePolicyFields(next);
                 },
-                onRemove: (i) => {
-                  const next = allowList.filter((_, idx) => idx !== i);
-                  setAllowList(next);
-                  handleSaveSSHPolicy(next, denyList);
+                onRemove: (i: number) => {
+                  const next = {
+                    ...policyFields,
+                    [f.key]: (policyFields[f.key] || []).filter((_, idx) => idx !== i),
+                  };
+                  setPolicyFields(next);
+                  handleSavePolicyFields(next);
                 },
-                placeholder: t("asset.cmdPolicyPlaceholder"),
-                variant: "allow",
-              },
-              {
-                key: "deny_list",
-                label: t("asset.cmdPolicyDenyList"),
-                items: denyList,
-                onAdd: (vals: string[]) => {
-                  const next = [...denyList, ...vals];
-                  setDenyList(next);
-                  handleSaveSSHPolicy(allowList, next);
-                },
-                onRemove: (i) => {
-                  const next = denyList.filter((_, idx) => idx !== i);
-                  setDenyList(next);
-                  handleSaveSSHPolicy(allowList, next);
-                },
-                placeholder: t("asset.cmdPolicyPlaceholder"),
-                variant: "deny",
-              },
-            ]}
-            buildPolicyJSON={() =>
-              JSON.stringify({
-                allow_list: allowList,
-                deny_list: denyList,
-                ...(policyGroups.length > 0 ? { groups: policyGroups } : {}),
-              })
-            }
-            hint={t("asset.cmdPolicyHint")}
-            saving={savingPolicy}
-            assetID={asset.ID}
-            onReset={handleResetPolicy}
-            referencedGroups={policyGroups}
-            onGroupsChange={handleGroupsChange}
-          />
-        )}
-
-        {/* Database Query Policy */}
-        {asset.Type === "database" && (
-          <CommandPolicyCard
-            title={t("asset.queryPolicy")}
-            policyType="database"
-            lists={[
-              {
-                key: "allow_types",
-                label: t("asset.queryPolicyAllowTypes"),
-                items: queryAllowTypes,
-                onAdd: (vals: string[]) => {
-                  const next = [...queryAllowTypes, ...vals];
-                  setQueryAllowTypes(next);
-                  handleSaveQueryPolicy(next, queryDenyTypes, queryDenyFlags);
-                },
-                onRemove: (i) => {
-                  const next = queryAllowTypes.filter((_, idx) => idx !== i);
-                  setQueryAllowTypes(next);
-                  handleSaveQueryPolicy(next, queryDenyTypes, queryDenyFlags);
-                },
-                placeholder: t("asset.queryPolicyPlaceholder"),
-                variant: "allow",
-              },
-              {
-                key: "deny_types",
-                label: t("asset.queryPolicyDenyTypes"),
-                items: queryDenyTypes,
-                onAdd: (vals: string[]) => {
-                  const next = [...queryDenyTypes, ...vals];
-                  setQueryDenyTypes(next);
-                  handleSaveQueryPolicy(queryAllowTypes, next, queryDenyFlags);
-                },
-                onRemove: (i) => {
-                  const next = queryDenyTypes.filter((_, idx) => idx !== i);
-                  setQueryDenyTypes(next);
-                  handleSaveQueryPolicy(queryAllowTypes, next, queryDenyFlags);
-                },
-                placeholder: t("asset.queryPolicyPlaceholder"),
-                variant: "deny",
-              },
-              {
-                key: "deny_flags",
-                label: t("asset.queryPolicyDenyFlags"),
-                items: queryDenyFlags,
-                onAdd: (vals: string[]) => {
-                  const next = [...queryDenyFlags, ...vals];
-                  setQueryDenyFlags(next);
-                  handleSaveQueryPolicy(queryAllowTypes, queryDenyTypes, next);
-                },
-                onRemove: (i) => {
-                  const next = queryDenyFlags.filter((_, idx) => idx !== i);
-                  setQueryDenyFlags(next);
-                  handleSaveQueryPolicy(queryAllowTypes, queryDenyTypes, next);
-                },
-                placeholder: t("asset.queryPolicyFlagPlaceholder"),
-                variant: "warn",
-              },
-            ]}
-            buildPolicyJSON={() =>
-              JSON.stringify({
-                allow_types: queryAllowTypes,
-                deny_types: queryDenyTypes,
-                deny_flags: queryDenyFlags,
-                ...(policyGroups.length > 0 ? { groups: policyGroups } : {}),
-              })
-            }
-            hint={t("asset.queryPolicyHint")}
-            saving={savingPolicy}
-            assetID={asset.ID}
-            onReset={handleResetPolicy}
-            referencedGroups={policyGroups}
-            onGroupsChange={handleGroupsChange}
-          />
-        )}
-
-        {/* Redis Policy */}
-        {asset.Type === "redis" && (
-          <CommandPolicyCard
-            title={t("asset.redisPolicy")}
-            policyType="redis"
-            lists={[
-              {
-                key: "allow_list",
-                label: t("asset.redisPolicyAllowList"),
-                items: redisAllowList,
-                onAdd: (vals: string[]) => {
-                  const next = [...redisAllowList, ...vals];
-                  setRedisAllowList(next);
-                  handleSaveRedisPolicy(next, redisDenyList);
-                },
-                onRemove: (i) => {
-                  const next = redisAllowList.filter((_, idx) => idx !== i);
-                  setRedisAllowList(next);
-                  handleSaveRedisPolicy(next, redisDenyList);
-                },
-                placeholder: t("asset.redisPolicyPlaceholder"),
-                variant: "allow",
-              },
-              {
-                key: "deny_list",
-                label: t("asset.redisPolicyDenyList"),
-                items: redisDenyList,
-                onAdd: (vals: string[]) => {
-                  const next = [...redisDenyList, ...vals];
-                  setRedisDenyList(next);
-                  handleSaveRedisPolicy(redisAllowList, next);
-                },
-                onRemove: (i) => {
-                  const next = redisDenyList.filter((_, idx) => idx !== i);
-                  setRedisDenyList(next);
-                  handleSaveRedisPolicy(redisAllowList, next);
-                },
-                placeholder: t("asset.redisPolicyPlaceholder"),
-                variant: "deny",
-              },
-            ]}
-            buildPolicyJSON={() =>
-              JSON.stringify({
-                allow_list: redisAllowList,
-                deny_list: redisDenyList,
-                ...(policyGroups.length > 0 ? { groups: policyGroups } : {}),
-              })
-            }
-            hint={t("asset.redisPolicyHint")}
-            saving={savingPolicy}
-            assetID={asset.ID}
-            onReset={handleResetPolicy}
-            referencedGroups={policyGroups}
-            onGroupsChange={handleGroupsChange}
-          />
-        )}
-
-        {/* MongoDB Policy */}
-        {asset.Type === "mongodb" && (
-          <CommandPolicyCard
-            title={t("asset.mongoPolicy")}
-            policyType="mongodb"
-            lists={[
-              {
-                key: "allow_types",
-                label: t("asset.mongoPolicyAllowTypes"),
-                items: mongoAllowTypes,
-                onAdd: (vals: string[]) => {
-                  const next = [...mongoAllowTypes, ...vals];
-                  setMongoAllowTypes(next);
-                  handleSaveMongoPolicy(next, mongoDenyTypes);
-                },
-                onRemove: (i) => {
-                  const next = mongoAllowTypes.filter((_, idx) => idx !== i);
-                  setMongoAllowTypes(next);
-                  handleSaveMongoPolicy(next, mongoDenyTypes);
-                },
-                placeholder: t("asset.mongoPolicyPlaceholder"),
-                variant: "allow",
-              },
-              {
-                key: "deny_types",
-                label: t("asset.mongoPolicyDenyTypes"),
-                items: mongoDenyTypes,
-                onAdd: (vals: string[]) => {
-                  const next = [...mongoDenyTypes, ...vals];
-                  setMongoDenyTypes(next);
-                  handleSaveMongoPolicy(mongoAllowTypes, next);
-                },
-                onRemove: (i) => {
-                  const next = mongoDenyTypes.filter((_, idx) => idx !== i);
-                  setMongoDenyTypes(next);
-                  handleSaveMongoPolicy(mongoAllowTypes, next);
-                },
-                placeholder: t("asset.mongoPolicyPlaceholder"),
-                variant: "deny",
-              },
-            ]}
-            buildPolicyJSON={() =>
-              JSON.stringify({
-                allow_types: mongoAllowTypes,
-                deny_types: mongoDenyTypes,
-                ...(policyGroups.length > 0 ? { groups: policyGroups } : {}),
-              })
-            }
-            hint={t("asset.mongoPolicyHint")}
-            saving={savingPolicy}
-            assetID={asset.ID}
-            onReset={handleResetPolicy}
-            referencedGroups={policyGroups}
-            onGroupsChange={handleGroupsChange}
-          />
-        )}
+                placeholder: t(f.placeholderKey),
+                variant: f.variant,
+              }))}
+              buildPolicyJSON={() =>
+                JSON.stringify({
+                  ...Object.fromEntries(Object.entries(policyFields).filter(([, v]) => v.length > 0)),
+                  ...(policyGroups.length > 0 ? { groups: policyGroups } : {}),
+                })
+              }
+              hint={t(pol.hintKey)}
+              saving={savingPolicy}
+              assetID={asset.ID}
+              onReset={handleResetPolicy}
+              referencedGroups={policyGroups}
+              onGroupsChange={handleGroupsChange}
+            />
+          );
+        })()}
 
         {/* Extension Policy */}
         {extInfo?.manifest.policies && isExtensionType && (
@@ -764,16 +283,19 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
               {
                 key: "allow_list",
                 label: t("asset.cmdPolicyAllowList"),
-                items: allowList,
+                items: policyFields["allow_list"] || [],
                 onAdd: (vals: string[]) => {
-                  const next = [...allowList, ...vals];
-                  setAllowList(next);
-                  handleSaveSSHPolicy(next, denyList);
+                  const next = { ...policyFields, allow_list: [...(policyFields["allow_list"] || []), ...vals] };
+                  setPolicyFields(next);
+                  handleSavePolicyFields(next);
                 },
                 onRemove: (i) => {
-                  const next = allowList.filter((_, idx) => idx !== i);
-                  setAllowList(next);
-                  handleSaveSSHPolicy(next, denyList);
+                  const next = {
+                    ...policyFields,
+                    allow_list: (policyFields["allow_list"] || []).filter((_, idx) => idx !== i),
+                  };
+                  setPolicyFields(next);
+                  handleSavePolicyFields(next);
                 },
                 placeholder: extInfo.manifest.policies.actions.join(", "),
                 variant: "allow",
@@ -781,16 +303,19 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
               {
                 key: "deny_list",
                 label: t("asset.cmdPolicyDenyList"),
-                items: denyList,
+                items: policyFields["deny_list"] || [],
                 onAdd: (vals: string[]) => {
-                  const next = [...denyList, ...vals];
-                  setDenyList(next);
-                  handleSaveSSHPolicy(allowList, next);
+                  const next = { ...policyFields, deny_list: [...(policyFields["deny_list"] || []), ...vals] };
+                  setPolicyFields(next);
+                  handleSavePolicyFields(next);
                 },
                 onRemove: (i) => {
-                  const next = denyList.filter((_, idx) => idx !== i);
-                  setDenyList(next);
-                  handleSaveSSHPolicy(allowList, next);
+                  const next = {
+                    ...policyFields,
+                    deny_list: (policyFields["deny_list"] || []).filter((_, idx) => idx !== i),
+                  };
+                  setPolicyFields(next);
+                  handleSavePolicyFields(next);
                 },
                 placeholder: extInfo.manifest.policies.actions.join(", "),
                 variant: "deny",
@@ -798,8 +323,7 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
             ]}
             buildPolicyJSON={() =>
               JSON.stringify({
-                allow_list: allowList,
-                deny_list: denyList,
+                ...Object.fromEntries(Object.entries(policyFields).filter(([, v]) => v.length > 0)),
                 ...(policyGroups.length > 0 ? { groups: policyGroups } : {}),
               })
             }
