@@ -267,8 +267,8 @@ Approval:
 
 Examples:
   opsctl mongo prod-mongo -d mydb -c users '{}'
-  opsctl mongo prod-mongo -d mydb -c users -o find '{"status":"active"}'
-  opsctl mongo prod-mongo -d mydb -c logs -o insertOne '{"msg":"hello"}'
-  opsctl mongo prod-mongo -d mydb -c orders -o aggregate '[{"$match":{"status":"pending"}}]'
+  opsctl mongo prod-mongo -d mydb -c users -o find '{"filter":{"status":"active"}}'
+  opsctl mongo prod-mongo -d mydb -c logs -o insertOne '{"document":{"msg":"hello"}}'
+  opsctl mongo prod-mongo -d mydb -c orders -o aggregate '{"pipeline":[{"$match":{"status":"pending"}}]}'
 `)
 }

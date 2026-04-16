@@ -24,7 +24,7 @@ func cmdCreate(ctx context.Context, handlers map[string]ai.ToolHandlerFunc, args
 	switch resource {
 	case "asset":
 		fs := flag.NewFlagSet("create asset", flag.ExitOnError)
-		assetType := fs.String("type", "ssh", `Asset type: "ssh", "database", or "redis"`)
+		assetType := fs.String("type", "ssh", `Asset type: "ssh", "database", "redis", or "mongodb"`)
 		name := fs.String("name", "", "Display name for the asset (required)")
 		host := fs.String("host", "", "Hostname or IP address (required)")
 		port := fs.Int("port", 0, "Port number (default: auto by type)")

@@ -146,7 +146,7 @@ echo '{"commands":[
   {"asset":"web-01","type":"exec","command":"uptime"},
   {"asset":"db-01","type":"sql","command":"SELECT 1"},
   {"asset":"cache","type":"redis","command":"PING"},
-  {"asset":"mongo-db","type":"mongo","database":"mydb","collection":"users","operation":"find","query":{"filter":{"status":"active"}}}
+  {"asset":"mongo-db","type":"mongo","command":"{\"operation\":\"find\",\"database\":\"mydb\",\"collection\":\"users\",\"query\":\"{}\"}"}
 ]}' | opsctl batch
 ```
 
@@ -178,7 +178,7 @@ opsctl batch 'sql:db-01:SELECT 1' 'redis:cache:PING' 'web-01:uptime'
 
 ### `create asset [flags]`
 
-Create a new asset (ssh, database, or redis). Requires approval.
+Create a new asset (ssh, database, redis, or mongodb). Requires approval.
 
 **Required flags**:
 - `--name <string>` — Display name
@@ -186,10 +186,10 @@ Create a new asset (ssh, database, or redis). Requires approval.
 - `--username <string>` — Login username
 
 **Optional flags**:
-- `--type <string>` — Asset type: "ssh" (default), "database", or "redis"
+- `--type <string>` — Asset type: "ssh" (default), "database", "redis", or "mongodb"
 - `--port <int>` — Port number (default: auto by type — 22/3306/5432/6379/27017)
 - `--auth-type <string>` — SSH auth method: "password" or "key" (SSH type only)
-- `--driver <string>` — Database driver: "mysql", "postgresql", or "mongodb" (database type, required)
+- `--driver <string>` — Database driver: "mysql" or "postgresql" (required for database type)
 - `--database <string>` — Default database name (database type)
 - `--read-only` — Enable read-only mode (database type)
 - `--ssh-asset <asset>` — SSH asset name/ID for tunnel connection (database/redis types)
