@@ -51,11 +51,29 @@ func (p *RedisPolicy) IsEmpty() bool {
 	return len(p.AllowList) == 0 && len(p.DenyList) == 0 && len(p.Groups) == 0
 }
 
+// MongoPolicy MongoDB 权限策略
+type MongoPolicy struct {
+	AllowTypes []string `json:"allow_types,omitempty"` // 允许的操作类型: find, findOne, aggregate, ...
+	DenyTypes  []string `json:"deny_types,omitempty"`  // 拒绝的操作类型: dropDatabase, dropCollection, ...
+	Groups     []string `json:"groups,omitempty"`      // 引用的权限组 ID
+}
+
+// IsEmpty 检查策略是否为空
+func (p *MongoPolicy) IsEmpty() bool {
+	return len(p.AllowTypes) == 0 && len(p.DenyTypes) == 0 && len(p.Groups) == 0
+}
+
+// DefaultMongoPolicy 返回默认 MongoDB 权限策略（引用内置权限组）
+func DefaultMongoPolicy() *MongoPolicy {
+	return &MongoPolicy{Groups: []string{BuiltinMongoReadOnly}}
+}
+
 // Holder 策略持有者接口，Asset 和 Group 均实现此接口
 type Holder interface {
 	GetCommandPolicy() (*CommandPolicy, error)
 	GetQueryPolicy() (*QueryPolicy, error)
 	GetRedisPolicy() (*RedisPolicy, error)
+	GetMongoPolicy() (*MongoPolicy, error)
 }
 
 // DefaultRedisPolicy 返回默认 Redis 权限策略（引用内置权限组）
@@ -76,6 +94,9 @@ const (
 	BuiltinSQLDangerousDeny   = "builtin:sql-dangerous-deny"
 	BuiltinRedisReadOnly      = "builtin:redis-readonly"
 	BuiltinRedisDangerousDeny = "builtin:redis-dangerous-deny"
+	BuiltinMongoReadOnly      = "builtin:mongo-readonly"
+	BuiltinMongoReadWrite     = "builtin:mongo-readwrite"
+	BuiltinMongoDangerousDeny = "builtin:mongo-dangerous-deny"
 
 	// BuiltinPrefix 内置权限组 ID 前缀
 	BuiltinPrefix = "builtin:"

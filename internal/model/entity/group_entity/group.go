@@ -90,3 +90,9 @@ func (g *Group) SetRedisPolicy(p *policy.RedisPolicy) error {
 	g.RdsPolicy = s
 	return nil
 }
+
+// GetMongoPolicy 解析 MongoDB 权限策略
+// TODO(task4): Group 将在 Task 4 数据库迁移中新增 MgoPolicy 字段，届时替换空字符串
+func (g *Group) GetMongoPolicy() (*policy.MongoPolicy, error) {
+	return jsonfield.UnmarshalOrDefault[policy.MongoPolicy]("", "MongoDB权限策略")
+}

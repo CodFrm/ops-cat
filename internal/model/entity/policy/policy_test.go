@@ -127,3 +127,41 @@ func TestDefaultRedisPolicy(t *testing.T) {
 		})
 	})
 }
+
+func TestMongoPolicyIsEmpty(t *testing.T) {
+	Convey("MongoPolicy.IsEmpty()", t, func() {
+		Convey("空策略返回 true", func() {
+			p := &MongoPolicy{}
+			So(p.IsEmpty(), ShouldBeTrue)
+		})
+
+		Convey("有 AllowTypes 时返回 false", func() {
+			p := &MongoPolicy{AllowTypes: []string{"find"}}
+			So(p.IsEmpty(), ShouldBeFalse)
+		})
+
+		Convey("有 DenyTypes 时返回 false", func() {
+			p := &MongoPolicy{DenyTypes: []string{"dropDatabase"}}
+			So(p.IsEmpty(), ShouldBeFalse)
+		})
+
+		Convey("有 Groups 时返回 false", func() {
+			p := &MongoPolicy{Groups: []string{BuiltinMongoReadOnly}}
+			So(p.IsEmpty(), ShouldBeFalse)
+		})
+	})
+}
+
+func TestDefaultMongoPolicy(t *testing.T) {
+	Convey("DefaultMongoPolicy()", t, func() {
+		p := DefaultMongoPolicy()
+
+		Convey("不为空", func() {
+			So(p.IsEmpty(), ShouldBeFalse)
+		})
+
+		Convey("包含内置 MongoDB 权限组引用", func() {
+			So(p.Groups, ShouldContain, BuiltinMongoReadOnly)
+		})
+	})
+}
