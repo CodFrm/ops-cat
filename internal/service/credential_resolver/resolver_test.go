@@ -78,3 +78,34 @@ func TestResolveRedisPassword(t *testing.T) {
 		})
 	})
 }
+
+func TestResolveMongoDBPassword(t *testing.T) {
+	convey.Convey("解析 MongoDB 密码", t, func() {
+		svc := setupCredentialSvc(t)
+		r := Default()
+
+		convey.Convey("空密码返回空字符串", func() {
+			cfg := &asset_entity.MongoDBConfig{Password: ""}
+			password, err := r.ResolveMongoDBPassword(context.Background(), cfg)
+			assert.NoError(t, err)
+			assert.Equal(t, "", password)
+		})
+
+		convey.Convey("正确解密已加密的密码", func() {
+			encrypted, err := svc.Encrypt("mongodb-secret-789")
+			assert.NoError(t, err)
+
+			cfg := &asset_entity.MongoDBConfig{Password: encrypted}
+			password, err := r.ResolveMongoDBPassword(context.Background(), cfg)
+			assert.NoError(t, err)
+			assert.Equal(t, "mongodb-secret-789", password)
+		})
+
+		convey.Convey("无效密文返回错误", func() {
+			cfg := &asset_entity.MongoDBConfig{Password: "plain-text-not-encrypted"} //nolint:gosec
+			_, err := r.ResolveMongoDBPassword(context.Background(), cfg)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "解密 MongoDB 密码失败")
+		})
+	})
+}

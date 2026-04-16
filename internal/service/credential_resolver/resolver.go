@@ -164,6 +164,26 @@ func (r *Resolver) ResolveRedisPassword(ctx context.Context, cfg *asset_entity.R
 	return decrypted, nil
 }
 
+// ResolveMongoDBPassword 解密 MongoDBConfig 中的密码
+// 优先使用统一凭证，向后兼容内联密码
+func (r *Resolver) ResolveMongoDBPassword(ctx context.Context, cfg *asset_entity.MongoDBConfig) (string, error) {
+	if cfg.CredentialID > 0 {
+		password, err := credential_mgr_svc.GetDecryptedPassword(ctx, cfg.CredentialID)
+		if err != nil {
+			return "", fmt.Errorf("获取 MongoDB 凭证失败: %w", err)
+		}
+		return password, nil
+	}
+	if cfg.Password == "" {
+		return "", nil
+	}
+	decrypted, err := credential_svc.Default().Decrypt(cfg.Password)
+	if err != nil {
+		return "", fmt.Errorf("解密 MongoDB 密码失败: %w", err)
+	}
+	return decrypted, nil
+}
+
 // DecryptProxyPassword 解密代理配置中的密码，返回新的 ProxyConfig（不修改原始对象）
 func (r *Resolver) DecryptProxyPassword(proxy *asset_entity.ProxyConfig) *asset_entity.ProxyConfig {
 	if proxy == nil || proxy.Password == "" {
