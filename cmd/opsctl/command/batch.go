@@ -57,7 +57,7 @@ type resolvedBatchCmd struct {
 	decision *ai.CheckResult // 策略预检结果，用于审计
 }
 
-var validBatchTypes = map[string]bool{"exec": true, "sql": true, "redis": true}
+var validBatchTypes = map[string]bool{"exec": true, "sql": true, "redis": true, "mongo": true}
 
 func cmdBatch(ctx context.Context, handlers map[string]ai.ToolHandlerFunc, args []string, session string) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
@@ -251,6 +251,11 @@ func executeBatchItem(ctx context.Context, handlers map[string]ai.ToolHandlerFun
 			"asset_id": float64(cmd.asset.ID),
 			"command":  cmd.command,
 		})
+	case "mongo":
+		result = executeBatchHandler(ctx, handlers, "exec_mongo", cmd, map[string]any{
+			"asset_id": float64(cmd.asset.ID),
+			"query":    cmd.command,
+		})
 	default:
 		result.Error = fmt.Sprintf("unsupported type: %s", cmd.cmdType)
 		result.ExitCode = -1
@@ -414,7 +419,7 @@ func parseBatchInput(args []string) ([]batchCommand, error) {
 						input.Commands[i].Type = "exec"
 					}
 					if !validBatchTypes[input.Commands[i].Type] {
-						return nil, fmt.Errorf("invalid type %q for command %d (must be exec/sql/redis)", input.Commands[i].Type, i)
+						return nil, fmt.Errorf("invalid type %q for command %d (must be exec/sql/redis/mongo)", input.Commands[i].Type, i)
 					}
 				}
 				return input.Commands, nil
@@ -482,6 +487,8 @@ func batchAuditTool(cmdType string) string {
 		return "exec_sql"
 	case "redis":
 		return "exec_redis"
+	case "mongo":
+		return "exec_mongo"
 	default:
 		return "exec"
 	}
@@ -492,7 +499,7 @@ func printBatchUsage() {
   opsctl [--session <id>] batch [args...]
 
 Executes multiple commands in parallel with a single approval request.
-Supports exec (SSH), sql, and redis command types.
+Supports exec (SSH), sql, redis, and mongo command types.
 
 Input Modes:
   Stdin JSON (AI-friendly):

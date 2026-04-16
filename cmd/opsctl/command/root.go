@@ -121,6 +121,8 @@ func Execute() int {
 		return cmdSQL(ctx, handlers, args, resolvedSession)
 	case "redis":
 		return cmdRedisCmd(ctx, handlers, args, resolvedSession)
+	case "mongo":
+		return cmdMongo(ctx, handlers, args, resolvedSession)
 	case "ssh":
 		return cmdSSH(ctx, args)
 	case "batch":
@@ -150,6 +152,7 @@ Commands:
   exec      Execute a shell command on a remote server via SSH
   sql       Execute SQL on a database asset (MySQL, PostgreSQL)
   redis     Execute a Redis command on a Redis asset
+  mongo     Execute a MongoDB operation on a MongoDB asset
   create    Create a new resource (ssh, database, or redis)
   update    Update an existing resource
   cp        Copy files between local and remote servers (scp-style)
@@ -192,6 +195,7 @@ Examples:
   opsctl exec web-server -- uptime                Run command (auto-creates session)
   opsctl sql prod-db "SELECT * FROM users"        Query a database
   opsctl redis cache "GET session:abc"            Execute Redis command
+  opsctl mongo prod-mongo -d mydb -c users '{}'  Query a MongoDB collection
   opsctl create asset --type database --driver mysql --name "DB" --host db.local --username app
   opsctl cp ./config.yml web-server:/etc/app/     Upload a file
   opsctl cp 1:/var/log/app.log ./app.log          Download a file
