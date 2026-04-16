@@ -65,7 +65,7 @@ func (p *MongoPolicy) IsEmpty() bool {
 
 // DefaultMongoPolicy 返回默认 MongoDB 权限策略（引用内置权限组）
 func DefaultMongoPolicy() *MongoPolicy {
-	return &MongoPolicy{Groups: []string{BuiltinMongoReadOnly}}
+	return &MongoPolicy{Groups: []string{BuiltinMongoReadOnly, BuiltinMongoDangerousDeny}}
 }
 
 // Holder 策略持有者接口，Asset 和 Group 均实现此接口

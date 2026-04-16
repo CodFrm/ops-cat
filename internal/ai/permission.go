@@ -17,7 +17,7 @@ import (
 
 // CheckPermission 统一权限检查（策略 + DB Grant 匹配）。
 // 不包含用户确认逻辑 — NeedConfirm 时由调用方处理。
-// assetType: "ssh" | "database" | "redis" | "exec"（exec 等同于 ssh）
+// assetType: "ssh" | "database" | "redis" | "mongodb" | "exec"（exec 等同于 ssh）| "sql"（sql 等同于 database）| "mongo"（mongo 等同于 mongodb）
 func CheckPermission(ctx context.Context, assetType string, assetID int64, command string) CheckResult {
 	// opsctl 使用的类型名映射到内部类型
 	switch assetType {
@@ -25,6 +25,8 @@ func CheckPermission(ctx context.Context, assetType string, assetID int64, comma
 		assetType = asset_entity.AssetTypeSSH
 	case "sql":
 		assetType = asset_entity.AssetTypeDatabase
+	case "mongo":
+		assetType = asset_entity.AssetTypeMongoDB
 	}
 
 	switch assetType {
@@ -194,7 +196,7 @@ func checkMongoDBPermission(ctx context.Context, assetID int64, operation string
 	// MongoDB 策略
 	asset, _ := resolveAssetPolicyChain(ctx, assetID)
 	mergedPolicy := collectMongoDBPolicies(ctx, asset)
-	result := checkMongoPolicyRules(ctx, mergedPolicy, operation)
+	result := CheckMongoDBPolicy(ctx, mergedPolicy, operation)
 
 	// 组通用 allow 优先于类型专用的 NeedConfirm
 	if result.Decision == NeedConfirm && groupResult.Decision == Allow {
