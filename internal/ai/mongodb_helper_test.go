@@ -41,7 +41,7 @@ func TestMongoDBCacheType(t *testing.T) {
 		cache := NewMongoDBClientCache()
 
 		// 验证类型别名是否匹配 ConnCache[*connpool.MongoClientCloser]
-		var _ *ConnCache[*connpool.MongoClientCloser] = cache
+		_ = (*ConnCache[*connpool.MongoClientCloser])(cache)
 		assert.NotNil(t, cache)
 	})
 }
@@ -110,7 +110,7 @@ func TestMarshalResult(t *testing.T) {
 	Convey("marshalResult 将 map 序列化为 JSON 字符串", t, func() {
 		Convey("正常序列化", func() {
 			result, err := marshalResult(map[string]any{
-				"count": 5,
+				"count":     5,
 				"documents": []string{"a", "b"},
 			})
 			assert.NoError(t, err)

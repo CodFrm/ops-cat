@@ -25,7 +25,7 @@ type MongoClientCloser struct {
 
 // Close disconnects the underlying MongoDB client.
 func (m *MongoClientCloser) Close() error {
-	return m.Client.Disconnect(context.Background())
+	return m.Disconnect(context.Background())
 }
 
 // mongoTunnelDialer implements options.ContextDialer for SSH tunnel routing.
@@ -169,10 +169,10 @@ func parseHostFromURI(uri string) (string, int, error) {
 		hostPort = hostPort[:idx]
 	}
 
-	hostStr, portStr, err := net.SplitHostPort(hostPort)
-	if err != nil {
-		// 没有端口，使用默认值
-		return hostPort, 27017, nil
+	hostStr, portStr, splitErr := net.SplitHostPort(hostPort)
+	if splitErr != nil {
+		// SplitHostPort 失败说明没有端口部分，使用默认 27017
+		return hostPort, 27017, nil //nolint:nilerr // no port in host is expected, not an error
 	}
 
 	portNum, err := strconv.Atoi(portStr)

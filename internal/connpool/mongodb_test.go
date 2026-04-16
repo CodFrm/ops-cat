@@ -72,7 +72,7 @@ func TestInjectPassword(t *testing.T) {
 		})
 
 		Convey("URI 中已有密码时不覆盖", func() {
-			uri := "mongodb://admin:existing@localhost:27017/mydb"
+			uri := "mongodb://admin:existing@localhost:27017/mydb" //nolint:gosec // test data
 			result := injectPassword(uri, "newpass")
 			So(result, ShouldEqual, uri)
 		})

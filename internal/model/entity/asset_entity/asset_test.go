@@ -183,7 +183,7 @@ func TestMongoDBConfig(t *testing.T) {
 
 		convey.Convey("ConnectionURI模式配置序列化", func() {
 			a := &Asset{Name: "test", Type: AssetTypeMongoDB}
-			cfg := &MongoDBConfig{
+			cfg := &MongoDBConfig{ //nolint:gosec // test data
 				ConnectionURI: "mongodb://user:pass@host:27017/db",
 			}
 			err := a.SetMongoDBConfig(cfg)
