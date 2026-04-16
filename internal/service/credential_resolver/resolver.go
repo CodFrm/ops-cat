@@ -124,6 +124,32 @@ func (r *Resolver) ResolveJumpHosts(ctx context.Context, jumpHostID int64, maxDe
 	return []ssh_svc.JumpHostEntry{entry}, nil
 }
 
+// PasswordSource 密码来源接口。
+type PasswordSource interface {
+	GetCredentialID() int64
+	GetPassword() string
+}
+
+// ResolvePasswordGeneric 通用密码解密。
+// 仅供 assettype handler 使用。现有 ResolveXxxPassword 方法保持不变。
+func (r *Resolver) ResolvePasswordGeneric(ctx context.Context, src PasswordSource) (string, error) {
+	if src.GetCredentialID() > 0 {
+		password, err := credential_mgr_svc.GetDecryptedPassword(ctx, src.GetCredentialID())
+		if err != nil {
+			return "", fmt.Errorf("获取凭证失败: %w", err)
+		}
+		return password, nil
+	}
+	if src.GetPassword() == "" {
+		return "", nil
+	}
+	decrypted, err := credential_svc.Default().Decrypt(src.GetPassword())
+	if err != nil {
+		return "", fmt.Errorf("解密密码失败: %w", err)
+	}
+	return decrypted, nil
+}
+
 // ResolveDatabasePassword 解密 DatabaseConfig 中的密码
 // 优先使用统一凭证，向后兼容内联密码
 func (r *Resolver) ResolveDatabasePassword(ctx context.Context, cfg *asset_entity.DatabaseConfig) (string, error) {

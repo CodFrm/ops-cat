@@ -144,6 +144,18 @@ type MongoDBConfig struct {
 	SSHAssetID    int64  `json:"ssh_asset_id,omitempty"` // Deprecated: use Asset.SSHTunnelID
 }
 
+// DatabaseConfig PasswordSource implementation
+func (c *DatabaseConfig) GetCredentialID() int64 { return c.CredentialID }
+func (c *DatabaseConfig) GetPassword() string    { return c.Password }
+
+// RedisConfig PasswordSource implementation
+func (c *RedisConfig) GetCredentialID() int64 { return c.CredentialID }
+func (c *RedisConfig) GetPassword() string    { return c.Password }
+
+// MongoDBConfig PasswordSource implementation
+func (c *MongoDBConfig) GetCredentialID() int64 { return c.CredentialID }
+func (c *MongoDBConfig) GetPassword() string    { return c.Password }
+
 // QueryPolicy SQL 权限策略（类型别名，定义在 policy 包）
 type QueryPolicy = policy.QueryPolicy
 
