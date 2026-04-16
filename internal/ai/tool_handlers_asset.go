@@ -88,6 +88,13 @@ func toSafeView(a *asset_entity.Asset) safeAssetView {
 			v.Username = cfg.Username
 			v.RedisDB = cfg.Database
 		}
+	case asset_entity.AssetTypeMongoDB:
+		if cfg, err := a.GetMongoDBConfig(); err == nil && cfg != nil {
+			v.Host = cfg.Host
+			v.Port = cfg.Port
+			v.Username = cfg.Username
+			v.Database = cfg.Database
+		}
 	}
 	return v
 }
@@ -195,6 +202,20 @@ func handleAddAsset(ctx context.Context, args map[string]any) (string, error) {
 		}
 		if err := asset.SetRedisConfig(redisCfg); err != nil {
 			logger.Default().Warn("set Redis config for new asset", zap.Error(err))
+		}
+	case asset_entity.AssetTypeMongoDB:
+		mongoCfg := &asset_entity.MongoDBConfig{
+			Host:       host,
+			Port:       port,
+			Username:   username,
+			Database:   argString(args, "database"),
+			AuthSource: "admin",
+		}
+		if sshAssetID := argInt64(args, "ssh_asset_id"); sshAssetID > 0 {
+			asset.SSHTunnelID = sshAssetID
+		}
+		if err := asset.SetMongoDBConfig(mongoCfg); err != nil {
+			logger.Default().Warn("set MongoDB config for new asset", zap.Error(err))
 		}
 	default:
 		return "", fmt.Errorf("unsupported asset type: %s", assetType)
