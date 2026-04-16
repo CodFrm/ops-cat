@@ -145,3 +145,95 @@ func TestAsset_SSHAddress(t *testing.T) {
 		assert.Equal(t, "10.0.0.1:2222", addr)
 	})
 }
+
+func TestMongoDBConfig(t *testing.T) {
+	convey.Convey("MongoDB配置序列化与反序列化", t, func() {
+		convey.Convey("IsMongoDB类型判断", func() {
+			a := &Asset{Type: AssetTypeMongoDB}
+			assert.True(t, a.IsMongoDB())
+			b := &Asset{Type: AssetTypeSSH}
+			assert.False(t, b.IsMongoDB())
+		})
+
+		convey.Convey("SetMongoDBConfig后GetMongoDBConfig应返回相同内容", func() {
+			a := &Asset{Name: "test", Type: AssetTypeMongoDB}
+			cfg := &MongoDBConfig{
+				Host:     "mongo.example.com",
+				Port:     27017,
+				Username: "admin",
+				Password: "secret",
+				Database: "mydb",
+			}
+			err := a.SetMongoDBConfig(cfg)
+			assert.NoError(t, err)
+
+			got, err := a.GetMongoDBConfig()
+			assert.NoError(t, err)
+			assert.Equal(t, cfg.Host, got.Host)
+			assert.Equal(t, cfg.Port, got.Port)
+			assert.Equal(t, cfg.Username, got.Username)
+			assert.Equal(t, cfg.Database, got.Database)
+		})
+
+		convey.Convey("非MongoDB类型调用GetMongoDBConfig应返回错误", func() {
+			a := &Asset{Name: "test", Type: AssetTypeSSH}
+			_, err := a.GetMongoDBConfig()
+			assert.Error(t, err)
+		})
+
+		convey.Convey("ConnectionURI模式配置序列化", func() {
+			a := &Asset{Name: "test", Type: AssetTypeMongoDB}
+			cfg := &MongoDBConfig{
+				ConnectionURI: "mongodb://user:pass@host:27017/db",
+			}
+			err := a.SetMongoDBConfig(cfg)
+			assert.NoError(t, err)
+
+			got, err := a.GetMongoDBConfig()
+			assert.NoError(t, err)
+			assert.Equal(t, cfg.ConnectionURI, got.ConnectionURI)
+		})
+	})
+}
+
+func TestValidateMongoDB(t *testing.T) {
+	convey.Convey("MongoDB资产校验", t, func() {
+		convey.Convey("ConnectionURI模式校验通过", func() {
+			a := &Asset{Name: "test", Type: AssetTypeMongoDB}
+			_ = a.SetMongoDBConfig(&MongoDBConfig{
+				ConnectionURI: "mongodb://localhost:27017",
+			})
+			err := a.Validate()
+			assert.NoError(t, err)
+		})
+
+		convey.Convey("手动模式配置完整时校验通过", func() {
+			a := &Asset{Name: "test", Type: AssetTypeMongoDB}
+			_ = a.SetMongoDBConfig(&MongoDBConfig{
+				Host: "localhost",
+				Port: 27017,
+			})
+			err := a.Validate()
+			assert.NoError(t, err)
+		})
+
+		convey.Convey("手动模式缺少Host应返回错误", func() {
+			a := &Asset{Name: "test", Type: AssetTypeMongoDB}
+			_ = a.SetMongoDBConfig(&MongoDBConfig{
+				Port: 27017,
+			})
+			err := a.Validate()
+			assert.Error(t, err)
+		})
+
+		convey.Convey("空URI且无Host应返回错误", func() {
+			a := &Asset{Name: "test", Type: AssetTypeMongoDB}
+			_ = a.SetMongoDBConfig(&MongoDBConfig{
+				ConnectionURI: "",
+				Port:          27017,
+			})
+			err := a.Validate()
+			assert.Error(t, err)
+		})
+	})
+}
