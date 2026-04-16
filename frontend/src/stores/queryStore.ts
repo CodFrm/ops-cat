@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { ExecuteSQL, ExecuteRedis, ExecuteRedisArgs } from "../../wailsjs/go/app/App";
+import { ExecuteSQL, ExecuteRedis, ExecuteRedisArgs, ListMongoDatabases, ListMongoCollections } from "../../wailsjs/go/app/App";
 import { asset_entity } from "../../wailsjs/go/models";
 import { useTabStore, registerTabCloseHook, registerTabRestoreHook, type QueryTabMeta } from "./tabStore";
 import { useAssetStore } from "./assetStore";
@@ -11,7 +11,7 @@ export interface QueryTab {
   assetId: number;
   assetName: string;
   assetIcon: string;
-  assetType: "database" | "redis";
+  assetType: "database" | "redis" | "mongodb";
   driver?: string; // "mysql" | "postgresql"
   defaultDatabase?: string;
 }
@@ -56,9 +56,22 @@ export interface RedisTabState {
   error: string | null;
 }
 
+export type MongoInnerTab =
+  | { id: string; type: "collection"; database: string; collection: string }
+  | { id: string; type: "query"; title: string; database?: string; collection?: string };
+
+export interface MongoDBTabState {
+  databases: string[];
+  collections: Record<string, string[]>;
+  activeDatabase: string | null;
+  innerTabs: MongoInnerTab[];
+  activeInnerTabId: string | null;
+}
+
 interface QueryState {
   dbStates: Record<string, DatabaseTabState>;
   redisStates: Record<string, RedisTabState>;
+  mongoStates: Record<string, MongoDBTabState>;
 
   openQueryTab: (asset: asset_entity.Asset) => void;
 
@@ -81,6 +94,14 @@ interface QueryState {
   setKeyFilter: (tabId: string, pattern: string) => void;
   loadDbKeyCounts: (tabId: string) => Promise<void>;
   removeKey: (tabId: string, key: string) => void;
+
+  // MongoDB actions
+  loadMongoDatabases: (tabId: string) => Promise<void>;
+  loadMongoCollections: (tabId: string, database: string) => Promise<void>;
+  openCollectionTab: (tabId: string, database: string, collection: string) => void;
+  openMongoQueryTab: (tabId: string, database?: string, collection?: string) => void;
+  closeMongoInnerTab: (tabId: string, innerTabId: string) => void;
+  setActiveMongoInnerTab: (tabId: string, innerTabId: string) => void;
 }
 
 // --- Helpers ---
@@ -113,6 +134,16 @@ function defaultRedisState(): RedisTabState {
     hasMore: true,
     dbKeyCounts: {},
     error: null,
+  };
+}
+
+function defaultMongoState(): MongoDBTabState {
+  return {
+    databases: [],
+    collections: {},
+    activeDatabase: null,
+    innerTabs: [],
+    activeInnerTabId: null,
   };
 }
 
@@ -160,6 +191,7 @@ function getQueryTabFromTabStore(tabId: string): QueryTab | undefined {
 export const useQueryStore = create<QueryState>((set, get) => ({
   dbStates: {},
   redisStates: {},
+  mongoStates: {},
 
   openQueryTab: (asset) => {
     const tabId = makeTabId(asset.ID);
@@ -192,7 +224,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
         assetId: asset.ID,
         assetName: asset.Name,
         assetIcon: asset.Icon || "",
-        assetType: asset.Type as "database" | "redis",
+        assetType: asset.Type as "database" | "redis" | "mongodb",
         driver,
         defaultDatabase,
       },
@@ -201,6 +233,10 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     if (asset.Type === "database") {
       set((s) => ({
         dbStates: { ...s.dbStates, [tabId]: defaultDbState() },
+      }));
+    } else if (asset.Type === "mongodb") {
+      set((s) => ({
+        mongoStates: { ...s.mongoStates, [tabId]: defaultMongoState() },
       }));
     } else {
       set((s) => ({
@@ -780,6 +816,123 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       },
     }));
   },
+
+  // --- MongoDB ---
+
+  loadMongoDatabases: async (tabId) => {
+    const tab = getQueryTabFromTabStore(tabId);
+    if (!tab) return;
+
+    try {
+      const result = await ListMongoDatabases(tab.assetId);
+      const databases: string[] = JSON.parse(result);
+      set((s) => ({
+        mongoStates: {
+          ...s.mongoStates,
+          [tabId]: { ...s.mongoStates[tabId], databases },
+        },
+      }));
+    } catch (err) {
+      /* ignore */
+      console.error("loadMongoDatabases error:", err);
+    }
+  },
+
+  loadMongoCollections: async (tabId, database) => {
+    const tab = getQueryTabFromTabStore(tabId);
+    if (!tab) return;
+
+    try {
+      const result = await ListMongoCollections(tab.assetId, database);
+      const collections: string[] = JSON.parse(result);
+      set((s) => ({
+        mongoStates: {
+          ...s.mongoStates,
+          [tabId]: {
+            ...s.mongoStates[tabId],
+            collections: { ...s.mongoStates[tabId].collections, [database]: collections },
+          },
+        },
+      }));
+    } catch (err) {
+      /* ignore */
+      console.error("loadMongoCollections error:", err);
+    }
+  },
+
+  openCollectionTab: (tabId, database, collection) => {
+    const state = get().mongoStates[tabId];
+    if (!state) return;
+    const innerId = `collection:${database}.${collection}`;
+    if (state.innerTabs.some((t) => t.id === innerId)) {
+      set((s) => ({
+        mongoStates: {
+          ...s.mongoStates,
+          [tabId]: { ...s.mongoStates[tabId], activeInnerTabId: innerId },
+        },
+      }));
+      return;
+    }
+    set((s) => ({
+      mongoStates: {
+        ...s.mongoStates,
+        [tabId]: {
+          ...s.mongoStates[tabId],
+          innerTabs: [...state.innerTabs, { id: innerId, type: "collection", database, collection }],
+          activeInnerTabId: innerId,
+        },
+      },
+    }));
+  },
+
+  openMongoQueryTab: (tabId, database?, collection?) => {
+    const state = get().mongoStates[tabId];
+    if (!state) return;
+    const count = state.innerTabs.filter((t) => t.type === "query").length + 1;
+    const innerId = `mongo-query:${Date.now()}`;
+    set((s) => ({
+      mongoStates: {
+        ...s.mongoStates,
+        [tabId]: {
+          ...s.mongoStates[tabId],
+          innerTabs: [
+            ...state.innerTabs,
+            { id: innerId, type: "query", title: `Query ${count}`, database, collection },
+          ],
+          activeInnerTabId: innerId,
+        },
+      },
+    }));
+  },
+
+  closeMongoInnerTab: (tabId, innerTabId) => {
+    const state = get().mongoStates[tabId];
+    if (!state) return;
+    const idx = state.innerTabs.findIndex((t) => t.id === innerTabId);
+    const newTabs = state.innerTabs.filter((t) => t.id !== innerTabId);
+    let newActive = state.activeInnerTabId;
+    if (newActive === innerTabId) {
+      const neighbor = state.innerTabs[idx + 1] || state.innerTabs[idx - 1];
+      newActive = neighbor?.id || null;
+    }
+    set((s) => ({
+      mongoStates: {
+        ...s.mongoStates,
+        [tabId]: { ...s.mongoStates[tabId], innerTabs: newTabs, activeInnerTabId: newActive },
+      },
+    }));
+  },
+
+  setActiveMongoInnerTab: (tabId, innerTabId) => {
+    const state = get().mongoStates[tabId];
+    if (!state) return;
+    set((s) => ({
+      mongoStates: {
+        ...s.mongoStates,
+        [tabId]: { ...s.mongoStates[tabId], activeInnerTabId: innerTabId },
+      },
+    }));
+  },
 }));
 
 // === Close Hook: clean up when tabStore closes a query tab ===
@@ -791,7 +944,9 @@ registerTabCloseHook((tab) => {
     delete newDbStates[tab.id];
     const newRedisStates = { ...s.redisStates };
     delete newRedisStates[tab.id];
-    return { dbStates: newDbStates, redisStates: newRedisStates };
+    const newMongoStates = { ...s.mongoStates };
+    delete newMongoStates[tab.id];
+    return { dbStates: newDbStates, redisStates: newRedisStates, mongoStates: newMongoStates };
   });
 });
 
@@ -802,13 +957,16 @@ registerTabRestoreHook("query", (tabs) => {
 
   const dbStates: Record<string, DatabaseTabState> = {};
   const redisStates: Record<string, RedisTabState> = {};
+  const mongoStates: Record<string, MongoDBTabState> = {};
   for (const tab of tabs) {
     const m = tab.meta as QueryTabMeta;
     if (m.assetType === "database") {
       dbStates[tab.id] = defaultDbState();
+    } else if (m.assetType === "mongodb") {
+      mongoStates[tab.id] = defaultMongoState();
     } else {
       redisStates[tab.id] = defaultRedisState();
     }
   }
-  useQueryStore.setState({ dbStates, redisStates });
+  useQueryStore.setState({ dbStates, redisStates, mongoStates });
 });

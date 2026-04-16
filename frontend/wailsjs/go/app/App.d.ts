@@ -192,6 +192,10 @@ export function ListCredentials():Promise<Array<credential_entity.Credential>>;
 
 export function ListCredentialsByType(arg1:string):Promise<Array<credential_entity.Credential>>;
 
+export function ListMongoCollections(arg1:number,arg2:string):Promise<string>;
+
+export function ListMongoDatabases(arg1:number):Promise<string>;
+
 export function ListForwardConfigs():Promise<Array<app.ForwardConfigWithStatus>>;
 
 export function ListGroups():Promise<Array<group_entity.Group>>;

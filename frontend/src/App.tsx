@@ -260,7 +260,7 @@ function App() {
   };
 
   const handleConnectAsset = async (asset: asset_entity.Asset) => {
-    if (asset.Type === "database" || asset.Type === "redis") {
+    if (asset.Type === "database" || asset.Type === "redis" || asset.Type === "mongodb") {
       useQueryStore.getState().openQueryTab(asset);
       return;
     }

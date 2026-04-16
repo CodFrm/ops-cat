@@ -350,6 +350,14 @@ export function ListCredentialsByType(arg1) {
   return window['go']['app']['App']['ListCredentialsByType'](arg1);
 }
 
+export function ListMongoCollections(arg1, arg2) {
+  return window['go']['app']['App']['ListMongoCollections'](arg1, arg2);
+}
+
+export function ListMongoDatabases(arg1) {
+  return window['go']['app']['App']['ListMongoDatabases'](arg1);
+}
+
 export function ListForwardConfigs() {
   return window['go']['app']['App']['ListForwardConfigs']();
 }
