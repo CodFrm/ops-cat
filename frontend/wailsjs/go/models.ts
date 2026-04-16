@@ -1417,6 +1417,7 @@ export namespace group_entity {
 	    CmdPolicy: string;
 	    QryPolicy: string;
 	    RdsPolicy: string;
+	    MgoPolicy: string;
 	    SortOrder: number;
 	    Createtime: number;
 	    Updatetime: number;
@@ -1435,6 +1436,7 @@ export namespace group_entity {
 	        this.CmdPolicy = source["CmdPolicy"];
 	        this.QryPolicy = source["QryPolicy"];
 	        this.RdsPolicy = source["RdsPolicy"];
+	        this.MgoPolicy = source["MgoPolicy"];
 	        this.SortOrder = source["SortOrder"];
 	        this.Createtime = source["Createtime"];
 	        this.Updatetime = source["Updatetime"];

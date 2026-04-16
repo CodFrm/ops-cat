@@ -3,11 +3,10 @@ package app
 import (
 	"fmt"
 
-	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/assettype"
 	"github.com/opskat/opskat/internal/model/entity/credential_entity"
 	"github.com/opskat/opskat/internal/repository/asset_repo"
 	"github.com/opskat/opskat/internal/service/credential_mgr_svc"
-	"github.com/opskat/opskat/internal/service/credential_resolver"
 	"github.com/opskat/opskat/internal/service/credential_svc"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -28,33 +27,11 @@ func (a *App) GetAssetPassword(assetID int64) (string, error) {
 		return "", fmt.Errorf("asset not found: %w", err)
 	}
 
-	resolver := credential_resolver.Default()
-	switch asset.Type {
-	case asset_entity.AssetTypeSSH:
-		cfg, err := asset.GetSSHConfig()
-		if err != nil {
-			return "", fmt.Errorf("get SSH config failed: %w", err)
-		}
-		password, _, _, err := resolver.ResolveSSHCredentials(ctx, cfg)
-		return password, err
-
-	case asset_entity.AssetTypeDatabase:
-		cfg, err := asset.GetDatabaseConfig()
-		if err != nil {
-			return "", fmt.Errorf("get database config failed: %w", err)
-		}
-		return resolver.ResolveDatabasePassword(ctx, cfg)
-
-	case asset_entity.AssetTypeRedis:
-		cfg, err := asset.GetRedisConfig()
-		if err != nil {
-			return "", fmt.Errorf("get Redis config failed: %w", err)
-		}
-		return resolver.ResolveRedisPassword(ctx, cfg)
-
-	default:
+	h, ok := assettype.Get(asset.Type)
+	if !ok {
 		return "", fmt.Errorf("unsupported asset type: %s", asset.Type)
 	}
+	return h.ResolvePassword(ctx, asset)
 }
 
 // --- 密钥管理 ---

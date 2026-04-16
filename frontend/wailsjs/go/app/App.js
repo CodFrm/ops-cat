@@ -130,6 +130,10 @@ export function ExecuteImportFile(arg1, arg2, arg3) {
   return window['go']['app']['App']['ExecuteImportFile'](arg1, arg2, arg3);
 }
 
+export function ExecuteMongo(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['ExecuteMongo'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function ExecuteRedis(arg1, arg2, arg3) {
   return window['go']['app']['App']['ExecuteRedis'](arg1, arg2, arg3);
 }
@@ -366,6 +370,14 @@ export function ListLocalSSHKeys() {
   return window['go']['app']['App']['ListLocalSSHKeys']();
 }
 
+export function ListMongoCollections(arg1, arg2) {
+  return window['go']['app']['App']['ListMongoCollections'](arg1, arg2);
+}
+
+export function ListMongoDatabases(arg1) {
+  return window['go']['app']['App']['ListMongoDatabases'](arg1);
+}
+
 export function ListPolicyGroups(arg1) {
   return window['go']['app']['App']['ListPolicyGroups'](arg1);
 }
@@ -532,6 +544,10 @@ export function SwitchConversation(arg1) {
 
 export function TestDatabaseConnection(arg1, arg2) {
   return window['go']['app']['App']['TestDatabaseConnection'](arg1, arg2);
+}
+
+export function TestMongoDBConnection(arg1, arg2) {
+  return window['go']['app']['App']['TestMongoDBConnection'](arg1, arg2);
 }
 
 export function TestPolicyRule(arg1) {

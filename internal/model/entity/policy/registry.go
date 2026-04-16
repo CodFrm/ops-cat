@@ -40,4 +40,5 @@ func init() {
 	RegisterDefaultPolicy("ssh", func() any { return DefaultCommandPolicy() })
 	RegisterDefaultPolicy("database", func() any { return DefaultQueryPolicy() })
 	RegisterDefaultPolicy("redis", func() any { return DefaultRedisPolicy() })
+	RegisterDefaultPolicy("mongodb", func() any { return DefaultMongoPolicy() })
 }

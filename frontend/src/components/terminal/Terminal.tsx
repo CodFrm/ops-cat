@@ -11,6 +11,7 @@ import { useTerminalThemeStore, toXtermTheme } from "@/stores/terminalThemeStore
 import { builtinThemes, defaultLightTheme, defaultDarkTheme } from "@/data/terminalThemes";
 import { useResolvedTheme } from "@/components/theme-provider";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -64,8 +65,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     const selection = termRef.current?.getSelection();
     if (selection) {
       navigator.clipboard.writeText(selection);
+      toast.success(t("ssh.contextMenu.copied"), { duration: 1500 });
     }
-  }, []);
+  }, [t]);
 
   const handlePaste = useCallback(() => {
     navigator.clipboard.readText().then((text) => {
@@ -102,11 +104,20 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     });
 
     // Let global shortcut handler handle shortcut keys instead of xterm
-    // Also intercept Ctrl+F for search
+    // Also intercept Ctrl+F for search, Cmd/Ctrl+C for copy with toast
     term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
       if (e.key === "f" && (e.ctrlKey || e.metaKey) && e.type === "keydown") {
         setShowSearch((v) => !v);
         return false;
+      }
+      // Cmd+C (Mac) or Ctrl+C (non-Mac): copy selection + show toast
+      if (e.key === "c" && (e.ctrlKey || e.metaKey) && e.type === "keydown") {
+        const selection = term.getSelection();
+        if (selection) {
+          navigator.clipboard.writeText(selection);
+          toast.success(t("ssh.contextMenu.copied"), { duration: 1500 });
+          return false;
+        }
       }
       return !matchShortcut(e, useShortcutStore.getState().shortcuts);
     });

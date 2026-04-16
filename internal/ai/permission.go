@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
@@ -16,7 +17,7 @@ import (
 
 // CheckPermission 统一权限检查（策略 + DB Grant 匹配）。
 // 不包含用户确认逻辑 — NeedConfirm 时由调用方处理。
-// assetType: "ssh" | "database" | "redis" | "exec"（exec 等同于 ssh）
+// assetType: "ssh" | "database" | "redis" | "mongodb" | "exec"（exec 等同于 ssh）| "sql"（sql 等同于 database）| "mongo"（mongo 等同于 mongodb）
 func CheckPermission(ctx context.Context, assetType string, assetID int64, command string) CheckResult {
 	// opsctl 使用的类型名映射到内部类型
 	switch assetType {
@@ -24,6 +25,8 @@ func CheckPermission(ctx context.Context, assetType string, assetID int64, comma
 		assetType = asset_entity.AssetTypeSSH
 	case "sql":
 		assetType = asset_entity.AssetTypeDatabase
+	case "mongo":
+		assetType = asset_entity.AssetTypeMongoDB
 	}
 
 	switch assetType {
@@ -33,6 +36,8 @@ func CheckPermission(ctx context.Context, assetType string, assetID int64, comma
 		return checkDatabasePermission(ctx, assetID, command)
 	case asset_entity.AssetTypeRedis:
 		return checkRedisPermission(ctx, assetID, command)
+	case asset_entity.AssetTypeMongoDB:
+		return checkMongoDBPermission(ctx, assetID, command)
 	default:
 		return CheckResult{Decision: NeedConfirm}
 	}
@@ -175,6 +180,88 @@ func checkRedisPermission(ctx context.Context, assetID int64, command string) Ch
 	merged := mergeRedisPolicy(mergedPolicy, asset_entity.DefaultRedisPolicy())
 	if len(merged.AllowList) > 0 {
 		result.HintRules = merged.AllowList
+	}
+	return result
+}
+
+// --- MongoDB ---
+
+func checkMongoDBPermission(ctx context.Context, assetID int64, operation string) CheckResult {
+	// 组通用策略
+	groupResult := CheckGroupGenericPolicy(ctx, assetID, operation, MatchCommandRule)
+	if groupResult.Decision == Deny {
+		return groupResult
+	}
+
+	// MongoDB 策略
+	asset, _ := resolveAssetPolicyChain(ctx, assetID)
+	mergedPolicy := collectMongoDBPolicies(ctx, asset)
+	result := CheckMongoDBPolicy(ctx, mergedPolicy, operation)
+
+	// 组通用 allow 优先于类型专用的 NeedConfirm
+	if result.Decision == NeedConfirm && groupResult.Decision == Allow {
+		return groupResult
+	}
+
+	if result.Decision != NeedConfirm {
+		return result
+	}
+
+	// DB Grant 匹配
+	if grantResult := matchGrantForAsset(ctx, assetID, operation); grantResult != nil {
+		return *grantResult
+	}
+
+	// NeedConfirm：收集允许的 MongoDB 操作类型作为提示
+	merged := mergeMongoPolicy(mergedPolicy, asset_entity.DefaultMongoPolicy())
+	if len(merged.AllowTypes) > 0 {
+		result.HintRules = merged.AllowTypes
+	}
+	return result
+}
+
+// checkMongoPolicyRules 检查 MongoDB 操作是否符合给定策略（不合并默认策略）
+func checkMongoPolicyRules(ctx context.Context, p *asset_entity.MongoPolicy, operation string) CheckResult {
+	if p == nil {
+		return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
+	}
+	// deny_types 检查
+	for _, denied := range p.DenyTypes {
+		if strings.EqualFold(operation, denied) {
+			return CheckResult{
+				Decision:       Deny,
+				Message:        policyFmt(ctx, "MongoDB operation %s denied by policy", "MongoDB 操作 %s 被策略禁止", operation),
+				DecisionSource: SourcePolicyDeny,
+				MatchedPattern: denied,
+			}
+		}
+	}
+	// allow_types 白名单
+	if len(p.AllowTypes) > 0 {
+		for _, allowed := range p.AllowTypes {
+			if strings.EqualFold(operation, allowed) {
+				return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
+			}
+		}
+		return CheckResult{Decision: NeedConfirm}
+	}
+	return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
+}
+
+// CheckMongoDBPolicy 检查 MongoDB 操作是否符合策略（合并默认策略后检查）
+func CheckMongoDBPolicy(ctx context.Context, p *asset_entity.MongoPolicy, operation string) CheckResult {
+	merged := mergeMongoPolicy(p, asset_entity.DefaultMongoPolicy())
+	return checkMongoPolicyRules(ctx, merged, operation)
+}
+
+func mergeMongoPolicy(custom, defaults *asset_entity.MongoPolicy) *asset_entity.MongoPolicy {
+	result := &asset_entity.MongoPolicy{}
+	if custom != nil {
+		result.AllowTypes = custom.AllowTypes
+		result.DenyTypes = append(result.DenyTypes, custom.DenyTypes...)
+	}
+	if defaults != nil {
+		result.DenyTypes = appendUnique(result.DenyTypes, defaults.DenyTypes...)
 	}
 	return result
 }

@@ -74,6 +74,26 @@ func resolveRedisGroups(ctx context.Context, groupIDs []string) (allow, deny []s
 	return
 }
 
+// resolveMongoGroups 解析引用的 MongoDB 权限组，返回合并后的 allowTypes/denyTypes
+func resolveMongoGroups(ctx context.Context, groupIDs []string) (allowTypes, denyTypes []string) {
+	if len(groupIDs) == 0 {
+		return
+	}
+	for _, pg := range fetchPolicyGroups(ctx, groupIDs) {
+		if pg.PolicyType != policy_group_entity.PolicyTypeMongo {
+			continue
+		}
+		var p policy.MongoPolicy
+		if err := json.Unmarshal([]byte(pg.Policy), &p); err != nil {
+			logger.Default().Warn("unmarshal policy group mongo policy", zap.String("id", pg.BuiltinID), zap.Error(err))
+			continue
+		}
+		allowTypes = append(allowTypes, p.AllowTypes...)
+		denyTypes = append(denyTypes, p.DenyTypes...)
+	}
+	return
+}
+
 // fetchPolicyGroups 按 ID 列表获取权限组（内置组从代码，用户组从 DB）
 func fetchPolicyGroups(ctx context.Context, ids []string) []*policy_group_entity.PolicyGroup {
 	var result []*policy_group_entity.PolicyGroup

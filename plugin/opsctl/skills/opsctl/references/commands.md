@@ -113,11 +113,30 @@ opsctl redis cache -n 2 "KEYS user:*"
 opsctl redis cache "SET key value EX 3600"
 ```
 
+## mongo
+
+### `mongo <asset> [flags] [query_json]`
+
+Execute MongoDB operations on a MongoDB asset. Requires approval.
+
+**Flags**:
+- `-o <operation>` — Operation type (default: find): find, findOne, insertOne, insertMany, updateOne, updateMany, deleteOne, deleteMany, aggregate, countDocuments
+- `-d <database>` — Database name (required)
+- `-c <collection>` — Collection name (required)
+
+**Examples**:
+
+```bash
+opsctl mongo prod-db -d mydb -c users -o find '{"filter":{"status":"active"}}'
+opsctl mongo prod-db -d mydb -c logs -o aggregate '{"pipeline":[{"$match":{"level":"error"}}]}'
+opsctl mongo prod-db -d mydb -c users -o countDocuments '{"filter":{}}'
+```
+
 ## batch
 
 ### `batch [args...]`
 
-Execute multiple commands in parallel with a single approval request. Supports exec (SSH), sql, and redis types in a single batch.
+Execute multiple commands in parallel with a single approval request. Supports exec (SSH), sql, redis, and mongo types in a single batch.
 
 **Input modes**:
 
@@ -126,7 +145,8 @@ Execute multiple commands in parallel with a single approval request. Supports e
 echo '{"commands":[
   {"asset":"web-01","type":"exec","command":"uptime"},
   {"asset":"db-01","type":"sql","command":"SELECT 1"},
-  {"asset":"cache","type":"redis","command":"PING"}
+  {"asset":"cache","type":"redis","command":"PING"},
+  {"asset":"mongo-db","type":"mongo","command":"{\"operation\":\"find\",\"database\":\"mydb\",\"collection\":\"users\",\"query\":\"{}\"}"}
 ]}' | opsctl batch
 ```
 
@@ -138,7 +158,7 @@ opsctl batch 'web-01:uptime' 'db-01:hostname'
 opsctl batch 'sql:db-01:SELECT 1' 'redis:cache:PING' 'web-01:uptime'
 ```
 
-**Args format**: `asset:command` (default exec) or `type:asset:command`. First `:` before a known type (`exec`/`sql`/`redis`) is the type separator.
+**Args format**: `asset:command` (default exec) or `type:asset:command`. First `:` before a known type (`exec`/`sql`/`redis`/`mongo`) is the type separator.
 
 **Output**: JSON with per-command results:
 ```json
@@ -158,7 +178,7 @@ opsctl batch 'sql:db-01:SELECT 1' 'redis:cache:PING' 'web-01:uptime'
 
 ### `create asset [flags]`
 
-Create a new asset (ssh, database, or redis). Requires approval.
+Create a new asset (ssh, database, redis, or mongodb). Requires approval.
 
 **Required flags**:
 - `--name <string>` — Display name
@@ -166,10 +186,10 @@ Create a new asset (ssh, database, or redis). Requires approval.
 - `--username <string>` — Login username
 
 **Optional flags**:
-- `--type <string>` — Asset type: "ssh" (default), "database", or "redis"
-- `--port <int>` — Port number (default: auto by type — 22/3306/5432/6379)
+- `--type <string>` — Asset type: "ssh" (default), "database", "redis", or "mongodb"
+- `--port <int>` — Port number (default: auto by type — 22/3306/5432/6379/27017)
 - `--auth-type <string>` — SSH auth method: "password" or "key" (SSH type only)
-- `--driver <string>` — Database driver: "mysql" or "postgresql" (database type, required)
+- `--driver <string>` — Database driver: "mysql" or "postgresql" (required for database type)
 - `--database <string>` — Default database name (database type)
 - `--read-only` — Enable read-only mode (database type)
 - `--ssh-asset <asset>` — SSH asset name/ID for tunnel connection (database/redis types)
@@ -186,6 +206,7 @@ Create a new asset (ssh, database, or redis). Requires approval.
 opsctl create asset --name "Web Server" --host 10.0.0.1 --username root
 opsctl create asset --type database --driver mysql --name "Prod DB" --host db.internal --username app
 opsctl create asset --type database --driver postgresql --name "Analytics" --host pg.internal --port 5432 --username readonly --read-only
+opsctl create asset --type mongodb --name "MongoDB" --host mongo.internal --port 27017 --username admin
 opsctl create asset --type redis --name "Cache" --host redis.internal --username default
 opsctl create asset --type database --driver mysql --name "DB via SSH" --host 127.0.0.1 --username app --ssh-asset web-server
 ```

@@ -82,6 +82,8 @@ export function EncryptPassword(arg1:string):Promise<string>;
 
 export function ExecuteImportFile(arg1:string,arg2:string,arg3:backup_svc.ImportOptions):Promise<backup_svc.ImportResult>;
 
+export function ExecuteMongo(arg1:number,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
+
 export function ExecuteRedis(arg1:number,arg2:string,arg3:number):Promise<string>;
 
 export function ExecuteRedisArgs(arg1:number,arg2:Array<string>,arg3:number):Promise<string>;
@@ -200,6 +202,10 @@ export function ListInstalledExtensions():Promise<Array<extension_svc.ExtensionI
 
 export function ListLocalSSHKeys():Promise<Array<app.LocalSSHKeyInfo>>;
 
+export function ListMongoCollections(arg1:number,arg2:string):Promise<string>;
+
+export function ListMongoDatabases(arg1:number):Promise<string>;
+
 export function ListPolicyGroups(arg1:string):Promise<Array<policy_group_entity.PolicyGroupItem>>;
 
 export function MoveAsset(arg1:number,arg2:string):Promise<void>;
@@ -283,6 +289,8 @@ export function StopForwardConfig(arg1:number):Promise<void>;
 export function SwitchConversation(arg1:number):Promise<Array<app.ConversationDisplayMessage>>;
 
 export function TestDatabaseConnection(arg1:string,arg2:string):Promise<void>;
+
+export function TestMongoDBConnection(arg1:string,arg2:string):Promise<void>;
 
 export function TestPolicyRule(arg1:app.PolicyTestRequest):Promise<app.PolicyTestResult>;
 

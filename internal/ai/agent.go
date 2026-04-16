@@ -201,9 +201,10 @@ func (a *Agent) Chat(ctx context.Context, messages []Message, onEvent func(Strea
 
 // DefaultToolExecutor 默认工具执行器，通过统一注册表调度，缓存 SSH 连接供同一次 Chat 复用
 type DefaultToolExecutor struct {
-	handlers map[string]ToolHandlerFunc
-	sshCache *SSHClientCache
-	sshPool  *sshpool.Pool // SSH 连接池，供 Redis/Database 隧道使用
+	handlers     map[string]ToolHandlerFunc
+	sshCache     *SSHClientCache
+	sshPool      *sshpool.Pool // SSH 连接池，供 Redis/Database 隧道使用
+	mongoDBCache *MongoDBClientCache
 }
 
 func NewDefaultToolExecutor() *DefaultToolExecutor {
@@ -212,15 +213,19 @@ func NewDefaultToolExecutor() *DefaultToolExecutor {
 		handlers[def.Name] = def.Handler
 	}
 	return &DefaultToolExecutor{
-		handlers: handlers,
-		sshCache: NewSSHClientCache(),
-		sshPool:  sshpool.NewPool(&AIPoolDialer{}, 5*time.Minute),
+		handlers:     handlers,
+		sshCache:     NewSSHClientCache(),
+		sshPool:      sshpool.NewPool(&AIPoolDialer{}, 5*time.Minute),
+		mongoDBCache: NewMongoDBClientCache(),
 	}
 }
 
-// Close 关闭所有缓存的 SSH 连接
+// Close 关闭所有缓存的连接
 func (e *DefaultToolExecutor) Close() error {
 	e.sshPool.Close()
+	if err := e.mongoDBCache.Close(); err != nil {
+		logger.Default().Warn("close MongoDB cache", zap.Error(err))
+	}
 	return e.sshCache.Close()
 }
 
@@ -239,5 +244,7 @@ func (e *DefaultToolExecutor) Execute(ctx context.Context, name string, argsJSON
 	if getSSHPool(ctx) == nil {
 		ctx = WithSSHPool(ctx, e.sshPool)
 	}
+	// 注入 MongoDB 缓存，exec_mongo 会自动使用
+	ctx = WithMongoDBCache(ctx, e.mongoDBCache)
 	return handler(ctx, args)
 }

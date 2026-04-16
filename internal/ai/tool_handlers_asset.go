@@ -8,6 +8,7 @@ import (
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 
+	"github.com/opskat/opskat/internal/assettype"
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/repository/group_repo"
 	"github.com/opskat/opskat/internal/service/asset_svc"
@@ -64,29 +65,32 @@ func toSafeView(a *asset_entity.Asset) safeAssetView {
 		Createtime:  a.Createtime,
 		Updatetime:  a.Updatetime,
 	}
-	switch a.Type {
-	case asset_entity.AssetTypeSSH:
-		if cfg, err := a.GetSSHConfig(); err == nil && cfg != nil {
-			v.Host = cfg.Host
-			v.Port = cfg.Port
-			v.Username = cfg.Username
-			v.AuthType = cfg.AuthType
-		}
-	case asset_entity.AssetTypeDatabase:
-		if cfg, err := a.GetDatabaseConfig(); err == nil && cfg != nil {
-			v.Host = cfg.Host
-			v.Port = cfg.Port
-			v.Username = cfg.Username
-			v.Driver = string(cfg.Driver)
-			v.Database = cfg.Database
-			v.ReadOnly = cfg.ReadOnly
-		}
-	case asset_entity.AssetTypeRedis:
-		if cfg, err := a.GetRedisConfig(); err == nil && cfg != nil {
-			v.Host = cfg.Host
-			v.Port = cfg.Port
-			v.Username = cfg.Username
-			v.RedisDB = cfg.Database
+	if h, ok := assettype.Get(a.Type); ok {
+		if fields := h.SafeView(a); fields != nil {
+			if val, ok := fields["host"].(string); ok {
+				v.Host = val
+			}
+			if val, ok := fields["port"].(int); ok {
+				v.Port = val
+			}
+			if val, ok := fields["username"].(string); ok {
+				v.Username = val
+			}
+			if val, ok := fields["driver"].(string); ok {
+				v.Driver = val
+			}
+			if val, ok := fields["database"].(string); ok {
+				v.Database = val
+			}
+			if val, ok := fields["read_only"].(bool); ok {
+				v.ReadOnly = val
+			}
+			if val, ok := fields["redis_db"].(int); ok {
+				v.RedisDB = val
+			}
+			if val, ok := fields["auth_type"].(string); ok {
+				v.AuthType = val
+			}
 		}
 	}
 	return v
@@ -155,49 +159,13 @@ func handleAddAsset(ctx context.Context, args map[string]any) (string, error) {
 		Description: description,
 	}
 
-	switch assetType {
-	case asset_entity.AssetTypeSSH:
-		authType := argString(args, "auth_type")
-		if authType == "" {
-			authType = "password"
-		}
-		if err := asset.SetSSHConfig(&asset_entity.SSHConfig{
-			Host:     host,
-			Port:     port,
-			Username: username,
-			AuthType: authType,
-		}); err != nil {
-			logger.Default().Warn("set SSH config for new asset", zap.Error(err))
-		}
-	case asset_entity.AssetTypeDatabase:
-		driver := asset_entity.DatabaseDriver(argString(args, "driver"))
-		if driver == "" {
-			return "", fmt.Errorf("database type requires driver parameter (mysql or postgresql)")
-		}
-		dbCfg := &asset_entity.DatabaseConfig{
-			Driver:     driver,
-			Host:       host,
-			Port:       port,
-			Username:   username,
-			Database:   argString(args, "database"),
-			ReadOnly:   argString(args, "read_only") == "true",
-			SSHAssetID: argInt64(args, "ssh_asset_id"),
-		}
-		if err := asset.SetDatabaseConfig(dbCfg); err != nil {
-			logger.Default().Warn("set database config for new asset", zap.Error(err))
-		}
-	case asset_entity.AssetTypeRedis:
-		redisCfg := &asset_entity.RedisConfig{
-			Host:       host,
-			Port:       port,
-			Username:   username,
-			SSHAssetID: argInt64(args, "ssh_asset_id"),
-		}
-		if err := asset.SetRedisConfig(redisCfg); err != nil {
-			logger.Default().Warn("set Redis config for new asset", zap.Error(err))
-		}
-	default:
+	h, ok := assettype.Get(assetType)
+	if !ok {
 		return "", fmt.Errorf("unsupported asset type: %s", assetType)
+	}
+	if err := h.ApplyCreateArgs(asset, args); err != nil {
+		// Database 的 driver 缺失等校验错误需返回；SetXxxConfig 序列化失败仅 warn（保持原始行为）
+		return "", err
 	}
 
 	if err := asset_svc.Asset().Create(ctx, asset); err != nil {
@@ -230,66 +198,9 @@ func handleUpdateAsset(ctx context.Context, args map[string]any) (string, error)
 		asset.Icon = icon
 	}
 
-	switch asset.Type {
-	case asset_entity.AssetTypeSSH:
-		sshCfg, err := asset.GetSSHConfig()
-		if err != nil {
-			logger.Default().Warn("get SSH config for asset update", zap.Error(err))
-		}
-		if sshCfg != nil {
-			if host := argString(args, "host"); host != "" {
-				sshCfg.Host = host
-			}
-			if port := argInt(args, "port"); port > 0 {
-				sshCfg.Port = port
-			}
-			if username := argString(args, "username"); username != "" {
-				sshCfg.Username = username
-			}
-			if err := asset.SetSSHConfig(sshCfg); err != nil {
-				logger.Default().Warn("set SSH config for updated asset", zap.Error(err))
-			}
-		}
-	case asset_entity.AssetTypeDatabase:
-		dbCfg, err := asset.GetDatabaseConfig()
-		if err != nil {
-			logger.Default().Warn("get database config for asset update", zap.Error(err))
-		}
-		if dbCfg != nil {
-			if host := argString(args, "host"); host != "" {
-				dbCfg.Host = host
-			}
-			if port := argInt(args, "port"); port > 0 {
-				dbCfg.Port = port
-			}
-			if username := argString(args, "username"); username != "" {
-				dbCfg.Username = username
-			}
-			if db := argString(args, "database"); db != "" {
-				dbCfg.Database = db
-			}
-			if err := asset.SetDatabaseConfig(dbCfg); err != nil {
-				logger.Default().Warn("set database config for updated asset", zap.Error(err))
-			}
-		}
-	case asset_entity.AssetTypeRedis:
-		redisCfg, err := asset.GetRedisConfig()
-		if err != nil {
-			logger.Default().Warn("get redis config for asset update", zap.Error(err))
-		}
-		if redisCfg != nil {
-			if host := argString(args, "host"); host != "" {
-				redisCfg.Host = host
-			}
-			if port := argInt(args, "port"); port > 0 {
-				redisCfg.Port = port
-			}
-			if username := argString(args, "username"); username != "" {
-				redisCfg.Username = username
-			}
-			if err := asset.SetRedisConfig(redisCfg); err != nil {
-				logger.Default().Warn("set Redis config for updated asset", zap.Error(err))
-			}
+	if h, ok := assettype.Get(asset.Type); ok {
+		if err := h.ApplyUpdateArgs(asset, args); err != nil {
+			logger.Default().Warn("apply update args failed", zap.String("type", asset.Type), zap.Error(err))
 		}
 	}
 

@@ -85,7 +85,7 @@ func requireApproval(ctx context.Context, req approval.ApprovalRequest) (Approva
 	if err != nil {
 		// 桌面端不在线
 		switch req.Type {
-		case "exec", "sql", "redis":
+		case "exec", "sql", "redis", "mongo":
 			// 离线拒绝：给出允许的命令提示
 			msg := formatOfflineDenyMessage(req.Type, req.Command, policyHints)
 			return ApprovalResult{
@@ -136,6 +136,8 @@ func formatOfflineDenyMessage(reqType, command string, hints []string) string {
 		sb.WriteString("SQL statement did not match any allowed policy")
 	case "redis":
 		sb.WriteString("Redis command did not match any allowed policy")
+	case "mongo":
+		sb.WriteString("MongoDB operation did not match any allowed policy")
 	}
 
 	if len(hints) > 0 {
@@ -146,6 +148,8 @@ func formatOfflineDenyMessage(reqType, command string, hints []string) string {
 			sb.WriteString("\nAllowed SQL types for this asset:\n")
 		case "redis":
 			sb.WriteString("\nAllowed Redis commands for this asset:\n")
+		case "mongo":
+			sb.WriteString("\nAllowed MongoDB operations for this asset:\n")
 		}
 		for _, h := range hints {
 			fmt.Fprintf(&sb, "  - %s\n", h)

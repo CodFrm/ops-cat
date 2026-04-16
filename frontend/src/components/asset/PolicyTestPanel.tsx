@@ -23,6 +23,7 @@ const PLACEHOLDER_MAP: Record<string, string> = {
   ssh: "asset.policyTestPlaceholder",
   database: "asset.policyTestSqlPlaceholder",
   redis: "asset.policyTestRedisPlaceholder",
+  mongodb: "asset.policyTestMongoPlaceholder",
 };
 
 const RESULT_CONFIG = {

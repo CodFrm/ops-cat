@@ -13,7 +13,6 @@ import {
   ChevronRight,
   Folder,
   Server,
-  Database,
   Eye,
   EyeOff,
   Shuffle,
@@ -33,6 +32,7 @@ import {
 } from "@opskat/ui";
 import { backup_svc } from "../../../wailsjs/go/models";
 import { ExportToFile } from "../../../wailsjs/go/app/App";
+import { getAssetType } from "@/lib/assetTypes";
 import { useAssetStore } from "@/stores/assetStore";
 import { useShortcutStore, DEFAULT_SHORTCUTS } from "@/stores/shortcutStore";
 import { useTerminalThemeStore } from "@/stores/terminalThemeStore";
@@ -54,13 +54,8 @@ function generatePassword(length = 20): string {
 }
 
 function AssetIcon({ type }: { type: string }) {
-  switch (type) {
-    case "database":
-    case "redis":
-      return <Database className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
-    default:
-      return <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
-  }
+  const Icon = getAssetType(type)?.icon ?? Server;
+  return <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
 }
 
 export function ExportDialog({ open, onOpenChange, mode, onGistExport }: ExportDialogProps) {

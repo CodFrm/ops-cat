@@ -218,6 +218,178 @@ func (a *App) ExecuteRedis(assetID int64, command string, db int) (string, error
 	return ai.ExecuteRedis(ctx, client, command)
 }
 
+// TestMongoDBConnection 测试 MongoDB 连接
+// configJSON: MongoDBConfig JSON，plainPassword: 明文密码
+func (a *App) TestMongoDBConnection(configJSON string, plainPassword string) error {
+	var cfg asset_entity.MongoDBConfig
+	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+		return fmt.Errorf("配置解析失败: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(a.langCtx(), 10*time.Second)
+	defer cancel()
+
+	password := plainPassword
+	if password == "" {
+		var err error
+		password, err = credential_resolver.Default().ResolveMongoDBPassword(ctx, &cfg)
+		if err != nil {
+			return fmt.Errorf("连接失败: %w", err)
+		}
+	}
+
+	// 测试连接场景没有持久化的 Asset，使用零值让 backward compat 生效
+	testAsset := &asset_entity.Asset{}
+	client, tunnel, err := connpool.DialMongoDB(ctx, testAsset, &cfg, password, a.sshPool)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := client.Disconnect(context.Background()); err != nil {
+			logger.Default().Warn("disconnect mongodb client failed", zap.Error(err))
+		}
+		if tunnel != nil {
+			if err := tunnel.Close(); err != nil {
+				logger.Default().Warn("close tunnel failed", zap.Error(err))
+			}
+		}
+	}()
+	return nil
+}
+
+// ExecuteMongo 在指定 MongoDB 资产上执行操作
+func (a *App) ExecuteMongo(assetID int64, operation, database, collection, query string) (string, error) {
+	asset, err := asset_svc.Asset().Get(a.langCtx(), assetID)
+	if err != nil {
+		return "", fmt.Errorf("资产不存在: %w", err)
+	}
+	if !asset.IsMongoDB() {
+		return "", fmt.Errorf("资产不是 MongoDB 类型")
+	}
+	cfg, err := asset.GetMongoDBConfig()
+	if err != nil {
+		return "", fmt.Errorf("获取 MongoDB 配置失败: %w", err)
+	}
+	password, err := credential_resolver.Default().ResolveMongoDBPassword(a.langCtx(), cfg)
+	if err != nil {
+		return "", fmt.Errorf("解析凭据失败: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(a.langCtx(), 30*time.Second)
+	defer cancel()
+
+	client, tunnel, err := connpool.DialMongoDB(ctx, asset, cfg, password, a.sshPool)
+	if err != nil {
+		return "", fmt.Errorf("连接 MongoDB 失败: %w", err)
+	}
+	defer func() {
+		if err := client.Disconnect(context.Background()); err != nil {
+			logger.Default().Warn("disconnect mongodb client failed", zap.Error(err))
+		}
+		if tunnel != nil {
+			if err := tunnel.Close(); err != nil {
+				logger.Default().Warn("close tunnel failed", zap.Error(err))
+			}
+		}
+	}()
+
+	return ai.ExecuteMongoDB(ctx, client, database, collection, operation, query)
+}
+
+// ListMongoDatabases 列出指定 MongoDB 资产的所有数据库
+func (a *App) ListMongoDatabases(assetID int64) (string, error) {
+	asset, err := asset_svc.Asset().Get(a.langCtx(), assetID)
+	if err != nil {
+		return "", fmt.Errorf("资产不存在: %w", err)
+	}
+	if !asset.IsMongoDB() {
+		return "", fmt.Errorf("资产不是 MongoDB 类型")
+	}
+	cfg, err := asset.GetMongoDBConfig()
+	if err != nil {
+		return "", fmt.Errorf("获取 MongoDB 配置失败: %w", err)
+	}
+	password, err := credential_resolver.Default().ResolveMongoDBPassword(a.langCtx(), cfg)
+	if err != nil {
+		return "", fmt.Errorf("解析凭据失败: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(a.langCtx(), 10*time.Second)
+	defer cancel()
+
+	client, tunnel, err := connpool.DialMongoDB(ctx, asset, cfg, password, a.sshPool)
+	if err != nil {
+		return "", fmt.Errorf("连接 MongoDB 失败: %w", err)
+	}
+	defer func() {
+		if err := client.Disconnect(context.Background()); err != nil {
+			logger.Default().Warn("disconnect mongodb client failed", zap.Error(err))
+		}
+		if tunnel != nil {
+			if err := tunnel.Close(); err != nil {
+				logger.Default().Warn("close tunnel failed", zap.Error(err))
+			}
+		}
+	}()
+
+	names, err := ai.ListMongoDatabases(ctx, client)
+	if err != nil {
+		return "", err
+	}
+	result, err := json.Marshal(names)
+	if err != nil {
+		return "", fmt.Errorf("序列化结果失败: %w", err)
+	}
+	return string(result), nil
+}
+
+// ListMongoCollections 列出指定 MongoDB 资产中某个数据库的所有集合
+func (a *App) ListMongoCollections(assetID int64, database string) (string, error) {
+	asset, err := asset_svc.Asset().Get(a.langCtx(), assetID)
+	if err != nil {
+		return "", fmt.Errorf("资产不存在: %w", err)
+	}
+	if !asset.IsMongoDB() {
+		return "", fmt.Errorf("资产不是 MongoDB 类型")
+	}
+	cfg, err := asset.GetMongoDBConfig()
+	if err != nil {
+		return "", fmt.Errorf("获取 MongoDB 配置失败: %w", err)
+	}
+	password, err := credential_resolver.Default().ResolveMongoDBPassword(a.langCtx(), cfg)
+	if err != nil {
+		return "", fmt.Errorf("解析凭据失败: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(a.langCtx(), 10*time.Second)
+	defer cancel()
+
+	client, tunnel, err := connpool.DialMongoDB(ctx, asset, cfg, password, a.sshPool)
+	if err != nil {
+		return "", fmt.Errorf("连接 MongoDB 失败: %w", err)
+	}
+	defer func() {
+		if err := client.Disconnect(context.Background()); err != nil {
+			logger.Default().Warn("disconnect mongodb client failed", zap.Error(err))
+		}
+		if tunnel != nil {
+			if err := tunnel.Close(); err != nil {
+				logger.Default().Warn("close tunnel failed", zap.Error(err))
+			}
+		}
+	}()
+
+	names, err := ai.ListMongoCollections(ctx, client, database)
+	if err != nil {
+		return "", err
+	}
+	result, err := json.Marshal(names)
+	if err != nil {
+		return "", fmt.Errorf("序列化结果失败: %w", err)
+	}
+	return string(result), nil
+}
+
 // ExecuteRedisArgs 使用预拆分的参数执行 Redis 命令（支持含空格的值）
 func (a *App) ExecuteRedisArgs(assetID int64, args []string, db int) (string, error) {
 	asset, err := asset_svc.Asset().Get(a.langCtx(), assetID)

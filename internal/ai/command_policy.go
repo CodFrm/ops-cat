@@ -326,6 +326,8 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 		approvalType = "sql"
 	case asset_entity.AssetTypeRedis:
 		approvalType = "redis"
+	case asset_entity.AssetTypeMongoDB:
+		approvalType = "mongo"
 	}
 
 	items := []ApprovalItem{{
@@ -527,6 +529,42 @@ func collectRedisPolicies(ctx context.Context, asset *asset_entity.Asset) *asset
 			merged.AllowList = p.AllowList
 		}
 		merged.DenyList = appendUnique(merged.DenyList, p.DenyList...)
+	}
+	return merged
+}
+
+// collectMongoDBPolicies 收集资产 + 组链的 MongoDB 权限策略并合并
+func collectMongoDBPolicies(ctx context.Context, asset *asset_entity.Asset) *asset_entity.MongoPolicy {
+	var holders []policy.Holder
+	if asset != nil {
+		holders = append(holders, asset)
+		if asset.GroupID > 0 {
+			for _, g := range resolveGroupChain(ctx, asset.GroupID) {
+				holders = append(holders, g)
+			}
+		}
+	}
+	policies := collectPoliciesFromChain(holders, func(h policy.Holder) (*asset_entity.MongoPolicy, error) {
+		return h.GetMongoPolicy()
+	})
+	if len(policies) == 0 {
+		return nil
+	}
+	// 解析引用的权限组
+	for _, p := range policies {
+		if len(p.Groups) > 0 {
+			grpAllowTypes, grpDenyTypes := resolveMongoGroups(ctx, p.Groups)
+			p.AllowTypes = append(p.AllowTypes, grpAllowTypes...)
+			p.DenyTypes = append(p.DenyTypes, grpDenyTypes...)
+		}
+	}
+	// 合并：allow_types 取第一个非空（资产优先），deny_types 全部合并
+	merged := &asset_entity.MongoPolicy{}
+	for _, p := range policies {
+		if len(merged.AllowTypes) == 0 && len(p.AllowTypes) > 0 {
+			merged.AllowTypes = p.AllowTypes
+		}
+		merged.DenyTypes = appendUnique(merged.DenyTypes, p.DenyTypes...)
 	}
 	return merged
 }

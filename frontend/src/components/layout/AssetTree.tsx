@@ -41,6 +41,7 @@ import {
 } from "@opskat/ui";
 import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
 import { pinyinMatch } from "@/lib/pinyin";
+import { getAssetType } from "@/lib/assetTypes";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useActiveAssetIds } from "@/hooks/useActiveAssetIds";
@@ -512,8 +513,10 @@ function GroupItem({
                         clickTimerRef.current = null;
                       }
                       onSelectAsset(asset);
-                      if (asset.Type === "ssh" && !isConnecting) onConnectAsset(asset);
-                      else if (asset.Type === "database" || asset.Type === "redis") onConnectAsset(asset);
+                      const def = getAssetType(asset.Type);
+                      if (def?.canConnect && (def.connectAction === "query" || !isConnecting)) {
+                        onConnectAsset(asset);
+                      }
                     }}
                   >
                     {isConnecting ? (
@@ -529,7 +532,7 @@ function GroupItem({
                   </div>
                 </ContextMenuTrigger>
                 <ContextMenuContent>
-                  {(asset.Type === "ssh" || asset.Type === "database" || asset.Type === "redis") && (
+                  {getAssetType(asset.Type)?.canConnect && (
                     <ContextMenuItem onClick={() => onConnectAsset(asset)} disabled={isConnecting}>
                       {isConnecting ? (
                         <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
@@ -539,7 +542,7 @@ function GroupItem({
                       {t("asset.connect")}
                     </ContextMenuItem>
                   )}
-                  {asset.Type === "ssh" && onConnectAssetInNewTab && (
+                  {getAssetType(asset.Type)?.canConnectInNewTab && onConnectAssetInNewTab && (
                     <ContextMenuItem onClick={() => onConnectAssetInNewTab(asset)} disabled={isConnecting}>
                       <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
                       {t("asset.connectInNewTab")}

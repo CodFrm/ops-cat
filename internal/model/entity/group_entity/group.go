@@ -17,6 +17,7 @@ type Group struct {
 	CmdPolicy   string `gorm:"column:command_policy;type:text"`
 	QryPolicy   string `gorm:"column:query_policy;type:text"`
 	RdsPolicy   string `gorm:"column:redis_policy;type:text"`
+	MgoPolicy   string `gorm:"column:mongo_policy;type:text"`
 	SortOrder   int    `gorm:"column:sort_order;default:0"`
 	Createtime  int64  `gorm:"column:createtime"`
 	Updatetime  int64  `gorm:"column:updatetime"`
@@ -88,5 +89,22 @@ func (g *Group) SetRedisPolicy(p *policy.RedisPolicy) error {
 		return err
 	}
 	g.RdsPolicy = s
+	return nil
+}
+
+// GetMongoPolicy 解析 MongoDB 权限策略
+func (g *Group) GetMongoPolicy() (*policy.MongoPolicy, error) {
+	return jsonfield.UnmarshalOrDefault[policy.MongoPolicy](g.MgoPolicy, "MongoDB权限策略")
+}
+
+// SetMongoPolicy 序列化 MongoDB 权限策略
+func (g *Group) SetMongoPolicy(p *policy.MongoPolicy) error {
+	s, err := jsonfield.MarshalOrClear(p, func(v *policy.MongoPolicy) bool {
+		return v.IsEmpty()
+	}, "MongoDB权限策略")
+	if err != nil {
+		return err
+	}
+	g.MgoPolicy = s
 	return nil
 }

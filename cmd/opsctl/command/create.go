@@ -8,6 +8,7 @@ import (
 
 	"github.com/opskat/opskat/internal/ai"
 	"github.com/opskat/opskat/internal/approval"
+	"github.com/opskat/opskat/internal/assettype"
 )
 
 func cmdCreate(ctx context.Context, handlers map[string]ai.ToolHandlerFunc, args []string, session string) int {
@@ -23,7 +24,7 @@ func cmdCreate(ctx context.Context, handlers map[string]ai.ToolHandlerFunc, args
 	switch resource {
 	case "asset":
 		fs := flag.NewFlagSet("create asset", flag.ExitOnError)
-		assetType := fs.String("type", "ssh", `Asset type: "ssh", "database", or "redis"`)
+		assetType := fs.String("type", "ssh", `Asset type: "ssh", "database", "redis", or "mongodb"`)
 		name := fs.String("name", "", "Display name for the asset (required)")
 		host := fs.String("host", "", "Hostname or IP address (required)")
 		port := fs.Int("port", 0, "Port number (default: auto by type)")
@@ -48,20 +49,12 @@ func cmdCreate(ctx context.Context, handlers map[string]ai.ToolHandlerFunc, args
 
 		// 自动设置默认端口
 		if *port == 0 {
-			switch *assetType {
-			case "ssh":
-				*port = 22
-			case "database":
-				switch *driver {
-				case "mysql":
-					*port = 3306
-				case "postgresql":
-					*port = 5432
-				default:
-					*port = 3306
-				}
-			case "redis":
-				*port = 6379
+			if h, ok := assettype.Get(*assetType); ok {
+				*port = h.DefaultPort()
+			}
+			// Database driver-specific override
+			if *assetType == "database" && *driver == "postgresql" {
+				*port = 5432
 			}
 		}
 

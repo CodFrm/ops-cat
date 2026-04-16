@@ -13,6 +13,7 @@ const (
 	AssetTypeSSH      = "ssh"
 	AssetTypeDatabase = "database"
 	AssetTypeRedis    = "redis"
+	AssetTypeMongoDB  = "mongodb"
 )
 
 // DatabaseDriver 数据库驱动类型
@@ -128,6 +129,33 @@ type RedisConfig struct {
 	SSHAssetID   int64  `json:"ssh_asset_id,omitempty"` // Deprecated: use Asset.SSHTunnelID
 }
 
+// MongoDBConfig MongoDB类型的特定配置
+type MongoDBConfig struct {
+	ConnectionURI string `json:"connection_uri,omitempty"` // 完整连接 URI（优先于手动配置）
+	Host          string `json:"host,omitempty"`
+	Port          int    `json:"port,omitempty"`
+	ReplicaSet    string `json:"replica_set,omitempty"`
+	Username      string `json:"username,omitempty"`
+	Password      string `json:"password,omitempty"`
+	CredentialID  int64  `json:"credential_id,omitempty"` // 统一凭证 ID（密码）
+	Database      string `json:"database,omitempty"`      // 默认数据库
+	AuthSource    string `json:"auth_source,omitempty"`   // 认证源数据库
+	TLS           bool   `json:"tls,omitempty"`
+	SSHAssetID    int64  `json:"ssh_asset_id,omitempty"` // Deprecated: use Asset.SSHTunnelID
+}
+
+// DatabaseConfig PasswordSource implementation
+func (c *DatabaseConfig) GetCredentialID() int64 { return c.CredentialID }
+func (c *DatabaseConfig) GetPassword() string    { return c.Password }
+
+// RedisConfig PasswordSource implementation
+func (c *RedisConfig) GetCredentialID() int64 { return c.CredentialID }
+func (c *RedisConfig) GetPassword() string    { return c.Password }
+
+// MongoDBConfig PasswordSource implementation
+func (c *MongoDBConfig) GetCredentialID() int64 { return c.CredentialID }
+func (c *MongoDBConfig) GetPassword() string    { return c.Password }
+
 // QueryPolicy SQL 权限策略（类型别名，定义在 policy 包）
 type QueryPolicy = policy.QueryPolicy
 
@@ -139,6 +167,12 @@ type RedisPolicy = policy.RedisPolicy
 
 // DefaultRedisPolicy 返回默认 Redis 权限策略
 var DefaultRedisPolicy = policy.DefaultRedisPolicy
+
+// MongoPolicy MongoDB 权限策略（类型别名，定义在 policy 包）
+type MongoPolicy = policy.MongoPolicy
+
+// DefaultMongoPolicy 返回默认 MongoDB 权限策略
+var DefaultMongoPolicy = policy.DefaultMongoPolicy
 
 // --- 充血模型方法 ---
 
@@ -155,6 +189,11 @@ func (a *Asset) IsDatabase() bool {
 // IsRedis 判断是否Redis类型
 func (a *Asset) IsRedis() bool {
 	return a.Type == AssetTypeRedis
+}
+
+// IsMongoDB 判断是否MongoDB类型
+func (a *Asset) IsMongoDB() bool {
+	return a.Type == AssetTypeMongoDB
 }
 
 // GetSSHConfig 解析SSH配置
@@ -211,6 +250,24 @@ func (a *Asset) SetRedisConfig(cfg *RedisConfig) error {
 	return nil
 }
 
+// GetMongoDBConfig 解析MongoDB配置
+func (a *Asset) GetMongoDBConfig() (*MongoDBConfig, error) {
+	if !a.IsMongoDB() {
+		return nil, errors.New("资产不是MongoDB类型")
+	}
+	return jsonfield.Unmarshal[MongoDBConfig](a.Config, "MongoDB配置")
+}
+
+// SetMongoDBConfig 序列化MongoDB配置到Config字段
+func (a *Asset) SetMongoDBConfig(cfg *MongoDBConfig) error {
+	s, err := jsonfield.Marshal(cfg, "MongoDB配置")
+	if err != nil {
+		return err
+	}
+	a.Config = s
+	return nil
+}
+
 // GetQueryPolicy 解析SQL权限策略（database类型）
 func (a *Asset) GetQueryPolicy() (*QueryPolicy, error) {
 	return jsonfield.UnmarshalOrDefault[QueryPolicy](a.CmdPolicy, "SQL权限策略")
@@ -245,6 +302,23 @@ func (a *Asset) SetRedisPolicy(p *RedisPolicy) error {
 	return nil
 }
 
+// GetMongoPolicy 解析MongoDB权限策略
+func (a *Asset) GetMongoPolicy() (*MongoPolicy, error) {
+	return jsonfield.UnmarshalOrDefault[MongoPolicy](a.CmdPolicy, "MongoDB权限策略")
+}
+
+// SetMongoPolicy 序列化MongoDB权限策略
+func (a *Asset) SetMongoPolicy(p *MongoPolicy) error {
+	s, err := jsonfield.MarshalOrClear(p, func(v *MongoPolicy) bool {
+		return v.IsEmpty()
+	}, "MongoDB权限策略")
+	if err != nil {
+		return err
+	}
+	a.CmdPolicy = s
+	return nil
+}
+
 // Validate 校验资产必填字段和类型配置的完整性
 func (a *Asset) Validate() error {
 	if a.Name == "" {
@@ -262,6 +336,8 @@ func (a *Asset) Validate() error {
 		return a.validateDatabase()
 	case AssetTypeRedis:
 		return a.validateRedis()
+	case AssetTypeMongoDB:
+		return a.validateMongoDB()
 	default:
 		// 扩展资产类型由扩展自行校验
 		return nil
@@ -330,6 +406,26 @@ func (a *Asset) validateRedis() error {
 	return nil
 }
 
+// validateMongoDB 校验MongoDB类型特定配置
+func (a *Asset) validateMongoDB() error {
+	cfg, err := a.GetMongoDBConfig()
+	if err != nil {
+		return fmt.Errorf("MongoDB配置无效: %w", err)
+	}
+	// URI 模式：直接通过
+	if cfg.ConnectionURI != "" {
+		return nil
+	}
+	// 手动配置模式：host 和 port 必填
+	if cfg.Host == "" {
+		return errors.New("MongoDB主机地址不能为空")
+	}
+	if cfg.Port <= 0 {
+		return errors.New("MongoDB端口无效")
+	}
+	return nil
+}
+
 // CanConnect 判断资产是否处于可连接状态
 func (a *Asset) CanConnect() bool {
 	if a.Status != StatusActive {
@@ -352,6 +448,15 @@ func (a *Asset) CanConnect() bool {
 		cfg, err := a.GetRedisConfig()
 		if err != nil {
 			return false
+		}
+		return cfg.Host != "" && cfg.Port > 0
+	case AssetTypeMongoDB:
+		cfg, err := a.GetMongoDBConfig()
+		if err != nil {
+			return false
+		}
+		if cfg.ConnectionURI != "" {
+			return true
 		}
 		return cfg.Host != "" && cfg.Port > 0
 	}

@@ -18,6 +18,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useQueryStore } from "@/stores/queryStore";
+import { getAssetType } from "@/lib/assetTypes";
 import { useTabStore, type InfoTabMeta } from "@/stores/tabStore";
 import { useExtensionStore } from "@/extension";
 import { bootstrapExtensions } from "@/extension/init";
@@ -260,7 +261,8 @@ function App() {
   };
 
   const handleConnectAsset = async (asset: asset_entity.Asset) => {
-    if (asset.Type === "database" || asset.Type === "redis") {
+    const def = getAssetType(asset.Type);
+    if (def?.connectAction === "query") {
       useQueryStore.getState().openQueryTab(asset);
       return;
     }
@@ -286,7 +288,7 @@ function App() {
       }
     }
 
-    if (asset.Type !== "ssh") return;
+    if (def?.connectAction !== "terminal") return;
     try {
       await connect(asset);
     } catch (e) {
@@ -295,7 +297,7 @@ function App() {
   };
 
   const handleConnectAssetInNewTab = async (asset: asset_entity.Asset) => {
-    if (asset.Type !== "ssh") return;
+    if (!getAssetType(asset.Type)?.canConnectInNewTab) return;
     try {
       await connect(asset, "", true);
     } catch (e) {

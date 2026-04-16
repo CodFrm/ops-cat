@@ -48,7 +48,7 @@ func AllToolDefs() []ToolDef {
 			Name:        "list_assets",
 			Description: "List managed remote server assets. Returns an array of assets (with ID, name, type, group, etc.). This is typically the first step to discover asset IDs for other operations. Supports filtering by type and group. Use get_asset to view asset description and connection details.",
 			Params: []ParamDef{
-				{Name: "asset_type", Type: ParamString, Description: `Filter by asset type. Currently only "ssh" is supported. Omit to return all types.`},
+				{Name: "asset_type", Type: ParamString, Description: `Filter by asset type. Supported: "ssh", "database", "redis", "mongodb". Omit to return all types.`},
 				{Name: "group_id", Type: ParamNumber, Description: "Filter by group ID. Omit or set to 0 to list all groups."},
 			},
 			Handler: handleListAssets,
@@ -73,10 +73,10 @@ func AllToolDefs() []ToolDef {
 		},
 		{
 			Name:        "add_asset",
-			Description: `Add a new asset to the inventory. Supports types: "ssh", "database", "redis". For database, specify driver ("mysql" or "postgresql").`,
+			Description: `Add a new asset to the inventory. Supports types: "ssh", "database", "redis", "mongodb". For database, specify driver ("mysql" or "postgresql").`,
 			Params: []ParamDef{
 				{Name: "name", Type: ParamString, Description: `Display name for the asset.`, Required: true},
-				{Name: "type", Type: ParamString, Description: `Asset type: "ssh" (default), "database", or "redis".`},
+				{Name: "type", Type: ParamString, Description: `Asset type: "ssh" (default), "database", "redis", or "mongodb".`},
 				{Name: "host", Type: ParamString, Description: "Hostname or IP address.", Required: true},
 				{Name: "port", Type: ParamNumber, Description: "Port number (default: 22 for SSH, 3306 for MySQL, 5432 for PostgreSQL, 6379 for Redis).", Required: true},
 				{Name: "username", Type: ParamString, Description: "Login username.", Required: true},
@@ -164,6 +164,19 @@ func AllToolDefs() []ToolDef {
 			},
 			Handler:          handleExecRedis,
 			CommandExtractor: func(args map[string]any) string { return argString(args, "command") },
+		},
+		{
+			Name:        "exec_mongo",
+			Description: "Execute MongoDB operations on a MongoDB asset. Credentials are resolved automatically.",
+			Params: []ParamDef{
+				{Name: "asset_id", Type: ParamNumber, Description: "MongoDB asset ID. Use list_assets with asset_type='mongodb' to find.", Required: true},
+				{Name: "operation", Type: ParamString, Description: "Operation: find, findOne, insertOne, insertMany, updateOne, updateMany, deleteOne, deleteMany, aggregate, countDocuments", Required: true},
+				{Name: "database", Type: ParamString, Description: "Database name", Required: true},
+				{Name: "collection", Type: ParamString, Description: "Collection name", Required: true},
+				{Name: "query", Type: ParamString, Description: "JSON for filter/document/pipeline, depends on operation"},
+			},
+			Handler:          handleExecMongo,
+			CommandExtractor: func(args map[string]any) string { return argString(args, "operation") },
 		},
 		{
 			Name:        "request_permission",

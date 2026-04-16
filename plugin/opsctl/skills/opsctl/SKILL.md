@@ -72,7 +72,7 @@ Output is structured JSON with per-command results (`exit_code`, `stdout`, `stde
 
 ## Commands
 
-Core commands: `list`, `get`, `create`, `update`, `ssh`, `exec`, `batch`, `sql`, `redis`, `cp`, `grant`, `session`, `init`.
+Core commands: `list`, `get`, `create`, `update`, `ssh`, `exec`, `batch`, `sql`, `redis`, `mongo`, `cp`, `grant`, `session`, `init`.
 
 For full command reference with flags and examples, see [references/commands.md](references/commands.md).
 

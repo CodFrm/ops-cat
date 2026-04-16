@@ -40,10 +40,28 @@ function makeRedisAsset(id: number, name = `Redis ${id}`): asset_entity.Asset {
   } as asset_entity.Asset;
 }
 
+function makeMongoAsset(id: number, name = `Mongo ${id}`): asset_entity.Asset {
+  return {
+    ID: id,
+    Name: name,
+    Type: "mongodb",
+    GroupID: 0,
+    Icon: "",
+    Tags: "",
+    Description: "",
+    Config: JSON.stringify({ host: "10.0.0.1", port: 27017 }),
+    CmdPolicy: "",
+    SortOrder: 0,
+    Status: 1,
+    Createtime: 0,
+    Updatetime: 0,
+  } as asset_entity.Asset;
+}
+
 describe("queryStore.openQueryTab", () => {
   beforeEach(() => {
     useTabStore.setState({ tabs: [], activeTabId: null });
-    useQueryStore.setState({ dbStates: {}, redisStates: {} });
+    useQueryStore.setState({ dbStates: {}, redisStates: {}, mongoStates: {} });
     vi.spyOn(useAssetStore.getState(), "getAssetPath").mockReturnValue("Test/DB");
   });
 
@@ -112,5 +130,34 @@ describe("queryStore.openQueryTab", () => {
     expect(useQueryStore.getState().dbStates["query-1"]).toBeDefined();
     expect(useQueryStore.getState().dbStates["query-2"]).toBeDefined();
     expect(useQueryStore.getState().redisStates["query-3"]).toBeDefined();
+  });
+
+  it("should open a new mongodb query tab", () => {
+    const asset = makeMongoAsset(20);
+    useQueryStore.getState().openQueryTab(asset);
+
+    const tabs = useTabStore.getState().tabs;
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].id).toBe("query-20");
+    expect(tabs[0].type).toBe("query");
+
+    const meta = tabs[0].meta as { assetType: string };
+    expect(meta.assetType).toBe("mongodb");
+
+    // Should initialize mongoStates, not db/redis
+    expect(useQueryStore.getState().mongoStates["query-20"]).toBeDefined();
+    expect(useQueryStore.getState().dbStates["query-20"]).toBeUndefined();
+    expect(useQueryStore.getState().redisStates["query-20"]).toBeUndefined();
+  });
+
+  it("should reuse existing mongodb query tab", () => {
+    const asset = makeMongoAsset(20);
+    useQueryStore.getState().openQueryTab(asset);
+    useQueryStore.getState().openQueryTab(asset);
+
+    // Only one tab should exist
+    expect(useTabStore.getState().tabs).toHaveLength(1);
+    // Should activate it
+    expect(useTabStore.getState().activeTabId).toBe("query-20");
   });
 });

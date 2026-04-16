@@ -15,6 +15,7 @@ const (
 	PolicyTypeCommand = "command"
 	PolicyTypeQuery   = "query"
 	PolicyTypeRedis   = "redis"
+	PolicyTypeMongo   = "mongo"
 )
 
 // PolicyGroup 权限组实体（数据库）
@@ -43,7 +44,7 @@ func (pg *PolicyGroup) Validate() error {
 		return errors.New("权限组名称不能为空")
 	}
 	switch pg.PolicyType {
-	case PolicyTypeCommand, PolicyTypeQuery, PolicyTypeRedis:
+	case PolicyTypeCommand, PolicyTypeQuery, PolicyTypeRedis, PolicyTypeMongo:
 	default:
 		if !hasExtensionPolicyType(pg.PolicyType) {
 			return errors.New("无效的策略类型")
@@ -230,6 +231,43 @@ func BuiltinGroups() []*PolicyGroup {
 					"SLAVEOF *", "REPLICAOF *",
 					"ACL DELUSER *", "ACL SETUSER *",
 					"SCRIPT FLUSH", "CLUSTER RESET *",
+				},
+			}),
+		},
+		// MongoDB 类型
+		{
+			BuiltinID:   policy.BuiltinMongoReadOnly,
+			Name:        "MongoDB Read-Only",
+			Description: "Allow MongoDB read-only operations",
+			PolicyType:  PolicyTypeMongo,
+			Policy: mustMarshal(&policy.MongoPolicy{
+				AllowTypes: []string{
+					"find", "findOne", "aggregate", "countDocuments",
+				},
+			}),
+		},
+		{
+			BuiltinID:   policy.BuiltinMongoReadWrite,
+			Name:        "MongoDB Read-Write",
+			Description: "Allow MongoDB CRUD operations",
+			PolicyType:  PolicyTypeMongo,
+			Policy: mustMarshal(&policy.MongoPolicy{
+				AllowTypes: []string{
+					"find", "findOne", "aggregate", "countDocuments",
+					"insertOne", "insertMany",
+					"updateOne", "updateMany",
+					"deleteOne", "deleteMany",
+				},
+			}),
+		},
+		{
+			BuiltinID:   policy.BuiltinMongoDangerousDeny,
+			Name:        "MongoDB Dangerous Deny",
+			Description: "Deny dangerous MongoDB operations",
+			PolicyType:  PolicyTypeMongo,
+			Policy: mustMarshal(&policy.MongoPolicy{
+				DenyTypes: []string{
+					"dropDatabase", "dropCollection",
 				},
 			}),
 		},

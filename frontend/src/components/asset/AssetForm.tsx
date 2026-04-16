@@ -31,11 +31,13 @@ import {
   TestSSHConnection,
   TestDatabaseConnection,
   TestRedisConnection,
+  TestMongoDBConnection,
 } from "../../../wailsjs/go/app/App";
 import { app } from "../../../wailsjs/go/models";
 import { SSHConfigSection } from "@/components/asset/SSHConfigSection";
 import { DatabaseConfigSection } from "@/components/asset/DatabaseConfigSection";
 import { RedisConfigSection } from "@/components/asset/RedisConfigSection";
+import { MongoDBConfigSection } from "@/components/asset/MongoDBConfigSection";
 import { useExtensionStore } from "@/extension";
 import { ExtensionConfigForm } from "@/components/asset/ExtensionConfigForm";
 
@@ -92,13 +94,28 @@ interface RedisConfig {
   ssh_asset_id?: number;
 }
 
-type AssetType = "ssh" | "database" | "redis" | (string & {});
+interface MongoDBConfig {
+  connection_uri?: string;
+  host?: string;
+  port?: number;
+  replica_set?: string;
+  username?: string;
+  password?: string;
+  credential_id?: number;
+  database?: string;
+  auth_source?: string;
+  tls?: boolean;
+  ssh_asset_id?: number;
+}
+
+type AssetType = "ssh" | "database" | "redis" | "mongodb" | (string & {});
 
 const DEFAULT_PORTS: Record<string, number> = {
   ssh: 22,
   mysql: 3306,
   postgresql: 5432,
   redis: 6379,
+  mongodb: 27017,
 };
 
 const DEFAULT_ICONS: Record<string, string> = {
@@ -106,6 +123,7 @@ const DEFAULT_ICONS: Record<string, string> = {
   mysql: "mysql",
   postgresql: "postgresql",
   redis: "redis",
+  mongodb: "mongodb",
 };
 
 export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }: AssetFormProps) {
@@ -172,6 +190,12 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   // Redis fields
   const [tls, setTls] = useState(false);
 
+  // MongoDB fields
+  const [mongoConnectionMode, setMongoConnectionMode] = useState<"manual" | "uri">("manual");
+  const [connectionURI, setConnectionURI] = useState("");
+  const [replicaSet, setReplicaSet] = useState("");
+  const [authSource, setAuthSource] = useState("");
+
   // Extension config
   const [extConfig, setExtConfig] = useState<Record<string, unknown>>({});
 
@@ -214,6 +238,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
           loadDatabaseConfig(editAsset);
         } else if (editType === "redis") {
           loadRedisConfig(editAsset);
+        } else if (editType === "mongodb") {
+          loadMongoDBConfig(editAsset);
         } else {
           // Extension type: load decrypted config
           const extInfo = useExtensionStore.getState().getExtensionForAssetType(editType);
@@ -235,6 +261,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         resetSSHFields();
         resetDatabaseFields();
         resetRedisFields();
+        resetMongoDBFields();
         setExtConfig({});
       }
     }
@@ -349,6 +376,42 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     }
   };
 
+  const loadMongoDBConfig = (asset: asset_entity.Asset) => {
+    try {
+      const cfg: MongoDBConfig = JSON.parse(asset.Config || "{}");
+      if (cfg.connection_uri) {
+        setMongoConnectionMode("uri");
+        setConnectionURI(cfg.connection_uri);
+      } else {
+        setMongoConnectionMode("manual");
+        setConnectionURI("");
+      }
+      setHost(cfg.host || "");
+      setPort(cfg.port || 27017);
+      setUsername(cfg.username || "");
+      setReplicaSet(cfg.replica_set || "");
+      setAuthSource(cfg.auth_source || "");
+      setDatabase(cfg.database || "");
+      setTls(cfg.tls || false);
+      setSshTunnelId(asset.sshTunnelId || cfg.ssh_asset_id || 0);
+
+      if (cfg.credential_id) {
+        setPasswordSource("managed");
+        setPasswordCredentialId(cfg.credential_id);
+        setEncryptedPassword("");
+        setPassword("");
+      } else {
+        setPasswordSource("inline");
+        setPasswordCredentialId(0);
+        setEncryptedPassword(cfg.password || "");
+        setPassword("");
+      }
+    } catch {
+      resetSharedFields("mongodb");
+      resetMongoDBFields();
+    }
+  };
+
   // Reset shared connection fields with type-appropriate defaults
   const resetSharedFields = (type: AssetType, dbDriver = "mysql") => {
     setHost("");
@@ -394,6 +457,16 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
 
   // Redis-exclusive fields only
   const resetRedisFields = () => {
+    setTls(false);
+  };
+
+  // MongoDB-exclusive fields only
+  const resetMongoDBFields = () => {
+    setMongoConnectionMode("manual");
+    setConnectionURI("");
+    setReplicaSet("");
+    setAuthSource("");
+    setDatabase("");
     setTls(false);
   };
 
@@ -493,6 +566,32 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setTesting(true);
     try {
       await TestRedisConnection(JSON.stringify(cfg), password);
+      toast.success(t("asset.testConnectionSuccess"));
+    } catch (e) {
+      toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleTestMongoDBConnection = async () => {
+    const cfg: MongoDBConfig = {};
+    if (mongoConnectionMode === "uri" && connectionURI) {
+      cfg.connection_uri = connectionURI;
+    } else {
+      cfg.host = host;
+      cfg.port = port;
+    }
+    if (username) cfg.username = username;
+    if (replicaSet) cfg.replica_set = replicaSet;
+    if (authSource) cfg.auth_source = authSource;
+    if (database) cfg.database = database;
+    if (tls) cfg.tls = true;
+    if (sshTunnelId > 0) cfg.ssh_asset_id = sshTunnelId;
+    if (!password && encryptedPassword) cfg.password = encryptedPassword;
+    setTesting(true);
+    try {
+      await TestMongoDBConnection(JSON.stringify(cfg), password);
       toast.success(t("asset.testConnectionSuccess"));
     } catch (e) {
       toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
@@ -610,6 +709,27 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       }
       if (tls) redisConfig.tls = true;
       config = JSON.stringify(redisConfig);
+    } else if (assetType === "mongodb") {
+      const mongoConfig: MongoDBConfig = {};
+      if (mongoConnectionMode === "uri" && connectionURI) {
+        mongoConfig.connection_uri = connectionURI;
+      } else {
+        mongoConfig.host = host;
+        mongoConfig.port = port;
+      }
+      if (username) mongoConfig.username = username;
+      if (passwordSource === "managed" && passwordCredentialId > 0) {
+        mongoConfig.credential_id = passwordCredentialId;
+      } else {
+        const encrypted = await encryptPasswordValue();
+        if (encrypted === undefined) return;
+        if (encrypted) mongoConfig.password = encrypted;
+      }
+      if (replicaSet) mongoConfig.replica_set = replicaSet;
+      if (authSource) mongoConfig.auth_source = authSource;
+      if (database) mongoConfig.database = database;
+      if (tls) mongoConfig.tls = true;
+      config = JSON.stringify(mongoConfig);
     } else {
       // Extension type: encrypt password fields from configSchema before saving
       const extInfo = useExtensionStore.getState().getExtensionForAssetType(assetType);
@@ -663,10 +783,12 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         ? t("asset.typeDatabase")
         : assetType === "redis"
           ? t("asset.typeRedis")
-          : (() => {
-              const found = availableTypes.find((at) => at.type === assetType);
-              return found ? resolveExtDisplayName(found) : assetType;
-            })();
+          : assetType === "mongodb"
+            ? t("asset.typeMongoDB")
+            : (() => {
+                const found = availableTypes.find((at) => at.type === assetType);
+                return found ? resolveExtDisplayName(found) : assetType;
+              })();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -689,6 +811,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                   <SelectItem value="ssh">{t("asset.typeSSH")}</SelectItem>
                   <SelectItem value="database">{t("asset.typeDatabase")}</SelectItem>
                   <SelectItem value="redis">{t("asset.typeRedis")}</SelectItem>
+                  <SelectItem value="mongodb">{t("asset.typeMongoDB")}</SelectItem>
                   {availableTypes
                     .filter((at) => !!at.extensionName)
                     .map((at) => (
@@ -714,7 +837,9 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                     ? "prod-db"
                     : assetType === "redis"
                       ? "cache-01"
-                      : `my-${assetType}`
+                      : assetType === "mongodb"
+                        ? "mongo-01"
+                        : `my-${assetType}`
               }
             />
           </div>
@@ -825,6 +950,40 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             />
           )}
 
+          {assetType === "mongodb" && (
+            <MongoDBConfigSection
+              connectionMode={mongoConnectionMode}
+              setConnectionMode={setMongoConnectionMode}
+              host={host}
+              setHost={setHost}
+              port={port}
+              setPort={setPort}
+              username={username}
+              setUsername={setUsername}
+              connectionURI={connectionURI}
+              setConnectionURI={setConnectionURI}
+              replicaSet={replicaSet}
+              setReplicaSet={setReplicaSet}
+              authSource={authSource}
+              setAuthSource={setAuthSource}
+              database={database}
+              setDatabase={setDatabase}
+              tls={tls}
+              setTls={setTls}
+              sshTunnelId={sshTunnelId}
+              setSshTunnelId={setSshTunnelId}
+              password={password}
+              setPassword={setPassword}
+              encryptedPassword={encryptedPassword}
+              passwordSource={passwordSource}
+              setPasswordSource={setPasswordSource}
+              passwordCredentialId={passwordCredentialId}
+              setPasswordCredentialId={setPasswordCredentialId}
+              managedPasswords={managedPasswords}
+              editAssetId={editAsset?.ID}
+            />
+          )}
+
           {assetType === "redis" && (
             <RedisConfigSection
               host={host}
@@ -853,6 +1012,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
           {assetType !== "ssh" &&
             assetType !== "database" &&
             assetType !== "redis" &&
+            assetType !== "mongodb" &&
             (() => {
               const extInfo = useExtensionStore.getState().getExtensionForAssetType(assetType);
               if (!extInfo) return null;
@@ -870,7 +1030,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             })()}
 
           {/* Test Connection */}
-          {(assetType === "ssh" || assetType === "database" || assetType === "redis") && (
+          {(assetType === "ssh" || assetType === "database" || assetType === "redis" || assetType === "mongodb") && (
             <Button
               type="button"
               variant="outline"
@@ -880,9 +1040,13 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                   ? handleTestConnection
                   : assetType === "database"
                     ? handleTestDatabaseConnection
-                    : handleTestRedisConnection
+                    : assetType === "mongodb"
+                      ? handleTestMongoDBConnection
+                      : handleTestRedisConnection
               }
-              disabled={testing || !host}
+              disabled={
+                testing || (assetType !== "mongodb" ? !host : mongoConnectionMode === "uri" ? !connectionURI : !host)
+              }
               className="gap-1 w-fit"
             >
               {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
@@ -908,7 +1072,13 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={saving || !name || (["ssh", "database", "redis"].includes(assetType) && !host)}
+            disabled={
+              saving ||
+              !name ||
+              (["ssh", "database", "redis"].includes(assetType) && !host) ||
+              (assetType === "mongodb" && mongoConnectionMode === "manual" && !host) ||
+              (assetType === "mongodb" && mongoConnectionMode === "uri" && !connectionURI)
+            }
           >
             {t("action.save")}
           </Button>

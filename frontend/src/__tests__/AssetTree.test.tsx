@@ -7,6 +7,7 @@ import { useTabStore } from "../stores/tabStore";
 import { useTerminalStore } from "../stores/terminalStore";
 import { useQueryStore } from "../stores/queryStore";
 import { asset_entity, group_entity } from "../../wailsjs/go/models";
+import { getAssetType } from "../lib/assetTypes";
 import React from "react";
 
 // ---- Minimal AssetList component that replicates the key double-click logic from AssetTree ----
@@ -46,9 +47,12 @@ function AssetList({
                 clearTimeout(clickTimerRef.current);
                 clickTimerRef.current = null;
               }
-              if (asset.Type === "ssh" && !isConnecting) onConnectAsset(asset);
-              else if (asset.Type === "database" || asset.Type === "redis") onConnectAsset(asset);
-              else onSelectAsset(asset);
+              const def = getAssetType(asset.Type);
+              if (def?.canConnect && (def.connectAction === "query" || !isConnecting)) {
+                onConnectAsset(asset);
+              } else {
+                onSelectAsset(asset);
+              }
             }}
           >
             {asset.Name}
@@ -64,7 +68,7 @@ function AssetList({
 function makeHandleConnectAsset() {
   const errors: string[] = [];
   const handleConnectAsset = async (asset: asset_entity.Asset) => {
-    if (asset.Type === "database" || asset.Type === "redis") {
+    if (asset.Type === "database" || asset.Type === "redis" || asset.Type === "mongodb") {
       useQueryStore.getState().openQueryTab(asset);
       return;
     }
@@ -125,7 +129,7 @@ describe("AssetTree double-click → connection flow", () => {
   beforeEach(() => {
     useTabStore.setState({ tabs: [], activeTabId: null });
     useTerminalStore.setState({ tabData: {}, connections: {}, connectingAssetIds: new Set() });
-    useQueryStore.setState({ dbStates: {}, redisStates: {} });
+    useQueryStore.setState({ dbStates: {}, redisStates: {}, mongoStates: {} });
     useAssetStore.setState({ assets: [], groups: [] as group_entity.Group[] });
     vi.spyOn(useAssetStore.getState(), "getAssetPath").mockImplementation((a) => a.Name);
     vi.mocked(ConnectSSHAsync).mockReset();
@@ -244,6 +248,25 @@ describe("AssetTree double-click → connection flow", () => {
     expect(tabs).toHaveLength(1);
     expect(tabs[0].id).toBe("query-3");
     expect(useQueryStore.getState().redisStates["query-3"]).toBeDefined();
+  });
+
+  it("double-clicking a mongodb asset opens query tab", async () => {
+    const mongoAsset = new asset_entity.Asset({
+      ID: 30,
+      Name: "MongoDB",
+      Type: "mongodb",
+      Config: JSON.stringify({ host: "localhost", port: 27017 }),
+      Status: 1,
+    });
+    const { handleConnectAsset } = makeHandleConnectAsset();
+    const onSelect = vi.fn();
+    const user = userEvent.setup();
+
+    render(<AssetList assets={[mongoAsset]} onConnectAsset={handleConnectAsset} onSelectAsset={onSelect} />);
+    await user.dblClick(screen.getByTestId("asset-30"));
+
+    const tabStore = useTabStore.getState();
+    expect(tabStore.tabs.some((t) => t.id === "query-30")).toBe(true);
   });
 
   it("double-click unknown type asset triggers select, not connect", async () => {

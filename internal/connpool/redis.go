@@ -53,5 +53,10 @@ func DialRedis(ctx context.Context, asset *asset_entity.Asset, cfg *asset_entity
 		return nil, nil, fmt.Errorf("redis 连接失败: %w", pingErr)
 	}
 
+	// 直连时 tunnel 为 *SSHTunnel 的 nil，直接返回会变成 typed-nil 接口，
+	// 调用方 `if closer != nil` 会误判为真并在 Close() 里 nil deref panic。
+	if tunnel == nil {
+		return client, nil, nil
+	}
 	return client, tunnel, nil
 }
