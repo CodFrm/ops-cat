@@ -185,7 +185,7 @@ interface MongoQueryContentProps {
 
 function MongoQueryContent({ assetId, innerTab }: MongoQueryContentProps) {
   const { t } = useTranslation();
-  const [operation, setOperation] = useState<string>(innerTab.database ? "find" : "find");
+  const [operation, setOperation] = useState<string>("find");
   const [database, setDatabase] = useState(innerTab.database || "");
   const [collection, setCollection] = useState(innerTab.collection || "");
   const [query, setQuery] = useState("{}");

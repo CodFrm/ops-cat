@@ -72,6 +72,7 @@ export interface MongoDBTabState {
   activeDatabase: string | null;
   innerTabs: MongoInnerTab[];
   activeInnerTabId: string | null;
+  error: string | null;
 }
 
 interface QueryState {
@@ -150,6 +151,7 @@ function defaultMongoState(): MongoDBTabState {
     activeDatabase: null,
     innerTabs: [],
     activeInnerTabId: null,
+    error: null,
   };
 }
 
@@ -839,8 +841,12 @@ export const useQueryStore = create<QueryState>((set, get) => ({
         },
       }));
     } catch (err) {
-      /* ignore */
-      console.error("loadMongoDatabases error:", err);
+      set((s) => ({
+        mongoStates: {
+          ...s.mongoStates,
+          [tabId]: { ...s.mongoStates[tabId], error: s.mongoStates[tabId]?.error || String(err) },
+        },
+      }));
     }
   },
 
@@ -861,8 +867,12 @@ export const useQueryStore = create<QueryState>((set, get) => ({
         },
       }));
     } catch (err) {
-      /* ignore */
-      console.error("loadMongoCollections error:", err);
+      set((s) => ({
+        mongoStates: {
+          ...s.mongoStates,
+          [tabId]: { ...s.mongoStates[tabId], error: s.mongoStates[tabId]?.error || String(err) },
+        },
+      }));
     }
   },
 
