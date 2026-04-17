@@ -1,4 +1,17 @@
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef } from "react";
+
+// Chunked binary -> base64 to avoid stack overflow on large pastes (>64KB).
+// String.fromCharCode(...largeArray) uses function-argument spread which hits V8's
+// ~65535 args limit and throws RangeError.
+function bytesToBase64(bytes: Uint8Array): string {
+  const CHUNK = 0x8000; // 32 KiB — safely under V8 args limit
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    const slice = bytes.subarray(i, i + CHUNK);
+    binary += String.fromCharCode.apply(null, slice as unknown as number[]);
+  }
+  return btoa(binary);
+}
 import { Terminal as XTerminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
@@ -72,8 +85,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const handlePaste = useCallback(() => {
     navigator.clipboard.readText().then((text) => {
       if (text && termRef.current) {
-        const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(text)));
-        WriteSSH(sessionId, encoded).catch(console.error);
+        WriteSSH(sessionId, bytesToBase64(new TextEncoder().encode(text))).catch(console.error);
       }
     });
   }, [sessionId]);
@@ -133,8 +145,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
     // 用户输入 → 后端
     const onDataDispose = term.onData((data) => {
-      const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(data)));
-      WriteSSH(sessionId, encoded).catch(console.error);
+      WriteSSH(sessionId, bytesToBase64(new TextEncoder().encode(data))).catch(console.error);
     });
 
     // 后端输出 → 终端（Go 侧已做 10ms 合并，此处直接写入，依赖 xterm.js 内部写入缓冲）
