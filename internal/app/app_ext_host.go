@@ -26,7 +26,8 @@ type appAssetConfigGetter struct {
 }
 
 func (g *appAssetConfigGetter) GetAssetConfig(assetID int64) (json.RawMessage, error) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	asset, err := asset_repo.Asset().Find(ctx, assetID)
 	if err != nil {
 		return nil, fmt.Errorf("asset %d not found: %w", assetID, err)
