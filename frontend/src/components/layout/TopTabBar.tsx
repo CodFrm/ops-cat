@@ -2,6 +2,7 @@ import { createContext, useContext, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Settings, KeyRound, MessageSquare, ScrollText, ArrowRightLeft, Server, Folder } from "lucide-react";
 import { useFullscreen } from "@/hooks/useFullscreen";
+import { useTabDragAndDrop } from "@/hooks/useTabDragAndDrop";
 import { useTabStore, type Tab, type PageTabMeta, type InfoTabMeta } from "@/stores/tabStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import {
@@ -62,6 +63,7 @@ function TabItem({
 }: TabItemProps) {
   const { t } = useTranslation();
   const { tabs, dragKeyRef, reorder, moveTo } = useContext(TabBarContext);
+  const dragProps = useTabDragAndDrop(tabKey, { dragKeyRef, reorder });
   const noTabStyle = { "--wails-draggable": "no-drag" } as React.CSSProperties;
   const globalIndex = tabs.findIndex((tab) => tab.id === tabKey);
   const total = tabs.length;
@@ -78,25 +80,7 @@ function TabItem({
           style={noTabStyle}
           title={title ?? label}
           onClick={onClick}
-          draggable
-          onDragStart={(e) => {
-            dragKeyRef.current = tabKey;
-            e.dataTransfer.effectAllowed = "move";
-          }}
-          onDragOver={(e) => {
-            if (dragKeyRef.current) {
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "move";
-            }
-          }}
-          onDragEnter={(e) => {
-            e.preventDefault();
-            if (!dragKeyRef.current || dragKeyRef.current === tabKey) return;
-            reorder(dragKeyRef.current, tabKey);
-          }}
-          onDragEnd={() => {
-            dragKeyRef.current = null;
-          }}
+          {...dragProps}
         >
           <Icon className="h-3.5 w-3.5 shrink-0" style={iconStyle} />
           <span className="truncate min-w-0">{label}</span>
