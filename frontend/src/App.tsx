@@ -9,6 +9,10 @@ import { MainPanel } from "@/components/layout/MainPanel";
 import { ConversationListPanel } from "@/components/ai/ConversationListPanel";
 import { WindowControls } from "@/components/layout/WindowControls";
 import { EdgeRevealStrip } from "@/components/layout/EdgeRevealStrip";
+import { useLayoutStore } from "@/stores/layoutStore";
+import { ActivityBar } from "@/components/layout/ActivityBar";
+import { LeftPanel } from "@/components/layout/LeftPanel";
+import { SideTabList } from "@/components/layout/SideTabList";
 import { AssetForm } from "@/components/asset/AssetForm";
 import { GroupDialog } from "@/components/asset/GroupDialog";
 import { PermissionDialog } from "@/components/ai/PermissionDialog";
@@ -332,6 +336,10 @@ function App() {
     useTabStore.getState().activateTab(tabId);
   }, []);
 
+  const tabBarLayout = useLayoutStore((s) => s.tabBarLayout);
+  const leftPanelVisible = useLayoutStore((s) => s.leftPanelVisible);
+  const activeSidePanel = useLayoutStore((s) => s.activeSidePanel);
+
   // Derive active page for sidebar highlighting
   const activeTab = useTabStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
   const activePage = !activeTab
@@ -348,56 +356,108 @@ function App() {
         <TooltipProvider>
           <div className="flex h-screen w-screen overflow-hidden bg-background">
             <WindowControls />
-            {sidebarHidden && <EdgeRevealStrip onClick={toggleSidebarHidden} />}
-            {!sidebarHidden && (
-              <Sidebar
-                activePage={activePage}
-                onPageChange={handlePageChange}
-                sidebarCollapsed={assetTreeCollapsed}
-                onToggleSidebar={toggleSidebar}
-                onHideSidebar={toggleSidebarHidden}
-                aiPanelCollapsed={aiPanelCollapsed}
-                onToggleAIPanel={toggleAIPanel}
-              />
-            )}
-            <div
-              className="relative overflow-hidden shrink-0 transition-[width] duration-200"
-              style={{ width: assetTreeCollapsed ? 0 : assetTreeWidth }}
-            >
-              <AssetTree
-                collapsed={false}
-                sidebarHidden={sidebarHidden}
-                onShowSidebar={toggleSidebarHidden}
-                onAddAsset={handleAddAsset}
-                onAddGroup={() => {
-                  setEditingGroup(null);
-                  setGroupDialogOpen(true);
-                }}
-                onEditGroup={(group) => {
-                  setEditingGroup(group);
-                  setGroupDialogOpen(true);
-                }}
-                onGroupDetail={(group) => {
-                  selectGroup(group.ID);
-                  selectAsset(null);
-                  handleOpenInfoTab("group", group.ID, group.Name, group.Icon || undefined);
-                }}
-                onEditAsset={handleEditAsset}
-                onCopyAsset={handleCopyAsset}
-                onConnectAsset={handleConnectAsset}
-                onConnectAssetInNewTab={handleConnectAssetInNewTab}
-                onSelectAsset={handleSelectAsset}
-                onOpenInfoTab={handleOpenInfoTab}
-              />
-              {/* Resize handle */}
-              {!assetTreeCollapsed && (
+            {tabBarLayout === "left" ? (
+              <>
+                {!sidebarHidden && (
+                  <Sidebar
+                    activePage={activePage}
+                    onPageChange={handlePageChange}
+                    sidebarCollapsed={false}
+                    onToggleSidebar={() => useLayoutStore.getState().toggleVisible()}
+                    onHideSidebar={toggleSidebarHidden}
+                    aiPanelCollapsed={aiPanelCollapsed}
+                    onToggleAIPanel={toggleAIPanel}
+                  />
+                )}
+                <ActivityBar />
+                {leftPanelVisible && (
+                  <LeftPanel>
+                    {activeSidePanel === "assets" ? (
+                      <AssetTree
+                        collapsed={false}
+                        sidebarHidden={sidebarHidden}
+                        onShowSidebar={toggleSidebarHidden}
+                        onAddAsset={handleAddAsset}
+                        onAddGroup={() => {
+                          setEditingGroup(null);
+                          setGroupDialogOpen(true);
+                        }}
+                        onEditGroup={(group) => {
+                          setEditingGroup(group);
+                          setGroupDialogOpen(true);
+                        }}
+                        onGroupDetail={(group) => {
+                          selectGroup(group.ID);
+                          selectAsset(null);
+                          handleOpenInfoTab("group", group.ID, group.Name, group.Icon || undefined);
+                        }}
+                        onEditAsset={handleEditAsset}
+                        onCopyAsset={handleCopyAsset}
+                        onConnectAsset={handleConnectAsset}
+                        onConnectAssetInNewTab={handleConnectAssetInNewTab}
+                        onSelectAsset={handleSelectAsset}
+                        onOpenInfoTab={handleOpenInfoTab}
+                      />
+                    ) : (
+                      <SideTabList />
+                    )}
+                  </LeftPanel>
+                )}
+              </>
+            ) : (
+              <>
+                {sidebarHidden && <EdgeRevealStrip onClick={toggleSidebarHidden} />}
+                {!sidebarHidden && (
+                  <Sidebar
+                    activePage={activePage}
+                    onPageChange={handlePageChange}
+                    sidebarCollapsed={assetTreeCollapsed}
+                    onToggleSidebar={toggleSidebar}
+                    onHideSidebar={toggleSidebarHidden}
+                    aiPanelCollapsed={aiPanelCollapsed}
+                    onToggleAIPanel={toggleAIPanel}
+                  />
+                )}
                 <div
-                  className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize z-10 hover:bg-primary/20 active:bg-primary/30 transition-colors"
-                  onMouseDown={handleAssetTreeResizeStart}
-                />
-              )}
-            </div>
-            {assetTreeResizing && <div className="fixed inset-0 z-50 cursor-col-resize" />}
+                  className="relative overflow-hidden shrink-0 transition-[width] duration-200"
+                  style={{ width: assetTreeCollapsed ? 0 : assetTreeWidth }}
+                >
+                  <AssetTree
+                    collapsed={false}
+                    sidebarHidden={sidebarHidden}
+                    onShowSidebar={toggleSidebarHidden}
+                    onAddAsset={handleAddAsset}
+                    onAddGroup={() => {
+                      setEditingGroup(null);
+                      setGroupDialogOpen(true);
+                    }}
+                    onEditGroup={(group) => {
+                      setEditingGroup(group);
+                      setGroupDialogOpen(true);
+                    }}
+                    onGroupDetail={(group) => {
+                      selectGroup(group.ID);
+                      selectAsset(null);
+                      handleOpenInfoTab("group", group.ID, group.Name, group.Icon || undefined);
+                    }}
+                    onEditAsset={handleEditAsset}
+                    onCopyAsset={handleCopyAsset}
+                    onConnectAsset={handleConnectAsset}
+                    onConnectAssetInNewTab={handleConnectAssetInNewTab}
+                    onSelectAsset={handleSelectAsset}
+                    onOpenInfoTab={handleOpenInfoTab}
+                  />
+                  {/* Resize handle */}
+                  {!assetTreeCollapsed && (
+                    <div
+                      className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize z-10 hover:bg-primary/20 active:bg-primary/30 transition-colors"
+                      onMouseDown={handleAssetTreeResizeStart}
+                    />
+                  )}
+                </div>
+                {assetTreeResizing && <div className="fixed inset-0 z-50 cursor-col-resize" />}
+              </>
+            )}
             <MainPanel
               onEditAsset={handleEditAsset}
               onDeleteAsset={handleDeleteAsset}

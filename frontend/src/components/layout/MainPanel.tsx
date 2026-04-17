@@ -24,6 +24,7 @@ import { useSFTPStore } from "@/stores/sftpStore";
 import { asset_entity } from "../../../wailsjs/go/models";
 import { ExtensionPage } from "@/extension";
 import { TopTabBar } from "./TopTabBar";
+import { useLayoutStore } from "@/stores/layoutStore";
 
 interface MainPanelProps {
   onEditAsset: (asset: asset_entity.Asset) => void;
@@ -43,6 +44,8 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPa
 
   const { assets, groups, initialized } = useAssetStore();
   const { fileManagerOpenTabs, fileManagerWidth, setFileManagerWidth } = useSFTPStore();
+
+  const tabBarLayout = useLayoutStore((s) => s.tabBarLayout);
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const hasTabs = tabs.length > 0;
@@ -147,16 +150,16 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPa
 
   return (
     <div className="flex flex-1 flex-col min-w-0">
-      {/* When no tabs, show standalone drag region */}
-      {!hasTabs && (
+      {/* When no tabs, show standalone drag region; also always shown in left layout (TopTabBar absent) */}
+      {(!hasTabs || tabBarLayout === "left") && (
         <div
           className={`${isFullscreen ? "h-2" : "h-10"} w-full shrink-0`}
           style={{ "--wails-draggable": "drag" } as React.CSSProperties}
         />
       )}
 
-      {/* Tab bar with integrated drag region */}
-      {hasTabs && <TopTabBar />}
+      {/* Tab bar with integrated drag region (top layout only) */}
+      {hasTabs && tabBarLayout === "top" && <TopTabBar />}
 
       {/* Content area */}
       <div className="flex-1 relative min-h-0 overflow-hidden">
