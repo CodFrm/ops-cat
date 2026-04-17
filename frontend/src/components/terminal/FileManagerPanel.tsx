@@ -604,6 +604,7 @@ export function FileManagerPanel({ sessionId, isOpen, width, onWidthChange }: Fi
                             "flex items-center gap-1.5 px-2 py-1 cursor-pointer transition-colors",
                             isSelected ? "bg-primary/10 text-primary" : "hover:bg-muted/50"
                           )}
+                          style={{ contentVisibility: "auto", containIntrinsicSize: "auto 28px" }}
                           onClick={() => setSelected(fullPath)}
                           onDoubleClick={() => {
                             if (entry.isDir) loadDir(fullPath);
