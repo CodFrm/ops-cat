@@ -205,3 +205,48 @@ describe("AI Send on Enter settings", () => {
     window.removeEventListener("ai-send-on-enter-change", handler);
   });
 });
+
+describe("conversationMessages (Phase 1)", () => {
+  beforeEach(() => {
+    useAIStore.setState({
+      tabStates: {},
+      conversations: [],
+      configured: false,
+      conversationMessages: {},
+      conversationStreaming: {},
+    });
+  });
+
+  it("getMessagesByConversationId returns empty array when no conversation", () => {
+    const store = useAIStore.getState();
+    expect(store.getMessagesByConversationId(999)).toEqual([]);
+  });
+
+  it("getMessagesByConversationId returns messages when set", () => {
+    useAIStore.setState({
+      conversationMessages: {
+        42: [{ role: "user", content: "hi", blocks: [] }],
+      },
+    });
+    const store = useAIStore.getState();
+    expect(store.getMessagesByConversationId(42)).toHaveLength(1);
+    expect(store.getMessagesByConversationId(42)[0].content).toBe("hi");
+  });
+
+  it("getStreamingByConversationId returns default when not sending", () => {
+    const store = useAIStore.getState();
+    expect(store.getStreamingByConversationId(42)).toEqual({ sending: false, pendingQueue: [] });
+  });
+
+  it("getStreamingByConversationId reflects streaming state", () => {
+    useAIStore.setState({
+      conversationStreaming: {
+        42: { sending: true, pendingQueue: ["q1", "q2"] },
+      },
+    });
+    expect(useAIStore.getState().getStreamingByConversationId(42)).toEqual({
+      sending: true,
+      pendingQueue: ["q1", "q2"],
+    });
+  });
+});

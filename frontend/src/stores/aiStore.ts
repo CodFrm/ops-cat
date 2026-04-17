@@ -220,6 +220,8 @@ function convertDisplayMessages(displayMsgs: app.ConversationDisplayMessage[]): 
 
 interface AIState {
   tabStates: Record<string, TabState>;
+  conversationMessages: Record<number, ChatMessage[]>;
+  conversationStreaming: Record<number, { sending: boolean; pendingQueue: string[] }>;
 
   // 全局状态
   conversations: conversation_entity.Conversation[];
@@ -250,6 +252,10 @@ interface AIState {
   // 查询
   isAnySending: () => boolean;
   getTabState: (tabId: string) => TabState;
+
+  // NEW — 派生 getter
+  getMessagesByConversationId: (convId: number) => ChatMessage[];
+  getStreamingByConversationId: (convId: number) => { sending: boolean; pendingQueue: string[] };
 }
 
 export const useAIStore = create<AIState>((set, get) => {
@@ -293,6 +299,8 @@ export const useAIStore = create<AIState>((set, get) => {
 
   return {
     tabStates: {},
+    conversationMessages: {},
+    conversationStreaming: {},
 
     conversations: [],
     configured: false,
@@ -960,6 +968,14 @@ export const useAIStore = create<AIState>((set, get) => {
 
     getTabState: (tabId: string) => {
       return get().tabStates[tabId] || { messages: [], sending: false, pendingQueue: [] };
+    },
+
+    getMessagesByConversationId: (convId: number) => {
+      return get().conversationMessages[convId] || [];
+    },
+
+    getStreamingByConversationId: (convId: number) => {
+      return get().conversationStreaming[convId] || { sending: false, pendingQueue: [] };
     },
   };
 });
