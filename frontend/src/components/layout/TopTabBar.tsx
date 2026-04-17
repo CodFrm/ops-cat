@@ -14,6 +14,9 @@ import {
   ContextMenuTrigger,
 } from "@opskat/ui";
 import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
+import { TabPanelMenu } from "./TabPanelMenu";
+import { TabFilterPopover } from "./TabFilterPopover";
+import { useLayoutStore } from "@/stores/layoutStore";
 
 const pageTabMeta: Record<string, { icon: typeof Settings; labelKey: string }> = {
   settings: { icon: Settings, labelKey: "nav.settings" },
@@ -152,6 +155,10 @@ export function TopTabBar() {
 
   const tabData = useTerminalStore((s) => s.tabData);
 
+  const filterOpen = useLayoutStore((s) => s.filterOpen);
+  const setFilterOpen = useLayoutStore((s) => s.setFilterOpen);
+  const requestOpenFilter = useLayoutStore((s) => s.requestOpenFilter);
+
   const dragKeyRef = useRef<string | null>(null);
 
   const tabBarCtx: TabBarContextValue = {
@@ -280,10 +287,19 @@ export function TopTabBar() {
   return (
     <TabBarContext.Provider value={tabBarCtx}>
       <div
+        data-top-tabbar
         className={`flex items-center border-b overflow-hidden bg-background ${isFullscreen ? "pt-2" : "pt-10"}`}
         style={{ "--wails-draggable": "drag" } as React.CSSProperties}
       >
-        {tabs.map((tab) => renderTabItem(tab))}
+        <div className="flex items-center min-w-0 flex-1">{tabs.map((tab) => renderTabItem(tab))}</div>
+        <TabFilterPopover open={filterOpen} onOpenChange={setFilterOpen}>
+          <div
+            className="flex items-center shrink-0 px-1"
+            style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}
+          >
+            <TabPanelMenu mode="top" onOpenFilter={requestOpenFilter} />
+          </div>
+        </TabFilterPopover>
       </div>
     </TabBarContext.Provider>
   );
