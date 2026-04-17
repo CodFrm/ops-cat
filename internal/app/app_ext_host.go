@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -92,15 +93,19 @@ type appKVStore struct {
 }
 
 func (s *appKVStore) Get(key string) ([]byte, error) {
-	val, err := extension_data_repo.ExtensionData().Get(context.Background(), s.extName, key)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	val, err := extension_data_repo.ExtensionData().Get(ctx, s.extName, key)
 	if err != nil {
-		return nil, nil //nolint:nilerr // KV miss returns nil, not error
+		return nil, nil // KV miss returns nil, not error
 	}
 	return val, nil
 }
 
 func (s *appKVStore) Set(key string, value []byte) error {
-	return extension_data_repo.ExtensionData().Set(context.Background(), s.extName, key, value)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return extension_data_repo.ExtensionData().Set(ctx, s.extName, key, value)
 }
 
 // appActionEventHandler implements extension.ActionEventHandler
@@ -120,7 +125,8 @@ func (h *appActionEventHandler) OnActionEvent(eventType string, data json.RawMes
 
 // getDecryptedExtConfig returns the asset config with password fields decrypted.
 func getDecryptedExtConfig(assetID int64, bridge *extension.Bridge) (string, error) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	asset, err := asset_repo.Asset().Find(ctx, assetID)
 	if err != nil {
 		return "", fmt.Errorf("asset %d not found: %w", assetID, err)
@@ -216,7 +222,9 @@ func (d *appTunnelDialer) Dial(tunnelAssetID int64, addr string) (net.Conn, erro
 	if d.app.sshPool == nil {
 		return nil, fmt.Errorf("SSH pool not initialized")
 	}
-	client, err := d.app.sshPool.Get(context.Background(), tunnelAssetID)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client, err := d.app.sshPool.Get(ctx, tunnelAssetID)
 	if err != nil {
 		return nil, fmt.Errorf("get SSH tunnel: %w", err)
 	}
