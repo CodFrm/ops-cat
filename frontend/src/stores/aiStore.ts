@@ -825,6 +825,17 @@ export const useAIStore = create<AIState>((set, get) => {
         if (tab) {
           tabStore.closeTab(tab.id);
         }
+
+        // 侧边绑定联动：若侧边仍持有该会话，清除之
+        if (get().sidebarConversationId === id) {
+          get().bindSidebar(null);
+        }
+        // 清理最近绑定记录，避免关闭 Tab 时误恢复已删除会话
+        const lastBound = localStorage.getItem("ai_sidebar_last_bound");
+        if (lastBound && parseInt(lastBound, 10) === id) {
+          localStorage.removeItem("ai_sidebar_last_bound");
+        }
+
         await get().fetchConversations();
       } catch (e) {
         console.error("删除会话失败:", e);
@@ -839,6 +850,7 @@ export const useAIStore = create<AIState>((set, get) => {
         localStorage.removeItem("ai_sidebar_conversation_id");
       } else {
         localStorage.setItem("ai_sidebar_conversation_id", String(conversationId));
+        localStorage.setItem("ai_sidebar_last_bound", String(conversationId));
       }
     },
 
@@ -1136,6 +1148,19 @@ registerTabCloseHook((tab) => {
     const { [tab.id]: _, ...newTabStates } = s.tabStates;
     return { tabStates: newTabStates };
   });
+
+  // 单宿主不变量：若关闭的 Tab 对应的 conversation 是最近的侧边绑定，且当前侧边为空，
+  // 则恢复侧边绑定，使得会话继续以侧边形态存在。
+  if (meta.conversationId) {
+    const lastBound = localStorage.getItem("ai_sidebar_last_bound");
+    if (
+      lastBound &&
+      parseInt(lastBound, 10) === meta.conversationId &&
+      useAIStore.getState().sidebarConversationId == null
+    ) {
+      useAIStore.getState().bindSidebar(meta.conversationId);
+    }
+  }
 });
 
 // === Restore Hook: load AI settings and restore conversation tabs ===

@@ -360,3 +360,51 @@ describe("sidebar state", () => {
     expect(StopAIGeneration).toHaveBeenCalledWith(123);
   });
 });
+
+describe("single-host invariant", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useAIStore.setState({
+      tabStates: {},
+      conversations: [{ ID: 50, Title: "t", Updatetime: 0 } as any],
+      conversationMessages: { 50: [] },
+      conversationStreaming: { 50: { sending: false, pendingQueue: [] } },
+      sidebarConversationId: 50,
+    });
+    vi.mocked(SwitchConversation).mockResolvedValue([] as any);
+  });
+
+  it("openConversationTab evicts sidebar if sidebar already holds that conv", async () => {
+    await useAIStore.getState().openConversationTab(50);
+    expect(useAIStore.getState().sidebarConversationId).toBeNull();
+  });
+
+  it("promoteSidebarToTab calls openConversationTab and clears sidebar", async () => {
+    const tabId = await useAIStore.getState().promoteSidebarToTab();
+    expect(tabId).toBeTruthy();
+    expect(useAIStore.getState().sidebarConversationId).toBeNull();
+  });
+
+  it("deleteConversation clears sidebar if it holds that conv", async () => {
+    vi.mocked(DeleteConversation).mockResolvedValue(undefined as any);
+    await useAIStore.getState().deleteConversation(50);
+    expect(useAIStore.getState().sidebarConversationId).toBeNull();
+  });
+
+  it("closing a tab whose conversation was last sidebar-bound restores sidebar", () => {
+    localStorage.setItem("ai_sidebar_last_bound", "77");
+    useAIStore.setState({ sidebarConversationId: null });
+    const tab = {
+      id: "ai-77",
+      type: "ai" as const,
+      label: "t",
+      meta: { type: "ai" as const, conversationId: 77, title: "t" },
+    };
+    useTabStore.setState({ tabs: [tab], activeTabId: "ai-77" });
+
+    useTabStore.getState().closeTab("ai-77");
+
+    expect(useAIStore.getState().sidebarConversationId).toBe(77);
+  });
+});
