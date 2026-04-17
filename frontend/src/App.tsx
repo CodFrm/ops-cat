@@ -10,7 +10,6 @@ import { ConversationListPanel } from "@/components/ai/ConversationListPanel";
 import { WindowControls } from "@/components/layout/WindowControls";
 import { EdgeRevealStrip } from "@/components/layout/EdgeRevealStrip";
 import { useLayoutStore } from "@/stores/layoutStore";
-import { ActivityBar } from "@/components/layout/ActivityBar";
 import { LeftPanel } from "@/components/layout/LeftPanel";
 import { SideTabList } from "@/components/layout/SideTabList";
 import { AssetForm } from "@/components/asset/AssetForm";
@@ -358,6 +357,7 @@ function App() {
             <WindowControls />
             {tabBarLayout === "left" ? (
               <>
+                {sidebarHidden && <EdgeRevealStrip onClick={toggleSidebarHidden} />}
                 {!sidebarHidden && (
                   <Sidebar
                     activePage={activePage}
@@ -369,7 +369,6 @@ function App() {
                     onToggleAIPanel={toggleAIPanel}
                   />
                 )}
-                <ActivityBar />
                 {leftPanelVisible && (
                   <LeftPanel>
                     {activeSidePanel === "assets" ? (
