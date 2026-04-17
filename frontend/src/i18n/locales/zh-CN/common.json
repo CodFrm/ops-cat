@@ -584,7 +584,23 @@
     "regenerateTitle": "重新生成",
     "regenerateConfirm": "重新生成将删除此消息及之后的所有对话记录，确定要继续吗？",
     "retrying": "重试中",
-    "newConversation": "新对话"
+    "newConversation": "新对话",
+    "sidebar": {
+      "title": "AI 助手",
+      "newChat": "新对话",
+      "history": "历史",
+      "historySearchPlaceholder": "搜索历史…",
+      "historyEmpty": "暂无历史对话",
+      "historyViewAll": "查看全部",
+      "promoteToTab": "转为主面板 Tab",
+      "promoteHint": "已在 Tab 中打开",
+      "collapse": "折叠",
+      "expand": "展开",
+      "followMainTab": "跟随主面板",
+      "emptyGuide": "点击 + 新建对话，或从 📋 历史中继续",
+      "noConversation": "未选择对话",
+      "attachedAssets": "关联资产"
+    }
   },
   "shortcut": {
     "title": "快捷键",

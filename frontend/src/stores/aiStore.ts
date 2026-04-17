@@ -75,43 +75,43 @@ interface StreamEventData {
 }
 
 interface TabState {
-  messages: ChatMessage[];
-  sending: boolean;
-  pendingQueue: string[];
+  // Phase 1 清理后：tabStates 保留为 UI 态占位（将来放 scrollTop / inputDraft 等），
+  // messages/sending/pendingQueue 已全部迁移到 conversationMessages / conversationStreaming。
+  _marker?: "tab-state";
 }
 
-// 模块级 per-tab 事件监听管理（不放 zustand，因为含函数引用）
-const tabEventListeners = new Map<string, { cancel: (() => void) | null; generation: number }>();
+// 模块级 per-conversation 事件监听管理（不放 zustand，因为含函数引用）
+const conversationListeners = new Map<number, { cancel: (() => void) | null; generation: number }>();
 
-function getOrCreateListener(tabId: string) {
-  if (!tabEventListeners.has(tabId)) {
-    tabEventListeners.set(tabId, { cancel: null, generation: 0 });
+function getOrCreateConvListener(convId: number) {
+  if (!conversationListeners.has(convId)) {
+    conversationListeners.set(convId, { cancel: null, generation: 0 });
   }
-  return tabEventListeners.get(tabId)!;
+  return conversationListeners.get(convId)!;
 }
 
-function cleanupListener(tabId: string) {
-  const listener = tabEventListeners.get(tabId);
+function cleanupConvListener(convId: number) {
+  const listener = conversationListeners.get(convId);
   if (listener?.cancel) listener.cancel();
-  tabEventListeners.delete(tabId);
-  cleanupStreamBuffer(tabId);
+  conversationListeners.delete(convId);
+  cleanupStreamBuffer(convId);
 }
 
 // === 流式事件缓冲（性能优化：合并高频 content/thinking 事件，按帧刷新）===
 
-const streamBuffers = new Map<string, { content: string; thinking: string; raf: number | null }>();
+const streamBuffers = new Map<number, { content: string; thinking: string; raf: number | null }>();
 
-function getOrCreateStreamBuffer(tabId: string) {
-  let buf = streamBuffers.get(tabId);
+function getOrCreateStreamBuffer(convId: number) {
+  let buf = streamBuffers.get(convId);
   if (!buf) {
     buf = { content: "", thinking: "", raf: null };
-    streamBuffers.set(tabId, buf);
+    streamBuffers.set(convId, buf);
   }
   return buf;
 }
 
-function flushStreamBuffer(tabId: string) {
-  const buf = streamBuffers.get(tabId);
+function flushStreamBuffer(convId: number) {
+  const buf = streamBuffers.get(convId);
   if (!buf) return;
   if (buf.raf !== null) {
     cancelAnimationFrame(buf.raf);
@@ -124,9 +124,9 @@ function flushStreamBuffer(tabId: string) {
   if (!cd && !td) return;
 
   useAIStore.setState((state) => {
-    const tabState = state.tabStates[tabId];
-    if (!tabState) return state;
-    const updated = updateLastAssistant(tabState.messages, (msg) => {
+    const msgs = state.conversationMessages[convId];
+    if (!msgs) return state;
+    const updated = updateLastAssistant(msgs, (msg) => {
       let blocks = msg.blocks;
       let content = msg.content;
       if (td) {
@@ -145,14 +145,17 @@ function flushStreamBuffer(tabId: string) {
       return { ...msg, content, blocks };
     });
     if (!updated) return state;
-    return { tabStates: { ...state.tabStates, [tabId]: { ...tabState, messages: updated } } };
+
+    return {
+      conversationMessages: { ...state.conversationMessages, [convId]: updated },
+    };
   });
 }
 
-function cleanupStreamBuffer(tabId: string) {
-  const buf = streamBuffers.get(tabId);
+function cleanupStreamBuffer(convId: number) {
+  const buf = streamBuffers.get(convId);
   if (buf?.raf != null) cancelAnimationFrame(buf.raf);
-  streamBuffers.delete(tabId);
+  streamBuffers.delete(convId);
 }
 
 // === 辅助函数 ===
@@ -216,10 +219,514 @@ function convertDisplayMessages(displayMsgs: app.ConversationDisplayMessage[]): 
   }));
 }
 
+// === 模块级 conversation 操作（被 sendToTab / sendFromSidebar / regenerate 等共用）===
+
+function updateConversation(
+  convId: number,
+  updates: { messages?: ChatMessage[]; sending?: boolean; pendingQueue?: string[] }
+) {
+  useAIStore.setState((state) => {
+    const newConvMessages =
+      updates.messages !== undefined
+        ? { ...state.conversationMessages, [convId]: updates.messages }
+        : state.conversationMessages;
+
+    const currentStreaming = state.conversationStreaming[convId] || { sending: false, pendingQueue: [] };
+    const newConvStreaming =
+      updates.sending !== undefined || updates.pendingQueue !== undefined
+        ? {
+            ...state.conversationStreaming,
+            [convId]: {
+              sending: updates.sending ?? currentStreaming.sending,
+              pendingQueue: updates.pendingQueue ?? currentStreaming.pendingQueue,
+            },
+          }
+        : state.conversationStreaming;
+
+    return {
+      conversationMessages: newConvMessages,
+      conversationStreaming: newConvStreaming,
+    };
+  });
+}
+
+function drainQueue(convId: number) {
+  const streaming = useAIStore.getState().conversationStreaming[convId];
+  if (!streaming || streaming.pendingQueue.length === 0) return;
+
+  const queue = [...streaming.pendingQueue];
+  updateConversation(convId, { pendingQueue: [] });
+
+  // 将队列中所有消息作为独立 user message 追加
+  const currentMsgs = useAIStore.getState().conversationMessages[convId] || [];
+  const newMsgs = [...currentMsgs];
+  for (const text of queue) {
+    newMsgs.push({
+      role: "user" as const,
+      content: text,
+      blocks: [],
+      streaming: false,
+    });
+  }
+  updateConversation(convId, { messages: newMsgs });
+
+  // 触发新一轮发送（空内容表示使用已有消息）
+  setTimeout(() => {
+    _sendForConversation(convId, "").catch(() => {});
+  }, 0);
+}
+
+// 事件处理：核心流式状态机，完全基于 convId
+function handleStreamEvent(convId: number, event: StreamEventData) {
+  const currentMsgs = useAIStore.getState().conversationMessages[convId] || [];
+  if (!currentMsgs) return;
+
+  // 高频事件缓冲：content/thinking 通过 RAF 合并，每帧最多一次状态更新
+  if (event.type === "content" || event.type === "thinking") {
+    const buf = getOrCreateStreamBuffer(convId);
+    if (event.type === "content") {
+      buf.content += event.content || "";
+    } else {
+      buf.thinking += event.content || "";
+    }
+    if (buf.raf === null) {
+      buf.raf = requestAnimationFrame(() => {
+        const b = streamBuffers.get(convId);
+        if (b) b.raf = null;
+        flushStreamBuffer(convId);
+      });
+    }
+    return;
+  }
+
+  // 非流式事件：先刷新缓冲区保证顺序，再处理
+  flushStreamBuffer(convId);
+  const msgs = useAIStore.getState().conversationMessages[convId] || currentMsgs;
+
+  switch (event.type) {
+    case "agent_start": {
+      const updated = updateLastAssistant(msgs, (msg) => ({
+        ...msg,
+        blocks: [
+          ...msg.blocks,
+          {
+            type: "agent" as const,
+            content: "",
+            agentRole: event.agent_role || "",
+            agentTask: event.agent_task || "",
+            status: "running" as const,
+            childBlocks: [],
+          },
+        ],
+      }));
+      if (updated) updateConversation(convId, { messages: updated });
+      break;
+    }
+
+    case "agent_end": {
+      const updated = updateLastAssistant(msgs, (msg) => {
+        const newBlocks = [...msg.blocks];
+        for (let i = newBlocks.length - 1; i >= 0; i--) {
+          if (newBlocks[i].type === "agent" && newBlocks[i].status === "running") {
+            newBlocks[i] = { ...newBlocks[i], content: event.content || "", status: "completed" };
+            break;
+          }
+        }
+        return { ...msg, blocks: newBlocks };
+      });
+      if (updated) updateConversation(convId, { messages: updated });
+      break;
+    }
+
+    case "tool_start": {
+      const updated = updateLastAssistant(msgs, (msg) => {
+        const newBlocks = [...msg.blocks];
+        const toolBlock: ContentBlock = {
+          type: "tool" as const,
+          content: "",
+          toolName: event.tool_name || "Tool",
+          toolInput: event.tool_input || "",
+          status: "running" as const,
+        };
+
+        // 如果有 running 的 agent 块，嵌套到 childBlocks
+        let agentIdx = -1;
+        for (let i = newBlocks.length - 1; i >= 0; i--) {
+          if (newBlocks[i].type === "agent" && newBlocks[i].status === "running") {
+            agentIdx = i;
+            break;
+          }
+        }
+        if (agentIdx !== -1) {
+          const agentBlock = { ...newBlocks[agentIdx] };
+          agentBlock.childBlocks = [...(agentBlock.childBlocks || []), toolBlock];
+          newBlocks[agentIdx] = agentBlock;
+        } else {
+          newBlocks.push(toolBlock);
+        }
+
+        return { ...msg, blocks: newBlocks };
+      });
+      if (updated) updateConversation(convId, { messages: updated });
+      break;
+    }
+
+    case "tool_result": {
+      const updated = updateLastAssistant(msgs, (msg) => {
+        const newBlocks = [...msg.blocks];
+
+        // 先检查是否在 running 的 agent 块内
+        let agentIdx = -1;
+        for (let i = newBlocks.length - 1; i >= 0; i--) {
+          if (newBlocks[i].type === "agent" && newBlocks[i].status === "running") {
+            agentIdx = i;
+            break;
+          }
+        }
+        if (agentIdx !== -1 && newBlocks[agentIdx].childBlocks) {
+          const agentBlock = { ...newBlocks[agentIdx] };
+          const children = [...(agentBlock.childBlocks || [])];
+          let matchIdx = -1;
+          for (let i = children.length - 1; i >= 0; i--) {
+            if (
+              children[i].type === "tool" &&
+              children[i].status === "running" &&
+              children[i].toolName === event.tool_name
+            ) {
+              matchIdx = i;
+              break;
+            }
+          }
+          if (matchIdx === -1) {
+            for (let i = children.length - 1; i >= 0; i--) {
+              if (children[i].type === "tool" && children[i].status === "running") {
+                matchIdx = i;
+                break;
+              }
+            }
+          }
+          if (matchIdx !== -1) {
+            children[matchIdx] = { ...children[matchIdx], content: event.content || "", status: "completed" };
+            agentBlock.childBlocks = children;
+            newBlocks[agentIdx] = agentBlock;
+            return { ...msg, blocks: newBlocks };
+          }
+        }
+
+        // 顶层工具块匹配
+        let matchIdx = -1;
+        for (let i = newBlocks.length - 1; i >= 0; i--) {
+          const b = newBlocks[i];
+          if (b.type === "tool" && b.status === "running" && b.toolName === event.tool_name) {
+            matchIdx = i;
+            break;
+          }
+        }
+        if (matchIdx === -1) {
+          for (let i = newBlocks.length - 1; i >= 0; i--) {
+            const b = newBlocks[i];
+            if (b.type === "tool" && b.status === "running") {
+              matchIdx = i;
+              break;
+            }
+          }
+        }
+        if (matchIdx !== -1) {
+          newBlocks[matchIdx] = { ...newBlocks[matchIdx], content: event.content || "", status: "completed" };
+        }
+        return { ...msg, blocks: newBlocks };
+      });
+      if (updated) updateConversation(convId, { messages: updated });
+      break;
+    }
+
+    case "approval_request": {
+      const updated = updateLastAssistant(msgs, (msg) => {
+        const newBlocks = [...msg.blocks];
+        newBlocks.push({
+          type: "approval" as const,
+          content: "",
+          status: "pending_confirm" as const,
+          confirmId: event.confirm_id,
+          agentRole: event.agent_role,
+          approvalKind: event.kind,
+          approvalItems: event.items,
+          approvalDescription: event.description,
+          approvalSessionId: event.session_id,
+        });
+        return { ...msg, blocks: newBlocks };
+      });
+      if (updated) updateConversation(convId, { messages: updated });
+
+      if (document.hidden) {
+        try {
+          new Notification("OpsKat", {
+            body: i18n.t("ai.notificationPermissionNeeded"),
+            tag: `confirm-${event.confirm_id}`,
+          });
+        } catch {
+          // 通知权限未授予，忽略
+        }
+      }
+      break;
+    }
+
+    case "approval_result": {
+      const updated = updateLastAssistant(msgs, (msg) => {
+        const newBlocks = msg.blocks.map((b) =>
+          b.confirmId === event.confirm_id && b.status === "pending_confirm"
+            ? { ...b, status: event.content === "deny" ? ("error" as const) : ("running" as const) }
+            : b
+        );
+        return { ...msg, blocks: newBlocks };
+      });
+      if (updated) updateConversation(convId, { messages: updated });
+      break;
+    }
+
+    case "thinking_done": {
+      const updated = updateLastAssistant(msgs, (msg) => {
+        const newBlocks = msg.blocks.map((b) =>
+          b.type === "thinking" && b.status === "running" ? { ...b, status: "completed" as const } : b
+        );
+        return { ...msg, blocks: newBlocks };
+      });
+      if (updated) updateConversation(convId, { messages: updated });
+      break;
+    }
+
+    case "queue_consumed": {
+      // 后端在工具调用间隙消费了一条排队消息
+      // 结束当前 assistant 消息，插入 user 消息，开启新 assistant 流
+      const nextMsgs = [...msgs];
+      const lastIdx = nextMsgs.length - 1;
+      if (lastIdx >= 0 && nextMsgs[lastIdx].role === "assistant") {
+        nextMsgs[lastIdx] = { ...nextMsgs[lastIdx], streaming: false };
+      }
+      nextMsgs.push({
+        role: "user" as const,
+        content: event.content || "",
+        blocks: [],
+        streaming: false,
+      });
+      nextMsgs.push({
+        role: "assistant" as const,
+        content: "",
+        blocks: [],
+        streaming: true,
+      });
+      // 从本地队列头部移除已消费的消息
+      const curQueue = useAIStore.getState().conversationStreaming[convId]?.pendingQueue || [];
+      const newQueue = curQueue.length > 0 ? curQueue.slice(1) : [];
+      updateConversation(convId, { messages: nextMsgs, pendingQueue: newQueue });
+      break;
+    }
+
+    case "stopped": {
+      cleanupStreamBuffer(convId);
+      const updated = updateLastAssistant(msgs, (msg) => {
+        const newBlocks = msg.blocks.map((b) => {
+          if (b.type === "tool" && b.status === "running") {
+            return { ...b, status: "cancelled" as const };
+          }
+          if (b.type === "thinking" && b.status === "running") {
+            return { ...b, status: "completed" as const };
+          }
+          if (b.type === "agent" && b.status === "running") {
+            return {
+              ...b,
+              status: "cancelled" as const,
+              childBlocks: b.childBlocks?.map((c) =>
+                c.status === "running" ? { ...c, status: "cancelled" as const } : c
+              ),
+            };
+          }
+          return b;
+        });
+        return { ...msg, blocks: newBlocks, streaming: false };
+      });
+      if (updated) {
+        updateConversation(convId, { messages: updated, sending: false });
+      } else {
+        updateConversation(convId, { sending: false });
+      }
+
+      // 保存消息
+      const finalMsgs = useAIStore.getState().conversationMessages[convId] || [];
+      SaveConversationMessages(convId, toDisplayMessages(finalMsgs)).catch(() => {});
+      useAIStore.getState().fetchConversations();
+
+      // 消费队列
+      drainQueue(convId);
+      break;
+    }
+
+    case "retry": {
+      const updated = updateLastAssistant(msgs, (msg) => ({
+        ...msg,
+        blocks: appendText(msg.blocks, `\n\n*${i18n.t("ai.retrying", "重试中")} (${event.content})...*`),
+      }));
+      if (updated) updateConversation(convId, { messages: updated });
+      break;
+    }
+
+    case "done": {
+      cleanupStreamBuffer(convId);
+      const updated = updateLastAssistant(msgs, (msg) => {
+        const newBlocks = msg.blocks.map((b) =>
+          b.type === "tool" && (b.status === "running" || b.status === "pending_confirm")
+            ? { ...b, status: "completed" as const }
+            : b
+        );
+        return { ...msg, blocks: newBlocks, streaming: false };
+      });
+      if (updated) {
+        updateConversation(convId, { messages: updated, sending: false });
+      } else {
+        updateConversation(convId, { sending: false });
+      }
+
+      // Persist messages
+      const finalMsgs = useAIStore.getState().conversationMessages[convId] || [];
+      SaveConversationMessages(convId, toDisplayMessages(finalMsgs)).catch(() => {});
+      // Refresh conversations (title may have updated); sync any open tab bound to this conv.
+      useAIStore
+        .getState()
+        .fetchConversations()
+        .then(() => {
+          const convs = useAIStore.getState().conversations;
+          const currentTab = useTabStore
+            .getState()
+            .tabs.find((t) => t.type === "ai" && (t.meta as AITabMeta).conversationId === convId);
+          if (currentTab) {
+            const meta = currentTab.meta as AITabMeta;
+            const conv = convs.find((c) => c.ID === convId);
+            if (conv && conv.Title !== currentTab.label) {
+              useTabStore.getState().updateTab(currentTab.id, {
+                label: conv.Title,
+                meta: { ...meta, title: conv.Title },
+              });
+            }
+          }
+        });
+
+      // 消费队列
+      drainQueue(convId);
+      break;
+    }
+
+    case "error": {
+      cleanupStreamBuffer(convId);
+      const updated = updateLastAssistant(msgs, (msg) => ({
+        ...msg,
+        blocks: appendText(msg.blocks, `\n\n**Error:** ${event.error}`),
+        streaming: false,
+      }));
+      if (updated) {
+        updateConversation(convId, { messages: updated, sending: false });
+      } else {
+        updateConversation(convId, { sending: false });
+      }
+      break;
+    }
+  }
+}
+
+// 核心发送：完全基于 convId，共享给 sendToTab / sendFromSidebar / regenerate
+async function _sendForConversation(convId: number, content: string) {
+  const state = useAIStore.getState();
+  const streaming = state.conversationStreaming[convId] || { sending: false, pendingQueue: [] };
+
+  // 生成中时排队：推送到后端 runner 队列 + 本地队列（用于 UI 显示）
+  if (streaming.sending) {
+    if (content.trim()) {
+      updateConversation(convId, { pendingQueue: [...streaming.pendingQueue, content.trim()] });
+      QueueAIMessage(convId, content.trim()).catch(() => {});
+    }
+    return;
+  }
+
+  // 空内容 = drain/regen 发送（消息已经在 state 中）
+  const isDrainSend = !content.trim();
+  const currentMsgs = state.conversationMessages[convId] || [];
+  const newMessages = [...currentMsgs];
+
+  if (isDrainSend) {
+    if (newMessages.length === 0) return;
+    updateConversation(convId, { sending: true });
+  } else {
+    newMessages.push({
+      role: "user",
+      content,
+      blocks: [],
+    });
+    updateConversation(convId, { messages: newMessages, sending: true });
+  }
+
+  const assistantMsg: ChatMessage = {
+    role: "assistant",
+    content: "",
+    blocks: [],
+    streaming: true,
+  };
+  updateConversation(convId, {
+    messages: [...newMessages, assistantMsg],
+  });
+
+  // Set up event listener (keyed by conversationId)
+  const listener = getOrCreateConvListener(convId);
+  listener.generation++;
+  const myGeneration = listener.generation;
+
+  if (listener.cancel) {
+    listener.cancel();
+    listener.cancel = null;
+  }
+
+  const eventName = `ai:event:${convId}`;
+  listener.cancel = EventsOn(eventName, (event: StreamEventData) => {
+    if (myGeneration !== listener.generation) return;
+    handleStreamEvent(convId, event);
+  });
+
+  const apiMessages = newMessages.map((m) => {
+    return new ai.Message({
+      role: m.role,
+      content: m.content,
+    });
+  });
+
+  // 收集当前 Tab 上下文
+  const allTabs = useTabStore.getState().tabs;
+  const openTabs = allTabs
+    .filter(
+      (t): t is Tab & { meta: { assetId: number; assetName?: string } } =>
+        t.type !== "ai" && t.type !== "page" && t.meta != null && "assetId" in t.meta
+    )
+    .map(
+      (t) =>
+        new ai.TabInfo({
+          type: t.type,
+          assetId: t.meta.assetId || 0,
+          assetName: t.meta.assetName || t.label || "",
+        })
+    );
+  const aiContext = new ai.AIContext({ openTabs });
+
+  try {
+    await SendAIMessage(convId, apiMessages, aiContext);
+  } catch {
+    updateConversation(convId, { sending: false });
+    cleanupConvListener(convId);
+  }
+}
+
 // === Store ===
 
 interface AIState {
   tabStates: Record<string, TabState>;
+  conversationMessages: Record<number, ChatMessage[]>;
+  conversationStreaming: Record<number, { sending: boolean; pendingQueue: string[] }>;
 
   // 全局状态
   conversations: conversation_entity.Conversation[];
@@ -227,12 +734,18 @@ interface AIState {
   providerName: string;
   modelName: string;
 
+  // 侧边助手状态
+  sidebarConversationId: number | null;
+  sidebarUIState: { inputDraft: string; scrollTop: number };
+
   // 配置
   checkConfigured: () => Promise<void>;
 
   // 发送
   send: (content: string) => Promise<void>;
   sendToTab: (tabId: string, content: string) => Promise<void>;
+  sendFromSidebar: (convId: number, content: string) => Promise<void>;
+  stopConversation: (convId: number) => Promise<void>;
   stopGeneration: (tabId: string) => Promise<void>;
   regenerate: (tabId: string, messageIndex: number) => Promise<void>;
   removeFromQueue: (tabId: string, index: number) => void;
@@ -247,57 +760,38 @@ interface AIState {
   fetchConversations: () => Promise<void>;
   deleteConversation: (id: number) => Promise<void>;
 
+  // 侧边助手 actions
+  bindSidebar: (conversationId: number | null) => void;
+  promoteSidebarToTab: () => Promise<string | null>;
+  createAndBindSidebarConversation: () => Promise<number>;
+  validateSidebarConversation: () => void;
+  setSidebarInputDraft: (draft: string) => void;
+
   // 查询
   isAnySending: () => boolean;
   getTabState: (tabId: string) => TabState;
+
+  // NEW — 派生 getter
+  getMessagesByConversationId: (convId: number) => ChatMessage[];
+  getStreamingByConversationId: (convId: number) => { sending: boolean; pendingQueue: string[] };
 }
 
 export const useAIStore = create<AIState>((set, get) => {
-  function drainQueue(tabId: string, _convId: number) {
-    const tabState = get().tabStates[tabId];
-    if (!tabState || tabState.pendingQueue.length === 0) return;
-
-    const queue = [...tabState.pendingQueue];
-    updateTab(tabId, { pendingQueue: [] });
-
-    // 将队列中所有消息作为独立 user message 追加
-    const currentMsgs = get().tabStates[tabId]?.messages || [];
-    const newMsgs = [...currentMsgs];
-    for (const text of queue) {
-      newMsgs.push({
-        role: "user" as const,
-        content: text,
-        blocks: [],
-        streaming: false,
-      });
-    }
-    updateTab(tabId, { messages: newMsgs });
-
-    // 触发新一轮发送（空内容表示使用已有消息）
-    setTimeout(() => {
-      get().sendToTab(tabId, "");
-    }, 0);
-  }
-
-  function updateTab(tabId: string, updates: Partial<TabState>) {
-    set((state) => {
-      const current = state.tabStates[tabId] || {
-        messages: [],
-        sending: false,
-        pendingQueue: [],
-      };
-      const newTabState = { ...current, ...updates };
-      return { tabStates: { ...state.tabStates, [tabId]: newTabState } };
-    });
-  }
-
   return {
     tabStates: {},
+    conversationMessages: {},
+    conversationStreaming: {},
 
     conversations: [],
     configured: false,
     providerName: "",
     modelName: "",
+
+    sidebarConversationId: (() => {
+      const saved = localStorage.getItem("ai_sidebar_conversation_id");
+      return saved ? parseInt(saved, 10) : null;
+    })(),
+    sidebarUIState: { inputDraft: localStorage.getItem("ai_sidebar_input_draft") || "", scrollTop: 0 },
 
     checkConfigured: async () => {
       try {
@@ -316,6 +810,7 @@ export const useAIStore = create<AIState>((set, get) => {
       try {
         const convs = await ListConversations();
         set({ conversations: convs || [] });
+        get().validateSidebarConversation();
       } catch {
         set({ conversations: [] });
       }
@@ -330,15 +825,79 @@ export const useAIStore = create<AIState>((set, get) => {
         if (tab) {
           tabStore.closeTab(tab.id);
         }
+
+        // 侧边绑定联动：若侧边仍持有该会话，清除之
+        if (get().sidebarConversationId === id) {
+          get().bindSidebar(null);
+        }
+        // 清理最近绑定记录，避免关闭 Tab 时误恢复已删除会话
+        const lastBound = localStorage.getItem("ai_sidebar_last_bound");
+        if (lastBound && parseInt(lastBound, 10) === id) {
+          localStorage.removeItem("ai_sidebar_last_bound");
+        }
+
         await get().fetchConversations();
       } catch (e) {
         console.error("删除会话失败:", e);
       }
     },
 
+    // === 侧边助手 ===
+
+    bindSidebar: (conversationId: number | null) => {
+      set({ sidebarConversationId: conversationId });
+      if (conversationId === null) {
+        localStorage.removeItem("ai_sidebar_conversation_id");
+      } else {
+        localStorage.setItem("ai_sidebar_conversation_id", String(conversationId));
+        localStorage.setItem("ai_sidebar_last_bound", String(conversationId));
+      }
+    },
+
+    createAndBindSidebarConversation: async () => {
+      const conv = await CreateConversation();
+      set((state) => ({
+        conversations: [conv, ...state.conversations],
+        conversationMessages: { ...state.conversationMessages, [conv.ID]: [] },
+        conversationStreaming: {
+          ...state.conversationStreaming,
+          [conv.ID]: { sending: false, pendingQueue: [] },
+        },
+      }));
+      get().bindSidebar(conv.ID);
+      return conv.ID;
+    },
+
+    promoteSidebarToTab: async () => {
+      const convId = get().sidebarConversationId;
+      if (convId == null) return null;
+      const tabId = await get().openConversationTab(convId);
+      return tabId;
+    },
+
+    validateSidebarConversation: () => {
+      const convId = get().sidebarConversationId;
+      if (convId == null) return;
+      const exists = get().conversations.some((c) => c.ID === convId);
+      if (!exists) {
+        get().bindSidebar(null);
+        localStorage.removeItem("ai_sidebar_last_bound");
+      }
+    },
+
+    setSidebarInputDraft: (draft: string) => {
+      set({ sidebarUIState: { ...get().sidebarUIState, inputDraft: draft } });
+      localStorage.setItem("ai_sidebar_input_draft", draft);
+    },
+
     // === Tab 管理 ===
 
     openConversationTab: async (conversationId: number) => {
+      // Single-host invariant: evict sidebar when it holds the same conv
+      if (get().sidebarConversationId === conversationId) {
+        get().bindSidebar(null);
+      }
+
       const tabStore = useTabStore.getState();
 
       // If already open, activate
@@ -368,11 +927,16 @@ export const useAIStore = create<AIState>((set, get) => {
           meta: { type: "ai", conversationId, title },
         });
 
-        // Set business data
+        // Register empty UI placeholder entry + write to conversation-keyed stores
         set((state) => ({
           tabStates: {
             ...state.tabStates,
-            [tabId]: { messages, sending: false, pendingQueue: [] },
+            [tabId]: {},
+          },
+          conversationMessages: { ...state.conversationMessages, [conversationId]: messages },
+          conversationStreaming: {
+            ...state.conversationStreaming,
+            [conversationId]: { sending: false, pendingQueue: [] },
           },
         }));
 
@@ -397,7 +961,7 @@ export const useAIStore = create<AIState>((set, get) => {
       set((state) => ({
         tabStates: {
           ...state.tabStates,
-          [tabId]: { messages: [], sending: false, pendingQueue: [] },
+          [tabId]: {},
         },
       }));
 
@@ -432,479 +996,58 @@ export const useAIStore = create<AIState>((set, get) => {
       const tabState = state.tabStates[tabId];
       if (!tabState) return;
 
-      // 生成中时排队：推送到后端 runner 队列 + 本地队列（用于 UI 显示）
-      if (tabState.sending) {
-        if (content.trim()) {
-          updateTab(tabId, {
-            pendingQueue: [...tabState.pendingQueue, content.trim()],
-          });
-          // 推送到后端，工具调用间隙会被注入
-          const tab = useTabStore.getState().tabs.find((t) => t.id === tabId);
-          const convId = tab ? (tab.meta as AITabMeta).conversationId : null;
-          if (convId) {
-            QueueAIMessage(convId, content.trim()).catch(() => {});
-          }
-        }
-        return;
-      }
+      const existingTab = useTabStore.getState().tabs.find((t) => t.id === tabId);
+      if (!existingTab) return;
+      let convId = (existingTab.meta as AITabMeta).conversationId;
 
-      // 空内容 = drain/regen 发送（消息已经在 state 中）
-      const isDrainSend = !content.trim();
-      let newMessages = [...tabState.messages];
+      // drain 模式 + 没有历史消息时直接返回，避免创建空会话
+      const existingMessages = convId != null ? state.conversationMessages[convId] || [] : [];
+      if (!content.trim() && existingMessages.length === 0) return;
 
-      if (!isDrainSend) {
-        const displayContent = content;
-        const userMsg: ChatMessage = {
-          role: "user",
-          content: displayContent,
-          blocks: [],
-        };
-        newMessages = [...newMessages, userMsg];
-        updateTab(tabId, { messages: newMessages, sending: true });
-
-        // First message becomes conversation title
-        if (tabState.messages.length === 0) {
-          const title = displayContent.length > 30 ? displayContent.slice(0, 30) + "…" : displayContent;
-          useTabStore.getState().updateTab(tabId, {
-            label: title,
-            meta: { ...useTabStore.getState().tabs.find((t) => t.id === tabId)!.meta, title } as AITabMeta,
-          });
-        }
-      } else {
-        if (newMessages.length === 0) return;
-        updateTab(tabId, { sending: true });
-      }
-
-      const assistantMsg: ChatMessage = {
-        role: "assistant",
-        content: "",
-        blocks: [],
-        streaming: true,
-      };
-      updateTab(tabId, {
-        messages: [...newMessages, assistantMsg],
-      });
-
-      // Ensure tab has a conversation ID
-      const tabStore = useTabStore.getState();
-      const tab = tabStore.tabs.find((t) => t.id === tabId);
-      let convId = tab ? (tab.meta as AITabMeta).conversationId : null;
-
+      // Ensure tab has a conversation ID *before* writing any message state —
+      // conversationMessages / conversationStreaming are keyed by convId.
       if (!convId) {
         try {
           const conv = await CreateConversation();
           convId = conv.ID;
-          // Update tab meta with conversation ID
+          const curTab = useTabStore.getState().tabs.find((t) => t.id === tabId);
           useTabStore.getState().updateTab(tabId, {
-            meta: { type: "ai", conversationId: convId, title: tab?.label || "对话" },
+            meta: { type: "ai", conversationId: convId, title: curTab?.label || "对话" },
           });
           get().fetchConversations();
         } catch {
-          updateTab(tabId, { sending: false });
           return;
         }
       }
 
-      // Set up event listener
-      const listener = getOrCreateListener(tabId);
-      listener.generation++;
-      const myGeneration = listener.generation;
-
-      if (listener.cancel) {
-        listener.cancel();
-        listener.cancel = null;
+      // First message becomes conversation title —— tab-only concern
+      const streaming = get().conversationStreaming[convId] || { sending: false, pendingQueue: [] };
+      if (!streaming.sending && content.trim()) {
+        const msgsForConv = get().conversationMessages[convId] || [];
+        if (msgsForConv.length === 0) {
+          const title = content.length > 30 ? content.slice(0, 30) + "…" : content;
+          const curTab = useTabStore.getState().tabs.find((t) => t.id === tabId);
+          if (curTab) {
+            useTabStore.getState().updateTab(tabId, {
+              label: title,
+              meta: { ...(curTab.meta as AITabMeta), title } as AITabMeta,
+            });
+          }
+        }
       }
 
-      const eventName = `ai:event:${convId}`;
-      listener.cancel = EventsOn(eventName, (event: StreamEventData) => {
-        if (myGeneration !== listener.generation) return;
+      await _sendForConversation(convId, content);
+    },
 
-        const currentTabState = get().tabStates[tabId];
-        if (!currentTabState) return;
+    sendFromSidebar: async (convId: number, content: string) => {
+      await _sendForConversation(convId, content);
+    },
 
-        // 高频事件缓冲：content/thinking 通过 RAF 合并，每帧最多一次状态更新
-        if (event.type === "content" || event.type === "thinking") {
-          const buf = getOrCreateStreamBuffer(tabId);
-          if (event.type === "content") {
-            buf.content += event.content || "";
-          } else {
-            buf.thinking += event.content || "";
-          }
-          if (buf.raf === null) {
-            buf.raf = requestAnimationFrame(() => {
-              const b = streamBuffers.get(tabId);
-              if (b) b.raf = null;
-              flushStreamBuffer(tabId);
-            });
-          }
-          return;
-        }
-
-        // 非流式事件：先刷新缓冲区保证顺序，再处理
-        flushStreamBuffer(tabId);
-        const msgs = get().tabStates[tabId]?.messages || currentTabState.messages;
-
-        switch (event.type) {
-          case "agent_start": {
-            const updated = updateLastAssistant(msgs, (msg) => ({
-              ...msg,
-              blocks: [
-                ...msg.blocks,
-                {
-                  type: "agent" as const,
-                  content: "",
-                  agentRole: event.agent_role || "",
-                  agentTask: event.agent_task || "",
-                  status: "running" as const,
-                  childBlocks: [],
-                },
-              ],
-            }));
-            if (updated) updateTab(tabId, { messages: updated });
-            break;
-          }
-
-          case "agent_end": {
-            const updated = updateLastAssistant(msgs, (msg) => {
-              const newBlocks = [...msg.blocks];
-              for (let i = newBlocks.length - 1; i >= 0; i--) {
-                if (newBlocks[i].type === "agent" && newBlocks[i].status === "running") {
-                  newBlocks[i] = { ...newBlocks[i], content: event.content || "", status: "completed" };
-                  break;
-                }
-              }
-              return { ...msg, blocks: newBlocks };
-            });
-            if (updated) updateTab(tabId, { messages: updated });
-            break;
-          }
-
-          case "tool_start": {
-            const updated = updateLastAssistant(msgs, (msg) => {
-              const newBlocks = [...msg.blocks];
-              const toolBlock: ContentBlock = {
-                type: "tool" as const,
-                content: "",
-                toolName: event.tool_name || "Tool",
-                toolInput: event.tool_input || "",
-                status: "running" as const,
-              };
-
-              // 如果有 running 的 agent 块，嵌套到 childBlocks
-              let agentIdx = -1;
-              for (let i = newBlocks.length - 1; i >= 0; i--) {
-                if (newBlocks[i].type === "agent" && newBlocks[i].status === "running") {
-                  agentIdx = i;
-                  break;
-                }
-              }
-              if (agentIdx !== -1) {
-                const agentBlock = { ...newBlocks[agentIdx] };
-                agentBlock.childBlocks = [...(agentBlock.childBlocks || []), toolBlock];
-                newBlocks[agentIdx] = agentBlock;
-              } else {
-                newBlocks.push(toolBlock);
-              }
-
-              return { ...msg, blocks: newBlocks };
-            });
-            if (updated) updateTab(tabId, { messages: updated });
-            break;
-          }
-
-          case "tool_result": {
-            const updated = updateLastAssistant(msgs, (msg) => {
-              const newBlocks = [...msg.blocks];
-
-              // 先检查是否在 running 的 agent 块内
-              let agentIdx = -1;
-              for (let i = newBlocks.length - 1; i >= 0; i--) {
-                if (newBlocks[i].type === "agent" && newBlocks[i].status === "running") {
-                  agentIdx = i;
-                  break;
-                }
-              }
-              if (agentIdx !== -1 && newBlocks[agentIdx].childBlocks) {
-                const agentBlock = { ...newBlocks[agentIdx] };
-                const children = [...(agentBlock.childBlocks || [])];
-                let matchIdx = -1;
-                for (let i = children.length - 1; i >= 0; i--) {
-                  if (
-                    children[i].type === "tool" &&
-                    children[i].status === "running" &&
-                    children[i].toolName === event.tool_name
-                  ) {
-                    matchIdx = i;
-                    break;
-                  }
-                }
-                if (matchIdx === -1) {
-                  for (let i = children.length - 1; i >= 0; i--) {
-                    if (children[i].type === "tool" && children[i].status === "running") {
-                      matchIdx = i;
-                      break;
-                    }
-                  }
-                }
-                if (matchIdx !== -1) {
-                  children[matchIdx] = { ...children[matchIdx], content: event.content || "", status: "completed" };
-                  agentBlock.childBlocks = children;
-                  newBlocks[agentIdx] = agentBlock;
-                  return { ...msg, blocks: newBlocks };
-                }
-              }
-
-              // 顶层工具块匹配
-              let matchIdx = -1;
-              for (let i = newBlocks.length - 1; i >= 0; i--) {
-                const b = newBlocks[i];
-                if (b.type === "tool" && b.status === "running" && b.toolName === event.tool_name) {
-                  matchIdx = i;
-                  break;
-                }
-              }
-              if (matchIdx === -1) {
-                for (let i = newBlocks.length - 1; i >= 0; i--) {
-                  const b = newBlocks[i];
-                  if (b.type === "tool" && b.status === "running") {
-                    matchIdx = i;
-                    break;
-                  }
-                }
-              }
-              if (matchIdx !== -1) {
-                newBlocks[matchIdx] = { ...newBlocks[matchIdx], content: event.content || "", status: "completed" };
-              }
-              return { ...msg, blocks: newBlocks };
-            });
-            if (updated) updateTab(tabId, { messages: updated });
-            break;
-          }
-
-          case "approval_request": {
-            const updated = updateLastAssistant(msgs, (msg) => {
-              const newBlocks = [...msg.blocks];
-              newBlocks.push({
-                type: "approval" as const,
-                content: "",
-                status: "pending_confirm" as const,
-                confirmId: event.confirm_id,
-                agentRole: event.agent_role,
-                approvalKind: event.kind,
-                approvalItems: event.items,
-                approvalDescription: event.description,
-                approvalSessionId: event.session_id,
-              });
-              return { ...msg, blocks: newBlocks };
-            });
-            if (updated) updateTab(tabId, { messages: updated });
-
-            if (document.hidden) {
-              try {
-                new Notification("OpsKat", {
-                  body: i18n.t("ai.notificationPermissionNeeded"),
-                  tag: `confirm-${event.confirm_id}`,
-                });
-              } catch {
-                // 通知权限未授予，忽略
-              }
-            }
-            break;
-          }
-
-          case "approval_result": {
-            const updated = updateLastAssistant(msgs, (msg) => {
-              const newBlocks = msg.blocks.map((b) =>
-                b.confirmId === event.confirm_id && b.status === "pending_confirm"
-                  ? { ...b, status: event.content === "deny" ? ("error" as const) : ("running" as const) }
-                  : b
-              );
-              return { ...msg, blocks: newBlocks };
-            });
-            if (updated) updateTab(tabId, { messages: updated });
-            break;
-          }
-
-          case "thinking_done": {
-            const updated = updateLastAssistant(msgs, (msg) => {
-              const newBlocks = msg.blocks.map((b) =>
-                b.type === "thinking" && b.status === "running" ? { ...b, status: "completed" as const } : b
-              );
-              return { ...msg, blocks: newBlocks };
-            });
-            if (updated) updateTab(tabId, { messages: updated });
-            break;
-          }
-
-          case "queue_consumed": {
-            // 后端在工具调用间隙消费了一条排队消息
-            // 结束当前 assistant 消息，插入 user 消息，开启新 assistant 流
-            const currentMsgs = [...msgs];
-            const lastIdx = currentMsgs.length - 1;
-            if (lastIdx >= 0 && currentMsgs[lastIdx].role === "assistant") {
-              currentMsgs[lastIdx] = { ...currentMsgs[lastIdx], streaming: false };
-            }
-            currentMsgs.push({
-              role: "user" as const,
-              content: event.content || "",
-              blocks: [],
-              streaming: false,
-            });
-            currentMsgs.push({
-              role: "assistant" as const,
-              content: "",
-              blocks: [],
-              streaming: true,
-            });
-            // 从本地队列头部移除已消费的消息
-            const curQueue = currentTabState.pendingQueue;
-            const newQueue = curQueue.length > 0 ? curQueue.slice(1) : [];
-            updateTab(tabId, { messages: currentMsgs, pendingQueue: newQueue });
-            break;
-          }
-
-          case "stopped": {
-            cleanupStreamBuffer(tabId);
-            const updated = updateLastAssistant(msgs, (msg) => {
-              const newBlocks = msg.blocks.map((b) => {
-                if (b.type === "tool" && b.status === "running") {
-                  return { ...b, status: "cancelled" as const };
-                }
-                if (b.type === "thinking" && b.status === "running") {
-                  return { ...b, status: "completed" as const };
-                }
-                if (b.type === "agent" && b.status === "running") {
-                  return {
-                    ...b,
-                    status: "cancelled" as const,
-                    childBlocks: b.childBlocks?.map((c) =>
-                      c.status === "running" ? { ...c, status: "cancelled" as const } : c
-                    ),
-                  };
-                }
-                return b;
-              });
-              return { ...msg, blocks: newBlocks, streaming: false };
-            });
-            if (updated) {
-              updateTab(tabId, { messages: updated, sending: false });
-            } else {
-              updateTab(tabId, { sending: false });
-            }
-
-            // 保存消息
-            const finalMsgs = get().tabStates[tabId]?.messages || [];
-            if (convId) {
-              SaveConversationMessages(convId, toDisplayMessages(finalMsgs)).catch(() => {});
-            }
-            get().fetchConversations();
-
-            // 消费队列
-            drainQueue(tabId, convId!);
-            break;
-          }
-
-          case "retry": {
-            const updated = updateLastAssistant(msgs, (msg) => ({
-              ...msg,
-              blocks: appendText(msg.blocks, `\n\n*${i18n.t("ai.retrying", "重试中")} (${event.content})...*`),
-            }));
-            if (updated) updateTab(tabId, { messages: updated });
-            break;
-          }
-
-          case "done": {
-            cleanupStreamBuffer(tabId);
-            const updated = updateLastAssistant(msgs, (msg) => {
-              const newBlocks = msg.blocks.map((b) =>
-                b.type === "tool" && (b.status === "running" || b.status === "pending_confirm")
-                  ? { ...b, status: "completed" as const }
-                  : b
-              );
-              return { ...msg, blocks: newBlocks, streaming: false };
-            });
-            if (updated) {
-              updateTab(tabId, { messages: updated, sending: false });
-            } else {
-              updateTab(tabId, { sending: false });
-            }
-
-            // Persist messages
-            const finalMsgs = get().tabStates[tabId]?.messages || [];
-            if (convId) {
-              SaveConversationMessages(convId, toDisplayMessages(finalMsgs)).catch(() => {});
-            }
-            // Refresh conversations (title may have updated)
-            get()
-              .fetchConversations()
-              .then(() => {
-                const convs = get().conversations;
-                const currentTab = useTabStore.getState().tabs.find((t) => t.id === tabId);
-                if (currentTab) {
-                  const meta = currentTab.meta as AITabMeta;
-                  if (meta.conversationId) {
-                    const conv = convs.find((c) => c.ID === meta.conversationId);
-                    if (conv && conv.Title !== currentTab.label) {
-                      useTabStore.getState().updateTab(tabId, {
-                        label: conv.Title,
-                        meta: { ...meta, title: conv.Title },
-                      });
-                    }
-                  }
-                }
-              });
-
-            // 消费队列
-            drainQueue(tabId, convId!);
-            break;
-          }
-
-          case "error": {
-            cleanupStreamBuffer(tabId);
-            const updated = updateLastAssistant(msgs, (msg) => ({
-              ...msg,
-              blocks: appendText(msg.blocks, `\n\n**Error:** ${event.error}`),
-              streaming: false,
-            }));
-            if (updated) {
-              updateTab(tabId, { messages: updated, sending: false });
-            } else {
-              updateTab(tabId, { sending: false });
-            }
-            break;
-          }
-        }
-      });
-
-      const apiMessages = newMessages.map((m) => {
-        return new ai.Message({
-          role: m.role,
-          content: m.content,
-        });
-      });
-
-      // 收集当前 Tab 上下文
-      const allTabs = useTabStore.getState().tabs;
-      const openTabs = allTabs
-        .filter(
-          (t): t is Tab & { meta: { assetId: number; assetName?: string } } =>
-            t.type !== "ai" && t.type !== "page" && t.meta != null && "assetId" in t.meta
-        )
-        .map(
-          (t) =>
-            new ai.TabInfo({
-              type: t.type,
-              assetId: t.meta.assetId || 0,
-              assetName: t.meta.assetName || t.label || "",
-            })
-        );
-      const aiContext = new ai.AIContext({ openTabs });
-
+    stopConversation: async (convId: number) => {
       try {
-        await SendAIMessage(convId!, apiMessages, aiContext);
+        await StopAIGeneration(convId);
       } catch {
-        updateTab(tabId, { sending: false });
-        cleanupListener(tabId);
+        // ignore
       }
     },
 
@@ -921,18 +1064,23 @@ export const useAIStore = create<AIState>((set, get) => {
     },
 
     regenerate: async (tabId: string, messageIndex: number) => {
-      const tabState = get().tabStates[tabId];
-      if (!tabState) return;
+      const tab = useTabStore.getState().tabs.find((t) => t.id === tabId);
+      if (!tab) return;
+      const convId = (tab.meta as AITabMeta).conversationId;
+      if (convId == null) return;
+
+      const streaming = get().conversationStreaming[convId] || { sending: false, pendingQueue: [] };
+      const messages = get().conversationMessages[convId] || [];
 
       // 正在生成时先停止
-      if (tabState.sending) {
+      if (streaming.sending) {
         await get().stopGeneration(tabId);
         await new Promise((r) => setTimeout(r, 200));
       }
 
       // 截断到指定消息之前
-      const truncated = tabState.messages.slice(0, messageIndex);
-      updateTab(tabId, { messages: truncated, sending: false, pendingQueue: [] });
+      const truncated = messages.slice(0, messageIndex);
+      updateConversation(convId, { messages: truncated, sending: false, pendingQueue: [] });
 
       if (truncated.length === 0) return;
 
@@ -941,25 +1089,41 @@ export const useAIStore = create<AIState>((set, get) => {
     },
 
     removeFromQueue: (tabId: string, index: number) => {
-      const tabState = get().tabStates[tabId];
-      if (!tabState) return;
-      const newQueue = tabState.pendingQueue.filter((_, i) => i !== index);
-      updateTab(tabId, { pendingQueue: newQueue });
+      const tab = useTabStore.getState().tabs.find((t) => t.id === tabId);
+      if (!tab) return;
+      const convId = (tab.meta as AITabMeta).conversationId;
+      if (convId == null) return;
+      const streaming = get().conversationStreaming[convId];
+      if (!streaming) return;
+      const newQueue = streaming.pendingQueue.filter((_, i) => i !== index);
+      updateConversation(convId, { pendingQueue: newQueue });
     },
 
     clearQueue: (tabId: string) => {
-      updateTab(tabId, { pendingQueue: [] });
+      const tab = useTabStore.getState().tabs.find((t) => t.id === tabId);
+      if (!tab) return;
+      const convId = (tab.meta as AITabMeta).conversationId;
+      if (convId == null) return;
+      updateConversation(convId, { pendingQueue: [] });
     },
 
     // === 查询 ===
 
     isAnySending: () => {
-      const { tabStates } = get();
-      return Object.values(tabStates).some((ts) => ts.sending);
+      const { conversationStreaming } = get();
+      return Object.values(conversationStreaming).some((s) => s.sending);
     },
 
     getTabState: (tabId: string) => {
-      return get().tabStates[tabId] || { messages: [], sending: false, pendingQueue: [] };
+      return get().tabStates[tabId] || {};
+    },
+
+    getMessagesByConversationId: (convId: number) => {
+      return get().conversationMessages[convId] || [];
+    },
+
+    getStreamingByConversationId: (convId: number) => {
+      return get().conversationStreaming[convId] || { sending: false, pendingQueue: [] };
     },
   };
 });
@@ -970,22 +1134,33 @@ registerTabCloseHook((tab) => {
   if (tab.type !== "ai") return;
 
   const state = useAIStore.getState();
-  const tabState = state.tabStates[tab.id];
   const meta = tab.meta as AITabMeta;
 
-  // Save messages
-  if (meta.conversationId && tabState?.messages.length) {
-    SaveConversationMessages(meta.conversationId, toDisplayMessages(tabState.messages)).catch(() => {});
+  if (meta.conversationId) {
+    const msgs = state.conversationMessages[meta.conversationId] || [];
+    if (msgs.length) {
+      SaveConversationMessages(meta.conversationId, toDisplayMessages(msgs)).catch(() => {});
+    }
+    cleanupConvListener(meta.conversationId);
   }
 
-  // Clean up event listener
-  cleanupListener(tab.id);
-
-  // Remove tab state
   useAIStore.setState((s) => {
     const { [tab.id]: _, ...newTabStates } = s.tabStates;
     return { tabStates: newTabStates };
   });
+
+  // 单宿主不变量：若关闭的 Tab 对应的 conversation 是最近的侧边绑定，且当前侧边为空，
+  // 则恢复侧边绑定，使得会话继续以侧边形态存在。
+  if (meta.conversationId) {
+    const lastBound = localStorage.getItem("ai_sidebar_last_bound");
+    if (
+      lastBound &&
+      parseInt(lastBound, 10) === meta.conversationId &&
+      useAIStore.getState().sidebarConversationId == null
+    ) {
+      useAIStore.getState().bindSidebar(meta.conversationId);
+    }
+  }
 });
 
 // === Restore Hook: load AI settings and restore conversation tabs ===
@@ -1018,7 +1193,12 @@ async function restoreAITabs(tabs: Tab[]) {
           const displayMsgs = await SwitchConversation(meta.conversationId);
           const messages = convertDisplayMessages(displayMsgs);
           useAIStore.setState((s) => ({
-            tabStates: { ...s.tabStates, [tab.id]: { messages, sending: false, pendingQueue: [] } },
+            tabStates: { ...s.tabStates, [tab.id]: {} },
+            conversationMessages: { ...s.conversationMessages, [meta.conversationId!]: messages },
+            conversationStreaming: {
+              ...s.conversationStreaming,
+              [meta.conversationId!]: { sending: false, pendingQueue: [] },
+            },
           }));
           const conv = conversations.find((c) => c.ID === meta.conversationId);
           if (conv && conv.Title !== tab.label) {
@@ -1029,7 +1209,7 @@ async function restoreAITabs(tabs: Tab[]) {
         }
       } else {
         useAIStore.setState((s) => ({
-          tabStates: { ...s.tabStates, [tab.id]: { messages: [], sending: false, pendingQueue: [] } },
+          tabStates: { ...s.tabStates, [tab.id]: {} },
         }));
       }
     }

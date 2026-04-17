@@ -584,7 +584,23 @@
     "regenerateTitle": "Regenerate",
     "regenerateConfirm": "Regenerating will delete this message and all messages after it. Are you sure?",
     "retrying": "Retrying",
-    "newConversation": "New conversation"
+    "newConversation": "New conversation",
+    "sidebar": {
+      "title": "AI Assistant",
+      "newChat": "New chat",
+      "history": "History",
+      "historySearchPlaceholder": "Search history…",
+      "historyEmpty": "No past conversations",
+      "historyViewAll": "View all",
+      "promoteToTab": "Open in main tab",
+      "promoteHint": "Opened in tab",
+      "collapse": "Collapse",
+      "expand": "Expand",
+      "followMainTab": "Follow main tab",
+      "emptyGuide": "Click + to start a new chat, or pick one from 📋 History",
+      "noConversation": "No conversation selected",
+      "attachedAssets": "Attached assets"
+    }
   },
   "shortcut": {
     "title": "Shortcuts",
