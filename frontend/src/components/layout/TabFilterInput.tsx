@@ -43,6 +43,9 @@ export function TabFilterInput({
             onChange("");
             onClose();
           } else if (e.key === "Enter" && onEnter) {
+            // IME 合成中：让 Enter 作为候选词确认，不触发动作
+            // eslint-disable-next-line @typescript-eslint/no-deprecated
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
             e.preventDefault();
             onEnter();
           } else if (e.key === "ArrowUp" && onArrow) {

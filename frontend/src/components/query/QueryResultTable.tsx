@@ -289,6 +289,9 @@ export function QueryResultTable({
                             onBlur={(e) => commitEdit(origIdx, col, e.target.value)}
                             onKeyDown={(e) => {
                               if (e.key === "Enter") {
+                                // IME 合成中：让 Enter 作为候选词确认，不提交编辑
+                                // eslint-disable-next-line @typescript-eslint/no-deprecated
+                                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                                 commitEdit(origIdx, col, (e.target as HTMLInputElement).value);
                               }
                               if (e.key === "Escape") {

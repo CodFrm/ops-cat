@@ -72,7 +72,7 @@ export function AIChatContent({ tabId }: AIChatContentProps) {
   const [regenerateTarget, setRegenerateTarget] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { isComposing, onCompositionStart, onCompositionEnd } = useIMEComposing();
+  const { composingRef, onCompositionStart, onCompositionEnd } = useIMEComposing();
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -106,8 +106,13 @@ export function AIChatContent({ tabId }: AIChatContentProps) {
 
   const sendOnEnter = useAISendOnEnter();
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (isComposing()) return;
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // IME 合成中：交给浏览器（Enter 作为候选词确认，不发送）
+    // - nativeEvent.isComposing: DOM 标准
+    // - keyCode === 229: 浏览器对 IME 正在处理该键的底层标识（跨浏览器最稳）
+    // - composingRef.current: compositionstart/end 追踪兜底
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    if (e.nativeEvent.isComposing || e.keyCode === 229 || composingRef.current) return;
     if (sendOnEnter) {
       if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
         e.preventDefault();
