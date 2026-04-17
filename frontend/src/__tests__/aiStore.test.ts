@@ -13,6 +13,7 @@ import {
   DeleteConversation,
   SwitchConversation,
   SendAIMessage,
+  StopAIGeneration,
 } from "../../wailsjs/go/app/App";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 
@@ -332,5 +333,30 @@ describe("sidebar state", () => {
     vi.mocked(SwitchConversation).mockResolvedValue([] as any);
     void useAIStore.getState().openConversationTab(42);
     expect(useAIStore.getState().sidebarConversationId).toBeNull();
+  });
+
+  it("sendFromSidebar appends user message and subscribes ai:event:${convId}", async () => {
+    vi.mocked(EventsOn).mockReturnValue(() => {});
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+
+    useAIStore.setState({
+      sidebarConversationId: 88,
+      conversationMessages: { 88: [] },
+      conversationStreaming: { 88: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendFromSidebar(88, "ping");
+
+    const msgs = useAIStore.getState().conversationMessages[88];
+    expect(msgs.some((m) => m.role === "user" && m.content === "ping")).toBe(true);
+    expect(vi.mocked(EventsOn).mock.calls.some((c) => c[0] === "ai:event:88")).toBe(true);
+  });
+
+  it("stopConversation calls StopAIGeneration with the convId", async () => {
+    vi.mocked(StopAIGeneration).mockResolvedValue(undefined as any);
+
+    await useAIStore.getState().stopConversation(123);
+
+    expect(StopAIGeneration).toHaveBeenCalledWith(123);
   });
 });
