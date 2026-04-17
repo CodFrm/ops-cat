@@ -14,6 +14,7 @@ import {
   SwitchConversation,
   SendAIMessage,
 } from "../../wailsjs/go/app/App";
+import { EventsOn } from "../../wailsjs/runtime/runtime";
 
 describe("aiStore", () => {
   beforeEach(() => {
@@ -269,5 +270,23 @@ describe("conversationMessages (Phase 1)", () => {
     const cms = useAIStore.getState().conversationMessages[42];
     expect(ts.messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["hello"]);
     expect(cms.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["hello"]);
+  });
+
+  it("event listener is keyed by conversationId, not tabId", async () => {
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+    vi.mocked(EventsOn).mockReturnValue(() => {});
+
+    const tabId = "ai-77";
+    useTabStore.setState({
+      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 77, title: "t" } }],
+      activeTabId: tabId,
+    });
+    useAIStore.setState({ tabStates: { [tabId]: { messages: [], sending: false, pendingQueue: [] } } });
+
+    await useAIStore.getState().sendToTab(tabId, "hi");
+
+    const onCalls = vi.mocked(EventsOn).mock.calls;
+    const eventNames = onCalls.map((c) => c[0]);
+    expect(eventNames).toContain("ai:event:77");
   });
 });
