@@ -72,7 +72,7 @@ export function Sidebar({
     <div className="flex h-full w-14 flex-col items-center border-r border-panel-divider bg-sidebar/80 backdrop-blur-sm">
       {/* Drag region for Wails window */}
       <div
-        className={`${isFullscreen ? "h-2" : "h-10"} w-full shrink-0`}
+        className={`${isFullscreen ? "h-0" : "h-8"} w-full shrink-0`}
         style={{ "--wails-draggable": "drag" } as React.CSSProperties}
       />
 

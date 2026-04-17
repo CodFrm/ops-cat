@@ -118,7 +118,7 @@ export function ConversationListPanel({ collapsed, onToggle, onOpenConversation 
 
           {/* Drag region */}
           <div
-            className={`${isFullscreen ? "h-2" : "h-10"} w-full shrink-0`}
+            className={`${isFullscreen ? "h-0" : "h-8"} w-full shrink-0`}
             style={{ "--wails-draggable": "drag" } as React.CSSProperties}
           />
 

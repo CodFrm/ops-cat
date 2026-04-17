@@ -160,7 +160,7 @@ export function AssetTree({
     <div className="flex h-full w-full flex-col border-r border-panel-divider bg-sidebar">
       {/* Drag region for frameless window */}
       <div
-        className={`${isFullscreen ? "h-2" : "h-10"} w-full shrink-0`}
+        className={`${isFullscreen ? "h-0" : "h-8"} w-full shrink-0`}
         style={{ "--wails-draggable": "drag" } as React.CSSProperties}
       />
       <div className="flex flex-col gap-1.5 px-3 pb-2 border-b border-panel-divider">

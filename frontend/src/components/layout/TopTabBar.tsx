@@ -281,7 +281,7 @@ export function TopTabBar() {
     <TabBarContext.Provider value={tabBarCtx}>
       <div
         data-top-tabbar
-        className={`flex items-center border-b overflow-hidden bg-background ${isFullscreen ? "pt-2" : "pt-10"}`}
+        className={`flex items-center border-b overflow-hidden bg-background ${isFullscreen ? "pt-0" : "pt-8"}`}
         style={{ "--wails-draggable": "drag" } as React.CSSProperties}
       >
         <div className="flex items-center min-w-0 flex-1">{tabs.map((tab) => renderTabItem(tab))}</div>
