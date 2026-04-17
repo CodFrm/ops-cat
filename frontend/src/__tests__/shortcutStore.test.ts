@@ -18,6 +18,16 @@ describe("shortcutStore", () => {
       expect(shortcuts["panel.ai"]).toEqual(DEFAULT_SHORTCUTS["panel.ai"]);
     });
 
+    it("has panel.switch default", () => {
+      const { shortcuts } = useShortcutStore.getState();
+      expect(shortcuts["panel.switch"]).toEqual(DEFAULT_SHORTCUTS["panel.switch"]);
+    });
+
+    it("has panel.filter default", () => {
+      const { shortcuts } = useShortcutStore.getState();
+      expect(shortcuts["panel.filter"]).toEqual(DEFAULT_SHORTCUTS["panel.filter"]);
+    });
+
     it("isRecording is false", () => {
       expect(useShortcutStore.getState().isRecording).toBe(false);
     });

@@ -26,6 +26,8 @@ export type ShortcutAction =
   | "split.horizontal"
   | "panel.ai"
   | "panel.sidebar"
+  | "panel.switch"
+  | "panel.filter"
   | "page.home"
   | "page.settings"
   | "page.sshkeys";
@@ -47,6 +49,8 @@ export const SHORTCUT_ACTIONS: ShortcutAction[] = [
   "split.horizontal",
   "panel.ai",
   "panel.sidebar",
+  "panel.switch",
+  "panel.filter",
   "page.home",
   "page.settings",
   "page.sshkeys",
@@ -69,6 +73,8 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, ShortcutBinding> = {
   "split.horizontal": { code: "KeyD", mod: true, shift: true, alt: false },
   "panel.ai": { code: "KeyB", mod: true, shift: false, alt: false },
   "panel.sidebar": { code: "KeyE", mod: true, shift: false, alt: false },
+  "panel.switch": { code: "KeyE", mod: true, shift: true, alt: false },
+  "panel.filter": { code: "KeyF", mod: true, shift: false, alt: false },
   "page.home": { code: "KeyH", mod: true, shift: true, alt: false },
   "page.settings": { code: "Comma", mod: true, shift: false, alt: false },
   "page.sshkeys": { code: "KeyK", mod: true, shift: true, alt: false },
