@@ -36,7 +36,7 @@ export function ConversationListPanel({ collapsed, onToggle, onOpenConversation 
     openConversationTab,
     openNewConversationTab,
     deleteConversation,
-    tabStates,
+    conversationStreaming,
   } = useAIStore();
   const tabs = useTabStore((s) => s.tabs);
   const aiTabs = useMemo(() => tabs.filter((t) => t.type === "ai"), [tabs]);
@@ -78,9 +78,7 @@ export function ConversationListPanel({ collapsed, onToggle, onOpenConversation 
 
   // 仅在该会话的 tab 正在发送时阻止删除
   const isConvSending = (convId: number) => {
-    const tab = aiTabs.find((t) => (t.meta as AITabMeta).conversationId === convId);
-    if (!tab) return false;
-    return tabStates[tab.id]?.sending || false;
+    return conversationStreaming[convId]?.sending || false;
   };
 
   const handleDelete = (e: React.MouseEvent, id: number) => {

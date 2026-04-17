@@ -101,13 +101,14 @@ describe("aiStore", () => {
   });
 
   describe("openNewConversationTab", () => {
-    it("creates a new AI tab with empty messages", () => {
+    it("creates a new AI tab with a placeholder tabStates entry", () => {
       const tabId = useAIStore.getState().openNewConversationTab();
 
       expect(tabId).toMatch(/^ai-new-/);
       expect(useTabStore.getState().tabs).toHaveLength(1);
       expect(useTabStore.getState().tabs[0].type).toBe("ai");
-      expect(useAIStore.getState().tabStates[tabId]).toEqual({ messages: [], sending: false, pendingQueue: [] });
+      // tabStates entry exists as a UI placeholder (no more messages/sending/pendingQueue).
+      expect(useAIStore.getState().tabStates[tabId]).toBeDefined();
     });
   });
 
@@ -134,46 +135,28 @@ describe("aiStore", () => {
 
       expect(tabId).toBe("ai-2");
       expect(useTabStore.getState().tabs).toHaveLength(1);
-      const tabState = useAIStore.getState().tabStates[tabId];
-      expect(tabState.messages).toHaveLength(1);
-      expect(tabState.messages[0].role).toBe("user");
-    });
-  });
-
-  describe("getTabState", () => {
-    it("returns tab state for existing tab", () => {
-      useAIStore.setState({
-        tabStates: {
-          "ai-1": { messages: [{ role: "user", content: "Hi", blocks: [] }], sending: false, pendingQueue: [] },
-        },
-      });
-
-      const state = useAIStore.getState().getTabState("ai-1");
-      expect(state.messages).toHaveLength(1);
-    });
-
-    it("returns default state for unknown tab", () => {
-      const state = useAIStore.getState().getTabState("unknown");
-      expect(state).toEqual({ messages: [], sending: false, pendingQueue: [] });
+      const msgs = useAIStore.getState().conversationMessages[2];
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].role).toBe("user");
     });
   });
 
   describe("isAnySending", () => {
-    it("returns false when no tabs are sending", () => {
+    it("returns false when no conversations are sending", () => {
       useAIStore.setState({
-        tabStates: {
-          "ai-1": { messages: [], sending: false, pendingQueue: [] },
-          "ai-2": { messages: [], sending: false, pendingQueue: [] },
+        conversationStreaming: {
+          1: { sending: false, pendingQueue: [] },
+          2: { sending: false, pendingQueue: [] },
         },
       });
       expect(useAIStore.getState().isAnySending()).toBe(false);
     });
 
-    it("returns true when any tab is sending", () => {
+    it("returns true when any conversation is sending", () => {
       useAIStore.setState({
-        tabStates: {
-          "ai-1": { messages: [], sending: false, pendingQueue: [] },
-          "ai-2": { messages: [], sending: true, pendingQueue: [] },
+        conversationStreaming: {
+          1: { sending: false, pendingQueue: [] },
+          2: { sending: true, pendingQueue: [] },
         },
       });
       expect(useAIStore.getState().isAnySending()).toBe(true);
@@ -252,23 +235,21 @@ describe("conversationMessages (Phase 1)", () => {
     });
   });
 
-  it("sendToTab writes to both tabStates and conversationMessages for an existing conversation", async () => {
+  it("sendToTab writes only to conversationMessages for an existing conversation", async () => {
     const tabId = "ai-42";
     useTabStore.setState({
       tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 42, title: "t" } }],
       activeTabId: tabId,
     });
     useAIStore.setState({
-      tabStates: { [tabId]: { messages: [], sending: false, pendingQueue: [] } },
+      tabStates: { [tabId]: {} },
     });
 
     vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
 
     await useAIStore.getState().sendToTab(tabId, "hello");
 
-    const ts = useAIStore.getState().tabStates[tabId];
     const cms = useAIStore.getState().conversationMessages[42];
-    expect(ts.messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["hello"]);
     expect(cms.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["hello"]);
   });
 
@@ -281,7 +262,7 @@ describe("conversationMessages (Phase 1)", () => {
       tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 77, title: "t" } }],
       activeTabId: tabId,
     });
-    useAIStore.setState({ tabStates: { [tabId]: { messages: [], sending: false, pendingQueue: [] } } });
+    useAIStore.setState({ tabStates: { [tabId]: {} } });
 
     await useAIStore.getState().sendToTab(tabId, "hi");
 

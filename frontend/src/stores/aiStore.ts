@@ -75,9 +75,9 @@ interface StreamEventData {
 }
 
 interface TabState {
-  messages: ChatMessage[];
-  sending: boolean;
-  pendingQueue: string[];
+  // Phase 1 清理后：tabStates 保留为 UI 态占位（将来放 scrollTop / inputDraft 等），
+  // messages/sending/pendingQueue 已全部迁移到 conversationMessages / conversationStreaming。
+  _marker?: "tab-state";
 }
 
 // 模块级 per-conversation 事件监听管理（不放 zustand，因为含函数引用）
@@ -146,18 +146,8 @@ function flushStreamBuffer(convId: number) {
     });
     if (!updated) return state;
 
-    // Mirror back to tabStates (transition — Task 5 will remove the mirror).
-    const newTabStates = { ...state.tabStates };
-    const tab = useTabStore
-      .getState()
-      .tabs.find((t) => t.type === "ai" && (t.meta as AITabMeta).conversationId === convId);
-    if (tab && newTabStates[tab.id]) {
-      newTabStates[tab.id] = { ...newTabStates[tab.id], messages: updated };
-    }
-
     return {
       conversationMessages: { ...state.conversationMessages, [convId]: updated },
-      tabStates: newTabStates,
     };
   });
 }
@@ -298,41 +288,11 @@ export const useAIStore = create<AIState>((set, get) => {
     }, 0);
   }
 
-  function updateTab(tabId: string, updates: Partial<TabState>) {
-    set((state) => {
-      const current = state.tabStates[tabId] || {
-        messages: [],
-        sending: false,
-        pendingQueue: [],
-      };
-      const newTabState = { ...current, ...updates };
-
-      // Resolve convId from tab meta for dual-write
-      const tab = useTabStore.getState().tabs.find((t) => t.id === tabId);
-      const convId = tab ? (tab.meta as AITabMeta).conversationId : null;
-
-      const newConvMessages =
-        convId != null && updates.messages !== undefined
-          ? { ...state.conversationMessages, [convId]: updates.messages }
-          : state.conversationMessages;
-
-      const newConvStreaming =
-        convId != null && (updates.sending !== undefined || updates.pendingQueue !== undefined)
-          ? {
-              ...state.conversationStreaming,
-              [convId]: {
-                sending: updates.sending ?? state.conversationStreaming[convId]?.sending ?? false,
-                pendingQueue: updates.pendingQueue ?? state.conversationStreaming[convId]?.pendingQueue ?? [],
-              },
-            }
-          : state.conversationStreaming;
-
-      return {
-        tabStates: { ...state.tabStates, [tabId]: newTabState },
-        conversationMessages: newConvMessages,
-        conversationStreaming: newConvStreaming,
-      };
-    });
+  function updateTab(tabId: string, updates: { messages?: ChatMessage[]; sending?: boolean; pendingQueue?: string[] }) {
+    const tab = useTabStore.getState().tabs.find((t) => t.id === tabId);
+    const convId = tab ? (tab.meta as AITabMeta).conversationId : null;
+    if (convId == null) return;
+    updateConversation(convId, updates);
   }
 
   function updateConversation(
@@ -357,27 +317,9 @@ export const useAIStore = create<AIState>((set, get) => {
             }
           : state.conversationStreaming;
 
-      // Mirror tabStates (transition only — Task 5 removes this)
-      const tab = useTabStore
-        .getState()
-        .tabs.find((t) => t.type === "ai" && (t.meta as AITabMeta).conversationId === convId);
-      let newTabStates = state.tabStates;
-      if (tab) {
-        const curTabState = state.tabStates[tab.id] || { messages: [], sending: false, pendingQueue: [] };
-        newTabStates = {
-          ...state.tabStates,
-          [tab.id]: {
-            messages: updates.messages ?? curTabState.messages,
-            sending: updates.sending ?? curTabState.sending,
-            pendingQueue: updates.pendingQueue ?? curTabState.pendingQueue,
-          },
-        };
-      }
-
       return {
         conversationMessages: newConvMessages,
         conversationStreaming: newConvStreaming,
-        tabStates: newTabStates,
       };
     });
   }
@@ -461,16 +403,12 @@ export const useAIStore = create<AIState>((set, get) => {
           meta: { type: "ai", conversationId, title },
         });
 
-        // Set business data
+        // Register empty UI placeholder entry + write to conversation-keyed stores
         set((state) => ({
           tabStates: {
             ...state.tabStates,
-            [tabId]: { messages, sending: false, pendingQueue: [] },
+            [tabId]: {},
           },
-        }));
-
-        // Dual-write to conversation-keyed stores (Phase 1 transition)
-        useAIStore.setState((state) => ({
           conversationMessages: { ...state.conversationMessages, [conversationId]: messages },
           conversationStreaming: {
             ...state.conversationStreaming,
@@ -499,7 +437,7 @@ export const useAIStore = create<AIState>((set, get) => {
       set((state) => ({
         tabStates: {
           ...state.tabStates,
-          [tabId]: { messages: [], sending: false, pendingQueue: [] },
+          [tabId]: {},
         },
       }));
 
@@ -534,17 +472,20 @@ export const useAIStore = create<AIState>((set, get) => {
       const tabState = state.tabStates[tabId];
       if (!tabState) return;
 
+      const existingTab = useTabStore.getState().tabs.find((t) => t.id === tabId);
+      const existingConvId = existingTab ? (existingTab.meta as AITabMeta).conversationId : null;
+      const existingStreaming = existingConvId != null ? state.conversationStreaming[existingConvId] : undefined;
+      const existingMessages = existingConvId != null ? state.conversationMessages[existingConvId] || [] : [];
+
       // 生成中时排队：推送到后端 runner 队列 + 本地队列（用于 UI 显示）
-      if (tabState.sending) {
+      if (existingStreaming?.sending) {
         if (content.trim()) {
           updateTab(tabId, {
-            pendingQueue: [...tabState.pendingQueue, content.trim()],
+            pendingQueue: [...existingStreaming.pendingQueue, content.trim()],
           });
           // 推送到后端，工具调用间隙会被注入
-          const tab = useTabStore.getState().tabs.find((t) => t.id === tabId);
-          const queueConvId = tab ? (tab.meta as AITabMeta).conversationId : null;
-          if (queueConvId) {
-            QueueAIMessage(queueConvId, content.trim()).catch(() => {});
+          if (existingConvId) {
+            QueueAIMessage(existingConvId, content.trim()).catch(() => {});
           }
         }
         return;
@@ -552,8 +493,28 @@ export const useAIStore = create<AIState>((set, get) => {
 
       // 空内容 = drain/regen 发送（消息已经在 state 中）
       const isDrainSend = !content.trim();
-      let newMessages = [...tabState.messages];
-      const hadEmptyMessages = tabState.messages.length === 0;
+      let newMessages = [...existingMessages];
+      const hadEmptyMessages = existingMessages.length === 0;
+
+      // Drain 模式下没有历史消息时直接返回，避免空跑
+      if (isDrainSend && newMessages.length === 0) return;
+
+      // Ensure tab has a conversation ID *before* writing any message state —
+      // conversationMessages / conversationStreaming are keyed by convId.
+      let convId = existingConvId;
+      if (!convId) {
+        try {
+          const conv = await CreateConversation();
+          convId = conv.ID;
+          const curTab = useTabStore.getState().tabs.find((t) => t.id === tabId);
+          useTabStore.getState().updateTab(tabId, {
+            meta: { type: "ai", conversationId: convId, title: curTab?.label || "对话" },
+          });
+          get().fetchConversations();
+        } catch {
+          return;
+        }
+      }
 
       if (!isDrainSend) {
         const displayContent = content;
@@ -563,7 +524,7 @@ export const useAIStore = create<AIState>((set, get) => {
           blocks: [],
         };
         newMessages = [...newMessages, userMsg];
-        updateTab(tabId, { messages: newMessages, sending: true });
+        updateConversation(convId!, { messages: newMessages, sending: true });
 
         // First message becomes conversation title
         if (hadEmptyMessages) {
@@ -574,8 +535,7 @@ export const useAIStore = create<AIState>((set, get) => {
           });
         }
       } else {
-        if (newMessages.length === 0) return;
-        updateTab(tabId, { sending: true });
+        updateConversation(convId!, { sending: true });
       }
 
       const assistantMsg: ChatMessage = {
@@ -584,29 +544,9 @@ export const useAIStore = create<AIState>((set, get) => {
         blocks: [],
         streaming: true,
       };
-      updateTab(tabId, {
+      updateConversation(convId!, {
         messages: [...newMessages, assistantMsg],
       });
-
-      // Ensure tab has a conversation ID
-      const tabStore = useTabStore.getState();
-      const tab = tabStore.tabs.find((t) => t.id === tabId);
-      let convId = tab ? (tab.meta as AITabMeta).conversationId : null;
-
-      if (!convId) {
-        try {
-          const conv = await CreateConversation();
-          convId = conv.ID;
-          // Update tab meta with conversation ID
-          useTabStore.getState().updateTab(tabId, {
-            meta: { type: "ai", conversationId: convId, title: tab?.label || "对话" },
-          });
-          get().fetchConversations();
-        } catch {
-          updateTab(tabId, { sending: false });
-          return;
-        }
-      }
 
       // Set up event listener (keyed by conversationId)
       const listener = getOrCreateConvListener(convId!);
@@ -1024,18 +964,23 @@ export const useAIStore = create<AIState>((set, get) => {
     },
 
     regenerate: async (tabId: string, messageIndex: number) => {
-      const tabState = get().tabStates[tabId];
-      if (!tabState) return;
+      const tab = useTabStore.getState().tabs.find((t) => t.id === tabId);
+      if (!tab) return;
+      const convId = (tab.meta as AITabMeta).conversationId;
+      if (convId == null) return;
+
+      const streaming = get().conversationStreaming[convId] || { sending: false, pendingQueue: [] };
+      const messages = get().conversationMessages[convId] || [];
 
       // 正在生成时先停止
-      if (tabState.sending) {
+      if (streaming.sending) {
         await get().stopGeneration(tabId);
         await new Promise((r) => setTimeout(r, 200));
       }
 
       // 截断到指定消息之前
-      const truncated = tabState.messages.slice(0, messageIndex);
-      updateTab(tabId, { messages: truncated, sending: false, pendingQueue: [] });
+      const truncated = messages.slice(0, messageIndex);
+      updateConversation(convId, { messages: truncated, sending: false, pendingQueue: [] });
 
       if (truncated.length === 0) return;
 
@@ -1044,25 +989,33 @@ export const useAIStore = create<AIState>((set, get) => {
     },
 
     removeFromQueue: (tabId: string, index: number) => {
-      const tabState = get().tabStates[tabId];
-      if (!tabState) return;
-      const newQueue = tabState.pendingQueue.filter((_, i) => i !== index);
-      updateTab(tabId, { pendingQueue: newQueue });
+      const tab = useTabStore.getState().tabs.find((t) => t.id === tabId);
+      if (!tab) return;
+      const convId = (tab.meta as AITabMeta).conversationId;
+      if (convId == null) return;
+      const streaming = get().conversationStreaming[convId];
+      if (!streaming) return;
+      const newQueue = streaming.pendingQueue.filter((_, i) => i !== index);
+      updateConversation(convId, { pendingQueue: newQueue });
     },
 
     clearQueue: (tabId: string) => {
-      updateTab(tabId, { pendingQueue: [] });
+      const tab = useTabStore.getState().tabs.find((t) => t.id === tabId);
+      if (!tab) return;
+      const convId = (tab.meta as AITabMeta).conversationId;
+      if (convId == null) return;
+      updateConversation(convId, { pendingQueue: [] });
     },
 
     // === 查询 ===
 
     isAnySending: () => {
-      const { tabStates } = get();
-      return Object.values(tabStates).some((ts) => ts.sending);
+      const { conversationStreaming } = get();
+      return Object.values(conversationStreaming).some((s) => s.sending);
     },
 
     getTabState: (tabId: string) => {
-      return get().tabStates[tabId] || { messages: [], sending: false, pendingQueue: [] };
+      return get().tabStates[tabId] || {};
     },
 
     getMessagesByConversationId: (convId: number) => {
@@ -1127,17 +1080,13 @@ async function restoreAITabs(tabs: Tab[]) {
           const displayMsgs = await SwitchConversation(meta.conversationId);
           const messages = convertDisplayMessages(displayMsgs);
           useAIStore.setState((s) => ({
-            tabStates: { ...s.tabStates, [tab.id]: { messages, sending: false, pendingQueue: [] } },
+            tabStates: { ...s.tabStates, [tab.id]: {} },
+            conversationMessages: { ...s.conversationMessages, [meta.conversationId!]: messages },
+            conversationStreaming: {
+              ...s.conversationStreaming,
+              [meta.conversationId!]: { sending: false, pendingQueue: [] },
+            },
           }));
-          if (meta.conversationId) {
-            useAIStore.setState((s) => ({
-              conversationMessages: { ...s.conversationMessages, [meta.conversationId!]: messages },
-              conversationStreaming: {
-                ...s.conversationStreaming,
-                [meta.conversationId!]: { sending: false, pendingQueue: [] },
-              },
-            }));
-          }
           const conv = conversations.find((c) => c.ID === meta.conversationId);
           if (conv && conv.Title !== tab.label) {
             tabStore.updateTab(tab.id, { label: conv.Title, meta: { ...meta, title: conv.Title } });
@@ -1147,7 +1096,7 @@ async function restoreAITabs(tabs: Tab[]) {
         }
       } else {
         useAIStore.setState((s) => ({
-          tabStates: { ...s.tabStates, [tab.id]: { messages: [], sending: false, pendingQueue: [] } },
+          tabStates: { ...s.tabStates, [tab.id]: {} },
         }));
       }
     }

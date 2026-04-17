@@ -27,7 +27,7 @@ describe("AIChatContent (Phase 1 refactor)", () => {
       conversationMessages: {
         5: [{ role: "user", content: "从 conversationMessages 读到", blocks: [] }],
       },
-      tabStates: { [tabId]: { messages: [], sending: false, pendingQueue: [] } },
+      tabStates: { [tabId]: {} },
     });
 
     render(<AIChatContent tabId={tabId} />);
