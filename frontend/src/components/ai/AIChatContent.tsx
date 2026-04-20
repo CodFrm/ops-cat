@@ -212,7 +212,7 @@ export function AIChatContent({
                   size="sm"
                   className="h-5 px-1.5 text-xs text-muted-foreground hover:text-destructive"
                   onClick={() => {
-                    if (tabId) clearQueue(tabId);
+                    if (conversationId != null) clearQueue(conversationId);
                   }}
                 >
                   <Trash2 className="h-3 w-3 mr-1" />
@@ -228,7 +228,7 @@ export function AIChatContent({
                     <button
                       className="shrink-0 text-muted-foreground/50 hover:text-destructive transition-colors"
                       onClick={() => {
-                        if (tabId) removeFromQueue(tabId, i);
+                        if (conversationId != null) removeFromQueue(conversationId, i);
                       }}
                     >
                       <X className="h-3 w-3" />

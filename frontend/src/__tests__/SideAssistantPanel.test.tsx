@@ -4,7 +4,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/re
 import { useAIStore } from "../stores/aiStore";
 import { useTabStore } from "../stores/tabStore";
 import { SideAssistantPanel } from "../components/ai/SideAssistantPanel";
-import { CreateConversation, ListConversations, SwitchConversation } from "../../wailsjs/go/app/App";
+import { CreateConversation, ListConversations, LoadConversationMessages } from "../../wailsjs/go/app/App";
 
 // Note: setup.ts mocks react-i18next so `t(key)` returns the raw key.
 // So button titles become the i18n keys themselves (e.g. "ai.sidebar.newChat").
@@ -128,7 +128,7 @@ describe("SideAssistantPanel", () => {
   });
 
   it("clicking promote button promotes sidebar conversation and clears sidebar binding", async () => {
-    vi.mocked(SwitchConversation).mockResolvedValue([] as any);
+    vi.mocked(LoadConversationMessages).mockResolvedValue([] as any);
     useAIStore.setState({
       sidebarConversationId: 5,
       conversations: [{ ID: 5, Title: "Conv", Updatetime: 0 } as any],

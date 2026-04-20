@@ -7,7 +7,7 @@ import {
   GetActiveAIProvider,
   CreateConversation,
   ListConversations,
-  SwitchConversation,
+  LoadConversationMessages,
   DeleteConversation,
   SaveConversationMessages,
 } from "../../wailsjs/go/app/App";
@@ -221,10 +221,11 @@ function convertDisplayMessages(displayMsgs: app.ConversationDisplayMessage[]): 
 
 // 单次加载会话历史消息：仅当当前 store 尚未持有该 convId 的消息时才触发后端拉取。
 // 侧边绑定 / localStorage 恢复走这条路径，避免侧边显示已有会话时"消息为空"的表现。
+// 走 LoadConversationMessages（只读），不会修改后端 currentConversationID。
 async function ensureConversationMessagesLoaded(convId: number) {
   if (useAIStore.getState().conversationMessages[convId] !== undefined) return;
   try {
-    const displayMsgs = await SwitchConversation(convId);
+    const displayMsgs = await LoadConversationMessages(convId);
     const messages = convertDisplayMessages(displayMsgs);
     useAIStore.setState((s) => ({
       conversationMessages:
@@ -769,8 +770,8 @@ interface AIState {
   stopConversation: (convId: number) => Promise<void>;
   stopGeneration: (tabId: string) => Promise<void>;
   regenerate: (tabId: string, messageIndex: number) => Promise<void>;
-  removeFromQueue: (tabId: string, index: number) => void;
-  clearQueue: (tabId: string) => void;
+  removeFromQueue: (convId: number, index: number) => void;
+  clearQueue: (convId: number) => void;
 
   // Tab 管理 (delegates to tabStore)
   openConversationTab: (conversationId: number) => Promise<string>;
@@ -944,9 +945,9 @@ export const useAIStore = create<AIState>((set, get) => {
       const conv = state.conversations.find((c) => c.ID === conversationId);
       const title = conv?.Title || "对话";
 
-      // Load messages
+      // Load messages（只读加载，避免后端 currentConversationID 被多 Tab 竞争覆盖）
       try {
-        const displayMsgs = await SwitchConversation(conversationId);
+        const displayMsgs = await LoadConversationMessages(conversationId);
         const messages = convertDisplayMessages(displayMsgs);
 
         // Open tab in tabStore
@@ -1118,22 +1119,14 @@ export const useAIStore = create<AIState>((set, get) => {
       await get().sendToTab(tabId, "");
     },
 
-    removeFromQueue: (tabId: string, index: number) => {
-      const tab = useTabStore.getState().tabs.find((t) => t.id === tabId);
-      if (!tab) return;
-      const convId = (tab.meta as AITabMeta).conversationId;
-      if (convId == null) return;
+    removeFromQueue: (convId: number, index: number) => {
       const streaming = get().conversationStreaming[convId];
       if (!streaming) return;
       const newQueue = streaming.pendingQueue.filter((_, i) => i !== index);
       updateConversation(convId, { pendingQueue: newQueue });
     },
 
-    clearQueue: (tabId: string) => {
-      const tab = useTabStore.getState().tabs.find((t) => t.id === tabId);
-      if (!tab) return;
-      const convId = (tab.meta as AITabMeta).conversationId;
-      if (convId == null) return;
+    clearQueue: (convId: number) => {
       updateConversation(convId, { pendingQueue: [] });
     },
 
@@ -1220,7 +1213,7 @@ async function restoreAITabs(tabs: Tab[]) {
           continue;
         }
         try {
-          const displayMsgs = await SwitchConversation(meta.conversationId);
+          const displayMsgs = await LoadConversationMessages(meta.conversationId);
           const messages = convertDisplayMessages(displayMsgs);
           useAIStore.setState((s) => ({
             tabStates: { ...s.tabStates, [tab.id]: {} },

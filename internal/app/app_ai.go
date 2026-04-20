@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -110,8 +111,20 @@ func (a *App) SwitchConversation(id int64) ([]ConversationDisplayMessage, error)
 	}
 
 	a.switchToConversation(conv)
+	return a.loadConversationDisplayMessages(ctx, id)
+}
 
-	// 加载消息用于前端显示
+// LoadConversationMessages 只读加载会话消息，不修改 currentConversationID。
+// 用于侧边栏等场景只需读取历史而不切换当前会话。
+func (a *App) LoadConversationMessages(id int64) ([]ConversationDisplayMessage, error) {
+	ctx := a.langCtx()
+	if _, err := conversation_svc.Conversation().Get(ctx, id); err != nil {
+		return nil, fmt.Errorf("会话不存在: %w", err)
+	}
+	return a.loadConversationDisplayMessages(ctx, id)
+}
+
+func (a *App) loadConversationDisplayMessages(ctx context.Context, id int64) ([]ConversationDisplayMessage, error) {
 	msgs, err := conversation_svc.Conversation().LoadMessages(ctx, id)
 	if err != nil {
 		return nil, err

@@ -11,7 +11,7 @@ import {
   GetActiveAIProvider,
   ListConversations,
   DeleteConversation,
-  SwitchConversation,
+  LoadConversationMessages,
   SendAIMessage,
   StopAIGeneration,
 } from "../../wailsjs/go/app/App";
@@ -140,7 +140,7 @@ describe("aiStore", () => {
       useAIStore.setState({
         conversations: [{ ID: 2, Title: "Old Chat" }] as any,
       });
-      vi.mocked(SwitchConversation).mockResolvedValue([{ role: "user", content: "Hello", blocks: [] }] as any);
+      vi.mocked(LoadConversationMessages).mockResolvedValue([{ role: "user", content: "Hello", blocks: [] }] as any);
 
       const tabId = await useAIStore.getState().openConversationTab(2);
 
@@ -315,7 +315,7 @@ describe("sidebar state", () => {
   });
 
   it("bindSidebar loads conversation messages when binding to an unseen convId", async () => {
-    vi.mocked(SwitchConversation).mockResolvedValue([
+    vi.mocked(LoadConversationMessages).mockResolvedValue([
       { role: "user", content: "hi", blocks: [] },
       { role: "assistant", content: "hello", blocks: [] },
     ] as any);
@@ -324,7 +324,7 @@ describe("sidebar state", () => {
 
     await waitForStoreCondition(() => useAIStore.getState().conversationMessages[42] !== undefined);
 
-    expect(SwitchConversation).toHaveBeenCalledWith(42);
+    expect(LoadConversationMessages).toHaveBeenCalledWith(42);
     expect(useAIStore.getState().conversationMessages[42]).toHaveLength(2);
     expect(useAIStore.getState().conversationStreaming[42]).toEqual({ sending: false, pendingQueue: [] });
   });
@@ -339,20 +339,22 @@ describe("sidebar state", () => {
     // Wait one microtask tick for the fire-and-forget promise to settle.
     await Promise.resolve();
 
-    expect(SwitchConversation).not.toHaveBeenCalled();
+    expect(LoadConversationMessages).not.toHaveBeenCalled();
     expect(useAIStore.getState().conversationMessages[55]).toHaveLength(1);
   });
 
   it("fetchConversations loads messages for sidebar-bound conv restored from localStorage", async () => {
     vi.mocked(ListConversations).mockResolvedValue([{ ID: 7, Title: "Restored", Updatetime: 0 }] as any);
-    vi.mocked(SwitchConversation).mockResolvedValue([{ role: "user", content: "from backend", blocks: [] }] as any);
+    vi.mocked(LoadConversationMessages).mockResolvedValue([
+      { role: "user", content: "from backend", blocks: [] },
+    ] as any);
     // Simulate localStorage restore: sidebarConversationId set, but no messages in store.
     useAIStore.setState({ sidebarConversationId: 7, conversationMessages: {}, conversationStreaming: {} });
 
     await useAIStore.getState().fetchConversations();
     await waitForStoreCondition(() => useAIStore.getState().conversationMessages[7] !== undefined);
 
-    expect(SwitchConversation).toHaveBeenCalledWith(7);
+    expect(LoadConversationMessages).toHaveBeenCalledWith(7);
     expect(useAIStore.getState().conversationMessages[7]).toHaveLength(1);
   });
 
@@ -383,7 +385,7 @@ describe("sidebar state", () => {
       sidebarConversationId: 42,
       conversations: [{ ID: 42, Title: "t", Updatetime: 0 } as any],
     });
-    vi.mocked(SwitchConversation).mockResolvedValue([] as any);
+    vi.mocked(LoadConversationMessages).mockResolvedValue([] as any);
     void useAIStore.getState().openConversationTab(42);
     expect(useAIStore.getState().sidebarConversationId).toBeNull();
   });
@@ -425,7 +427,7 @@ describe("single-host invariant", () => {
       conversationStreaming: { 50: { sending: false, pendingQueue: [] } },
       sidebarConversationId: 50,
     });
-    vi.mocked(SwitchConversation).mockResolvedValue([] as any);
+    vi.mocked(LoadConversationMessages).mockResolvedValue([] as any);
   });
 
   it("openConversationTab evicts sidebar if sidebar already holds that conv", async () => {

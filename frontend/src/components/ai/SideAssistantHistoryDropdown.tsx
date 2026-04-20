@@ -5,15 +5,16 @@ import { cn, ScrollArea, Button, Input, ConfirmDialog } from "@opskat/ui";
 import { useAIStore } from "@/stores/aiStore";
 import { useTabStore, type AITabMeta } from "@/stores/tabStore";
 
-function formatRelativeTime(timestamp: number): string {
+function formatRelativeTime(timestamp: number, locale: string): string {
   const now = Date.now() / 1000;
   const diff = now - timestamp;
-  if (diff < 60) return "刚刚";
-  if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}天前`;
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  if (diff < 60) return rtf.format(0, "second");
+  if (diff < 3600) return rtf.format(-Math.floor(diff / 60), "minute");
+  if (diff < 86400) return rtf.format(-Math.floor(diff / 3600), "hour");
+  if (diff < 604800) return rtf.format(-Math.floor(diff / 86400), "day");
   const date = new Date(timestamp * 1000);
-  return `${date.getMonth() + 1}/${date.getDate()}`;
+  return new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric" }).format(date);
 }
 
 interface SideAssistantHistoryDropdownProps {
@@ -27,7 +28,8 @@ export function SideAssistantHistoryDropdown({
   onSelect,
   onClose,
 }: SideAssistantHistoryDropdownProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language || "zh-CN";
   const { conversations, deleteConversation } = useAIStore();
   const tabs = useTabStore((s) => s.tabs);
   const openInTabIds = useMemo(
@@ -91,7 +93,7 @@ export function SideAssistantHistoryDropdown({
                   <div className="flex-1 min-w-0">
                     <p className="truncate">{conv.Title}</p>
                     <p className="text-xs text-muted-foreground">
-                      {formatRelativeTime(conv.Updatetime)}
+                      {formatRelativeTime(conv.Updatetime, locale)}
                       {isInTab && ` · ${t("ai.sidebar.promoteHint")}`}
                     </p>
                   </div>
