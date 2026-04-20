@@ -131,9 +131,10 @@ func runCommandWithCache(ctx context.Context, cache *SSHClientCache, assetID int
 	}
 	output, err := runSSHCommand(ctx, client, command)
 	if err != nil {
-		// 当前会话已经取消时，直接清掉缓存连接，避免下次复用到半失效连接。
+		// 当前会话已经取消时，runSSHCommand 已主动关闭 client 以打断阻塞；
+		// 这里只需把条目从缓存中摘除（避免下次复用半失效连接），不能再次 Close。
 		if ctx.Err() != nil {
-			cache.Remove(assetID)
+			cache.Forget(assetID)
 			return "", ctx.Err()
 		}
 		// 非取消错误优先按连接失效处理，删除缓存后只重试一次，避免重复执行

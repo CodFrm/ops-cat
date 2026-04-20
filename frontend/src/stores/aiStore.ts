@@ -219,6 +219,19 @@ function appendText(blocks: ContentBlock[], text: string): ContentBlock[] {
   return newBlocks;
 }
 
+// 持久化 streaming 快照时需要归一化的中间态 → 终态。
+// 应用异常退出后重启，这些 block 不会再收到后端事件来结束，保留 running/pending_confirm
+// 会让 UI 上长期显示"运行中/待确认"的 spinner 而没有任何进展。统一归一化为 cancelled。
+const STREAMING_SNAPSHOT_STATUS_OVERRIDES: Record<string, ContentBlock["status"]> = {
+  running: "cancelled",
+  pending_confirm: "cancelled",
+};
+
+function normalizeSnapshotStatus(status: ContentBlock["status"]): ContentBlock["status"] {
+  if (!status) return status;
+  return STREAMING_SNAPSHOT_STATUS_OVERRIDES[status] ?? status;
+}
+
 function toDisplayMessages(msgs: ChatMessage[], includeStreaming = false): app.ConversationDisplayMessage[] {
   return msgs
     .filter((m) => includeStreaming || !m.streaming)
@@ -234,7 +247,7 @@ function toDisplayMessages(msgs: ChatMessage[], includeStreaming = false): app.C
                 content: b.content,
                 toolName: b.toolName,
                 toolInput: b.toolInput,
-                status: b.status,
+                status: includeStreaming ? normalizeSnapshotStatus(b.status) : b.status,
               })
           ),
         })
