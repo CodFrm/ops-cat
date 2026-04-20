@@ -25,6 +25,7 @@ import {
   type MentionRef,
 } from "@/stores/aiStore";
 import { AIChatInput, type AIChatInputHandle } from "@/components/ai/AIChatInput";
+import { UserMessage } from "@/components/ai/UserMessage";
 import { useTabStore, type AITabMeta } from "@/stores/tabStore";
 import { ToolBlock } from "@/components/ai/ToolBlock";
 import { ThinkingBlock } from "@/components/ai/ThinkingBlock";
@@ -283,21 +284,6 @@ export function AIChatContent({
     </CompactContext.Provider>
   );
 }
-
-const UserMessage = memo(function UserMessage({ msg }: { msg: ChatMessage }) {
-  const compactCtx = useCompact();
-  const maxWidthClass = compactCtx ? "max-w-[95%]" : "max-w-[85%]";
-  return (
-    <div className="flex flex-col items-end gap-1.5">
-      <span className="text-xs font-semibold text-muted-foreground tracking-wide">You</span>
-      <div
-        className={`inline-block rounded-xl rounded-br-sm bg-primary px-3.5 py-2.5 text-primary-foreground ${maxWidthClass} text-left shadow-sm break-words`}
-      >
-        {msg.content}
-      </div>
-    </div>
-  );
-});
 
 const AssistantMessage = memo(function AssistantMessage({
   msg,
