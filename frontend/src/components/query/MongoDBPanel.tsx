@@ -297,7 +297,7 @@ function MongoQueryContent({ assetId, innerTab }: MongoQueryContentProps) {
           onKeyDown={(e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
               // IME 合成中：不触发执行，交给 IME 处理
-              // eslint-disable-next-line @typescript-eslint/no-deprecated
+
               if (e.nativeEvent.isComposing || e.keyCode === 229) return;
               e.preventDefault();
               handleExecute(0);

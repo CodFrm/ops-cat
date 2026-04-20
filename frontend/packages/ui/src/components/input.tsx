@@ -17,7 +17,7 @@ function Input({
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       // IME 合成中：吞掉 Enter，避免误触发下游动作（如发送、提交）
-      // eslint-disable-next-line @typescript-eslint/no-deprecated
+
       if (e.key === "Enter" && (e.nativeEvent.isComposing || e.keyCode === 229 || composingRef.current)) {
         e.preventDefault();
         return;
