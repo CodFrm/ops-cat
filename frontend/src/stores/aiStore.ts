@@ -11,10 +11,19 @@ import {
   DeleteConversation,
   SaveConversationMessages,
 } from "../../wailsjs/go/app/App";
-import { ai, conversation_entity, app } from "../../wailsjs/go/models";
+import { ai, conversation_entity, app, group_entity } from "../../wailsjs/go/models";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import i18n from "../i18n";
 import { useTabStore, registerTabCloseHook, registerTabRestoreHook, type AITabMeta, type Tab } from "./tabStore";
+import { useAssetStore } from "./assetStore";
+
+// 用户消息中的资产引用（对应前端 @ 提及）
+export interface MentionRef {
+  assetId: number;
+  name: string; // 发送时刻的资产名快照
+  start: number; // content 中字符起始索引（含 @ 符号，JS 字符串索引）
+  end: number; // 结束索引（不含）
+}
 
 // 内容块：文本、工具调用、Sub Agent 或审批
 export interface ContentBlock {
@@ -48,6 +57,12 @@ export interface ChatMessage {
   content: string;
   blocks: ContentBlock[];
   streaming?: boolean;
+  mentions?: MentionRef[];
+}
+
+export interface PendingQueueItem {
+  text: string;
+  mentions?: MentionRef[];
 }
 
 interface StreamEventData {
@@ -200,6 +215,15 @@ function toDisplayMessages(msgs: ChatMessage[]): app.ConversationDisplayMessage[
                 status: b.status,
               })
           ),
+          mentions: (m.mentions || []).map(
+            (mr) =>
+              new conversation_entity.MentionRef({
+                assetId: mr.assetId,
+                name: mr.name,
+                start: mr.start,
+                end: mr.end,
+              })
+          ),
         })
     );
 }
@@ -215,8 +239,33 @@ function convertDisplayMessages(displayMsgs: app.ConversationDisplayMessage[]): 
       toolInput: b.toolInput,
       status: b.status as "running" | "completed" | "error" | undefined,
     })),
+    mentions: (dm.mentions || []).map((mr: conversation_entity.MentionRef) => ({
+      assetId: mr.assetId,
+      name: mr.name,
+      start: mr.start,
+      end: mr.end,
+    })),
     streaming: false,
   }));
+}
+
+// 根据 groups 列表构建 groupId → 斜杠分隔路径映射
+function buildGroupPathMap(groups: group_entity.Group[]): Map<number, string> {
+  const byId = new Map<number, group_entity.Group>();
+  for (const g of groups) byId.set(g.ID, g);
+  const cache = new Map<number, string>();
+  const resolve = (id: number): string => {
+    if (cache.has(id)) return cache.get(id)!;
+    const g = byId.get(id);
+    if (!g) return "";
+    const parent = g.ParentID ? resolve(g.ParentID) : "";
+    const full = parent ? `${parent}/${g.Name}` : g.Name;
+    cache.set(id, full);
+    return full;
+  };
+  const map = new Map<number, string>();
+  for (const g of groups) map.set(g.ID, resolve(g.ID));
+  return map;
 }
 
 // 单次加载会话历史消息：仅当当前 store 尚未持有该 convId 的消息时才触发后端拉取。
@@ -245,7 +294,7 @@ async function ensureConversationMessagesLoaded(convId: number) {
 
 function updateConversation(
   convId: number,
-  updates: { messages?: ChatMessage[]; sending?: boolean; pendingQueue?: string[] }
+  updates: { messages?: ChatMessage[]; sending?: boolean; pendingQueue?: PendingQueueItem[] }
 ) {
   useAIStore.setState((state) => {
     const newConvMessages =
@@ -282,10 +331,11 @@ function drainQueue(convId: number) {
   // 将队列中所有消息作为独立 user message 追加
   const currentMsgs = useAIStore.getState().conversationMessages[convId] || [];
   const newMsgs = [...currentMsgs];
-  for (const text of queue) {
+  for (const item of queue) {
     newMsgs.push({
       role: "user" as const,
-      content: text,
+      content: item.text,
+      mentions: item.mentions,
       blocks: [],
       streaming: false,
     });
@@ -655,14 +705,16 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
 }
 
 // 核心发送：完全基于 convId，共享给 sendToTab / sendFromSidebar / regenerate
-async function _sendForConversation(convId: number, content: string) {
+async function _sendForConversation(convId: number, content: string, mentions?: MentionRef[]) {
   const state = useAIStore.getState();
   const streaming = state.conversationStreaming[convId] || { sending: false, pendingQueue: [] };
 
   // 生成中时排队：推送到后端 runner 队列 + 本地队列（用于 UI 显示）
   if (streaming.sending) {
     if (content.trim()) {
-      updateConversation(convId, { pendingQueue: [...streaming.pendingQueue, content.trim()] });
+      updateConversation(convId, {
+        pendingQueue: [...streaming.pendingQueue, { text: content.trim(), mentions }],
+      });
       QueueAIMessage(convId, content.trim()).catch(() => {});
     }
     return;
@@ -680,6 +732,7 @@ async function _sendForConversation(convId: number, content: string) {
     newMessages.push({
       role: "user",
       content,
+      mentions,
       blocks: [],
     });
     updateConversation(convId, { messages: newMessages, sending: true });
@@ -733,7 +786,39 @@ async function _sendForConversation(convId: number, content: string) {
           assetName: t.meta.assetName || t.label || "",
         })
     );
-  const aiContext = new ai.AIContext({ openTabs });
+
+  // 收集所有 user 消息的 mentions，查 assetStore 组装 MentionedAssets（按 assetId 去重）
+  const assetStore = useAssetStore.getState();
+  const groupPathMap = buildGroupPathMap(assetStore.groups);
+  const mentionedAssets: ai.MentionedAsset[] = [];
+  const seenIds = new Set<number>();
+  for (const m of newMessages) {
+    if (m.role !== "user" || !m.mentions) continue;
+    for (const mr of m.mentions) {
+      if (seenIds.has(mr.assetId)) continue;
+      seenIds.add(mr.assetId);
+      const asset = assetStore.assets.find((a) => a.ID === mr.assetId);
+      if (!asset) continue; // 资产已删除跳过
+      let host = "";
+      try {
+        const cfg = JSON.parse(asset.Config || "{}");
+        host = cfg.host || "";
+      } catch {
+        /* ignore */
+      }
+      mentionedAssets.push(
+        new ai.MentionedAsset({
+          assetId: asset.ID,
+          name: asset.Name,
+          type: asset.Type,
+          host,
+          groupPath: asset.GroupID ? groupPathMap.get(asset.GroupID) || "" : "",
+        })
+      );
+    }
+  }
+
+  const aiContext = new ai.AIContext({ openTabs, mentionedAssets });
 
   try {
     await SendAIMessage(convId, apiMessages, aiContext);
@@ -748,7 +833,7 @@ async function _sendForConversation(convId: number, content: string) {
 interface AIState {
   tabStates: Record<string, TabState>;
   conversationMessages: Record<number, ChatMessage[]>;
-  conversationStreaming: Record<number, { sending: boolean; pendingQueue: string[] }>;
+  conversationStreaming: Record<number, { sending: boolean; pendingQueue: PendingQueueItem[] }>;
 
   // 全局状态
   conversations: conversation_entity.Conversation[];
@@ -764,9 +849,9 @@ interface AIState {
   checkConfigured: () => Promise<void>;
 
   // 发送
-  send: (content: string) => Promise<void>;
-  sendToTab: (tabId: string, content: string) => Promise<void>;
-  sendFromSidebar: (convId: number, content: string) => Promise<void>;
+  send: (content: string, mentions?: MentionRef[]) => Promise<void>;
+  sendToTab: (tabId: string, content: string, mentions?: MentionRef[]) => Promise<void>;
+  sendFromSidebar: (convId: number, content: string, mentions?: MentionRef[]) => Promise<void>;
   stopConversation: (convId: number) => Promise<void>;
   stopGeneration: (tabId: string) => Promise<void>;
   regenerate: (tabId: string, messageIndex: number) => Promise<void>;
@@ -795,7 +880,7 @@ interface AIState {
 
   // NEW — 派生 getter
   getMessagesByConversationId: (convId: number) => ChatMessage[];
-  getStreamingByConversationId: (convId: number) => { sending: boolean; pendingQueue: string[] };
+  getStreamingByConversationId: (convId: number) => { sending: boolean; pendingQueue: PendingQueueItem[] };
 }
 
 export const useAIStore = create<AIState>((set, get) => {
@@ -1001,15 +1086,15 @@ export const useAIStore = create<AIState>((set, get) => {
 
     // === 向后兼容 ===
 
-    send: async (content: string) => {
+    send: async (content: string, mentions?: MentionRef[]) => {
       const tabStore = useTabStore.getState();
       const activeTab = tabStore.tabs.find((t) => t.id === tabStore.activeTabId && t.type === "ai");
       if (!activeTab) {
         const newTabId = get().openNewConversationTab();
-        await get().sendToTab(newTabId, content);
+        await get().sendToTab(newTabId, content, mentions);
         return;
       }
-      await get().sendToTab(activeTab.id, content);
+      await get().sendToTab(activeTab.id, content, mentions);
     },
 
     clear: () => {
@@ -1022,7 +1107,7 @@ export const useAIStore = create<AIState>((set, get) => {
 
     // === 核心发送 ===
 
-    sendToTab: async (tabId: string, content: string) => {
+    sendToTab: async (tabId: string, content: string, mentions?: MentionRef[]) => {
       const state = get();
       const tabState = state.tabStates[tabId];
       if (!tabState) return;
@@ -1067,11 +1152,11 @@ export const useAIStore = create<AIState>((set, get) => {
         }
       }
 
-      await _sendForConversation(convId, content);
+      await _sendForConversation(convId, content, mentions);
     },
 
-    sendFromSidebar: async (convId: number, content: string) => {
-      await _sendForConversation(convId, content);
+    sendFromSidebar: async (convId: number, content: string, mentions?: MentionRef[]) => {
+      await _sendForConversation(convId, content, mentions);
     },
 
     stopConversation: async (convId: number) => {

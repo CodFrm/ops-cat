@@ -17,7 +17,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@opskat/ui";
-import { useAIStore, useAISendOnEnter, type ChatMessage, type ContentBlock } from "@/stores/aiStore";
+import {
+  useAIStore,
+  useAISendOnEnter,
+  type ChatMessage,
+  type ContentBlock,
+  type PendingQueueItem,
+} from "@/stores/aiStore";
 import { useTabStore, type AITabMeta } from "@/stores/tabStore";
 import { ToolBlock } from "@/components/ai/ToolBlock";
 import { ThinkingBlock } from "@/components/ai/ThinkingBlock";
@@ -31,7 +37,7 @@ const mdRehypePlugins = [rehypeSanitize];
 
 // 稳定引用的默认值，避免 zustand selector 每次返回新对象导致无限渲染
 const EMPTY_MESSAGES: ChatMessage[] = [];
-const DEFAULT_STREAMING = { sending: false, pendingQueue: [] as string[] };
+const DEFAULT_STREAMING = { sending: false, pendingQueue: [] as PendingQueueItem[] };
 
 interface AIChatContentProps {
   tabId?: string;
@@ -220,10 +226,10 @@ export function AIChatContent({
                 </Button>
               </div>
               <div className="space-y-1">
-                {pendingQueue.map((text, i) => (
+                {pendingQueue.map((item, i) => (
                   <div key={i} className="flex items-center gap-1.5 text-xs bg-background rounded px-2 py-1.5 border">
                     <span className="truncate flex-1 text-muted-foreground">
-                      {text.length > 50 ? text.slice(0, 50) + "…" : text}
+                      {item.text.length > 50 ? item.text.slice(0, 50) + "…" : item.text}
                     </span>
                     <button
                       className="shrink-0 text-muted-foreground/50 hover:text-destructive transition-colors"

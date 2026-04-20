@@ -237,12 +237,12 @@ describe("conversationMessages (Phase 1)", () => {
   it("getStreamingByConversationId reflects streaming state", () => {
     useAIStore.setState({
       conversationStreaming: {
-        42: { sending: true, pendingQueue: ["q1", "q2"] },
+        42: { sending: true, pendingQueue: [{ text: "q1" }, { text: "q2" }] },
       },
     });
     expect(useAIStore.getState().getStreamingByConversationId(42)).toEqual({
       sending: true,
-      pendingQueue: ["q1", "q2"],
+      pendingQueue: [{ text: "q1" }, { text: "q2" }],
     });
   });
 
