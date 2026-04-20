@@ -352,6 +352,14 @@ func (a *App) makeCommandConfirmFunc() ai.CommandConfirmFunc {
 				Content:   resp.Decision,
 			})
 			return resp
+		case <-ctx.Done():
+			// 审批等待跟随当前对话上下文取消，避免 run_command 已停止但审批协程仍悬挂。
+			wailsRuntime.EventsEmit(a.ctx, eventName, ai.StreamEvent{
+				Type:      "approval_result",
+				ConfirmID: confirmID,
+				Content:   "deny",
+			})
+			return ai.ApprovalResponse{Decision: "deny"}
 		case <-a.ctx.Done():
 			return ai.ApprovalResponse{Decision: "deny"}
 		case <-a.shutdownCh:
@@ -409,6 +417,14 @@ func (a *App) makeGrantRequestFunc() ai.GrantRequestFunc {
 				}
 			}
 			return true, finalPatterns
+		case <-ctx.Done():
+			// grant 申请与单次审批一致，优先受会话级 ctx 控制，避免页面已取消但授权流程未退出。
+			wailsRuntime.EventsEmit(a.ctx, eventName, ai.StreamEvent{
+				Type:      "approval_result",
+				ConfirmID: confirmID,
+				Content:   "deny",
+			})
+			return false, nil
 		case <-a.ctx.Done():
 			return false, nil
 		case <-a.shutdownCh:

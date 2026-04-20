@@ -83,6 +83,10 @@ interface TabState {
 // 模块级 per-conversation 事件监听管理（不放 zustand，因为含函数引用）
 const conversationListeners = new Map<number, { cancel: (() => void) | null; generation: number }>();
 
+// 每个 conversation 只保留一个待执行的落盘定时器。
+// 流式输出期间会持续增量更新消息，如果每次都立即保存，磁盘写入会过于频繁。
+const persistTimers = new Map<number, number>();
+
 function getOrCreateConvListener(convId: number) {
   if (!conversationListeners.has(convId)) {
     conversationListeners.set(convId, { cancel: null, generation: 0 });
@@ -95,6 +99,36 @@ function cleanupConvListener(convId: number) {
   if (listener?.cancel) listener.cancel();
   conversationListeners.delete(convId);
   cleanupStreamBuffer(convId);
+  cleanupPersistTimer(convId);
+}
+
+// cleanupPersistTimer 清理指定 conversation 尚未执行的落盘定时器。
+function cleanupPersistTimer(convId: number) {
+  const timer = persistTimers.get(convId);
+  if (timer !== undefined) {
+    window.clearTimeout(timer);
+    persistTimers.delete(convId);
+  }
+}
+
+// persistConversationSnapshot 将当前 conversation 的消息快照保存到持久化存储。
+function persistConversationSnapshot(convId: number, includeStreaming = false) {
+  const msgs = useAIStore.getState().conversationMessages[convId];
+  if (!msgs) return;
+  SaveConversationMessages(convId, toDisplayMessages(msgs, includeStreaming)).catch(() => {});
+}
+
+// schedulePersist 为 conversation 安排一次短延迟的消息快照保存。
+// 流式输出期间做一次短延迟防抖：
+// 1. 降低高频写入带来的性能开销；
+// 2. 让应用异常退出前，尽量已经落下最近一段对话快照。
+function schedulePersist(convId: number, includeStreaming = false) {
+  cleanupPersistTimer(convId);
+  const timer = window.setTimeout(() => {
+    persistTimers.delete(convId);
+    persistConversationSnapshot(convId, includeStreaming);
+  }, 300);
+  persistTimers.set(convId, timer);
 }
 
 // === 流式事件缓冲（性能优化：合并高频 content/thinking 事件，按帧刷新）===
@@ -150,6 +184,9 @@ function flushStreamBuffer(convId: number) {
       conversationMessages: { ...state.conversationMessages, [convId]: updated },
     };
   });
+
+  // 增量内容刷入消息列表后，同步安排一次防抖落盘。
+  schedulePersist(convId, true);
 }
 
 function cleanupStreamBuffer(convId: number) {
@@ -182,9 +219,22 @@ function appendText(blocks: ContentBlock[], text: string): ContentBlock[] {
   return newBlocks;
 }
 
-function toDisplayMessages(msgs: ChatMessage[]): app.ConversationDisplayMessage[] {
+// 持久化 streaming 快照时需要归一化的中间态 → 终态。
+// 应用异常退出后重启，这些 block 不会再收到后端事件来结束，保留 running/pending_confirm
+// 会让 UI 上长期显示"运行中/待确认"的 spinner 而没有任何进展。统一归一化为 cancelled。
+const STREAMING_SNAPSHOT_STATUS_OVERRIDES: Record<string, ContentBlock["status"]> = {
+  running: "cancelled",
+  pending_confirm: "cancelled",
+};
+
+function normalizeSnapshotStatus(status: ContentBlock["status"]): ContentBlock["status"] {
+  if (!status) return status;
+  return STREAMING_SNAPSHOT_STATUS_OVERRIDES[status] ?? status;
+}
+
+function toDisplayMessages(msgs: ChatMessage[], includeStreaming = false): app.ConversationDisplayMessage[] {
   return msgs
-    .filter((m) => !m.streaming)
+    .filter((m) => includeStreaming || !m.streaming)
     .map(
       (m) =>
         new app.ConversationDisplayMessage({
@@ -197,7 +247,7 @@ function toDisplayMessages(msgs: ChatMessage[]): app.ConversationDisplayMessage[
                 content: b.content,
                 toolName: b.toolName,
                 toolInput: b.toolInput,
-                status: b.status,
+                status: includeStreaming ? normalizeSnapshotStatus(b.status) : b.status,
               })
           ),
         })
@@ -270,6 +320,11 @@ function updateConversation(
       conversationStreaming: newConvStreaming,
     };
   });
+
+  if (updates.messages !== undefined) {
+    // 消息列表发生变化后，补一轮防抖持久化。
+    schedulePersist(convId, true);
+  }
 }
 
 function drainQueue(convId: number) {
@@ -573,9 +628,9 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
         updateConversation(convId, { sending: false });
       }
 
-      // 保存消息
-      const finalMsgs = useAIStore.getState().conversationMessages[convId] || [];
-      SaveConversationMessages(convId, toDisplayMessages(finalMsgs)).catch(() => {});
+      // 终态立即落盘
+      cleanupPersistTimer(convId);
+      persistConversationSnapshot(convId);
       useAIStore.getState().fetchConversations();
 
       // 消费队列
@@ -608,9 +663,9 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
         updateConversation(convId, { sending: false });
       }
 
-      // Persist messages
-      const finalMsgs = useAIStore.getState().conversationMessages[convId] || [];
-      SaveConversationMessages(convId, toDisplayMessages(finalMsgs)).catch(() => {});
+      // 终态立即落盘，保证标题刷新前后都能恢复到完整会话内容。
+      cleanupPersistTimer(convId);
+      persistConversationSnapshot(convId);
       // Refresh conversations (title may have updated); sync any open tab bound to this conv.
       useAIStore
         .getState()
@@ -649,6 +704,10 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       } else {
         updateConversation(convId, { sending: false });
       }
+
+      // 错误态同样需要落盘，否则强制重启后会丢掉最后一次失败上下文。
+      cleanupPersistTimer(convId);
+      persistConversationSnapshot(convId, true);
       break;
     }
   }
@@ -1156,14 +1215,14 @@ export const useAIStore = create<AIState>((set, get) => {
 registerTabCloseHook((tab) => {
   if (tab.type !== "ai") return;
 
-  const state = useAIStore.getState();
   const meta = tab.meta as AITabMeta;
 
   if (meta.conversationId) {
-    const msgs = state.conversationMessages[meta.conversationId] || [];
-    if (msgs.length) {
-      SaveConversationMessages(meta.conversationId, toDisplayMessages(msgs)).catch(() => {});
-    }
+    // 关闭标签前补一次最终快照，避免最后一段对话未落盘。
+    // 关闭时流式输出可能仍在进行（streaming=true），必须传 includeStreaming=true 才能
+    // 把最后一段 assistant 消息一起落盘；toDisplayMessages 会把未完结的 block 归一为 cancelled。
+    cleanupPersistTimer(meta.conversationId);
+    persistConversationSnapshot(meta.conversationId, true);
     cleanupConvListener(meta.conversationId);
   }
 

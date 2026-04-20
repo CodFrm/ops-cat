@@ -3,8 +3,10 @@ package ai
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
@@ -18,6 +20,15 @@ import (
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
+
+// isExpectedCloseErr 判断 SSH/网络连接关闭时的预期错误。
+// 取消路径会主动 Close session/client 打断阻塞，随后的 defer 关闭就会返回这些错误；
+// 归类为预期错误后，上层可以跳过 warn 日志，避免噪音。
+func isExpectedCloseErr(err error) bool {
+	return err == nil ||
+		errors.Is(err, io.EOF) ||
+		errors.Is(err, net.ErrClosed)
+}
 
 // createSSHClient 创建 SSH 客户端，支持 password 和 key 认证
 func createSSHClient(cfg *asset_entity.SSHConfig, password, key, passphrase string) (*ssh.Client, error) {
@@ -92,28 +103,31 @@ func resolveAssetSSH(ctx context.Context, assetID int64) (*asset_entity.Asset, *
 }
 
 // executeSSHCommand 执行一次性 SSH 命令并返回输出（每次新建连接）
-func executeSSHCommand(cfg *asset_entity.SSHConfig, password, key, passphrase string, command string) (string, error) {
+func executeSSHCommand(ctx context.Context, cfg *asset_entity.SSHConfig, password, key, passphrase string, command string) (string, error) {
 	client, err := createSSHClient(cfg, password, key, passphrase)
 	if err != nil {
 		return "", err
 	}
 	defer func() {
-		if err := client.Close(); err != nil {
+		// runSSHCommand 在 ctx 取消时会主动 Close client 以打断阻塞，
+		// 这里再次 Close 属于预期重入；过滤已关闭错误避免日志噪音。
+		if err := client.Close(); err != nil && !isExpectedCloseErr(err) {
 			logger.Default().Warn("close SSH client", zap.Error(err))
 		}
 	}()
 
-	return runSSHCommand(client, command)
+	return runSSHCommand(ctx, client, command)
 }
 
 // runSSHCommand 在已有的 SSH 客户端上执行命令
-func runSSHCommand(client *ssh.Client, command string) (string, error) {
+func runSSHCommand(ctx context.Context, client *ssh.Client, command string) (string, error) {
 	session, err := client.NewSession()
 	if err != nil {
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 	defer func() {
-		if err := session.Close(); err != nil {
+		// ctx 取消路径下 session 已经被主动关闭，defer 再次 Close 会拿到已关闭错误，静默跳过。
+		if err := session.Close(); err != nil && !isExpectedCloseErr(err) {
 			logger.Default().Warn("close SSH session", zap.Error(err))
 		}
 	}()
@@ -122,11 +136,29 @@ func runSSHCommand(client *ssh.Client, command string) (string, error) {
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 
-	if err := session.Run(command); err != nil {
-		if stderr.Len() > 0 {
-			return "", fmt.Errorf("command failed: %s", stderr.String())
+	runCh := make(chan error, 1)
+	go func() {
+		runCh <- session.Run(command)
+	}()
+
+	select {
+	case err := <-runCh:
+		if err != nil {
+			if stderr.Len() > 0 {
+				return "", fmt.Errorf("command failed: %s", stderr.String())
+			}
+			return "", fmt.Errorf("command failed: %w", err)
 		}
-		return "", fmt.Errorf("command failed: %w", err)
+	case <-ctx.Done():
+		// 仅关闭 session 可能不足以唤醒底层 Run/Wait，这里连 client 一并关闭来打断阻塞。
+		// 上层 defer 会再次 Close，已通过 isExpectedCloseErr 过滤预期错误。
+		if err := session.Close(); err != nil && !isExpectedCloseErr(err) {
+			logger.Default().Warn("close SSH session on cancel", zap.Error(err))
+		}
+		if err := client.Close(); err != nil && !isExpectedCloseErr(err) {
+			logger.Default().Warn("close SSH client on cancel", zap.Error(err))
+		}
+		return "", ctx.Err()
 	}
 
 	output := stdout.String()
