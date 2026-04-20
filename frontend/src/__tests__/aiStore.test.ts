@@ -503,13 +503,49 @@ describe("persistence debounce & streaming snapshot", () => {
     await useAIStore.getState().sendToTab(tabId, "hi");
     expect(SaveConversationMessages).not.toHaveBeenCalled();
 
-    // Closing the tab should flush a final (non-streaming) snapshot synchronously and cancel
-    // the pending streaming timer so it does not fire after the tab is already gone.
+    // Closing the tab should flush a final snapshot synchronously and cancel the pending
+    // streaming timer so it does not fire after the tab is already gone.
     useTabStore.getState().closeTab(tabId);
     expect(SaveConversationMessages).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(300);
     expect(SaveConversationMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves in-flight streaming assistant message when closing tab mid-stream", () => {
+    const tabId = "ai-103";
+    useTabStore.setState({
+      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 103, title: "t" } }],
+      activeTabId: tabId,
+    });
+    useAIStore.setState({
+      tabStates: { [tabId]: {} },
+      conversationMessages: {
+        103: [
+          { role: "user", content: "go", blocks: [] },
+          {
+            role: "assistant",
+            content: "partial",
+            streaming: true,
+            blocks: [
+              { type: "tool", content: "", status: "running", toolName: "ssh" },
+              { type: "text", content: "ok", status: "completed" },
+            ],
+          },
+        ],
+      },
+      conversationStreaming: { 103: { sending: true, pendingQueue: [] } },
+    });
+
+    useTabStore.getState().closeTab(tabId);
+
+    expect(SaveConversationMessages).toHaveBeenCalledTimes(1);
+    const [convIdArg, displayMsgs] = vi.mocked(SaveConversationMessages).mock.calls[0];
+    expect(convIdArg).toBe(103);
+    const assistant = (displayMsgs as any[]).find((m) => m.role === "assistant");
+    expect(assistant).toBeTruthy();
+    expect(assistant.content).toBe("partial");
+    expect(assistant.blocks.map((b: any) => b.status)).toEqual(["cancelled", "completed"]);
   });
 });
 

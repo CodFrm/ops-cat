@@ -1219,8 +1219,10 @@ registerTabCloseHook((tab) => {
 
   if (meta.conversationId) {
     // 关闭标签前补一次最终快照，避免最后一段对话未落盘。
+    // 关闭时流式输出可能仍在进行（streaming=true），必须传 includeStreaming=true 才能
+    // 把最后一段 assistant 消息一起落盘；toDisplayMessages 会把未完结的 block 归一为 cancelled。
     cleanupPersistTimer(meta.conversationId);
-    persistConversationSnapshot(meta.conversationId);
+    persistConversationSnapshot(meta.conversationId, true);
     cleanupConvListener(meta.conversationId);
   }
 
