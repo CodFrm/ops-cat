@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { cn, useResizeHandle } from "@opskat/ui";
-import { useAIStore } from "@/stores/aiStore";
+import { useAIStore, type MentionRef } from "@/stores/aiStore";
 import { useTabStore } from "@/stores/tabStore";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { SideAssistantHeader } from "./SideAssistantHeader";
@@ -81,12 +81,12 @@ export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelPr
     bindSidebar(convId);
   };
 
-  const handleSendOverride = async (text: string) => {
+  const handleSendOverride = async (text: string, mentions?: MentionRef[]) => {
     let convId = sidebarConversationId;
     if (convId == null) {
       convId = await createAndBindSidebarConversation();
     }
-    await sendFromSidebar(convId, text);
+    await sendFromSidebar(convId, text, mentions);
   };
 
   const handleStopOverride = async () => {
