@@ -141,7 +141,6 @@ func runSSHCommand(ctx context.Context, client *ssh.Client, command string) (str
 		if err := session.Close(); err != nil && !errors.Is(err, io.EOF) {
 			logger.Default().Warn("close SSH session on cancel", zap.Error(err))
 		}
-		
 		if err := client.Close(); err != nil && !errors.Is(err, io.EOF) {
 			logger.Default().Warn("close SSH client on cancel", zap.Error(err))
 		}
@@ -153,16 +152,6 @@ func runSSHCommand(ctx context.Context, client *ssh.Client, command string) (str
 		output += "\nSTDERR:\n" + stderr.String()
 	}
 	return output, nil
-}
-
-// executeSSHCommandDetached 执行一次性 SSH 命令并忽略调用方上下文（非 AI 流程使用）
-func executeSSHCommandDetached(cfg *asset_entity.SSHConfig, password, key, passphrase string, command string) (string, error) {
-	return executeSSHCommand(context.Background(), cfg, password, key, passphrase, command)
-}
-
-// runSSHCommandDetached 在已有 SSH 客户端上执行命令并忽略调用方上下文（非 AI 流程使用）
-func runSSHCommandDetached(client *ssh.Client, command string) (string, error) {
-	return runSSHCommand(context.Background(), client, command)
 }
 
 // executeWithSFTP 创建临时 SSH+SFTP 连接并执行操作

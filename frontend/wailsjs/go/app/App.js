@@ -330,6 +330,10 @@ export function ListAssets(arg1, arg2) {
   return window['go']['app']['App']['ListAssets'](arg1, arg2);
 }
 
+export function LoadConversationMessages(arg1) {
+  return window['go']['app']['App']['LoadConversationMessages'](arg1);
+}
+
 export function ListAuditLogs(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
   return window['go']['app']['App']['ListAuditLogs'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }

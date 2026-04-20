@@ -26,7 +26,7 @@ vi.mock("react-i18next", () => ({
     t: (key: string) => key,
     i18n: { language: "en", changeLanguage: vi.fn() },
   }),
-  Trans: ({ children }: { children: React.ReactNode }) => children,
+  Trans: ({ i18nKey, children }: { i18nKey?: string; children?: React.ReactNode }) => i18nKey ?? children,
   initReactI18next: { type: "3rdParty", init: vi.fn() },
 }));
 

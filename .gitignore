@@ -28,3 +28,4 @@ coverage_new.out
 
 /devserver
 .superpowers/
+.worktrees/

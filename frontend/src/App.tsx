@@ -6,7 +6,7 @@ import { TooltipProvider, Toaster } from "@opskat/ui";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { AssetTree } from "@/components/layout/AssetTree";
 import { MainPanel } from "@/components/layout/MainPanel";
-import { ConversationListPanel } from "@/components/ai/ConversationListPanel";
+import { SideAssistantPanel } from "@/components/ai/SideAssistantPanel";
 import { WindowControls } from "@/components/layout/WindowControls";
 import { EdgeRevealStrip } from "@/components/layout/EdgeRevealStrip";
 import { useLayoutStore } from "@/stores/layoutStore";
@@ -331,10 +331,6 @@ function App() {
     }
   }, []);
 
-  const handleOpenConversation = useCallback((tabId: string) => {
-    useTabStore.getState().activateTab(tabId);
-  }, []);
-
   const tabBarLayout = useLayoutStore((s) => s.tabBarLayout);
   const leftPanelVisible = useLayoutStore((s) => s.leftPanelVisible);
   const activeSidePanel = useLayoutStore((s) => s.activeSidePanel);
@@ -462,11 +458,8 @@ function App() {
               onDeleteAsset={handleDeleteAsset}
               onConnectAsset={handleConnectAsset}
             />
-            <ConversationListPanel
-              collapsed={aiPanelCollapsed}
-              onToggle={() => setAiPanelCollapsed(!aiPanelCollapsed)}
-              onOpenConversation={handleOpenConversation}
-            />
+            <SideAssistantPanel collapsed={aiPanelCollapsed} onToggle={toggleAIPanel} />
+            {aiPanelCollapsed && <EdgeRevealStrip side="right" onClick={toggleAIPanel} />}
           </div>
 
           <AssetForm
