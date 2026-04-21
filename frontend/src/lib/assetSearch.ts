@@ -6,11 +6,16 @@ export function buildGroupPathMap(groups: group_entity.Group[]): Map<number, str
   const byId = new Map<number, group_entity.Group>();
   for (const g of groups) byId.set(g.ID, g);
   const cache = new Map<number, string>();
+  // visiting 用于检测 parent 链成环（DB 异常或直接改写可能造成），避免爆栈
+  const visiting = new Set<number>();
   const resolve = (id: number): string => {
     if (cache.has(id)) return cache.get(id)!;
+    if (visiting.has(id)) return "";
     const g = byId.get(id);
     if (!g) return "";
+    visiting.add(id);
     const parent = g.ParentID ? resolve(g.ParentID) : "";
+    visiting.delete(id);
     const full = parent ? `${parent}/${g.Name}` : g.Name;
     cache.set(id, full);
     return full;

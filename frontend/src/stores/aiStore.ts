@@ -552,6 +552,9 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
     case "queue_consumed": {
       // 后端在工具调用间隙消费了一条排队消息
       // 结束当前 assistant 消息，插入 user 消息，开启新 assistant 流
+      // event.content 为后端分离出的展示原文；mentions 从本地队列读取用于高亮 chip
+      const curQueue = useAIStore.getState().conversationStreaming[convId]?.pendingQueue || [];
+      const consumedItem = curQueue[0];
       const nextMsgs = [...msgs];
       const lastIdx = nextMsgs.length - 1;
       if (lastIdx >= 0 && nextMsgs[lastIdx].role === "assistant") {
@@ -560,6 +563,7 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       nextMsgs.push({
         role: "user" as const,
         content: event.content || "",
+        mentions: consumedItem?.mentions,
         blocks: [],
         streaming: false,
       });
@@ -569,8 +573,6 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
         blocks: [],
         streaming: true,
       });
-      // 从本地队列头部移除已消费的消息
-      const curQueue = useAIStore.getState().conversationStreaming[convId]?.pendingQueue || [];
       const newQueue = curQueue.length > 0 ? curQueue.slice(1) : [];
       updateConversation(convId, { messages: nextMsgs, pendingQueue: newQueue });
       break;
