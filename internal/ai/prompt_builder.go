@@ -17,7 +17,7 @@ type TabInfo struct {
 type MentionedAsset struct {
 	AssetID   int64  `json:"assetId"`
 	Name      string `json:"name"`
-	Type      string `json:"type"`      // ssh/mysql/redis/mongo/...
+	Type      string `json:"type"` // ssh/mysql/redis/mongo/...
 	Host      string `json:"host"`
 	GroupPath string `json:"groupPath"` // 完整路径 "生产/数据库"，无分组时为空
 }
