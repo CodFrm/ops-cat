@@ -40,7 +40,7 @@ import {
   ContextMenuTrigger,
 } from "@opskat/ui";
 import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
-import { pinyinMatch } from "@/lib/pinyin";
+import { filterAssets } from "@/lib/assetSearch";
 import { getAssetType } from "@/lib/assetTypes";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
@@ -99,7 +99,7 @@ export function AssetTree({
 
   if (collapsed) return null;
 
-  const filteredAssets = filter ? assets.filter((a) => pinyinMatch(a.Name, filter)) : assets;
+  const filteredAssets = filter ? filterAssets(assets, groups, { query: filter }).map((r) => r.asset) : assets;
 
   // Group assets by GroupID
   const groupedAssets = new Map<number, asset_entity.Asset[]>();

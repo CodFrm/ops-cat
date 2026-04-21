@@ -11,11 +11,12 @@ import {
   DeleteConversation,
   SaveConversationMessages,
 } from "../../wailsjs/go/app/App";
-import { ai, conversation_entity, app, group_entity } from "../../wailsjs/go/models";
+import { ai, conversation_entity, app } from "../../wailsjs/go/models";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import i18n from "../i18n";
 import { useTabStore, registerTabCloseHook, registerTabRestoreHook, type AITabMeta, type Tab } from "./tabStore";
 import { useAssetStore } from "./assetStore";
+import { buildGroupPathMap } from "@/lib/assetSearch";
 
 // 用户消息中的资产引用（对应前端 @ 提及）
 export interface MentionRef {
@@ -247,25 +248,6 @@ function convertDisplayMessages(displayMsgs: app.ConversationDisplayMessage[]): 
     })),
     streaming: false,
   }));
-}
-
-// 根据 groups 列表构建 groupId → 斜杠分隔路径映射
-function buildGroupPathMap(groups: group_entity.Group[]): Map<number, string> {
-  const byId = new Map<number, group_entity.Group>();
-  for (const g of groups) byId.set(g.ID, g);
-  const cache = new Map<number, string>();
-  const resolve = (id: number): string => {
-    if (cache.has(id)) return cache.get(id)!;
-    const g = byId.get(id);
-    if (!g) return "";
-    const parent = g.ParentID ? resolve(g.ParentID) : "";
-    const full = parent ? `${parent}/${g.Name}` : g.Name;
-    cache.set(id, full);
-    return full;
-  };
-  const map = new Map<number, string>();
-  for (const g of groups) map.set(g.ID, resolve(g.ID));
-  return map;
 }
 
 // 单次加载会话历史消息：仅当当前 store 尚未持有该 convId 的消息时才触发后端拉取。
