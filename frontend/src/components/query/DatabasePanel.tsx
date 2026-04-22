@@ -92,11 +92,7 @@ export function DatabasePanel({ tabId }: DatabasePanelProps) {
           {innerTabs.map((tab) => {
             const isActive = tab.id === activeInnerTabId;
             return (
-              <div
-                key={tab.id}
-                className="absolute inset-0"
-                style={{ display: isActive ? "block" : "none" }}
-              >
+              <div key={tab.id} className="absolute inset-0" style={{ display: isActive ? "block" : "none" }}>
                 {tab.type === "table" ? (
                   <TableDataTab tabId={tabId} database={tab.database} table={tab.table} />
                 ) : (
