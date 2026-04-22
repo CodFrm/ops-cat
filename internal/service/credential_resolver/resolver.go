@@ -263,8 +263,8 @@ func (r *Resolver) ResolveSSHConnectConfig(ctx context.Context, assetID int64) (
 }
 
 // DialAssetSSH 一站式解析资产并建立 SSH 连接，自动处理代理密码解密、跳板机链。
-// 除返回的 *ssh.Client 外，调用方还须关闭返回的所有额外 closer（跳板机链的中间连接等）；
-// 否则会泄漏连接。失败时返回的 closer 列表为 nil。
+// 除返回的 *ssh.Client 外，调用方还须负责关闭返回的所有额外 closer（跳板机链的
+// 中间连接等）；否则会泄漏连接。失败时返回的 closer 列表为 nil。
 func (r *Resolver) DialAssetSSH(ctx context.Context, assetID int64) (*ssh.Client, []io.Closer, error) {
 	sshCfg, password, key, passphrase, jumpHosts, err := r.ResolveSSHConnectConfig(ctx, assetID)
 	if err != nil {

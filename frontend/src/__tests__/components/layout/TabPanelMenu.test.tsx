@@ -66,11 +66,12 @@ describe("TabPanelMenu", () => {
     expect(useTabStore.getState().tabs).toHaveLength(0);
   });
 
-  it("clicking 'filter' calls onOpenFilter", () => {
+  it("clicking 'filter' calls onOpenFilter (deferred to escape DropdownMenu close)", async () => {
     const fn = vi.fn();
     render(<TabPanelMenu mode="top" onOpenFilter={fn} />);
     openMenu(screen.getByRole("button"));
     fireEvent.click(screen.getByText("shortcut.panel.filter"));
+    await new Promise((r) => setTimeout(r, 0));
     expect(fn).toHaveBeenCalled();
   });
 
