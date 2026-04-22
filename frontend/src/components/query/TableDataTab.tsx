@@ -1,7 +1,35 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronLeft, ChevronRight, Save, Undo2, Loader2, RefreshCw, ChevronsLeft, ChevronsRight, Filter } from "lucide-react";
-import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@opskat/ui";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Save,
+  Undo2,
+  Loader2,
+  RefreshCw,
+  ChevronsLeft,
+  ChevronsRight,
+  Filter,
+  FileCode2,
+  Copy,
+} from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  Button,
+  Input,
+  ScrollArea,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@opskat/ui";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { ExecuteSQL } from "../../../wailsjs/go/app/App";
 import { QueryResultTable, CellEdit } from "./QueryResultTable";
@@ -53,6 +81,9 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
   const [edits, setEdits] = useState<Map<string, unknown>>(new Map());
   const [submitting, setSubmitting] = useState(false);
   const [showSqlPreview, setShowSqlPreview] = useState(false);
+  const [showDDLDialog, setShowDDLDialog] = useState(false);
+  const [ddlLoading, setDdlLoading] = useState(false);
+  const [ddlSQL, setDdlSQL] = useState("");
   const [whereInput, setWhereInput] = useState("");
   const [orderByInput, setOrderByInput] = useState("");
   const [whereClause, setWhereClause] = useState("");
@@ -253,6 +284,75 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
     setApplyVersion((v) => v + 1);
   }, [whereInput, orderByInput]);
 
+  const handleViewDDL = useCallback(async () => {
+    if (!assetId) return;
+    setShowDDLDialog(true);
+    setDdlLoading(true);
+
+    try {
+      let ddl = "";
+
+      if (driver === "postgresql") {
+        const escapedTable = table.replace(/'/g, "''");
+        const columnsSql = `SELECT column_name, data_type, udt_name, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${escapedTable}' ORDER BY ordinal_position`;
+        const primaryKeySql = `SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.table_schema = 'public' AND tc.table_name = '${escapedTable}' AND tc.constraint_type = 'PRIMARY KEY' ORDER BY kcu.ordinal_position`;
+
+        const columnsResult = await ExecuteSQL(assetId, columnsSql, database);
+        const primaryKeyResult = await ExecuteSQL(assetId, primaryKeySql, database);
+        const columnsParsed: SQLResult = JSON.parse(columnsResult);
+        const primaryKeyParsed: SQLResult = JSON.parse(primaryKeyResult);
+
+        const columns = columnsParsed.rows || [];
+        const primaryKeyColumns = (primaryKeyParsed.rows || []).map((r) => String(Object.values(r)[0] ?? "")).filter(Boolean);
+
+        if (columns.length > 0) {
+          const defs = columns.map((col) => {
+            const name = String(col.column_name ?? "");
+            const dataType = String(col.data_type ?? "");
+            const udtName = String(col.udt_name ?? "");
+            const columnDefault = col.column_default == null ? "" : String(col.column_default);
+            const type = dataType === "USER-DEFINED" && udtName ? udtName : dataType;
+            const nullable = String(col.is_nullable ?? "").toUpperCase() === "YES";
+
+            let line = `"${name}" ${type}`;
+            if (!nullable) line += " NOT NULL";
+            if (columnDefault) line += ` DEFAULT ${columnDefault}`;
+            return line;
+          });
+
+          if (primaryKeyColumns.length > 0) {
+            defs.push(`PRIMARY KEY (${primaryKeyColumns.map((c) => `"${c}"`).join(", ")})`);
+          }
+
+          ddl = `CREATE TABLE "public"."${table}" (\n  ${defs.join(",\n  ")}\n);`;
+        }
+      } else {
+        const quotedTable = quoteIdent(table, driver);
+        const result = await ExecuteSQL(assetId, `SHOW CREATE TABLE ${quotedTable}`, database);
+        const parsed: SQLResult = JSON.parse(result);
+        const row = parsed.rows?.[0];
+        if (row) {
+          const values = Object.values(row);
+          const createSQL = values.find((v) => typeof v === "string" && /CREATE\s+(TABLE|VIEW)/i.test(String(v)));
+          ddl = String(createSQL ?? values[1] ?? values[0] ?? "");
+        }
+      }
+
+      setDdlSQL(ddl || t("query.ddlEmpty"));
+    } catch (e) {
+      setDdlSQL(String(e));
+    } finally {
+      setDdlLoading(false);
+    }
+  }, [assetId, driver, table, database, t]);
+
+  const handleCopyDDL = useCallback(async () => {
+    const text = ddlLoading ? "" : ddlSQL;
+    if (!text) return;
+    await navigator.clipboard.writeText(text);
+    toast.success(t("query.copied"));
+  }, [ddlLoading, ddlSQL, t]);
+
   const hasNext = totalPages != null ? page < totalPages - 1 : rows.length === pageSize;
   const hasPrev = page > 0;
   const hasEdits = edits.size > 0;
@@ -294,6 +394,10 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
         <Button variant="outline" size="sm" className="h-7 text-xs gap-1 shrink-0" onClick={handleApplyQuery}>
           <Filter className="h-3.5 w-3.5" />
           {t("query.applyFilter")}
+        </Button>
+        <Button variant="outline" size="sm" className="h-7 text-xs gap-1 shrink-0" onClick={handleViewDDL}>
+          <FileCode2 className="h-3.5 w-3.5" />
+          {t("query.viewDDL")}
         </Button>
       </div>
 
@@ -436,6 +540,28 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
           )}
         </div>
       </div>
+
+      {/* DDL dialog */}
+      <AlertDialog open={showDDLDialog} onOpenChange={setShowDDLDialog}>
+        <AlertDialogContent className="max-w-3xl" onOverlayClick={() => setShowDDLDialog(false)}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("query.ddlDialogTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("query.ddlDialogDesc", { table })}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <ScrollArea className="max-h-[420px]">
+            <pre className="bg-muted rounded-md p-3 text-xs font-mono whitespace-pre-wrap break-all border border-border">
+              {ddlLoading ? t("query.loadingDDL") : ddlSQL}
+            </pre>
+          </ScrollArea>
+          <AlertDialogFooter>
+            <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={handleCopyDDL} disabled={ddlLoading || !ddlSQL}>
+              <Copy className="h-3.5 w-3.5" />
+              {t("action.copy")}
+            </Button>
+            <AlertDialogCancel size="sm" className="h-7 text-xs px-3">{t("action.close")}</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* SQL Preview confirmation dialog */}
       <SqlPreviewDialog
