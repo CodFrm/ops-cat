@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/opskat/opskat/internal/ai"
@@ -56,14 +57,33 @@ func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
 // resetRunners 停止并清空所有缓存的 ConversationRunner。
 // Why: runner 在创建时会捕获当时的 aiAgent 引用，供应商切换后若不清空，
 // 已有会话会继续使用旧 provider，必须重启软件才生效。
+// 并发调用 Stop 避免串行累计阻塞 UI；另外设 3s 上限——Runner.Stop 会阻塞等
+// goroutine 退出，若某个 Stop 被卡住（ctx 不被及时响应等），
+// 超时后放行，泄漏的 goroutine 只是持有旧 agent 引用，不会导致正确性问题。
 func (a *App) resetRunners() {
+	var wg sync.WaitGroup
 	a.runners.Range(func(key, value any) bool {
 		if r, ok := value.(*ai.ConversationRunner); ok {
-			r.Stop()
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				r.Stop()
+			}()
 		}
 		a.runners.Delete(key)
 		return true
 	})
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		logger.Default().Warn("resetRunners: 部分 runner Stop 未在 3s 内完成，放行关闭")
+	}
 }
 
 // InitAIProvider 启动时加载激活的 Provider
@@ -362,6 +382,31 @@ func (a *App) SaveConversationMessages(convID int64, displayMsgs []ConversationD
 // GetCurrentConversationID 获取当前会话ID
 func (a *App) GetCurrentConversationID() int64 {
 	return a.currentConversationID
+}
+
+// WaitAIFlushAck 返回用于等待前端 flush 完成的 channel。
+// main.go 的 OnBeforeClose 使用：先 drain 掉旧信号，再 emit 事件，最后 select 等待 ack 或超时。
+func (a *App) WaitAIFlushAck() <-chan struct{} {
+	return a.flushAckCh
+}
+
+// DrainAIFlushAck 清空可能残留的 ack 信号，避免误把上次的 ack 当作本次响应。
+func (a *App) DrainAIFlushAck() {
+	select {
+	case <-a.flushAckCh:
+	default:
+	}
+}
+
+// subscribeAIFlushAck 在 Startup 中注册：前端完成会话落盘后会 EventsEmit("ai:flush-done")，
+// 这里把信号推入 channel，供 OnBeforeClose 等待。
+func (a *App) subscribeAIFlushAck() {
+	wailsRuntime.EventsOn(a.ctx, "ai:flush-done", func(_ ...any) {
+		select {
+		case a.flushAckCh <- struct{}{}:
+		default:
+		}
+	})
 }
 
 // RespondPermission 前端响应权限确认请求

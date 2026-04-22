@@ -6,6 +6,7 @@ import (
 	"log"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/opskat/opskat/internal/app"
 	"github.com/opskat/opskat/internal/bootstrap"
@@ -16,6 +17,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
+	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 //go:embed all:frontend/dist
@@ -66,7 +68,19 @@ func main() {
 			Assets:  assets,
 			Handler: app.NewExtensionAssetHandler(filepath.Join(bootstrap.AppDataDir(), "extensions"), nil),
 		},
-		OnStartup:  a.Startup,
+		OnStartup: a.Startup,
+		// OnBeforeClose 在窗口真正关闭前触发：emit ai:flush-all 让前端落盘所有活跃会话，
+		// 前端完成后 EventsEmit("ai:flush-done") 回执，后端从 flushAckCh 收到信号立刻放行；
+		// 超时 2s 兜底避免前端异常时永久阻塞。返回 false 允许关闭；返回 true 则阻止关闭。
+		OnBeforeClose: func(ctx context.Context) bool {
+			a.DrainAIFlushAck()
+			wailsRuntime.EventsEmit(ctx, "ai:flush-all")
+			select {
+			case <-a.WaitAIFlushAck():
+			case <-time.After(2 * time.Second):
+			}
+			return false
+		},
 		OnShutdown: func(ctx context.Context) { a.Cleanup() },
 		Bind: []interface{}{
 			a,

@@ -3,7 +3,10 @@ package conversation_svc
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
 	"github.com/opskat/opskat/internal/repository/conversation_repo"
@@ -193,6 +196,84 @@ func TestConversationSvc_SaveMessages(t *testing.T) {
 			assert.Error(t, err)
 		})
 	})
+}
+
+// TestConversationSvc_SaveMessages_ConcurrentSameID 验证同一 conversationID 的并发 SaveMessages
+// 被序列化，防止后到的 delete 覆盖先到的 insert。
+// 这是守护修复「关闭软件丢失 AI 对话」的关键不变量：前端立即落盘 + 300ms 防抖落盘
+// 会从不同 IPC goroutine 并发进入 SaveMessages，没有序列化就会丢数据。
+func TestConversationSvc_SaveMessages_ConcurrentSameID(t *testing.T) {
+	ctx, mockRepo := setupTest(t)
+
+	var inFlight atomic.Int32
+	var maxInFlight atomic.Int32
+	mockRepo.EXPECT().DeleteMessages(gomock.Any(), int64(42)).Times(2).DoAndReturn(
+		func(_ context.Context, _ int64) error {
+			n := inFlight.Add(1)
+			// 记录峰值并发数；若大于 1 说明没锁住。
+			for {
+				m := maxInFlight.Load()
+				if n <= m || maxInFlight.CompareAndSwap(m, n) {
+					break
+				}
+			}
+			// 给另一个 goroutine 抢跑的机会，放大竞争窗口。
+			time.Sleep(20 * time.Millisecond)
+			inFlight.Add(-1)
+			return nil
+		},
+	)
+	mockRepo.EXPECT().CreateMessages(gomock.Any(), gomock.Any()).Times(2).Return(nil)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = Conversation().SaveMessages(ctx, 42, []*conversation_entity.Message{{Role: "user", Content: "x"}})
+		}()
+	}
+	wg.Wait()
+
+	assert.Equal(t, int32(1), maxInFlight.Load(), "同一 conversationID 的 SaveMessages 应串行")
+}
+
+// TestConversationSvc_SaveMessages_ConcurrentDifferentID 验证不同 conversationID 的
+// SaveMessages 仍可并发执行，锁粒度正确。
+func TestConversationSvc_SaveMessages_ConcurrentDifferentID(t *testing.T) {
+	ctx, mockRepo := setupTest(t)
+
+	var inFlight atomic.Int32
+	var maxInFlight atomic.Int32
+	for _, id := range []int64{101, 102} {
+		mockRepo.EXPECT().DeleteMessages(gomock.Any(), id).DoAndReturn(
+			func(_ context.Context, _ int64) error {
+				n := inFlight.Add(1)
+				for {
+					m := maxInFlight.Load()
+					if n <= m || maxInFlight.CompareAndSwap(m, n) {
+						break
+					}
+				}
+				time.Sleep(20 * time.Millisecond)
+				inFlight.Add(-1)
+				return nil
+			},
+		)
+		mockRepo.EXPECT().CreateMessages(gomock.Any(), gomock.Any()).Return(nil)
+	}
+
+	var wg sync.WaitGroup
+	for _, id := range []int64{101, 102} {
+		wg.Add(1)
+		go func(convID int64) {
+			defer wg.Done()
+			_ = Conversation().SaveMessages(ctx, convID, []*conversation_entity.Message{{Role: "user", Content: "x"}})
+		}(id)
+	}
+	wg.Wait()
+
+	assert.Equal(t, int32(2), maxInFlight.Load(), "不同 conversationID 的 SaveMessages 应可并发")
 }
 
 func TestConversationSvc_LoadMessages(t *testing.T) {

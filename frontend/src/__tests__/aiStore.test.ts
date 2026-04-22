@@ -438,7 +438,7 @@ describe("persistence debounce & streaming snapshot", () => {
     vi.useRealTimers();
   });
 
-  it("debounces SaveConversationMessages across multiple schedules", async () => {
+  it("persists user message immediately and debounces follow-up streaming snapshot", async () => {
     const tabId = "ai-100";
     useTabStore.setState({
       tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 100, title: "t" } }],
@@ -446,14 +446,14 @@ describe("persistence debounce & streaming snapshot", () => {
     });
     useAIStore.setState({ tabStates: { [tabId]: {} } });
 
-    // sendToTab internally triggers two updateConversation calls (user msg, then streaming
-    // assistant msg), each of which schedules a persist. They should collapse into one timer.
+    // sendToTab 新行为：用户消息立即落盘一次（避免防抖窗口内崩溃丢失用户输入），
+    // 紧接着的 assistant placeholder 更新走 300ms 防抖。
     await useAIStore.getState().sendToTab(tabId, "hi");
-    expect(SaveConversationMessages).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(300);
     expect(SaveConversationMessages).toHaveBeenCalledTimes(1);
     expect(vi.mocked(SaveConversationMessages).mock.calls[0][0]).toBe(100);
+
+    await vi.advanceTimersByTimeAsync(300);
+    expect(SaveConversationMessages).toHaveBeenCalledTimes(2);
   });
 
   it("normalizes running/pending_confirm blocks when persisting a streaming snapshot", async () => {
@@ -500,16 +500,17 @@ describe("persistence debounce & streaming snapshot", () => {
     });
     useAIStore.setState({ tabStates: { [tabId]: {} } });
 
+    // sendToTab 会立即落盘一次（用户消息），后续 assistant placeholder 走 300ms 防抖。
     await useAIStore.getState().sendToTab(tabId, "hi");
-    expect(SaveConversationMessages).not.toHaveBeenCalled();
+    expect(SaveConversationMessages).toHaveBeenCalledTimes(1);
 
-    // Closing the tab should flush a final snapshot synchronously and cancel the pending
-    // streaming timer so it does not fire after the tab is already gone.
+    // 关闭标签要取消待定的防抖定时器，并同步 flush 一次最终快照。
     useTabStore.getState().closeTab(tabId);
-    expect(SaveConversationMessages).toHaveBeenCalledTimes(1);
+    expect(SaveConversationMessages).toHaveBeenCalledTimes(2);
 
+    // 定时器已被清理，300ms 后不应再产生额外保存。
     await vi.advanceTimersByTimeAsync(300);
-    expect(SaveConversationMessages).toHaveBeenCalledTimes(1);
+    expect(SaveConversationMessages).toHaveBeenCalledTimes(2);
   });
 
   it("preserves in-flight streaming assistant message when closing tab mid-stream", () => {

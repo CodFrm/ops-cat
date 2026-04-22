@@ -3,6 +3,7 @@ package conversation_svc
 import (
 	"context"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
@@ -25,7 +26,14 @@ type ConversationSvc interface {
 	LoadMessages(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error)
 }
 
-type conversationSvc struct{}
+type conversationSvc struct {
+	// saveLocks 为每个 conversationID 维护一把互斥锁。
+	// SaveMessages 实现为 delete-all + insert-all，两个 IPC 并发调用时，
+	// 若不加锁，后到的 delete 可能覆盖先到的 insert，导致数据丢失。
+	// 此外，该锁也让 Save 调用按 IPC 到达顺序落盘，前端依赖这个顺序来保证
+	// 「晚调度的快照覆盖早调度的快照」。
+	saveLocks sync.Map // map[int64]*sync.Mutex
+}
 
 var defaultConversation = &conversationSvc{}
 
@@ -73,6 +81,9 @@ func (s *conversationSvc) Delete(ctx context.Context, id int64) error {
 		logger.Default().Warn("delete conversation messages", zap.Int64("id", id), zap.Error(err))
 	}
 
+	// 清理 saveLocks，避免删除后的 conversationID 继续占用 mutex。
+	s.saveLocks.Delete(id)
+
 	// 清理工作目录
 	if conv.WorkDir != "" {
 		if err := os.RemoveAll(conv.WorkDir); err != nil {
@@ -84,6 +95,12 @@ func (s *conversationSvc) Delete(ctx context.Context, id int64) error {
 }
 
 func (s *conversationSvc) SaveMessages(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error {
+	// 按 conversationID 加锁，串行化同一会话的 delete+insert，防止并发覆盖丢数据。
+	lockI, _ := s.saveLocks.LoadOrStore(conversationID, &sync.Mutex{})
+	lock := lockI.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+
 	// 先删除旧消息
 	if err := conversation_repo.Conversation().DeleteMessages(ctx, conversationID); err != nil {
 		return err

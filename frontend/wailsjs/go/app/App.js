@@ -118,6 +118,10 @@ export function DownloadAndInstallUpdate(arg1) {
   return window['go']['app']['App']['DownloadAndInstallUpdate'](arg1);
 }
 
+export function DrainAIFlushAck() {
+  return window['go']['app']['App']['DrainAIFlushAck']();
+}
+
 export function EnableExtension(arg1) {
   return window['go']['app']['App']['EnableExtension'](arg1);
 }
@@ -604,6 +608,10 @@ export function UpdateGroup(arg1) {
 
 export function UpdatePolicyGroup(arg1) {
   return window['go']['app']['App']['UpdatePolicyGroup'](arg1);
+}
+
+export function WaitAIFlushAck() {
+  return window['go']['app']['App']['WaitAIFlushAck']();
 }
 
 export function WaitGitHubDeviceAuth(arg1, arg2) {

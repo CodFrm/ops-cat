@@ -81,6 +81,7 @@ type App struct {
 	currentConversationID   int64                      // 当前活跃会话ID
 	runners                 sync.Map                   // map[int64]*ai.ConversationRunner
 	extSvc                  *extension_svc.Service
+	flushAckCh              chan struct{}              // OnBeforeClose 等待前端确认 flush 完成
 }
 
 // NewApp 创建App实例
@@ -93,6 +94,7 @@ func NewApp(skill SkillContent) *App {
 		sftpService:    sftp_svc.NewService(mgr),
 		permissionChan: make(chan ai.PermissionResponse, 1),
 		shutdownCh:     make(chan struct{}),
+		flushAckCh:     make(chan struct{}, 1),
 	}
 	a.forwardManager = NewForwardManager(&appPoolDialer{sshManager: mgr})
 	return a
@@ -113,6 +115,7 @@ func (a *App) Startup(ctx context.Context) {
 	a.startSSHPoolServer(authToken)
 	a.startAutoUpdateCheck()
 	a.InitAIProvider()
+	a.subscribeAIFlushAck()
 	a.emitSystemStatus()
 
 	// Initialize extension system (can be disabled via OPSKAT_EXTENSIONS=0)

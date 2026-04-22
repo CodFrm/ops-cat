@@ -16,11 +16,13 @@ vi.mock("../../wailsjs/runtime/runtime", () => ({
 
 // Mock Wails backend bindings
 vi.mock("../../wailsjs/go/app/App", async () => {
-  // Read the real module's export names and replace each with vi.fn()
+  // Read the real module's export names and replace each with vi.fn().
+  // mockResolvedValue(undefined) 让所有 binding 默认返回 Promise<undefined>，
+  // 与真实 Wails binding 的签名一致，避免 `.catch(() => {})` 在 undefined 上报错。
   const actual = await vi.importActual<Record<string, unknown>>("../../wailsjs/go/app/App");
   const mocked: Record<string, unknown> = {};
   for (const key of Object.keys(actual)) {
-    mocked[key] = vi.fn();
+    mocked[key] = vi.fn().mockResolvedValue(undefined);
   }
   return mocked;
 });

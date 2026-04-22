@@ -76,6 +76,8 @@ export function DisconnectSSH(arg1:string):Promise<void>;
 
 export function DownloadAndInstallUpdate(arg1:boolean):Promise<void>;
 
+export function DrainAIFlushAck():Promise<void>;
+
 export function EnableExtension(arg1:string):Promise<void>;
 
 export function EncryptPassword(arg1:string):Promise<string>;
@@ -319,6 +321,8 @@ export function UpdateForwardConfig(arg1:number,arg2:string,arg3:number,arg4:Arr
 export function UpdateGroup(arg1:group_entity.Group):Promise<void>;
 
 export function UpdatePolicyGroup(arg1:policy_group_entity.PolicyGroup):Promise<void>;
+
+export function WaitAIFlushAck():Promise<any>;
 
 export function WaitGitHubDeviceAuth(arg1:string,arg2:number):Promise<string>;
 
