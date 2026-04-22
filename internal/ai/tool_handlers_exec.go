@@ -11,8 +11,6 @@ import (
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 
-	"github.com/opskat/opskat/internal/model/entity/asset_entity"
-	"github.com/opskat/opskat/internal/service/asset_svc"
 	"github.com/opskat/opskat/internal/service/credential_resolver"
 
 	"github.com/pkg/sftp"
@@ -87,42 +85,22 @@ func handleRunCommand(ctx context.Context, args map[string]any) (string, error) 
 		}
 	}
 
-	asset, err := asset_svc.Asset().Get(ctx, assetID)
-	if err != nil {
-		return "", fmt.Errorf("asset not found: %w", err)
-	}
-	if !asset.IsSSH() {
-		return "", fmt.Errorf("asset is not SSH type")
-	}
-	sshCfg, err := asset.GetSSHConfig()
-	if err != nil {
-		return "", fmt.Errorf("failed to get SSH config: %w", err)
-	}
-
 	// 如果有 SSH 缓存（内置 Agent 模式），使用缓存连接
 	if cache := getSSHCache(ctx); cache != nil {
-		return runCommandWithCache(ctx, cache, assetID, sshCfg, command)
+		return runCommandWithCache(ctx, cache, assetID, command)
 	}
 
 	// 无缓存，创建一次性连接
-	password, key, passphrase, err := credential_resolver.Default().ResolveSSHCredentials(ctx, sshCfg)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve credentials: %w", err)
-	}
-	return executeSSHCommand(ctx, sshCfg, password, key, passphrase, command)
+	return executeSSHCommand(ctx, assetID, command)
 }
 
-func runCommandWithCache(ctx context.Context, cache *SSHClientCache, assetID int64, cfg *asset_entity.SSHConfig, command string) (string, error) {
+func runCommandWithCache(ctx context.Context, cache *SSHClientCache, assetID int64, command string) (string, error) {
 	dial := func() (*ssh.Client, io.Closer, error) {
-		password, key, passphrase, err := credential_resolver.Default().ResolveSSHCredentials(ctx, cfg)
+		client, extras, err := credential_resolver.Default().DialAssetSSH(ctx, assetID)
 		if err != nil {
 			return nil, nil, err
 		}
-		client, err := createSSHClient(cfg, password, key, passphrase)
-		if err != nil {
-			return nil, nil, err
-		}
-		return client, nil, nil
+		return client, closersAsOne(extras), nil
 	}
 
 	client, _, err := cache.GetOrDial(assetID, dial)
@@ -160,12 +138,7 @@ func handleUploadFile(ctx context.Context, args map[string]any) (string, error) 
 		return "", fmt.Errorf("missing required parameters: asset_id, local_path, remote_path")
 	}
 
-	_, sshCfg, password, key, passphrase, err := resolveAssetSSH(ctx, assetID)
-	if err != nil {
-		return "", err
-	}
-
-	err = executeWithSFTP(ctx, sshCfg, password, key, passphrase, func(client *sftp.Client) error {
+	err := executeWithSFTP(ctx, assetID, func(client *sftp.Client) error {
 		srcFile, err := os.Open(localPath) //nolint:gosec
 		if err != nil {
 			return fmt.Errorf("failed to open local file: %w", err)
@@ -203,12 +176,7 @@ func handleDownloadFile(ctx context.Context, args map[string]any) (string, error
 		return "", fmt.Errorf("missing required parameters: asset_id, remote_path, local_path")
 	}
 
-	_, sshCfg, password, key, passphrase, err := resolveAssetSSH(ctx, assetID)
-	if err != nil {
-		return "", err
-	}
-
-	err = executeWithSFTP(ctx, sshCfg, password, key, passphrase, func(client *sftp.Client) error {
+	err := executeWithSFTP(ctx, assetID, func(client *sftp.Client) error {
 		srcFile, err := client.Open(remotePath)
 		if err != nil {
 			return fmt.Errorf("failed to open remote file: %w", err)
