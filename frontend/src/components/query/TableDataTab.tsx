@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronLeft, ChevronRight, Save, Undo2, Loader2, RefreshCw, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Save, Undo2, Loader2, RefreshCw, ChevronsLeft, ChevronsRight, Filter } from "lucide-react";
 import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@opskat/ui";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { ExecuteSQL } from "../../../wailsjs/go/app/App";
@@ -53,6 +53,11 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
   const [edits, setEdits] = useState<Map<string, unknown>>(new Map());
   const [submitting, setSubmitting] = useState(false);
   const [showSqlPreview, setShowSqlPreview] = useState(false);
+  const [whereInput, setWhereInput] = useState("");
+  const [orderByInput, setOrderByInput] = useState("");
+  const [whereClause, setWhereClause] = useState("");
+  const [orderByClause, setOrderByClause] = useState("");
+  const [applyVersion, setApplyVersion] = useState(0);
 
   const driver = queryMeta?.driver;
   const assetId = queryMeta?.assetId ?? 0;
@@ -64,8 +69,10 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
     if (!assetId) return;
     const tableName =
       driver === "postgresql" ? `"${table}"` : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+    const where = whereClause.trim();
+    const wherePart = where ? ` WHERE ${where}` : "";
     try {
-      const result = await ExecuteSQL(assetId, `SELECT COUNT(*) AS cnt FROM ${tableName}`, database);
+      const result = await ExecuteSQL(assetId, `SELECT COUNT(*) AS cnt FROM ${tableName}${wherePart}`, database);
       const parsed: SQLResult = JSON.parse(result);
       const row = parsed.rows?.[0];
       if (row) {
@@ -73,9 +80,9 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
         if (!isNaN(cnt)) setTotalRows(cnt);
       }
     } catch {
-      // ignore count errors
+      setTotalRows(null);
     }
-  }, [assetId, database, table, driver]);
+  }, [assetId, database, table, driver, whereClause]);
 
   const fetchData = useCallback(
     async (pageNum: number) => {
@@ -86,7 +93,11 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
       const offset = pageNum * pageSize;
       const tableName =
         driver === "postgresql" ? `"${table}"` : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
-      const sql = `SELECT * FROM ${tableName} LIMIT ${pageSize} OFFSET ${offset}`;
+      const where = whereClause.trim();
+      const orderBy = orderByClause.trim();
+      const wherePart = where ? ` WHERE ${where}` : "";
+      const orderByPart = orderBy ? ` ORDER BY ${orderBy}` : "";
+      const sql = `SELECT * FROM ${tableName}${wherePart}${orderByPart} LIMIT ${pageSize} OFFSET ${offset}`;
 
       try {
         const result = await ExecuteSQL(assetId, sql, database);
@@ -101,16 +112,16 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
         setLoading(false);
       }
     },
-    [assetId, database, table, driver, pageSize]
+    [assetId, database, table, driver, pageSize, whereClause, orderByClause]
   );
 
   useEffect(() => {
     fetchCount();
-  }, [fetchCount]);
+  }, [fetchCount, applyVersion]);
 
   useEffect(() => {
     fetchData(page);
-  }, [fetchData, page]);
+  }, [fetchData, page, applyVersion]);
 
   // Sync page input
   useEffect(() => {
@@ -234,17 +245,102 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
     fetchCount();
   }, [fetchData, fetchCount, page]);
 
+  const handleApplyQuery = useCallback(() => {
+    setWhereClause(whereInput.trim());
+    setOrderByClause(orderByInput.trim());
+    setPage(0);
+    setEdits(new Map());
+    setApplyVersion((v) => v + 1);
+  }, [whereInput, orderByInput]);
+
   const hasNext = totalPages != null ? page < totalPages - 1 : rows.length === pageSize;
   const hasPrev = page > 0;
   const hasEdits = edits.size > 0;
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header bar */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-muted/30 shrink-0">
-        <span className="text-xs font-mono font-semibold bg-muted px-1.5 py-0.5 rounded border border-border">
-          {database}.{table}
-        </span>
+      {/* Filter bar */}
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-muted/20 shrink-0">
+        <div className="flex items-center gap-1 flex-1 min-w-0">
+          <span className="text-[11px] font-mono text-muted-foreground">WHERE</span>
+          <Input
+            className="h-7 text-xs font-mono"
+            value={whereInput}
+            onChange={(e) => setWhereInput(e.target.value)}
+            placeholder={t("query.wherePlaceholder")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                handleApplyQuery();
+              }
+            }}
+          />
+        </div>
+        <div className="flex items-center gap-1 flex-1 min-w-0">
+          <span className="text-[11px] font-mono text-muted-foreground whitespace-nowrap">ORDER BY</span>
+          <Input
+            className="h-7 text-xs font-mono"
+            value={orderByInput}
+            onChange={(e) => setOrderByInput(e.target.value)}
+            placeholder={t("query.orderByPlaceholder")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                handleApplyQuery();
+              }
+            }}
+          />
+        </div>
+        <Button variant="outline" size="sm" className="h-7 text-xs gap-1 shrink-0" onClick={handleApplyQuery}>
+          <Filter className="h-3.5 w-3.5" />
+          {t("query.applyFilter")}
+        </Button>
+      </div>
+
+      {/* Table content */}
+      <QueryResultTable
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        error={error ?? undefined}
+        editable
+        edits={edits}
+        onCellEdit={handleCellEdit}
+        showRowNumber
+        rowNumberOffset={page * pageSize}
+      />
+
+      {/* Edit action bar */}
+      {hasEdits && (
+        <div className="flex items-center gap-2 px-3 py-2 border-t border-border bg-muted/50 shrink-0">
+          <span className="text-xs text-muted-foreground">{t("query.pendingEdits", { count: edits.size })}</span>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1"
+              onClick={handleDiscard}
+              disabled={submitting}
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+              {t("query.discardEdits")}
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              className="h-7 text-xs gap-1"
+              onClick={() => setShowSqlPreview(true)}
+              disabled={submitting}
+            >
+              {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              {t("query.submitEdits")}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Footer bar */}
+      <div className="flex items-center gap-2 px-3 py-1.5 border-t border-border bg-muted/30 shrink-0">
         {totalRows != null && (
           <span className="text-xs text-muted-foreground">{t("query.totalRows", { count: totalRows })}</span>
         )}
@@ -340,48 +436,6 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
           )}
         </div>
       </div>
-
-      {/* Table content */}
-      <QueryResultTable
-        columns={columns}
-        rows={rows}
-        loading={loading}
-        error={error ?? undefined}
-        editable
-        edits={edits}
-        onCellEdit={handleCellEdit}
-        showRowNumber
-        rowNumberOffset={page * pageSize}
-      />
-
-      {/* Edit action bar */}
-      {hasEdits && (
-        <div className="flex items-center gap-2 px-3 py-2 border-t border-border bg-muted/50 shrink-0">
-          <span className="text-xs text-muted-foreground">{t("query.pendingEdits", { count: edits.size })}</span>
-          <div className="ml-auto flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs gap-1"
-              onClick={handleDiscard}
-              disabled={submitting}
-            >
-              <Undo2 className="h-3.5 w-3.5" />
-              {t("query.discardEdits")}
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              className="h-7 text-xs gap-1"
-              onClick={() => setShowSqlPreview(true)}
-              disabled={submitting}
-            >
-              {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-              {t("query.submitEdits")}
-            </Button>
-          </div>
-        </div>
-      )}
 
       {/* SQL Preview confirmation dialog */}
       <SqlPreviewDialog
