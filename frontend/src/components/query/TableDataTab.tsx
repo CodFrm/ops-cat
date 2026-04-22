@@ -156,17 +156,17 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   const totalPages = totalRows != null ? Math.max(1, Math.ceil(totalRows / pageSize)) : null;
 
   // Fetch primary key column names for the current table. Used to build a
-  // concise UPDATE WHERE clause instead of matching every column. PostgreSQL
-  // uses ctid for row identity, so we only query MySQL-family drivers here.
+  // concise UPDATE WHERE clause instead of matching every column.
   const fetchPrimaryKeys = useCallback(async () => {
     if (!assetId) return;
-    if (driver === "postgresql") {
-      setPrimaryKeys([]);
-      setPkLoaded(true);
-      return;
-    }
     try {
-      const sql = `SHOW KEYS FROM ${quoteIdent(database, driver)}.${quoteIdent(table, driver)} WHERE Key_name = 'PRIMARY'`;
+      let sql: string;
+      if (driver === "postgresql") {
+        const escapedTable = table.replace(/'/g, "''");
+        sql = `SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.table_schema = 'public' AND tc.table_name = '${escapedTable}' AND tc.constraint_type = 'PRIMARY KEY' ORDER BY kcu.ordinal_position`;
+      } else {
+        sql = `SHOW KEYS FROM ${quoteIdent(database, driver)}.${quoteIdent(table, driver)} WHERE Key_name = 'PRIMARY'`;
+      }
       const result = await ExecuteSQL(assetId, sql, database);
       const parsed: SQLResult = JSON.parse(result);
       const cols = (parsed.rows ?? []).map((r) => String(r["Column_name"] ?? r["column_name"] ?? "")).filter(Boolean);
@@ -292,12 +292,10 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
         setClauses.push(`${quoteIdent(col, driver)} = ${sqlQuote(value)}`);
       }
 
-      // MySQL: prefer primary-key columns to keep the WHERE clause short and
-      // avoid fuzzy matching on TEXT/BLOB columns. Falls back to every column
-      // when the table has no primary key.
-      // PostgreSQL: identifies the row by ctid against a full-column subquery
-      // (subquery uses full columns since ctid is physical and changes on update).
-      const whereCols = driver !== "postgresql" && primaryKeys.length > 0 ? primaryKeys : columns;
+      // 优先用主键定位：WHERE 短、避免 TEXT/BLOB 模糊匹配，也能处理 PG 浮点等列等值不稳的情况。
+      // 没主键时退回全列匹配；PG 还要用 ctid 包一层把"匹配到的多行"收敛为物理一行。
+      const hasPK = primaryKeys.length > 0;
+      const whereCols = hasPK ? primaryKeys : columns;
       const whereClauses: string[] = [];
       for (const col of whereCols) {
         const origVal = row[col];
@@ -310,16 +308,18 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
 
       const tableName =
         driver === "postgresql" ? `"${table}"` : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+      const whereSQL = whereClauses.join(" AND ");
 
       if (driver === "postgresql") {
-        // ctid subquery uses the full-row match (whereCols === columns here).
-        statements.push(
-          `UPDATE ${tableName} SET ${setClauses.join(", ")} WHERE ctid = (SELECT ctid FROM ${tableName} WHERE ${whereClauses.join(" AND ")} LIMIT 1);`
-        );
+        if (hasPK) {
+          statements.push(`UPDATE ${tableName} SET ${setClauses.join(", ")} WHERE ${whereSQL};`);
+        } else {
+          statements.push(
+            `UPDATE ${tableName} SET ${setClauses.join(", ")} WHERE ctid = (SELECT ctid FROM ${tableName} WHERE ${whereSQL} LIMIT 1);`
+          );
+        }
       } else {
-        statements.push(
-          `UPDATE ${tableName} SET ${setClauses.join(", ")} WHERE ${whereClauses.join(" AND ")} LIMIT 1;`
-        );
+        statements.push(`UPDATE ${tableName} SET ${setClauses.join(", ")} WHERE ${whereSQL} LIMIT 1;`);
       }
     }
     return statements;
