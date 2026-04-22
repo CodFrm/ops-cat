@@ -175,7 +175,7 @@ export function MongoDBResultView({ data, loading, skip = 0, limit = 20, onPageC
             </div>
           ) : (
             <table className="border-collapse text-xs font-mono w-full">
-              <thead className="bg-muted sticky top-0 z-10">
+              <thead className="bg-muted sticky top-0">
                 <tr>
                   {columns.map((col) => (
                     <th

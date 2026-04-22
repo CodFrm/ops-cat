@@ -206,7 +206,7 @@ export function QueryResultTable({
     <div className="flex-1 min-h-0 flex flex-col">
       <div className="flex-1 overflow-auto min-h-0 query-table-scroll">
         <table className="border-collapse text-xs font-mono">
-          <thead className="bg-muted sticky top-0 z-10">
+          <thead className="bg-muted sticky top-0">
             <tr>
               {showRowNumber && (
                 <th className="border border-border px-2 py-1.5 text-center font-semibold text-muted-foreground whitespace-nowrap w-[50px]">

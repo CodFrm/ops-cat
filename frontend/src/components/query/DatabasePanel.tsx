@@ -94,11 +94,8 @@ export function DatabasePanel({ tabId }: DatabasePanelProps) {
             return (
               <div
                 key={tab.id}
-                className="absolute inset-0 [contain:paint]"
-                style={{
-                  visibility: isActive ? "visible" : "hidden",
-                  pointerEvents: isActive ? "auto" : "none",
-                }}
+                className="absolute inset-0"
+                style={{ display: isActive ? "block" : "none" }}
               >
                 {tab.type === "table" ? (
                   <TableDataTab tabId={tabId} database={tab.database} table={tab.table} />
