@@ -101,9 +101,10 @@ export function MongoDBPanel({ tabId }: MongoDBPanelProps) {
             return (
               <div
                 key={innerTab.id}
-                className="absolute inset-0"
+                className="absolute inset-0 [contain:paint]"
                 style={{
-                  display: isActive ? "block" : "none",
+                  visibility: isActive ? "visible" : "hidden",
+                  pointerEvents: isActive ? "auto" : "none",
                 }}
               >
                 {innerTab.type === "collection" ? (

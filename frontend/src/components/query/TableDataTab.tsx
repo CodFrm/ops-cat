@@ -303,7 +303,9 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
         const primaryKeyParsed: SQLResult = JSON.parse(primaryKeyResult);
 
         const columns = columnsParsed.rows || [];
-        const primaryKeyColumns = (primaryKeyParsed.rows || []).map((r) => String(Object.values(r)[0] ?? "")).filter(Boolean);
+        const primaryKeyColumns = (primaryKeyParsed.rows || [])
+          .map((r) => String(Object.values(r)[0] ?? ""))
+          .filter(Boolean);
 
         if (columns.length > 0) {
           const defs = columns.map((col) => {
@@ -554,11 +556,19 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
             </pre>
           </ScrollArea>
           <AlertDialogFooter>
-            <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={handleCopyDDL} disabled={ddlLoading || !ddlSQL}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1"
+              onClick={handleCopyDDL}
+              disabled={ddlLoading || !ddlSQL}
+            >
               <Copy className="h-3.5 w-3.5" />
               {t("action.copy")}
             </Button>
-            <AlertDialogCancel size="sm" className="h-7 text-xs px-3">{t("action.close")}</AlertDialogCancel>
+            <AlertDialogCancel size="sm" className="h-7 text-xs px-3">
+              {t("action.close")}
+            </AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

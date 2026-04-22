@@ -170,9 +170,10 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPa
           return (
             <div
               key={tab.id}
-              className="absolute inset-0 flex flex-col"
+              className="absolute inset-0 flex flex-col [contain:paint]"
               style={{
-                display: isActive ? "block" : "none",
+                visibility: isActive ? "visible" : "hidden",
+                pointerEvents: isActive ? "auto" : "none",
               }}
             >
               <SessionToolbar tabId={tab.id} />
@@ -210,9 +211,10 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPa
           return (
             <div
               key={tab.id}
-              className="absolute inset-0 bg-background"
+              className="absolute inset-0 bg-background [contain:paint]"
               style={{
-                display: isActive ? "block" : "none",
+                visibility: isActive ? "visible" : "hidden",
+                pointerEvents: isActive ? "auto" : "none",
               }}
             >
               <AIChatContent tabId={tab.id} />
@@ -227,9 +229,10 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPa
           return (
             <div
               key={tab.id}
-              className="absolute inset-0 bg-background"
+              className="absolute inset-0 bg-background [contain:paint]"
               style={{
-                display: isActive ? "block" : "none",
+                visibility: isActive ? "visible" : "hidden",
+                pointerEvents: isActive ? "auto" : "none",
               }}
             >
               {meta.assetType === "database" ? (
