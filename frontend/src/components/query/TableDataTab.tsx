@@ -12,6 +12,7 @@ import {
   Filter,
   FileCode2,
   Copy,
+  Plus,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -34,6 +35,7 @@ import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { ExecuteSQL } from "../../../wailsjs/go/app/App";
 import { QueryResultTable, CellEdit } from "./QueryResultTable";
 import { SqlPreviewDialog } from "./SqlPreviewDialog";
+import { InsertRowDialog } from "./InsertRowDialog";
 import { toast } from "sonner";
 
 interface TableDataTabProps {
@@ -82,6 +84,7 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
   const [submitting, setSubmitting] = useState(false);
   const [showSqlPreview, setShowSqlPreview] = useState(false);
   const [showDDLDialog, setShowDDLDialog] = useState(false);
+  const [showInsertDialog, setShowInsertDialog] = useState(false);
   const [ddlLoading, setDdlLoading] = useState(false);
   const [ddlSQL, setDdlSQL] = useState("");
   const [whereInput, setWhereInput] = useState("");
@@ -355,6 +358,14 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
     toast.success(t("query.copied"));
   }, [ddlLoading, ddlSQL, t]);
 
+  const handleInsertSuccess = useCallback(async () => {
+    setPage(0);
+    setEdits(new Map());
+    setApplyVersion((v) => v + 1);
+    await fetchData(0);
+    await fetchCount();
+  }, [fetchData, fetchCount]);
+
   const hasNext = totalPages != null ? page < totalPages - 1 : rows.length === pageSize;
   const hasPrev = page > 0;
   const hasEdits = edits.size > 0;
@@ -396,6 +407,15 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
         <Button variant="outline" size="sm" className="h-7 text-xs gap-1 shrink-0" onClick={handleApplyQuery}>
           <Filter className="h-3.5 w-3.5" />
           {t("query.applyFilter")}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs gap-1 shrink-0"
+          onClick={() => setShowInsertDialog(true)}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {t("query.addRow")}
         </Button>
         <Button variant="outline" size="sm" className="h-7 text-xs gap-1 shrink-0" onClick={handleViewDDL}>
           <FileCode2 className="h-3.5 w-3.5" />
@@ -572,6 +592,17 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Insert row dialog */}
+      <InsertRowDialog
+        open={showInsertDialog}
+        onOpenChange={setShowInsertDialog}
+        assetId={assetId}
+        database={database}
+        table={table}
+        driver={driver}
+        onSuccess={handleInsertSuccess}
+      />
 
       {/* SQL Preview confirmation dialog */}
       <SqlPreviewDialog
