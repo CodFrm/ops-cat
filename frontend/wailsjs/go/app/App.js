@@ -586,6 +586,10 @@ export function UpdateAssetPassword(arg1, arg2) {
   return window['go']['app']['App']['UpdateAssetPassword'](arg1, arg2);
 }
 
+export function UpdateConversationTitle(arg1, arg2) {
+  return window['go']['app']['App']['UpdateConversationTitle'](arg1, arg2);
+}
+
 export function UpdateCredential(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['UpdateCredential'](arg1, arg2, arg3, arg4, arg5);
 }

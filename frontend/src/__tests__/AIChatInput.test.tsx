@@ -144,4 +144,57 @@ describe("AIChatInput", () => {
     expect(mentions).toEqual([expect.objectContaining({ assetId: 42, name: "prod-db" })]);
     expect(mentions[0].end).toBeGreaterThan(mentions[0].start);
   });
+
+  it("外部预填 draft 后提交仍能恢复多段落 mention", async () => {
+    const onSubmit = vi.fn();
+    const editorRef = { current: null as Editor | null };
+    const handleRef = createRef<AIChatInputHandle>();
+    const content = "check @prod-db disk\nthen @prod-db again";
+    const draftMentions = [
+      { assetId: 42, name: "prod-db", start: 6, end: 14 },
+      { assetId: 42, name: "prod-db", start: 25, end: 33 },
+    ];
+
+    render(<AIChatInput ref={handleRef} onSubmit={onSubmit} sendOnEnter={true} editorRef={editorRef} />);
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+
+    handleRef.current?.loadDraft({ content, mentions: draftMentions });
+    await waitFor(() => expect(editorRef.current!.getText({ blockSeparator: "\n" })).toBe(content));
+
+    handleRef.current?.submit();
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const [submittedText, submittedMentions] = onSubmit.mock.calls[0];
+    expect(submittedText).toBe(content);
+    expect(submittedMentions).toEqual(draftMentions);
+  });
+
+  it("外部预填后重置历史游标，ArrowUp 从最新消息重新开始", async () => {
+    const handleRef = createRef<AIChatInputHandle>();
+    const editorRef = { current: null as Editor | null };
+    const history = ["最新", "次新", "更早"];
+
+    render(
+      <AIChatInput
+        ref={handleRef}
+        onSubmit={vi.fn()}
+        sendOnEnter={true}
+        editorRef={editorRef}
+        userMessageHistory={history}
+      />
+    );
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+
+    const editor = screen.getByRole("textbox");
+    await userEvent.click(editor);
+    await userEvent.keyboard("{ArrowUp}{ArrowUp}");
+    await waitFor(() => expect(editorRef.current!.getText()).toBe("次新"));
+
+    handleRef.current?.loadDraft("外部草稿");
+    await waitFor(() => expect(editorRef.current!.getText()).toBe("外部草稿"));
+
+    editorRef.current!.chain().focus("start").run();
+    await userEvent.keyboard("{ArrowUp}");
+    await waitFor(() => expect(editorRef.current!.getText()).toBe("最新"));
+  });
 });

@@ -6,7 +6,7 @@ vi.mock("../i18n", () => ({
 }));
 
 import { useAIStore, getAISendOnEnter, setAISendOnEnter } from "../stores/aiStore";
-import { useTabStore } from "../stores/tabStore";
+import { useTabStore, type AITabMeta } from "../stores/tabStore";
 import {
   GetActiveAIProvider,
   ListConversations,
@@ -15,6 +15,7 @@ import {
   SendAIMessage,
   StopAIGeneration,
   SaveConversationMessages,
+  UpdateConversationTitle,
 } from "../../wailsjs/go/app/App";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 
@@ -414,6 +415,185 @@ describe("sidebar state", () => {
     await useAIStore.getState().stopConversation(123);
 
     expect(StopAIGeneration).toHaveBeenCalledWith(123);
+  });
+});
+
+describe("editAndResendConversation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useAIStore.setState({
+      tabStates: {},
+      conversations: [],
+      conversationMessages: {},
+      conversationStreaming: {},
+      sidebarConversationId: null,
+      sidebarUIState: { inputDraft: "", scrollTop: 0 },
+    });
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+    vi.mocked(SaveConversationMessages).mockResolvedValue(undefined as any);
+    vi.mocked(StopAIGeneration).mockResolvedValue(undefined as any);
+    vi.mocked(UpdateConversationTitle).mockResolvedValue(undefined as any);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("stops in-flight edits without letting stale stopped events drain the old queue", async () => {
+    vi.useFakeTimers();
+    const callbacks: Array<(event: any) => void> = [];
+    const cancels: Array<ReturnType<typeof vi.fn>> = [];
+    vi.mocked(EventsOn).mockImplementation(((_eventName: string, handler: (event: any) => void) => {
+      callbacks.push(handler);
+      const cancel = vi.fn();
+      cancels.push(cancel);
+      return cancel;
+    }) as any);
+
+    useAIStore.setState({
+      conversationMessages: { 55: [] },
+      conversationStreaming: { 55: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendFromSidebar(55, "original");
+    useAIStore.setState({
+      conversationStreaming: { 55: { sending: true, pendingQueue: [{ text: "queued-1" }, { text: "queued-2" }] } },
+    });
+    vi.mocked(StopAIGeneration).mockImplementation(async () => {
+      callbacks[0]?.({ type: "stopped" });
+    });
+
+    await useAIStore.getState().editAndResendConversation(55, 0, "edited");
+    await vi.runAllTimersAsync();
+
+    const msgs = useAIStore.getState().conversationMessages[55];
+    expect(msgs.map((m) => [m.role, m.content])).toEqual([
+      ["user", "edited"],
+      ["assistant", ""],
+    ]);
+    expect(useAIStore.getState().conversationStreaming[55]).toEqual({ sending: true, pendingQueue: [] });
+    expect(StopAIGeneration).toHaveBeenCalledWith(55);
+    expect(cancels[0]).toHaveBeenCalledTimes(1);
+    expect(SendAIMessage).toHaveBeenCalledTimes(2);
+    expect(
+      (vi.mocked(SendAIMessage).mock.calls[1]?.[1] as Array<{ role: string; content: string }>).map((m) => [
+        m.role,
+        m.content,
+      ])
+    ).toEqual([["user", "edited"]]);
+  });
+
+  it("supports sidebar edits by conversationId without a tab host", async () => {
+    vi.mocked(EventsOn).mockReturnValue(() => {});
+    useAIStore.setState({
+      sidebarConversationId: 88,
+      conversationMessages: {
+        88: [
+          { role: "user", content: "sidebar old", blocks: [] },
+          { role: "assistant", content: "sidebar answer", blocks: [] },
+        ],
+      },
+      conversationStreaming: { 88: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().editAndResendConversation(88, 0, "sidebar edited");
+
+    const msgs = useAIStore.getState().conversationMessages[88];
+    expect(msgs.map((m) => [m.role, m.content])).toEqual([
+      ["user", "sidebar edited"],
+      ["assistant", ""],
+    ]);
+    expect(useTabStore.getState().tabs).toEqual([]);
+    expect(vi.mocked(EventsOn).mock.calls.some((call) => call[0] === "ai:event:88")).toBe(true);
+    expect(vi.mocked(SendAIMessage).mock.calls[0]?.[0]).toBe(88);
+  });
+
+  it("truncates messages after the edited user turn before resending", async () => {
+    vi.mocked(EventsOn).mockReturnValue(() => {});
+    useAIStore.setState({
+      conversationMessages: {
+        90: [
+          { role: "user", content: "first", blocks: [] },
+          { role: "assistant", content: "first answer", blocks: [] },
+          { role: "user", content: "second", blocks: [] },
+          { role: "assistant", content: "second answer", blocks: [] },
+        ],
+      },
+      conversationStreaming: { 90: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().editAndResendConversation(90, 2, "second revised");
+
+    const msgs = useAIStore.getState().conversationMessages[90];
+    expect(msgs.map((m) => [m.role, m.content])).toEqual([
+      ["user", "first"],
+      ["assistant", "first answer"],
+      ["user", "second revised"],
+      ["assistant", ""],
+    ]);
+
+    const sentMessages = vi.mocked(SendAIMessage).mock.calls[0]?.[1] as Array<{ role: string; content: string }>;
+    expect(sentMessages.map((msg) => [msg.role, msg.content])).toEqual([
+      ["user", "first"],
+      ["assistant", "first answer"],
+      ["user", "second revised"],
+    ]);
+  });
+
+  it("ignores invalid indexes and non-user targets", async () => {
+    vi.mocked(EventsOn).mockReturnValue(() => {});
+    useAIStore.setState({
+      conversationMessages: {
+        91: [
+          { role: "user", content: "hello", blocks: [] },
+          { role: "assistant", content: "world", blocks: [] },
+        ],
+      },
+      conversationStreaming: { 91: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().editAndResendConversation(91, -1, "bad");
+    await useAIStore.getState().editAndResendConversation(91, 1, "bad");
+    await useAIStore.getState().editAndResendConversation(91, 99, "bad");
+    await useAIStore.getState().editAndResendConversation(91, 0, "   ");
+
+    expect(SendAIMessage).not.toHaveBeenCalled();
+    expect(useAIStore.getState().conversationMessages[91].map((m) => [m.role, m.content])).toEqual([
+      ["user", "hello"],
+      ["assistant", "world"],
+    ]);
+  });
+
+  it("updates local and backend titles when editing the first user turn", async () => {
+    vi.mocked(EventsOn).mockReturnValue(() => {});
+    useTabStore.setState({
+      tabs: [
+        { id: "ai-92", type: "ai", label: "old title", meta: { type: "ai", conversationId: 92, title: "old title" } },
+      ],
+      activeTabId: "ai-92",
+    });
+    useAIStore.setState({
+      conversations: [{ ID: 92, Title: "old title", Updatetime: 0 } as any],
+      tabStates: { "ai-92": {} },
+      conversationMessages: {
+        92: [
+          { role: "user", content: "old title", blocks: [] },
+          { role: "assistant", content: "answer", blocks: [] },
+        ],
+      },
+      conversationStreaming: { 92: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().editAndResendConversation(92, 0, "new first prompt");
+
+    expect(UpdateConversationTitle).toHaveBeenCalledWith(92, "new first prompt");
+    expect(useAIStore.getState().conversations.find((conv) => conv.ID === 92)?.Title).toBe("new first prompt");
+    expect(useTabStore.getState().tabs.find((tab) => tab.id === "ai-92")?.label).toBe("new first prompt");
+    expect((useTabStore.getState().tabs.find((tab) => tab.id === "ai-92")?.meta as AITabMeta | undefined)?.title).toBe(
+      "new first prompt"
+    );
   });
 });
 

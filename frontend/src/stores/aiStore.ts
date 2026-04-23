@@ -10,6 +10,7 @@ import {
   LoadConversationMessages,
   DeleteConversation,
   SaveConversationMessages,
+  UpdateConversationTitle,
 } from "../../wailsjs/go/app/App";
 import { ai, conversation_entity, app } from "../../wailsjs/go/models";
 import { EventsOn, EventsEmit } from "../../wailsjs/runtime/runtime";
@@ -132,6 +133,17 @@ function cleanupConvListener(convId: number) {
   conversationListeners.delete(convId);
   cleanupStreamBuffer(convId);
   cleanupPersistTimer(convId);
+}
+
+function invalidateConvListenerForReplay(convId: number) {
+  const listener = getOrCreateConvListener(convId);
+  // 先 bump generation，再解绑旧订阅，避免停流后的迟到事件回写到新分支。
+  listener.generation++;
+  if (listener.cancel) {
+    listener.cancel();
+    listener.cancel = null;
+  }
+  cleanupStreamBuffer(convId);
 }
 
 // cleanupPersistTimer 清理指定 conversation 尚未执行的落盘定时器。
@@ -354,6 +366,48 @@ async function ensureConversationMessagesLoaded(convId: number) {
   }
 }
 
+// 与后端标题规范保持一致，避免本地乐观更新和持久化后的标题不一致。
+const DEFAULT_CONVERSATION_TITLE = "新对话";
+const CONVERSATION_TITLE_MAX_CHARS = 50;
+
+// 编辑首条消息时要先得到最终标题，供前端和后端复用同一套裁剪规则。
+function buildConversationTitle(content: string) {
+  const trimmed = content.trim();
+  if (!trimmed) return DEFAULT_CONVERSATION_TITLE;
+  const chars = Array.from(trimmed);
+  if (chars.length <= CONVERSATION_TITLE_MAX_CHARS) return trimmed;
+  return chars.slice(0, CONVERSATION_TITLE_MAX_CHARS).join("");
+}
+
+// 先同步当前内存里的会话列表和标签页标题，避免用户编辑后侧栏仍短暂显示旧标题。
+function syncConversationTitleLocally(convId: number, title: string) {
+  useAIStore.setState((state) => ({
+    conversations: state.conversations.map((conv) => (conv.ID === convId ? { ...conv, Title: title } : conv)),
+  }));
+
+  const tabStore = useTabStore.getState();
+  for (const tab of tabStore.tabs) {
+    if (tab.type !== "ai") continue;
+    const meta = tab.meta as AITabMeta;
+    if (meta.conversationId !== convId) continue;
+    tabStore.updateTab(tab.id, {
+      label: title,
+      meta: { ...meta, title },
+    });
+  }
+}
+
+// replay 前先乐观更新标题；即使后端失败，下一次列表刷新也会再尝试拉正。
+async function updateConversationTitleForReplay(convId: number, content: string) {
+  const title = buildConversationTitle(content);
+  syncConversationTitleLocally(convId, title);
+  try {
+    await UpdateConversationTitle(convId, title);
+  } catch {
+    // ignore — 下一次 fetchConversations 仍会尝试从后端刷新标题
+  }
+}
+
 // === 模块级 conversation 操作（被 sendToTab / sendFromSidebar / regenerate 等共用）===
 
 function updateConversation(
@@ -415,6 +469,42 @@ function drainQueue(convId: number) {
   setTimeout(() => {
     _sendForConversation(convId, "").catch(() => {});
   }, 0);
+}
+
+// replay 前先让旧 listener 和 pending queue 失效，避免 stop 产生的迟到事件回放到新分支。
+function prepareConversationForReplay(convId: number) {
+  invalidateConvListenerForReplay(convId);
+  cleanupPersistTimer(convId);
+  updateConversation(convId, { sending: false, pendingQueue: [] });
+}
+
+// 先把会话消息截断到编辑点之前，再以统一发送链路重建 assistant 占位消息。
+function resetConversationForReplay(convId: number, messages: ChatMessage[]) {
+  updateConversation(convId, { messages, sending: false, pendingQueue: [] });
+}
+
+// 把“编辑并重发”和“重新生成”统一到一条 replay 流程里，避免两套截断逻辑继续分叉。
+async function replayConversation(
+  convId: number,
+  nextMessages: ChatMessage[],
+  content: string,
+  mentions?: MentionRef[]
+) {
+  const streaming = useAIStore.getState().conversationStreaming[convId] || { sending: false, pendingQueue: [] };
+  prepareConversationForReplay(convId);
+  if (streaming.sending) {
+    await useAIStore.getState().stopConversation(convId);
+  }
+
+  resetConversationForReplay(convId, nextMessages);
+
+  if (content.trim()) {
+    await _sendForConversation(convId, content, mentions);
+    return;
+  }
+
+  if (nextMessages.length === 0) return;
+  await _sendForConversation(convId, "");
 }
 
 // 事件处理：核心流式状态机，完全基于 convId
@@ -981,6 +1071,12 @@ interface AIState {
   send: (content: string, mentions?: MentionRef[]) => Promise<void>;
   sendToTab: (tabId: string, content: string, mentions?: MentionRef[]) => Promise<void>;
   sendFromSidebar: (convId: number, content: string, mentions?: MentionRef[]) => Promise<void>;
+  editAndResendConversation: (
+    convId: number,
+    messageIndex: number,
+    content: string,
+    mentions?: MentionRef[]
+  ) => Promise<void>;
   stopConversation: (convId: number) => Promise<void>;
   stopGeneration: (tabId: string) => Promise<void>;
   regenerate: (tabId: string, messageIndex: number) => Promise<void>;
@@ -1288,6 +1384,32 @@ export const useAIStore = create<AIState>((set, get) => {
       await _sendForConversation(convId, content, mentions);
     },
 
+    editAndResendConversation: async (
+      convId: number,
+      messageIndex: number,
+      content: string,
+      mentions?: MentionRef[]
+    ) => {
+      if (!content.trim()) return;
+
+      const messages = get().conversationMessages[convId] || [];
+      if (messages.length === 0) return;
+      if (messageIndex < 0 || messageIndex >= messages.length) return;
+
+      const target = messages[messageIndex];
+      if (!target || target.role !== "user") return;
+
+      const firstUserIndex = messages.findIndex((message) => message.role === "user");
+      if (firstUserIndex === messageIndex) {
+        // 首条 user message 同时决定会话标题，编辑后要先同步标题再 replay。
+        await updateConversationTitleForReplay(convId, content);
+      }
+
+      const truncated = messages.slice(0, messageIndex);
+      // 从被编辑消息之前的稳定历史重新发送，确保后续分支完全替换。
+      await replayConversation(convId, truncated, content, mentions);
+    },
+
     stopConversation: async (convId: number) => {
       try {
         await StopAIGeneration(convId);
@@ -1314,23 +1436,11 @@ export const useAIStore = create<AIState>((set, get) => {
       const convId = (tab.meta as AITabMeta).conversationId;
       if (convId == null) return;
 
-      const streaming = get().conversationStreaming[convId] || { sending: false, pendingQueue: [] };
       const messages = get().conversationMessages[convId] || [];
+      if (messageIndex < 0 || messageIndex >= messages.length) return;
 
-      // 正在生成时先停止
-      if (streaming.sending) {
-        await get().stopGeneration(tabId);
-        await new Promise((r) => setTimeout(r, 200));
-      }
-
-      // 截断到指定消息之前
       const truncated = messages.slice(0, messageIndex);
-      updateConversation(convId, { messages: truncated, sending: false, pendingQueue: [] });
-
-      if (truncated.length === 0) return;
-
-      // 用空内容触发 sendToTab（drain 模式，使用已有消息）
-      await get().sendToTab(tabId, "");
+      await replayConversation(convId, truncated, "");
     },
 
     removeFromQueue: (convId: number, index: number) => {

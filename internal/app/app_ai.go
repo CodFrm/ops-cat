@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +23,19 @@ func maskAPIKey(key string) string {
 		return "****"
 	}
 	return key[:4] + "****" + key[len(key)-4:]
+}
+
+// normalizeConversationTitle 统一会话标题规则，避免首次命名和后续编辑首条消息时产生不同标题。
+func normalizeConversationTitle(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return "新对话"
+	}
+	titleRunes := []rune(title)
+	if len(titleRunes) > 50 {
+		title = string(titleRunes[:50])
+	}
+	return title
 }
 
 // activateProvider 根据 Provider 配置创建 AI Agent
@@ -138,6 +152,17 @@ func (a *App) ListConversations() ([]*conversation_entity.Conversation, error) {
 	return conversation_svc.Conversation().List(a.langCtx())
 }
 
+// UpdateConversationTitle 更新会话标题。
+func (a *App) UpdateConversationTitle(id int64, title string) error {
+	ctx := a.langCtx()
+	conv, err := conversation_svc.Conversation().Get(ctx, id)
+	if err != nil {
+		return fmt.Errorf("会话不存在: %w", err)
+	}
+	conv.Title = normalizeConversationTitle(title)
+	return conversation_svc.Conversation().Update(ctx, conv)
+}
+
 // SwitchConversation 切换到指定会话，返回显示消息
 func (a *App) SwitchConversation(id int64) ([]ConversationDisplayMessage, error) {
 	ctx := a.langCtx()
@@ -236,11 +261,7 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 	if conv, err := conversation_svc.Conversation().Get(ctx, convID); err == nil && conv.Title == "新对话" {
 		for _, msg := range messages {
 			if msg.Role == ai.RoleUser {
-				title := string(msg.Content)
-				if len([]rune(title)) > 50 {
-					title = string([]rune(title)[:50])
-				}
-				conv.Title = title
+				conv.Title = normalizeConversationTitle(string(msg.Content))
 				if err := conversation_svc.Conversation().Update(ctx, conv); err != nil {
 					logger.Default().Error("update conversation title", zap.Error(err))
 				}
