@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
   Switch,
+  Textarea,
 } from "@opskat/ui";
 import { CallExtensionAction } from "../../../wailsjs/go/app/App";
 
@@ -121,14 +122,36 @@ export function ExtensionConfigForm({
         );
       }
 
+      // Textarea (multi-line text; PEM, JSON blobs, etc.)
+      if (prop.format === "textarea") {
+        return (
+          <div key={key} className="grid gap-2">
+            <Label htmlFor={key}>
+              {label}
+              {isRequired && <span className="text-destructive ml-0.5">*</span>}
+            </Label>
+            <Textarea
+              id={key}
+              value={String(value[key] ?? "")}
+              onChange={(e) => updateField(key, e.target.value)}
+              placeholder={placeholder}
+              rows={6}
+              className="font-mono text-xs"
+            />
+            {description && <p className="text-xs text-muted-foreground">{description}</p>}
+          </div>
+        );
+      }
+
       // String (password or normal)
       return (
         <div key={key} className="grid gap-2">
-          <Label>
+          <Label htmlFor={key}>
             {label}
             {isRequired && <span className="text-destructive ml-0.5">*</span>}
           </Label>
           <Input
+            id={key}
             type={prop.format === "password" ? "password" : "text"}
             value={String(value[key] ?? "")}
             onChange={(e) => updateField(key, e.target.value)}
