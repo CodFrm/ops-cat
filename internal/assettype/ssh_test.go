@@ -1,6 +1,7 @@
 package assettype
 
 import (
+	"context"
 	"testing"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
@@ -30,7 +31,7 @@ func TestSSHHandler(t *testing.T) {
 		})
 		convey.Convey("ApplyCreateArgs", func() {
 			a := &asset_entity.Asset{Type: "ssh"}
-			err := h.ApplyCreateArgs(a, map[string]any{
+			err := h.ApplyCreateArgs(context.Background(), a, map[string]any{
 				"host": "10.0.0.1", "port": float64(22), "username": "root",
 			})
 			convey.So(err, convey.ShouldBeNil)
@@ -44,7 +45,7 @@ func TestSSHHandler(t *testing.T) {
 			_ = a.SetSSHConfig(&asset_entity.SSHConfig{
 				Host: "10.0.0.1", Port: 22, Username: "root", AuthType: "password",
 			})
-			err := h.ApplyUpdateArgs(a, map[string]any{"host": "10.0.0.2"})
+			err := h.ApplyUpdateArgs(context.Background(), a, map[string]any{"host": "10.0.0.2"})
 			convey.So(err, convey.ShouldBeNil)
 			cfg, _ := a.GetSSHConfig()
 			convey.So(cfg.Host, convey.ShouldEqual, "10.0.0.2")

@@ -118,6 +118,9 @@ func (a *App) Startup(ctx context.Context) {
 	a.subscribeAIFlushAck()
 	a.emitSystemStatus()
 
+	// AI 工具变更资产/分组后广播 data:changed，触发前端左侧树刷新
+	ai.SetDataChangeNotifier(&appDataChangeNotifier{app: a})
+
 	// Initialize extension system (can be disabled via OPSKAT_EXTENSIONS=0)
 	if os.Getenv("OPSKAT_EXTENSIONS") == "0" {
 		zap.L().Info("extension system disabled via OPSKAT_EXTENSIONS=0")
@@ -206,6 +209,19 @@ func (a *App) activateWindow() {
 // OnSecondInstanceLaunch 第二个实例启动时激活当前窗口
 func (a *App) OnSecondInstanceLaunch() {
 	a.activateWindow()
+}
+
+// appDataChangeNotifier 实现 ai.DataChangeNotifier，把 AI 触发的资产/分组变更
+// 转发为 Wails 的 data:changed 事件，与 opsctl 通过 Unix socket 发出的同名事件复用同一前端监听器。
+type appDataChangeNotifier struct{ app *App }
+
+func (n *appDataChangeNotifier) NotifyDataChanged(resource string) {
+	if n.app == nil || n.app.ctx == nil {
+		return
+	}
+	wailsRuntime.EventsEmit(n.app.ctx, "data:changed", map[string]any{
+		"resource": resource,
+	})
 }
 
 // --- SSH 凭证解析（被多个文件共用的辅助方法）---

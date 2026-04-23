@@ -1,6 +1,7 @@
 package assettype
 
 import (
+	"context"
 	"testing"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
@@ -30,7 +31,7 @@ func TestMongoDBHandler(t *testing.T) {
 		})
 		convey.Convey("ApplyCreateArgs", func() {
 			a := &asset_entity.Asset{Type: "mongodb"}
-			err := h.ApplyCreateArgs(a, map[string]any{
+			err := h.ApplyCreateArgs(context.Background(), a, map[string]any{
 				"host": "10.0.0.1", "port": float64(27017),
 				"username": "admin", "database": "mydb",
 				"ssh_asset_id": float64(99),
@@ -49,7 +50,7 @@ func TestMongoDBHandler(t *testing.T) {
 			_ = a.SetMongoDBConfig(&asset_entity.MongoDBConfig{
 				Host: "10.0.0.1", Port: 27017, Username: "admin", Database: "mydb",
 			})
-			err := h.ApplyUpdateArgs(a, map[string]any{"host": "10.0.0.2", "database": "newdb"})
+			err := h.ApplyUpdateArgs(context.Background(), a, map[string]any{"host": "10.0.0.2", "database": "newdb"})
 			convey.So(err, convey.ShouldBeNil)
 			cfg, _ := a.GetMongoDBConfig()
 			convey.So(cfg.Host, convey.ShouldEqual, "10.0.0.2")

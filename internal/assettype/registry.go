@@ -16,8 +16,8 @@ type AssetTypeHandler interface {
 	SafeView(a *asset_entity.Asset) map[string]any
 	ResolvePassword(ctx context.Context, a *asset_entity.Asset) (string, error)
 	DefaultPolicy() any
-	ApplyCreateArgs(a *asset_entity.Asset, args map[string]any) error
-	ApplyUpdateArgs(a *asset_entity.Asset, args map[string]any) error
+	ApplyCreateArgs(ctx context.Context, a *asset_entity.Asset, args map[string]any) error
+	ApplyUpdateArgs(ctx context.Context, a *asset_entity.Asset, args map[string]any) error
 }
 
 var (

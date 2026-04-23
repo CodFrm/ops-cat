@@ -7,6 +7,7 @@ import (
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/model/entity/policy"
 	"github.com/opskat/opskat/internal/service/credential_resolver"
+	"github.com/opskat/opskat/internal/service/credential_svc"
 )
 
 type mongodbHandler struct{}
@@ -40,18 +41,26 @@ func (h *mongodbHandler) ResolvePassword(ctx context.Context, a *asset_entity.As
 
 func (h *mongodbHandler) DefaultPolicy() any { return asset_entity.DefaultMongoPolicy() }
 
-func (h *mongodbHandler) ApplyCreateArgs(a *asset_entity.Asset, args map[string]any) error {
+func (h *mongodbHandler) ApplyCreateArgs(_ context.Context, a *asset_entity.Asset, args map[string]any) error {
 	a.SSHTunnelID = ArgInt64(args, "ssh_asset_id")
-	return a.SetMongoDBConfig(&asset_entity.MongoDBConfig{
+	cfg := &asset_entity.MongoDBConfig{
 		Host:       ArgString(args, "host"),
 		Port:       ArgInt(args, "port"),
 		Username:   ArgString(args, "username"),
 		Database:   ArgString(args, "database"),
 		AuthSource: "admin",
-	})
+	}
+	if password := ArgString(args, "password"); password != "" {
+		encrypted, err := credential_svc.Default().Encrypt(password)
+		if err != nil {
+			return fmt.Errorf("encrypt MongoDB password: %w", err)
+		}
+		cfg.Password = encrypted
+	}
+	return a.SetMongoDBConfig(cfg)
 }
 
-func (h *mongodbHandler) ApplyUpdateArgs(a *asset_entity.Asset, args map[string]any) error {
+func (h *mongodbHandler) ApplyUpdateArgs(_ context.Context, a *asset_entity.Asset, args map[string]any) error {
 	cfg, err := a.GetMongoDBConfig()
 	if err != nil || cfg == nil {
 		return err
@@ -65,8 +74,19 @@ func (h *mongodbHandler) ApplyUpdateArgs(a *asset_entity.Asset, args map[string]
 	if v := ArgString(args, "username"); v != "" {
 		cfg.Username = v
 	}
-	if v := ArgString(args, "database"); v != "" {
-		cfg.Database = v
+	if _, ok := args["database"]; ok {
+		cfg.Database = ArgString(args, "database")
+	}
+	if _, ok := args["ssh_asset_id"]; ok {
+		a.SSHTunnelID = ArgInt64(args, "ssh_asset_id")
+	}
+	if password := ArgString(args, "password"); password != "" {
+		encrypted, err := credential_svc.Default().Encrypt(password)
+		if err != nil {
+			return fmt.Errorf("encrypt MongoDB password: %w", err)
+		}
+		cfg.Password = encrypted
+		cfg.CredentialID = 0
 	}
 	return a.SetMongoDBConfig(cfg)
 }

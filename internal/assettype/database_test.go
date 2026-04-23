@@ -1,6 +1,7 @@
 package assettype
 
 import (
+	"context"
 	"testing"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
@@ -32,7 +33,7 @@ func TestDatabaseHandler(t *testing.T) {
 		})
 		convey.Convey("ApplyCreateArgs", func() {
 			a := &asset_entity.Asset{Type: "database"}
-			err := h.ApplyCreateArgs(a, map[string]any{
+			err := h.ApplyCreateArgs(context.Background(), a, map[string]any{
 				"driver": "mysql", "host": "10.0.0.1", "port": float64(3306),
 				"username": "admin", "database": "mydb", "read_only": "true",
 				"ssh_asset_id": float64(42),
@@ -48,7 +49,7 @@ func TestDatabaseHandler(t *testing.T) {
 		})
 		convey.Convey("ApplyCreateArgs requires driver", func() {
 			a := &asset_entity.Asset{Type: "database"}
-			err := h.ApplyCreateArgs(a, map[string]any{
+			err := h.ApplyCreateArgs(context.Background(), a, map[string]any{
 				"host": "10.0.0.1", "port": float64(3306),
 			})
 			convey.So(err, convey.ShouldNotBeNil)
@@ -59,7 +60,7 @@ func TestDatabaseHandler(t *testing.T) {
 				Driver: asset_entity.DriverMySQL, Host: "10.0.0.1", Port: 3306,
 				Username: "admin", Database: "mydb",
 			})
-			err := h.ApplyUpdateArgs(a, map[string]any{"host": "10.0.0.2", "database": "newdb"})
+			err := h.ApplyUpdateArgs(context.Background(), a, map[string]any{"host": "10.0.0.2", "database": "newdb"})
 			convey.So(err, convey.ShouldBeNil)
 			cfg, _ := a.GetDatabaseConfig()
 			convey.So(cfg.Host, convey.ShouldEqual, "10.0.0.2")

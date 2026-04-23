@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 
 	"github.com/opskat/opskat/internal/assettype"
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/model/entity/group_entity"
 	"github.com/opskat/opskat/internal/repository/group_repo"
 	"github.com/opskat/opskat/internal/service/asset_svc"
 )
@@ -163,14 +165,14 @@ func handleAddAsset(ctx context.Context, args map[string]any) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("unsupported asset type: %s", assetType)
 	}
-	if err := h.ApplyCreateArgs(asset, args); err != nil {
-		// Database 的 driver 缺失等校验错误需返回；SetXxxConfig 序列化失败仅 warn（保持原始行为）
+	if err := h.ApplyCreateArgs(ctx, asset, args); err != nil {
 		return "", err
 	}
 
 	if err := asset_svc.Asset().Create(ctx, asset); err != nil {
 		return "", fmt.Errorf("failed to create asset: %w", err)
 	}
+	notifyDataChanged("asset")
 	return fmt.Sprintf(`{"id":%d,"message":"asset created successfully"}`, asset.ID), nil
 }
 
@@ -188,8 +190,8 @@ func handleUpdateAsset(ctx context.Context, args map[string]any) (string, error)
 	if name := argString(args, "name"); name != "" {
 		asset.Name = name
 	}
-	if desc := argString(args, "description"); desc != "" {
-		asset.Description = desc
+	if _, ok := args["description"]; ok {
+		asset.Description = argString(args, "description")
 	}
 	if _, ok := args["group_id"]; ok {
 		asset.GroupID = argInt64(args, "group_id")
@@ -199,14 +201,15 @@ func handleUpdateAsset(ctx context.Context, args map[string]any) (string, error)
 	}
 
 	if h, ok := assettype.Get(asset.Type); ok {
-		if err := h.ApplyUpdateArgs(asset, args); err != nil {
-			logger.Default().Warn("apply update args failed", zap.String("type", asset.Type), zap.Error(err))
+		if err := h.ApplyUpdateArgs(ctx, asset, args); err != nil {
+			return "", fmt.Errorf("apply update args failed: %w", err)
 		}
 	}
 
 	if err := asset_svc.Asset().Update(ctx, asset); err != nil {
 		return "", fmt.Errorf("failed to update asset: %w", err)
 	}
+	notifyDataChanged("asset")
 	return `{"message":"asset updated successfully"}`, nil
 }
 
@@ -258,4 +261,58 @@ func handleGetGroup(ctx context.Context, args map[string]any) (string, error) {
 		return "", fmt.Errorf("failed to marshal group detail: %w", err)
 	}
 	return string(data), nil
+}
+
+func handleAddGroup(ctx context.Context, args map[string]any) (string, error) {
+	name := argString(args, "name")
+	if name == "" {
+		return "", fmt.Errorf("missing required parameter: name")
+	}
+	now := time.Now().Unix()
+	group := &group_entity.Group{
+		Name:        name,
+		ParentID:    argInt64(args, "parent_id"),
+		Icon:        argString(args, "icon"),
+		Description: argString(args, "description"),
+		SortOrder:   argInt(args, "sort_order"),
+		Createtime:  now,
+		Updatetime:  now,
+	}
+	if err := group_repo.Group().Create(ctx, group); err != nil {
+		return "", fmt.Errorf("failed to create group: %w", err)
+	}
+	notifyDataChanged("group")
+	return fmt.Sprintf(`{"id":%d,"message":"group created successfully"}`, group.ID), nil
+}
+
+func handleUpdateGroup(ctx context.Context, args map[string]any) (string, error) {
+	id := argInt64(args, "id")
+	if id == 0 {
+		return "", fmt.Errorf("missing required parameter: id")
+	}
+	group, err := group_repo.Group().Find(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("group not found: %w", err)
+	}
+	if name := argString(args, "name"); name != "" {
+		group.Name = name
+	}
+	if _, ok := args["parent_id"]; ok {
+		group.ParentID = argInt64(args, "parent_id")
+	}
+	if _, ok := args["icon"]; ok {
+		group.Icon = argString(args, "icon")
+	}
+	if _, ok := args["description"]; ok {
+		group.Description = argString(args, "description")
+	}
+	if _, ok := args["sort_order"]; ok {
+		group.SortOrder = argInt(args, "sort_order")
+	}
+	group.Updatetime = time.Now().Unix()
+	if err := group_repo.Group().Update(ctx, group); err != nil {
+		return "", fmt.Errorf("failed to update group: %w", err)
+	}
+	notifyDataChanged("group")
+	return `{"message":"group updated successfully"}`, nil
 }

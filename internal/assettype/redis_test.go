@@ -1,6 +1,7 @@
 package assettype
 
 import (
+	"context"
 	"testing"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
@@ -30,7 +31,7 @@ func TestRedisHandler(t *testing.T) {
 		})
 		convey.Convey("ApplyCreateArgs", func() {
 			a := &asset_entity.Asset{Type: "redis"}
-			err := h.ApplyCreateArgs(a, map[string]any{
+			err := h.ApplyCreateArgs(context.Background(), a, map[string]any{
 				"host": "10.0.0.1", "port": float64(6379),
 				"username": "default", "ssh_asset_id": float64(7),
 			})
@@ -46,7 +47,7 @@ func TestRedisHandler(t *testing.T) {
 			_ = a.SetRedisConfig(&asset_entity.RedisConfig{
 				Host: "10.0.0.1", Port: 6379, Username: "default",
 			})
-			err := h.ApplyUpdateArgs(a, map[string]any{"host": "10.0.0.2"})
+			err := h.ApplyUpdateArgs(context.Background(), a, map[string]any{"host": "10.0.0.2"})
 			convey.So(err, convey.ShouldBeNil)
 			cfg, _ := a.GetRedisConfig()
 			convey.So(cfg.Host, convey.ShouldEqual, "10.0.0.2")
