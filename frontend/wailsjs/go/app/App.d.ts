@@ -312,6 +312,8 @@ export function UpdateAsset(arg1:asset_entity.Asset):Promise<void>;
 
 export function UpdateAssetPassword(arg1:number,arg2:string):Promise<void>;
 
+export function UpdateConversationTitle(arg1:number,arg2:string):Promise<void>;
+
 export function UpdateCredential(arg1:number,arg2:string,arg3:string,arg4:string,arg5:string):Promise<credential_entity.Credential>;
 
 export function UpdateCredentialPassphrase(arg1:number,arg2:string,arg3:string):Promise<void>;

@@ -5,7 +5,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 import { WriteSSH, ResizeSSH } from "../../../wailsjs/go/app/App";
 import { EventsOn, EventsOff } from "../../../wailsjs/runtime/runtime";
-import { useShortcutStore, matchShortcut, formatBinding } from "@/stores/shortcutStore";
+import { useShortcutStore, matchShortcut, formatBinding, formatModKey } from "@/stores/shortcutStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useTerminalThemeStore, toXtermTheme } from "@/stores/terminalThemeStore";
 import { builtinThemes, defaultLightTheme, defaultDarkTheme } from "@/data/terminalThemes";
@@ -115,10 +115,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       fitAddon.fit();
     });
 
-    // Let global shortcut handler handle shortcut keys instead of xterm
-    // Also intercept Ctrl+F for search, Cmd/Ctrl+C for copy with toast
+    // Let global shortcut handler handle shortcut keys instead of xterm.
+    // The panel.filter binding also opens in-terminal search when xterm is focused
+    // (matched via current user binding — rebinding the shortcut moves both together).
     term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-      if (e.key === "f" && (e.ctrlKey || e.metaKey) && e.type === "keydown") {
+      const action = matchShortcut(e, useShortcutStore.getState().shortcuts);
+      if (action === "panel.filter" && e.type === "keydown") {
         setShowSearch((v) => !v);
         return false;
       }
@@ -131,7 +133,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           return false;
         }
       }
-      return !matchShortcut(e, useShortcutStore.getState().shortcuts);
+      return !action;
     });
 
     termRef.current = term;
@@ -250,20 +252,20 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         <ContextMenuContent>
           <ContextMenuItem onClick={handleCopy} disabled={!hasSelection}>
             {t("ssh.contextMenu.copy")}
-            <ContextMenuShortcut>⌘C</ContextMenuShortcut>
+            <ContextMenuShortcut>{formatModKey("KeyC")}</ContextMenuShortcut>
           </ContextMenuItem>
           <ContextMenuItem onClick={handlePaste}>
             {t("ssh.contextMenu.paste")}
-            <ContextMenuShortcut>⌘V</ContextMenuShortcut>
+            <ContextMenuShortcut>{formatModKey("KeyV")}</ContextMenuShortcut>
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem onClick={handleSelectAll}>
             {t("ssh.contextMenu.selectAll")}
-            <ContextMenuShortcut>⌘A</ContextMenuShortcut>
+            <ContextMenuShortcut>{formatModKey("KeyA")}</ContextMenuShortcut>
           </ContextMenuItem>
           <ContextMenuItem onClick={() => setShowSearch(true)}>
             {t("ssh.contextMenu.find")}
-            <ContextMenuShortcut>⌘F</ContextMenuShortcut>
+            <ContextMenuShortcut>{formatBinding(shortcuts["panel.filter"])}</ContextMenuShortcut>
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem onClick={() => splitPane(tabId, "horizontal")} disabled={!paneConnected}>

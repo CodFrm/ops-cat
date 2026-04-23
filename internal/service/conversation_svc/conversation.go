@@ -19,6 +19,7 @@ type ConversationSvc interface {
 	List(ctx context.Context) ([]*conversation_entity.Conversation, error)
 	Get(ctx context.Context, id int64) (*conversation_entity.Conversation, error)
 	Update(ctx context.Context, conv *conversation_entity.Conversation) error
+	UpdateTitle(ctx context.Context, id int64, title string) error
 	Delete(ctx context.Context, id int64) error
 
 	// 消息持久化
@@ -62,6 +63,10 @@ func (s *conversationSvc) Get(ctx context.Context, id int64) (*conversation_enti
 func (s *conversationSvc) Update(ctx context.Context, conv *conversation_entity.Conversation) error {
 	conv.Updatetime = time.Now().Unix()
 	return conversation_repo.Conversation().Update(ctx, conv)
+}
+
+func (s *conversationSvc) UpdateTitle(ctx context.Context, id int64, title string) error {
+	return conversation_repo.Conversation().UpdateTitle(ctx, id, title, time.Now().Unix())
 }
 
 func (s *conversationSvc) Delete(ctx context.Context, id int64) error {

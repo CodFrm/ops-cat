@@ -7,7 +7,7 @@ import { useResizeHandle } from "@opskat/ui";
 import { toast } from "sonner";
 import { useQueryStore, type MongoInnerTab } from "@/stores/queryStore";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
-import { isMac } from "@/stores/shortcutStore";
+import { isMac, formatModKey } from "@/stores/shortcutStore";
 import { MongoDBCollectionBrowser } from "./MongoDBCollectionBrowser";
 import { MongoDBResultView } from "./MongoDBResultView";
 import { ExecuteMongo } from "../../../wailsjs/go/app/App";
@@ -141,7 +141,7 @@ interface MongoCollectionContentProps {
   pendingLoad: boolean;
 }
 
-const MONGO_REFRESH_SHORTCUT_LABEL = isMac ? "⌘R" : "Ctrl+R";
+const MONGO_REFRESH_SHORTCUT_LABEL = formatModKey("KeyR");
 
 function MongoCollectionContent(props: MongoCollectionContentProps) {
   const { t } = useTranslation();
@@ -553,7 +553,7 @@ function MongoQueryContent({ tabId, assetId, innerTab }: MongoQueryContentProps)
     [currentCollections, t]
   );
 
-  const shortcutLabel = isMac ? "⌘⏎" : "Ctrl+Enter";
+  const shortcutLabel = formatModKey("Enter");
   const canExecute = !!database || /getSiblingDB\s*\(/.test(query);
 
   return (

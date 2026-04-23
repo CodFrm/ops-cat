@@ -10,11 +10,17 @@ import tippy, { type Instance } from "tippy.js";
 import { MentionList, type MentionListRef, type MentionItem } from "./MentionList";
 import type { MentionRef } from "@/stores/aiStore";
 
+export interface AIChatInputDraft {
+  content: string;
+  mentions?: MentionRef[];
+}
+
 export interface AIChatInputHandle {
   focus: () => void;
   clear: () => void;
   isEmpty: () => boolean;
   submit: () => void;
+  loadDraft: (draft: string | AIChatInputDraft) => void;
 }
 
 export interface AIChatInputProps {
@@ -33,6 +39,29 @@ interface ProseMirrorLikeNode {
   text?: string;
   attrs: Record<string, unknown>;
   descendants: (fn: (node: ProseMirrorLikeNode) => boolean | void) => void;
+}
+
+interface TipTapTextNode {
+  type: "text";
+  text: string;
+}
+
+interface TipTapMentionNode {
+  type: "mention";
+  attrs: {
+    id: string;
+    label: string;
+  };
+}
+
+interface TipTapParagraphNode {
+  type: "paragraph";
+  content?: Array<TipTapTextNode | TipTapMentionNode>;
+}
+
+interface TipTapDocNode {
+  type: "doc";
+  content: TipTapParagraphNode[];
 }
 
 type InputHistoryDirection = "up" | "down";
@@ -68,6 +97,97 @@ function extractTextAndMentions(doc: ProseMirrorLikeNode): {
     return true;
   });
   return { text: text.replace(/\n+$/g, ""), mentions };
+}
+
+function normalizeDraftMessage(draft: string | AIChatInputDraft): AIChatInputDraft {
+  if (typeof draft === "string") {
+    return { content: draft, mentions: [] };
+  }
+  return {
+    content: draft.content ?? "",
+    mentions: draft.mentions ?? [],
+  };
+}
+
+function appendTextToParagraphs(
+  paragraphs: TipTapParagraphNode[],
+  text: string,
+  currentParagraphContent: Array<TipTapTextNode | TipTapMentionNode>
+) {
+  const segments = text.split("\n");
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    if (segment.length > 0) {
+      currentParagraphContent.push({ type: "text", text: segment });
+    }
+    if (index < segments.length - 1) {
+      paragraphs.push(
+        currentParagraphContent.length > 0
+          ? { type: "paragraph", content: currentParagraphContent }
+          : { type: "paragraph" }
+      );
+      currentParagraphContent = [];
+    }
+  }
+  return currentParagraphContent;
+}
+
+// 统一把持久化 user message（content + mentions）重建为 TipTap 文档，
+// 供历史浏览与外部 draft 预填共用，避免两套回填逻辑出现偏差。
+function buildEditorDocFromMessage(message: string | AIChatInputDraft): TipTapDocNode {
+  const draft = normalizeDraftMessage(message);
+  const content = draft.content ?? "";
+  const mentions = [...(draft.mentions ?? [])].sort((a, b) => a.start - b.start);
+  const paragraphs: TipTapParagraphNode[] = [];
+  let currentParagraphContent: Array<TipTapTextNode | TipTapMentionNode> = [];
+  let cursor = 0;
+
+  for (const mention of mentions) {
+    const start = Math.max(0, Math.min(mention.start, content.length));
+    const end = Math.max(start, Math.min(mention.end, content.length));
+    if (start < cursor || end <= start) {
+      continue;
+    }
+
+    if (start > cursor) {
+      currentParagraphContent = appendTextToParagraphs(
+        paragraphs,
+        content.slice(cursor, start),
+        currentParagraphContent
+      );
+    }
+
+    const mentionSlice = content.slice(start, end);
+    if (mentionSlice.length === 0 || mentionSlice.includes("\n")) {
+      currentParagraphContent = appendTextToParagraphs(paragraphs, mentionSlice, currentParagraphContent);
+      cursor = end;
+      continue;
+    }
+
+    const labelFromContent = mentionSlice.startsWith("@") ? mentionSlice.slice(1) : mentionSlice;
+    const label = labelFromContent || mention.name;
+    currentParagraphContent.push({
+      type: "mention",
+      attrs: {
+        id: String(mention.assetId),
+        label,
+      },
+    });
+    cursor = end;
+  }
+
+  if (cursor < content.length) {
+    currentParagraphContent = appendTextToParagraphs(paragraphs, content.slice(cursor), currentParagraphContent);
+  }
+
+  paragraphs.push(
+    currentParagraphContent.length > 0 ? { type: "paragraph", content: currentParagraphContent } : { type: "paragraph" }
+  );
+
+  return {
+    type: "doc",
+    content: paragraphs,
+  };
 }
 
 // 仅在首行首字符接管向上历史，避免影响富文本输入的原生光标移动。
@@ -106,19 +226,8 @@ function getInputHistoryNavigationState({
 }
 
 // 把历史消息写回编辑器，并把光标定位到末尾，保证连续切换时体验稳定。
-function applyInputHistoryMessage(editor: Editor, nextMessage: string) {
-  const historyDoc = {
-    type: "doc",
-    content:
-      nextMessage.length > 0
-        ? nextMessage.split("\n").map((line) => ({
-            type: "paragraph",
-            content: line.length > 0 ? [{ type: "text", text: line }] : [],
-          }))
-        : [{ type: "paragraph" }],
-  };
-
-  editor.commands.setContent(historyDoc);
+function applyInputHistoryMessage(editor: Editor, nextMessage: string | AIChatInputDraft) {
+  editor.commands.setContent(buildEditorDocFromMessage(nextMessage));
   editor.commands.focus("end");
 }
 
@@ -315,9 +424,17 @@ export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(funct
     ref,
     () => ({
       focus: () => editor?.commands.focus(),
-      clear: () => editor?.commands.clearContent(),
+      clear: () => {
+        historyIndexRef.current = -1;
+        editor?.commands.clearContent();
+      },
       isEmpty: () => editor?.isEmpty ?? true,
       submit: () => triggerSubmitRef.current(),
+      loadDraft: (draft) => {
+        if (!editor) return;
+        historyIndexRef.current = -1;
+        applyInputHistoryMessage(editor, draft);
+      },
     }),
     [editor]
   );

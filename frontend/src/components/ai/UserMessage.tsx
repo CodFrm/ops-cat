@@ -1,10 +1,10 @@
 import { memo, useCallback } from "react";
-import { Copy } from "lucide-react";
+import { Copy, Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@opskat/ui";
 import type { ChatMessage, MentionRef } from "@/stores/aiStore";
-import { useCompact } from "@/components/ai/AIChatContent";
+import { useCompact } from "@/components/ai/AIChatContentContext";
 import { openAssetInfoTab } from "@/lib/openAssetInfoTab";
 
 interface Segment {
@@ -43,7 +43,12 @@ async function copyUserMessageText(text: string, copiedText: string, failedText:
   }
 }
 
-export const UserMessage = memo(function UserMessage({ msg }: { msg: ChatMessage }) {
+interface UserMessageProps {
+  msg: ChatMessage;
+  onEdit?: () => void;
+}
+
+export const UserMessage = memo(function UserMessage({ msg, onEdit }: UserMessageProps) {
   const compact = useCompact();
   const maxWidthClass = compact ? "max-w-[95%]" : "max-w-[85%]";
   const segments = buildSegments(msg.content, msg.mentions);
@@ -61,10 +66,25 @@ export const UserMessage = memo(function UserMessage({ msg }: { msg: ChatMessage
     void copyUserMessageText(copyText, t("ai.copied", "已复制到剪贴板"), t("ai.copyFailed", "复制失败"));
   }, [msg.content, t]);
 
+  const handleEdit = useCallback(() => {
+    onEdit?.();
+  }, [onEdit]);
+
   return (
     <div className="flex flex-col items-end gap-1.5 group/user">
       <span className="text-xs font-semibold text-muted-foreground tracking-wide">You</span>
       <div className={`flex items-start justify-end gap-2 ${maxWidthClass}`}>
+        {onEdit && (
+          <button
+            type="button"
+            className="mt-1 opacity-0 group-hover/user:opacity-100 transition-opacity text-muted-foreground/50 hover:text-primary"
+            onClick={handleEdit}
+            title={t("ai.editMessage", "编辑消息")}
+            aria-label={t("ai.editMessage", "编辑消息")}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        )}
         <button
           type="button"
           className="mt-1 opacity-0 group-hover/user:opacity-100 transition-opacity text-muted-foreground/50 hover:text-primary"
@@ -96,6 +116,7 @@ export const UserMessage = memo(function UserMessage({ msg }: { msg: ChatMessage
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent>
+            {onEdit && <ContextMenuItem onClick={handleEdit}>{t("ai.editMessage", "编辑消息")}</ContextMenuItem>}
             <ContextMenuItem onClick={handleContextCopy}>{t("action.copy", "复制")}</ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
