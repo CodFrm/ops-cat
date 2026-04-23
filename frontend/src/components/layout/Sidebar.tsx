@@ -10,6 +10,7 @@ import {
   ArrowRightLeft,
   Server,
   LayoutList,
+  FileCode,
 } from "lucide-react";
 import logoLight from "@/assets/images/logo.png";
 import logoDark from "@/assets/images/logo-dark.png";
@@ -51,6 +52,7 @@ export function Sidebar({
     { id: "home", icon: Home, label: t("nav.home") },
     { id: "forward", icon: ArrowRightLeft, label: t("nav.forward") },
     { id: "sshkeys", icon: KeyRound, label: t("nav.sshKeys") },
+    { id: "snippets", icon: FileCode, label: t("nav.snippets") },
     { id: "audit", icon: ScrollText, label: t("nav.audit") },
   ];
 
