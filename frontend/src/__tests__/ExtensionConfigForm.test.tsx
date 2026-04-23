@@ -24,12 +24,7 @@ describe("ExtensionConfigForm", () => {
     };
     const onChange = vi.fn();
     render(
-      <ExtensionConfigForm
-        extensionName="test"
-        configSchema={schema}
-        value={{ other: "keep" }}
-        onChange={onChange}
-      />
+      <ExtensionConfigForm extensionName="test" configSchema={schema} value={{ other: "keep" }} onChange={onChange} />
     );
     const el = screen.getByLabelText("CA Certificate") as HTMLTextAreaElement;
     fireEvent.change(el, { target: { value: "-----BEGIN CERT-----" } });
