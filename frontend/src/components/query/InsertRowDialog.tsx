@@ -15,6 +15,7 @@ import {
 } from "@opskat/ui";
 import { ExecuteSQL } from "../../../wailsjs/go/app/App";
 import { toast } from "sonner";
+import { SqlPreviewDialog } from "./SqlPreviewDialog";
 
 interface InsertRowDialogProps {
   open: boolean;
@@ -100,6 +101,8 @@ export function InsertRowDialog({
   const [values, setValues] = useState<Record<string, string>>({});
   const [loadingColumns, setLoadingColumns] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [showSqlPreview, setShowSqlPreview] = useState(false);
+  const [previewStatements, setPreviewStatements] = useState<string[]>([]);
 
   const loadColumns = useCallback(async () => {
     if (!assetId || !open) return;
@@ -169,7 +172,7 @@ export function InsertRowDialog({
 
   const requiredColumns = useMemo(() => columns.filter((col) => !col.nullable && !col.hasDefault), [columns]);
 
-  const handleSubmit = useCallback(async () => {
+  const handlePreview = useCallback(() => {
     if (!assetId) return;
 
     for (const col of requiredColumns) {
@@ -184,11 +187,20 @@ export function InsertRowDialog({
       .map((col) => ({ name: col.name, value: values[col.name] ?? "" }));
 
     const sql = buildInsertSql({ driver, database, table, columnsValues });
+    setPreviewStatements([sql]);
+    setShowSqlPreview(true);
+  }, [assetId, requiredColumns, values, columns, driver, table, database, t]);
+
+  const handleConfirmSubmit = useCallback(async () => {
+    if (!assetId || previewStatements.length === 0) return;
 
     setSubmitting(true);
     try {
-      await ExecuteSQL(assetId, sql, database);
+      for (const sql of previewStatements) {
+        await ExecuteSQL(assetId, sql, database);
+      }
       toast.success(t("query.insertSuccess"));
+      setShowSqlPreview(false);
       onOpenChange(false);
       onSuccess();
     } catch (e) {
@@ -196,68 +208,80 @@ export function InsertRowDialog({
     } finally {
       setSubmitting(false);
     }
-  }, [assetId, requiredColumns, values, columns, driver, table, database, t, onOpenChange, onSuccess]);
+  }, [assetId, previewStatements, database, t, onOpenChange, onSuccess]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl" showCloseButton={!submitting}>
-        <DialogHeader>
-          <DialogTitle>{t("query.insertDialogTitle")}</DialogTitle>
-          <DialogDescription>{t("query.insertDialogDesc", { table })}</DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-3xl" showCloseButton={!submitting}>
+          <DialogHeader>
+            <DialogTitle>{t("query.insertDialogTitle")}</DialogTitle>
+            <DialogDescription>{t("query.insertDialogDesc", { table })}</DialogDescription>
+          </DialogHeader>
 
-        {loadingColumns ? (
-          <div className="flex items-center justify-center py-8 text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-          </div>
-        ) : (
-          <ScrollArea className="max-h-[360px]">
-            <div className="space-y-3 pr-2">
-              {columns.map((col) => {
-                const required = !col.nullable && !col.hasDefault;
-                return (
-                  <div key={col.name} className="space-y-1.5">
-                    <Label className="text-xs">
-                      {col.name}
-                      {required ? <span className="text-destructive"> *</span> : null}
-                      <span className="ml-1 text-muted-foreground">({col.type})</span>
-                    </Label>
-                    <Input
-                      className="h-8 text-xs font-mono"
-                      value={values[col.name] ?? ""}
-                      onChange={(e) => setValues((prev) => ({ ...prev, [col.name]: e.target.value }))}
-                      placeholder={required ? t("query.requiredInput") : t("query.optionalInput")}
-                      disabled={submitting}
-                    />
-                  </div>
-                );
-              })}
-              {columns.length === 0 && <p className="text-xs text-muted-foreground">{t("query.noColumnsFound")}</p>}
+          {loadingColumns ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
             </div>
-          </ScrollArea>
-        )}
+          ) : (
+            <ScrollArea className="max-h-[360px]">
+              <div className="space-y-3 pr-2">
+                {columns.map((col) => {
+                  const required = !col.nullable && !col.hasDefault;
+                  return (
+                    <div key={col.name} className="space-y-1.5">
+                      <Label className="text-xs">
+                        {col.name}
+                        {required ? <span className="text-destructive"> *</span> : null}
+                        <span className="ml-1 text-muted-foreground">({col.type})</span>
+                      </Label>
+                      <Input
+                        className="h-8 text-xs font-mono"
+                        value={values[col.name] ?? ""}
+                        onChange={(e) => setValues((prev) => ({ ...prev, [col.name]: e.target.value }))}
+                        placeholder={required ? t("query.requiredInput") : t("query.optionalInput")}
+                        disabled={submitting}
+                      />
+                    </div>
+                  );
+                })}
+                {columns.length === 0 && <p className="text-xs text-muted-foreground">{t("query.noColumnsFound")}</p>}
+              </div>
+            </ScrollArea>
+          )}
 
-        <DialogFooter>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs"
-            onClick={() => onOpenChange(false)}
-            disabled={submitting}
-          >
-            {t("action.cancel")}
-          </Button>
-          <Button
-            size="sm"
-            className="h-8 text-xs"
-            onClick={handleSubmit}
-            disabled={submitting || loadingColumns || columns.length === 0}
-          >
-            {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-            {t("query.insertSubmit")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => onOpenChange(false)}
+              disabled={submitting}
+            >
+              {t("action.cancel")}
+            </Button>
+            <Button
+              size="sm"
+              className="h-8 text-xs"
+              onClick={handlePreview}
+              disabled={submitting || loadingColumns || columns.length === 0}
+            >
+              {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              {t("query.designTablePreviewChanges")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <SqlPreviewDialog
+        open={showSqlPreview}
+        onOpenChange={(nextOpen) => {
+          if (!submitting) setShowSqlPreview(nextOpen);
+        }}
+        statements={previewStatements}
+        onConfirm={handleConfirmSubmit}
+        submitting={submitting}
+      />
+    </>
   );
 }
