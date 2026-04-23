@@ -265,8 +265,8 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 	if conv, err := conversation_svc.Conversation().Get(ctx, convID); err == nil && conv.Title == "新对话" {
 		for _, msg := range messages {
 			if msg.Role == ai.RoleUser {
-				conv.Title = normalizeConversationTitle(string(msg.Content))
-				if err := conversation_svc.Conversation().Update(ctx, conv); err != nil {
+				title := normalizeConversationTitle(string(msg.Content))
+				if err := conversation_svc.Conversation().UpdateTitle(ctx, convID, title); err != nil {
 					logger.Default().Error("update conversation title", zap.Error(err))
 				}
 				break

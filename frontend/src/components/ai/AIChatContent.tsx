@@ -175,18 +175,18 @@ export function AIChatContent({
   }, [tabId]);
 
   // 编辑态依赖 conversationId 和消息索引，切换会话时要显式清掉草稿，避免把旧草稿带到新会话。
-  const resetEditMode = useCallback(
-    (options?: { clearDraft?: boolean }) => {
-      setEditTarget((current) => {
-        if (!current) return current;
-        if (options?.clearDraft) {
-          inputRef.current?.clear();
-        }
-        return null;
-      });
-    },
-    [setEditTarget]
-  );
+  // 用 updater 读取并清空 state（幂等），副作用放在 updater 外执行，避免 StrictMode 下重复触发。
+  const resetEditMode = useCallback((options?: { clearDraft?: boolean }) => {
+    let wasActive = false;
+    setEditTarget((current) => {
+      if (!current) return current;
+      wasActive = true;
+      return null;
+    });
+    if (wasActive && options?.clearDraft) {
+      inputRef.current?.clear();
+    }
+  }, []);
 
   useEffect(() => {
     if (previousConversationIdRef.current === conversationId) return;
