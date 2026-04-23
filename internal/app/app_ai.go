@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -236,7 +237,10 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 	if conv, err := conversation_svc.Conversation().Get(ctx, convID); err == nil && conv.Title == "新对话" {
 		for _, msg := range messages {
 			if msg.Role == ai.RoleUser {
-				title := string(msg.Content)
+				title := strings.TrimSpace(string(msg.Content))
+				if title == "" {
+					break // 空消息不覆盖默认标题
+				}
 				if len([]rune(title)) > 50 {
 					title = string([]rune(title)[:50])
 				}

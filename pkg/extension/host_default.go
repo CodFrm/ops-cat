@@ -104,7 +104,7 @@ func (h *DefaultHostProvider) openTCP(params IOOpenParams) (uint32, IOMeta, erro
 
 	id, err := h.io.Register(conn, conn, conn, IOMeta{})
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return 0, IOMeta{}, err
 	}
 	return id, IOMeta{}, nil

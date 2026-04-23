@@ -76,6 +76,11 @@ func (p *Plugin) CallTool(ctx context.Context, toolName string, args json.RawMes
 }
 
 // CallAction calls execute_action on the extension.
+//
+// The cancellation is installed AFTER acquiring p.mu so that concurrent
+// CallAction invocations don't race on host.activeCancel: the setup and the
+// WASM execution live in the same critical section, and the defer clears the
+// cancel before releasing the lock, so the next caller installs fresh state.
 func (p *Plugin) CallAction(ctx context.Context, actionName string, args json.RawMessage) (json.RawMessage, error) {
 	input, err := json.Marshal(map[string]any{
 		"action": actionName,
@@ -84,14 +89,22 @@ func (p *Plugin) CallAction(ctx context.Context, actionName string, args json.Ra
 	if err != nil {
 		return nil, fmt.Errorf("marshal %s input: %w", "execute_action", err)
 	}
+	if p.closed.Load() {
+		return nil, fmt.Errorf("plugin closed")
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
 	cancel := NewActionCancellation()
 	p.host.SetActiveCancellation(cancel)
-	defer p.host.SetActiveCancellation(nil)
 	p.activeCancel.Store(cancel)
-	defer p.activeCancel.Store(nil)
+	defer func() {
+		p.activeCancel.Store(nil)
+		p.host.SetActiveCancellation(nil)
+	}()
 
-	return p.call(ctx, "execute_action", input)
+	return p.callLocked(ctx, "execute_action", input)
 }
 
 // CancelActiveAction triggers cancellation of the currently running action.
@@ -165,6 +178,11 @@ func (p *Plugin) call(ctx context.Context, fnName string, input []byte) (json.Ra
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	return p.callLocked(ctx, fnName, input)
+}
+
+// callLocked executes a WASM function. Caller must hold p.mu.
+func (p *Plugin) callLocked(ctx context.Context, fnName string, input []byte) (json.RawMessage, error) {
 	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -205,7 +223,7 @@ func (p *Plugin) call(ctx context.Context, fnName string, input []byte) (json.Ra
 	return out, nil
 }
 
-// registerHostModule registers all 14 host functions as a wazero host module named "opskat".
+// registerHostModule registers all 13 host functions as a wazero host module named "opskat".
 // Guest and host share memory using the convention:
 //   - Guest exports malloc(size) -> ptr and free(ptr)
 //   - Return values packed as uint64: high 32 bits = ptr, low 32 bits = size
