@@ -30,7 +30,7 @@ func TestIOOpenTCP(t *testing.T) {
 		Convey("IOOpen(tcp) should succeed with valid addr", func() {
 			id, _, err := h.IOOpen(IOOpenParams{Type: "tcp", Addr: ln.Addr().String()})
 			So(err, ShouldBeNil)
-			So(id, ShouldBeGreaterThanOrEqualTo, 0)
+			So(id, ShouldBeGreaterThan, uint32(0))
 
 			Convey("Write and Read should round-trip", func() {
 				n, err := h.IOWrite(id, []byte("ping"))

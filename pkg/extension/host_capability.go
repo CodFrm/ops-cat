@@ -34,6 +34,12 @@ func (c *capHost) IOOpen(params IOOpenParams) (uint32, IOMeta, error) {
 		}
 		// Pass tunnel capability to dial-time guard.
 		params.AllowPrivate = c.manifest.Capabilities.Tunnel
+	case "tcp":
+		// TCP IO is currently reserved for first-party extensions (e.g. Kafka). Until a
+		// manifest.Capabilities.TCP + CheckTCPAddr gate lands (post-Phase 1), no per-call
+		// enforcement is done here — the wazero host module exposes this to every loaded
+		// extension. Do not mark the capHost as publicly safe for third-party extensions
+		// until that gate is in place.
 	}
 	return c.inner.IOOpen(params)
 }

@@ -90,6 +90,9 @@ func (h *DefaultHostProvider) openTCP(params IOOpenParams) (uint32, IOMeta, erro
 	var conn net.Conn
 	var err error
 	if h.cfg.AssetSSHTunnelID > 0 && h.cfg.TunnelDialer != nil {
+		// NOTE: params.Timeout is not honored on the tunnel path — TunnelDialer.Dial
+		// uses its own default dial timeout. Callers that need tighter control should
+		// set a deadline on the resulting handle via IOSetDeadline.
 		conn, err = h.cfg.TunnelDialer.Dial(h.cfg.AssetSSHTunnelID, params.Addr)
 	} else {
 		dialer := &net.Dialer{Timeout: timeout}

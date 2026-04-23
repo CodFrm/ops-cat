@@ -11,6 +11,9 @@ type HostProvider interface {
 	IOWrite(handleID uint32, data []byte) (int, error)
 	IOFlush(handleID uint32) (*IOMeta, error)
 	IOClose(handleID uint32) error
+	// IOSetDeadline sets read/write/both deadline on a handle.
+	// unixNanos is an absolute deadline in Unix nanoseconds; 0 clears any existing deadline.
+	// kind ∈ {"read","write","both"}. Returns an error if the underlying handle type does not support deadlines.
 	IOSetDeadline(handleID uint32, kind string, unixNanos int64) error
 	GetAssetConfig(assetID int64) (json.RawMessage, error)
 	FileDialog(dialogType string, opts DialogOptions) (string, error)
