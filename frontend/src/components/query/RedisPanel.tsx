@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useResizeHandle } from "@opskat/ui";
 import { RedisKeyBrowser } from "./RedisKeyBrowser";
 import { RedisKeyDetail } from "./RedisKeyDetail";
@@ -7,16 +8,18 @@ interface RedisPanelProps {
 }
 
 export function RedisPanel({ tabId }: RedisPanelProps) {
-  const { width: sidebarWidth, handleMouseDown } = useResizeHandle({
-    defaultWidth: 220,
-    minWidth: 160,
-    maxWidth: 400,
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const { size: sidebarWidth, handleMouseDown } = useResizeHandle({
+    defaultSize: 220,
+    minSize: 160,
+    maxSize: 400,
+    targetRef: sidebarRef,
   });
 
   return (
     <div className="flex h-full">
       {/* Left: Key browser */}
-      <div className="shrink-0 border-r" style={{ width: sidebarWidth }}>
+      <div ref={sidebarRef} className="shrink-0 border-r" style={{ width: sidebarWidth }}>
         <RedisKeyBrowser tabId={tabId} />
       </div>
 

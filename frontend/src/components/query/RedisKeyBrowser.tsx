@@ -130,8 +130,13 @@ function flattenTree(root: TreeNode, expandedSet: Set<string>): FlatTreeRow[] {
 
 export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
   const { t } = useTranslation();
-  const { redisStates, scanKeys, selectRedisDb, selectKey, setKeyFilter, loadDbKeyCounts, removeKey } = useQueryStore();
-  const state = redisStates[tabId];
+  const state = useQueryStore((s) => s.redisStates[tabId]);
+  const scanKeys = useQueryStore((s) => s.scanKeys);
+  const selectRedisDb = useQueryStore((s) => s.selectRedisDb);
+  const selectKey = useQueryStore((s) => s.selectKey);
+  const setKeyFilter = useQueryStore((s) => s.setKeyFilter);
+  const loadDbKeyCounts = useQueryStore((s) => s.loadDbKeyCounts);
+  const removeKey = useQueryStore((s) => s.removeKey);
   const tab = useTabStore((s) => s.tabs.find((tb) => tb.id === tabId));
   const tabMeta = tab?.meta as QueryTabMeta | undefined;
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);

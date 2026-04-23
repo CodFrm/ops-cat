@@ -21,6 +21,7 @@ import { useTerminalStore } from "@/stores/terminalStore";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTabStore, type QueryTabMeta, type PageTabMeta, type InfoTabMeta } from "@/stores/tabStore";
 import { useSFTPStore } from "@/stores/sftpStore";
+import { useShortcutStore, formatBinding, type ShortcutAction } from "@/stores/shortcutStore";
 import { asset_entity } from "../../../wailsjs/go/models";
 import { ExtensionPage } from "@/extension";
 import { TopTabBar } from "./TopTabBar";
@@ -46,6 +47,29 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPa
   const { fileManagerOpenTabs, fileManagerWidth, setFileManagerWidth } = useSFTPStore();
 
   const tabBarLayout = useLayoutStore((s) => s.tabBarLayout);
+  const shortcuts = useShortcutStore((s) => s.shortcuts);
+
+  const openSettingsTab = () => {
+    const tabStore = useTabStore.getState();
+    const existing = tabStore.tabs.find((tab) => tab.id === "settings");
+    if (existing) {
+      tabStore.activateTab("settings");
+    } else {
+      tabStore.openTab({
+        id: "settings",
+        type: "page",
+        label: t("nav.settings"),
+        meta: { type: "page", pageId: "settings" },
+      });
+    }
+  };
+
+  const SHORTCUT_HINTS: ReadonlyArray<readonly [ShortcutAction, string]> = [
+    ["panel.ai", "panelAi"],
+    ["panel.filter", "panelFilter"],
+    ["panel.sidebar", "panelSidebar"],
+    ["page.settings", "pageSettings"],
+  ] as const;
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const hasTabs = tabs.length > 0;
@@ -252,8 +276,8 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPa
 
         {/* Welcome screen when no active tab */}
         {!activeTab && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5">
-            <div className="text-center space-y-4">
+          <div className="absolute inset-0 flex items-center justify-center overflow-y-auto bg-gradient-to-br from-background via-background to-primary/5 p-6">
+            <div className="text-center space-y-5">
               <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
                 <img src={logoLight} alt="opskat" className="h-10 w-10 rounded-lg dark:hidden" />
                 <img src={logoDark} alt="opskat" className="h-10 w-10 rounded-lg hidden dark:block" />
@@ -262,7 +286,42 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPa
                 <h2 className="text-2xl font-semibold tracking-tight">{t("app.title")}</h2>
                 <p className="text-sm text-muted-foreground">{t("app.subtitle")}</p>
               </div>
-              <p className="text-xs text-muted-foreground/60">{t("app.hint")}</p>
+              <p className="text-xs text-muted-foreground">{t("app.hint")}</p>
+
+              <div className="mx-auto w-fit rounded-lg border border-border/60 bg-muted/30 px-5 py-4 text-left text-xs text-muted-foreground/80">
+                <ul className="flex flex-col gap-2">
+                  {(["doubleClick", "click", "rightClick"] as const).map((k) => (
+                    <li key={k} className="flex items-center gap-2">
+                      <kbd className="inline-flex min-w-[52px] items-center justify-center rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] text-foreground/70">
+                        {t(`app.hints.${k}Key`)}
+                      </kbd>
+                      <span>{t(`app.hints.${k}`)}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="my-3 h-px w-full bg-border/70" />
+                <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+                  {t("app.shortcuts.title")}
+                </div>
+                <ul className="flex flex-col gap-2">
+                  {SHORTCUT_HINTS.map(([action, key]) => (
+                    <li key={action} className="flex items-center gap-2">
+                      <kbd className="inline-flex min-w-[52px] items-center justify-center rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] text-foreground/70">
+                        {formatBinding(shortcuts[action])}
+                      </kbd>
+                      <span>{t(`app.shortcuts.${key}`)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <button
+                type="button"
+                onClick={openSettingsTab}
+                className="text-xs text-muted-foreground/70 transition-colors hover:text-foreground"
+              >
+                {t("app.shortcuts.all")} →
+              </button>
             </div>
           </div>
         )}

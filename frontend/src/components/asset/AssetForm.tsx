@@ -757,7 +757,14 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       Icon: icon,
       Description: description,
       Config: config,
-      sshTunnelId: sshTunnelId > 0 ? sshTunnelId : 0,
+      sshTunnelId:
+        assetType === "ssh"
+          ? connectionType === "jumphost" && sshTunnelId > 0
+            ? sshTunnelId
+            : 0
+          : sshTunnelId > 0
+            ? sshTunnelId
+            : 0,
     });
 
     setSaving(true);

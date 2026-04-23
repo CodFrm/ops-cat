@@ -496,31 +496,29 @@ func (m *Manager) dialViaJumpHosts(cfg ConnectConfig, targetConfig *ssh.ClientCo
 	return ssh.NewClient(c, chans, reqs), closers, nil
 }
 
-// dialViaProxy 通过 SOCKS5/HTTP 代理建立 TCP 连接
+// dialViaProxy 通过 SOCKS5 代理建立 TCP 连接
 func dialViaProxy(proxyCfg *asset_entity.ProxyConfig, targetAddr string) (net.Conn, error) {
-	proxyAddr := fmt.Sprintf("%s:%d", proxyCfg.Host, proxyCfg.Port)
-
-	switch proxyCfg.Type {
-	case "socks5", "socks4":
-		var auth *proxy.Auth
-		if proxyCfg.Username != "" {
-			auth = &proxy.Auth{
-				User:     proxyCfg.Username,
-				Password: proxyCfg.Password,
-			}
-		}
-		dialer, err := proxy.SOCKS5("tcp", proxyAddr, auth, proxy.Direct)
-		if err != nil {
-			return nil, fmt.Errorf("创建SOCKS代理失败: %w", err)
-		}
-		conn, err := dialer.Dial("tcp", targetAddr)
-		if err != nil {
-			return nil, fmt.Errorf("通过SOCKS代理连接失败: %w", err)
-		}
-		return conn, nil
-	default:
+	if proxyCfg.Type != "" && proxyCfg.Type != "socks5" {
 		return nil, fmt.Errorf("不支持的代理类型: %s", proxyCfg.Type)
 	}
+
+	proxyAddr := fmt.Sprintf("%s:%d", proxyCfg.Host, proxyCfg.Port)
+	var auth *proxy.Auth
+	if proxyCfg.Username != "" {
+		auth = &proxy.Auth{
+			User:     proxyCfg.Username,
+			Password: proxyCfg.Password,
+		}
+	}
+	dialer, err := proxy.SOCKS5("tcp", proxyAddr, auth, proxy.Direct)
+	if err != nil {
+		return nil, fmt.Errorf("创建SOCKS代理失败: %w", err)
+	}
+	conn, err := dialer.Dial("tcp", targetAddr)
+	if err != nil {
+		return nil, fmt.Errorf("通过SOCKS代理连接失败: %w", err)
+	}
+	return conn, nil
 }
 
 // buildAuthMethods 构建 SSH 认证方式

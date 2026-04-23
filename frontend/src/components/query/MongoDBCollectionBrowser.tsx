@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, ChevronDown, Database, Table2, Plus, RefreshCw, Loader2 } from "lucide-react";
-import { Button, ScrollArea } from "@opskat/ui";
+import { ChevronRight, ChevronDown, Code2, Database, Table2, Plus, RefreshCw, Loader2, Search } from "lucide-react";
+import { Button, Input, ScrollArea } from "@opskat/ui";
 import { useQueryStore } from "@/stores/queryStore";
 
 interface MongoDBCollectionBrowserProps {
@@ -11,45 +11,76 @@ interface MongoDBCollectionBrowserProps {
 
 export function MongoDBCollectionBrowser({ tabId, assetId }: MongoDBCollectionBrowserProps) {
   const { t } = useTranslation();
-  const { mongoStates, loadMongoDatabases, loadMongoCollections, openCollectionTab, openMongoQueryTab } =
-    useQueryStore();
+  const {
+    mongoStates,
+    loadMongoDatabases,
+    loadMongoCollections,
+    toggleMongoDbExpand,
+    openCollectionTab,
+    openMongoQueryTab,
+  } = useQueryStore();
 
   const mongoState = mongoStates[tabId];
-  const [expandedDbs, setExpandedDbs] = useState<Set<string>>(new Set());
   const [loadingDbs, setLoadingDbs] = useState(false);
   const [loadingCollections, setLoadingCollections] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState("");
+  const [showFilter, setShowFilter] = useState(false);
+  const [selected, setSelected] = useState<{ db: string; collection: string } | null>(null);
 
+  // Auto-load only when nothing cached; restored tabs already have databases.
   useEffect(() => {
+    if (!mongoState) return;
+    if (mongoState.databases.length > 0) return;
     setLoadingDbs(true);
     loadMongoDatabases(tabId).finally(() => setLoadingDbs(false));
-  }, [tabId, assetId, loadMongoDatabases]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabId, assetId]);
+
+  const filterLower = filter.trim().toLowerCase();
+
+  const visibleDbs = useMemo(() => {
+    if (!mongoState) return [];
+    if (!filterLower) {
+      return mongoState.databases.map((db) => ({
+        db,
+        dbMatch: false,
+        collections: mongoState.collections[db],
+      }));
+    }
+    const out: { db: string; dbMatch: boolean; collections: string[] | undefined }[] = [];
+    for (const db of mongoState.databases) {
+      const dbMatch = db.toLowerCase().includes(filterLower);
+      const loaded = mongoState.collections[db];
+      const matched = loaded?.filter((c) => c.toLowerCase().includes(filterLower));
+      if (dbMatch) {
+        out.push({ db, dbMatch: true, collections: loaded });
+      } else if (matched && matched.length > 0) {
+        out.push({ db, dbMatch: false, collections: matched });
+      }
+    }
+    return out;
+  }, [mongoState, filterLower]);
 
   if (!mongoState) return null;
 
-  const { databases, collections } = mongoState;
+  const { expandedDbs } = mongoState;
 
-  const toggleDbExpand = (db: string) => {
-    const next = new Set(expandedDbs);
-    if (next.has(db)) {
-      next.delete(db);
-    } else {
-      next.add(db);
-      // Load collections if not loaded
-      if (!collections[db]) {
-        setLoadingCollections((prev) => new Set(prev).add(db));
-        loadMongoCollections(tabId, db).finally(() => {
-          setLoadingCollections((prev) => {
-            const next = new Set(prev);
-            next.delete(db);
-            return next;
-          });
+  const handleToggle = (db: string) => {
+    const willExpand = !expandedDbs.includes(db);
+    if (willExpand && !mongoState.collections[db]) {
+      setLoadingCollections((prev) => new Set(prev).add(db));
+      loadMongoCollections(tabId, db).finally(() => {
+        setLoadingCollections((prev) => {
+          const next = new Set(prev);
+          next.delete(db);
+          return next;
         });
-      }
+      });
     }
-    setExpandedDbs(next);
+    toggleMongoDbExpand(tabId, db);
   };
 
-  const handleRefresh = () => {
+  const handleLoad = () => {
     setLoadingDbs(true);
     loadMongoDatabases(tabId).finally(() => setLoadingDbs(false));
   };
@@ -66,22 +97,52 @@ export function MongoDBCollectionBrowser({ tabId, assetId }: MongoDBCollectionBr
             variant="ghost"
             size="icon"
             className="h-6 w-6"
-            onClick={() => openMongoQueryTab(tabId)}
-            title={t("query.newSql")}
+            onClick={() => {
+              setShowFilter((v) => {
+                if (v) setFilter("");
+                return !v;
+              });
+            }}
+            title={t("query.filterCollections")}
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Search className={`h-3.5 w-3.5 ${showFilter ? "text-foreground" : ""}`} />
           </Button>
           <Button
             variant="ghost"
             size="icon"
             className="h-6 w-6"
-            onClick={handleRefresh}
-            title={t("query.refreshTree")}
+            onClick={() => openMongoQueryTab(tabId, selected?.db, selected?.collection)}
+            title={t("query.newSql")}
           >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleLoad} title={t("query.refreshTree")}>
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
+
+      {/* Filter input */}
+      {showFilter && (
+        <div className="border-b px-2 py-1.5 shrink-0">
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              autoFocus
+              className="h-7 pl-7 text-xs"
+              placeholder={t("query.filterCollections")}
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setFilter("");
+                  setShowFilter(false);
+                }
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Tree */}
       <ScrollArea className="flex-1 min-h-0">
@@ -90,19 +151,23 @@ export function MongoDBCollectionBrowser({ tabId, assetId }: MongoDBCollectionBr
             <div className="flex items-center justify-center py-4">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             </div>
-          ) : databases.length === 0 ? (
-            <div className="text-xs text-muted-foreground text-center py-4">{t("query.databases")}</div>
+          ) : visibleDbs.length === 0 ? (
+            <div className="text-xs text-muted-foreground text-center py-4">
+              {filterLower ? t("query.noMatch") : t("query.databases")}
+            </div>
           ) : (
-            databases.map((db) => {
-              const isExpanded = expandedDbs.has(db);
-              const dbCollections = collections[db];
+            visibleDbs.map(({ db, dbMatch, collections: dbCollections }) => {
+              const isExpanded = filterLower ? true : expandedDbs.includes(db);
 
               return (
                 <div key={db}>
                   {/* Database node */}
                   <div
                     className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs cursor-pointer hover:bg-accent transition-colors duration-150"
-                    onClick={() => toggleDbExpand(db)}
+                    onClick={() => {
+                      if (filterLower) return;
+                      handleToggle(db);
+                    }}
                   >
                     {isExpanded ? (
                       <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
@@ -122,19 +187,41 @@ export function MongoDBCollectionBrowser({ tabId, assetId }: MongoDBCollectionBr
                         </div>
                       ) : dbCollections.length === 0 ? (
                         <div className="px-2 py-1 text-xs text-muted-foreground italic">
-                          {t("query.mongoCollections")}
+                          {filterLower && !dbMatch ? t("query.noMatch") : t("query.mongoCollections")}
                         </div>
                       ) : (
-                        dbCollections.map((col) => (
-                          <div
-                            key={col}
-                            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs cursor-pointer hover:bg-accent transition-colors duration-150"
-                            onClick={() => openCollectionTab(tabId, db, col)}
-                          >
-                            <Table2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                            <span className="truncate">{col}</span>
-                          </div>
-                        ))
+                        dbCollections.map((col) => {
+                          const isSelected = selected?.db === db && selected?.collection === col;
+                          return (
+                            <div
+                              key={col}
+                              className={`group flex items-center gap-1.5 rounded-md px-2 py-1 text-xs cursor-pointer transition-colors duration-150 ${
+                                isSelected ? "bg-accent text-accent-foreground" : "hover:bg-accent"
+                              }`}
+                              onClick={() => setSelected({ db, collection: col })}
+                              onDoubleClick={() => {
+                                setSelected({ db, collection: col });
+                                openCollectionTab(tabId, db, col);
+                              }}
+                            >
+                              <Table2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                              <span className="flex-1 truncate">{col}</span>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelected({ db, collection: col });
+                                  openMongoQueryTab(tabId, db, col);
+                                }}
+                                title={t("query.newSql")}
+                              >
+                                <Code2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          );
+                        })
                       )}
                     </div>
                   )}

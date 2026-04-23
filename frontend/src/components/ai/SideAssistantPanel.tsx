@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useRef, useState, useEffect } from "react";
 import { cn, useResizeHandle } from "@opskat/ui";
 import { useAIStore, type MentionRef } from "@/stores/aiStore";
 import { useTabStore } from "@/stores/tabStore";
@@ -30,16 +30,18 @@ export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelPr
 
   const [historyOpen, setHistoryOpen] = useState(false);
 
+  const panelRef = useRef<HTMLDivElement>(null);
   const {
-    width,
+    size: width,
     isResizing: resizing,
     handleMouseDown: handleResizeStart,
   } = useResizeHandle({
-    defaultWidth: 360,
-    minWidth: 280,
-    maxWidth: 520,
+    defaultSize: 360,
+    minSize: 280,
+    maxSize: 520,
     reverse: true,
     storageKey: "ai_sidebar_width",
+    targetRef: panelRef,
   });
 
   useEffect(() => {
@@ -103,11 +105,12 @@ export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelPr
   if (collapsed) return null;
 
   return (
-    <div className="relative overflow-visible shrink-0 transition-[width] duration-200" style={{ width }}>
-      <div
-        className="relative flex h-full shrink-0 flex-col border-l border-panel-divider bg-sidebar"
-        style={{ width }}
-      >
+    <div
+      ref={panelRef}
+      className="relative overflow-visible shrink-0 transition-[width] duration-200"
+      style={{ width }}
+    >
+      <div className="relative flex h-full w-full shrink-0 flex-col border-l border-panel-divider bg-sidebar">
         <div
           className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize z-10 hover:bg-primary/20 active:bg-primary/30 transition-colors"
           onMouseDown={handleResizeStart}

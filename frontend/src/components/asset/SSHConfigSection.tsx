@@ -173,7 +173,6 @@ export function SSHConfigSection({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="socks5">SOCKS5</SelectItem>
-                  <SelectItem value="socks4">SOCKS4</SelectItem>
                 </SelectContent>
               </Select>
             </div>

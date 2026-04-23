@@ -386,6 +386,8 @@ export function FileManagerPanel({ sessionId, isOpen, width, onWidthChange }: Fi
   }, [isOpen]);
 
   // === Resize handle (with body cursor lock) ===
+  // 拖拽期间通过 ref 直接改 DOM 宽度（rAF 合批），松手才 setState —— 避免把 MainPanel 子树 60Hz 重渲
+  const outerRef = useRef<HTMLDivElement>(null);
   const handleResizeStart = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
@@ -395,15 +397,38 @@ export function FileManagerPanel({ sessionId, isOpen, width, onWidthChange }: Fi
       const prevCursor = document.body.style.cursor;
       document.body.style.cursor = "col-resize";
 
+      const outer = outerRef.current;
+      const prevOuterTransition = outer?.style.transition ?? "";
+      // 禁 width transition，否则拖拽时宽度有延迟
+      if (outer) outer.style.transition = "none";
+
+      let pending = startWidth;
+      let rafId: number | null = null;
+      const flushToDom = () => {
+        rafId = null;
+        if (panelRef.current) panelRef.current.style.width = `${pending}px`;
+        if (outer) outer.style.width = `${pending + HANDLE_PX}px`;
+      };
+
       const onMove = (e: MouseEvent) => {
-        const delta = startX - e.clientX;
-        onWidthChange(startWidth + delta);
+        pending = startWidth + (startX - e.clientX);
+        if (rafId == null) rafId = requestAnimationFrame(flushToDom);
       };
       const onUp = () => {
+        if (rafId != null) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
         setIsResizing(false);
         document.body.style.cursor = prevCursor;
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
+        if (panelRef.current) panelRef.current.style.width = "";
+        if (outer) {
+          outer.style.width = "";
+          outer.style.transition = prevOuterTransition;
+        }
+        onWidthChange(pending);
       };
       document.addEventListener("mousemove", onMove);
       document.addEventListener("mouseup", onUp);
@@ -491,6 +516,7 @@ export function FileManagerPanel({ sessionId, isOpen, width, onWidthChange }: Fi
     <>
       {/* Animated outer wrapper */}
       <div
+        ref={outerRef}
         className="shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
         style={{
           width: isOpen ? totalWidth : 0,

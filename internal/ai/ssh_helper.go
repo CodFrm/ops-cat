@@ -7,15 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 
-	"github.com/opskat/opskat/internal/model/entity/asset_entity"
-	"github.com/opskat/opskat/internal/service/asset_svc"
 	"github.com/opskat/opskat/internal/service/credential_resolver"
-	"github.com/opskat/opskat/internal/service/ssh_svc"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -52,92 +48,57 @@ func closeOnCancel(ctx context.Context, closers ...io.Closer) func() {
 	return func() { close(done) }
 }
 
-// createSSHClient 创建 SSH 客户端，支持 password 和 key 认证
-func createSSHClient(cfg *asset_entity.SSHConfig, password, key, passphrase string) (*ssh.Client, error) {
-	var authMethods []ssh.AuthMethod
-	switch cfg.AuthType {
-	case "password":
-		if password != "" {
-			authMethods = []ssh.AuthMethod{ssh.Password(password)}
-		}
-	case "key":
-		if key != "" {
-			signer, err := parseSSHPrivateKey([]byte(key), passphrase)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse private key: %w", err)
-			}
-			authMethods = []ssh.AuthMethod{ssh.PublicKeys(signer)}
-		}
-	}
-	if len(authMethods) == 0 {
-		return nil, fmt.Errorf("no authentication method available")
-	}
-
-	sshConfig := &ssh.ClientConfig{
-		User:            cfg.Username,
-		Auth:            authMethods,
-		HostKeyCallback: ssh_svc.MakeHostKeyCallback(cfg.Host, cfg.Port, ssh_svc.AutoTrustFirstRejectChangeVerifyFunc()),
-		Timeout:         30 * time.Second,
-	}
-
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-	client, err := ssh.Dial("tcp", addr, sshConfig)
+// dialAssetSSH 建立到资产的 SSH 连接，返回 client 与一次性清理函数。
+// 底层委托给 credential_resolver.DialAssetSSH，统一支持 SOCKS5/HTTP 代理与跳板机链。
+// 调用方必须在使用结束后调用返回的 cleanup，一并关闭 client 与跳板机链上的中间连接。
+func dialAssetSSH(ctx context.Context, assetID int64) (*ssh.Client, func(), error) {
+	client, extraClosers, err := credential_resolver.Default().DialAssetSSH(ctx, assetID)
 	if err != nil {
-		return nil, fmt.Errorf("SSH connection failed: %w", err)
+		return nil, nil, err
 	}
-	return client, nil
-}
-
-// parseSSHPrivateKey 解析私钥，支持 passphrase
-func parseSSHPrivateKey(data []byte, passphrase string) (ssh.Signer, error) {
-	signer, err := ssh.ParsePrivateKey(data)
-	if err == nil {
-		return signer, nil
-	}
-	if passphrase != "" {
-		signer, err = ssh.ParsePrivateKeyWithPassphrase(data, []byte(passphrase))
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse encrypted private key: %w", err)
-		}
-		return signer, nil
-	}
-	return nil, err
-}
-
-// resolveAssetSSH 根据资产 ID 解析 SSH 连接所需信息（内部使用 credential_resolver）
-func resolveAssetSSH(ctx context.Context, assetID int64) (*asset_entity.Asset, *asset_entity.SSHConfig, string, string, string, error) {
-	asset, err := asset_svc.Asset().Get(ctx, assetID)
-	if err != nil {
-		return nil, nil, "", "", "", fmt.Errorf("asset not found: %w", err)
-	}
-	if !asset.IsSSH() {
-		return nil, nil, "", "", "", fmt.Errorf("asset is not SSH type")
-	}
-	sshCfg, err := asset.GetSSHConfig()
-	if err != nil {
-		return nil, nil, "", "", "", fmt.Errorf("failed to get SSH config: %w", err)
-	}
-	password, key, passphrase, err := credential_resolver.Default().ResolveSSHCredentials(ctx, sshCfg)
-	if err != nil {
-		return nil, nil, "", "", "", fmt.Errorf("failed to resolve credentials: %w", err)
-	}
-	return asset, sshCfg, password, key, passphrase, nil
-}
-
-// executeSSHCommand 执行一次性 SSH 命令并返回输出（每次新建连接）
-func executeSSHCommand(ctx context.Context, cfg *asset_entity.SSHConfig, password, key, passphrase string, command string) (string, error) {
-	client, err := createSSHClient(cfg, password, key, passphrase)
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		// runSSHCommand 在 ctx 取消时会主动 Close client 以打断阻塞，
-		// 这里再次 Close 属于预期重入；过滤已关闭错误避免日志噪音。
+	cleanup := func() {
 		if err := client.Close(); err != nil && !isExpectedCloseErr(err) {
 			logger.Default().Warn("close SSH client", zap.Error(err))
 		}
-	}()
+		closeExtras(extraClosers)
+	}
+	return client, cleanup, nil
+}
 
+// closeExtras 关闭跳板机链等附加资源，预期关闭错误静默跳过。
+func closeExtras(closers []io.Closer) {
+	for _, c := range closers {
+		if c == nil {
+			continue
+		}
+		if err := c.Close(); err != nil && !isExpectedCloseErr(err) {
+			logger.Default().Warn("close SSH chain resource", zap.Error(err))
+		}
+	}
+}
+
+// closersAsOne 将多个 closer 打包成单个 io.Closer（用于只接受单 closer 的 API，如 ConnCache）。
+func closersAsOne(closers []io.Closer) io.Closer {
+	if len(closers) == 0 {
+		return nil
+	}
+	return closerFunc(func() error {
+		closeExtras(closers)
+		return nil
+	})
+}
+
+type closerFunc func() error
+
+func (f closerFunc) Close() error { return f() }
+
+// executeSSHCommand 执行一次性 SSH 命令并返回输出（每次新建连接）
+func executeSSHCommand(ctx context.Context, assetID int64, command string) (string, error) {
+	client, cleanup, err := dialAssetSSH(ctx, assetID)
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
 	return runSSHCommand(ctx, client, command)
 }
 
@@ -193,16 +154,12 @@ func runSSHCommand(ctx context.Context, client *ssh.Client, command string) (str
 // executeWithSFTP 创建临时 SSH+SFTP 连接并执行操作。
 // ctx 取消时主动关闭底层连接以打断 fn 内部可能的 io.Copy 阻塞，
 // 从而让 AI 停止会话能立即生效（否则大文件传输会挂住 runner.Stop）。
-func executeWithSFTP(ctx context.Context, cfg *asset_entity.SSHConfig, password, key, passphrase string, fn func(*sftp.Client) error) error {
-	client, err := createSSHClient(cfg, password, key, passphrase)
+func executeWithSFTP(ctx context.Context, assetID int64, fn func(*sftp.Client) error) error {
+	client, cleanup, err := dialAssetSSH(ctx, assetID)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err := client.Close(); err != nil && !isExpectedCloseErr(err) {
-			logger.Default().Warn("close SFTP SSH client", zap.Error(err))
-		}
-	}()
+	defer cleanup()
 
 	sftpClient, err := sftp.NewClient(client)
 	if err != nil {
@@ -228,31 +185,19 @@ func executeWithSFTP(ctx context.Context, cfg *asset_entity.SSHConfig, password,
 	return nil
 }
 
-// DialSSHClient 创建 SSH 客户端连接，自动解析凭据。调用者需要关闭 client。
-func DialSSHClient(ctx context.Context, assetID int64) (*ssh.Client, error) {
-	_, sshCfg, password, key, passphrase, err := resolveAssetSSH(ctx, assetID)
-	if err != nil {
-		return nil, err
-	}
-	return createSSHClient(sshCfg, password, key, passphrase)
+// DialSSHClient 创建 SSH 客户端连接，自动解析凭据、代理、跳板机链。
+// 调用者必须调用返回的 cleanup 关闭 client 与链路资源。
+func DialSSHClient(ctx context.Context, assetID int64) (*ssh.Client, func(), error) {
+	return dialAssetSSH(ctx, assetID)
 }
 
 // ExecWithStdio 在远程服务器执行命令，直接连接 stdio（支持管道）
 func ExecWithStdio(ctx context.Context, assetID int64, command string, stdin io.Reader, stdout, stderr io.Writer) error {
-	_, sshCfg, password, key, passphrase, err := resolveAssetSSH(ctx, assetID)
+	client, cleanup, err := dialAssetSSH(ctx, assetID)
 	if err != nil {
 		return err
 	}
-
-	client, err := createSSHClient(sshCfg, password, key, passphrase)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := client.Close(); err != nil {
-			logger.Default().Warn("close ExecWithStdio SSH client", zap.Error(err))
-		}
-	}()
+	defer cleanup()
 
 	session, err := client.NewSession()
 	if err != nil {
@@ -275,40 +220,18 @@ func ExecWithStdio(ctx context.Context, assetID int64, command string, stdin io.
 
 // CopyBetweenAssets 在两个资产间直接传输文件（SFTP 流式，不经本地磁盘）
 func CopyBetweenAssets(ctx context.Context, srcAssetID int64, srcPath string, dstAssetID int64, dstPath string) error {
-	// 解析源资产凭证
-	_, srcCfg, srcPassword, srcKey, srcPassphrase, err := resolveAssetSSH(ctx, srcAssetID)
-	if err != nil {
-		return fmt.Errorf("failed to resolve source asset: %w", err)
-	}
-
-	// 解析目标资产凭证
-	_, dstCfg, dstPassword, dstKey, dstPassphrase, err := resolveAssetSSH(ctx, dstAssetID)
-	if err != nil {
-		return fmt.Errorf("failed to resolve destination asset: %w", err)
-	}
-
-	// 创建 SSH 客户端
-	srcClient, err := createSSHClient(srcCfg, srcPassword, srcKey, srcPassphrase)
+	srcClient, srcCleanup, err := dialAssetSSH(ctx, srcAssetID)
 	if err != nil {
 		return fmt.Errorf("source asset SSH connection failed: %w", err)
 	}
-	defer func() {
-		if err := srcClient.Close(); err != nil && !isExpectedCloseErr(err) {
-			logger.Default().Warn("close source SSH client", zap.Error(err))
-		}
-	}()
+	defer srcCleanup()
 
-	dstClient, err := createSSHClient(dstCfg, dstPassword, dstKey, dstPassphrase)
+	dstClient, dstCleanup, err := dialAssetSSH(ctx, dstAssetID)
 	if err != nil {
 		return fmt.Errorf("destination asset SSH connection failed: %w", err)
 	}
-	defer func() {
-		if err := dstClient.Close(); err != nil && !isExpectedCloseErr(err) {
-			logger.Default().Warn("close destination SSH client", zap.Error(err))
-		}
-	}()
+	defer dstCleanup()
 
-	// 创建 SFTP 客户端
 	srcSFTP, err := sftp.NewClient(srcClient)
 	if err != nil {
 		return fmt.Errorf("source asset SFTP connection failed: %w", err)
@@ -364,17 +287,9 @@ func CopyBetweenAssets(ctx context.Context, srcAssetID int64, srcPath string, ds
 	return nil
 }
 
-// AIPoolDialer 实现 sshpool.PoolDialer，使用 credential_resolver 解析凭据
+// AIPoolDialer 实现 sshpool.PoolDialer，委托给 credential_resolver 统一 dial
 type AIPoolDialer struct{}
 
 func (d *AIPoolDialer) DialAsset(ctx context.Context, assetID int64) (*ssh.Client, []io.Closer, error) {
-	sshCfg, password, key, passphrase, _, err := credential_resolver.Default().ResolveSSHConnectConfig(ctx, assetID)
-	if err != nil {
-		return nil, nil, err
-	}
-	client, err := createSSHClient(sshCfg, password, key, passphrase)
-	if err != nil {
-		return nil, nil, err
-	}
-	return client, nil, nil
+	return credential_resolver.Default().DialAssetSSH(ctx, assetID)
 }

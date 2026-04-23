@@ -48,7 +48,15 @@ export function TabPanelMenu({ mode, onOpenFilter }: TabPanelMenuProps) {
           <DropdownMenuItem onClick={() => setLayout("top")}>{t("sideTabs.switchToTop")}</DropdownMenuItem>
         )}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={onOpenFilter}>
+        <DropdownMenuItem
+          onSelect={() => {
+            // Defer so DropdownMenu's DismissableLayer fully unmounts before the
+            // Popover's DismissableLayer mounts; otherwise the trailing pointer event
+            // on the now-detached menu item is interpreted as "outside" and the
+            // Popover closes the moment it opens.
+            setTimeout(onOpenFilter, 0);
+          }}
+        >
           <span className="flex-1">{t("shortcut.panel.filter")}</span>
           <span className="text-xs text-muted-foreground ml-4">{formatBinding(shortcuts["panel.filter"])}</span>
         </DropdownMenuItem>

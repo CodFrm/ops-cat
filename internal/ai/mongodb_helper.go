@@ -217,6 +217,14 @@ func mongoFind(ctx context.Context, client *mongo.Client, database, collection s
 		findOpts.SetSort(sortDoc)
 	}
 
+	if projRaw, ok := queryMap["projection"]; ok {
+		var projDoc bson.D
+		if err := bson.UnmarshalExtJSON(projRaw, false, &projDoc); err != nil {
+			return "", fmt.Errorf("解析 projection 失败: %w", err)
+		}
+		findOpts.SetProjection(projDoc)
+	}
+
 	limit := int64(100)
 	if limitRaw, ok := queryMap["limit"]; ok {
 		var l int64
@@ -265,9 +273,18 @@ func mongoFindOne(ctx context.Context, client *mongo.Client, database, collectio
 		filter = bson.D{}
 	}
 
+	findOneOpts := options.FindOne()
+	if projRaw, ok := queryMap["projection"]; ok {
+		var projDoc bson.D
+		if err := bson.UnmarshalExtJSON(projRaw, false, &projDoc); err != nil {
+			return "", fmt.Errorf("解析 projection 失败: %w", err)
+		}
+		findOneOpts.SetProjection(projDoc)
+	}
+
 	coll := client.Database(database).Collection(collection)
 	var doc bson.D
-	err = coll.FindOne(ctx, filter).Decode(&doc)
+	err = coll.FindOne(ctx, filter, findOneOpts).Decode(&doc)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return marshalResult(map[string]any{"document": nil})

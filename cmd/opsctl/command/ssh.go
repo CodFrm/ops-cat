@@ -78,16 +78,12 @@ func cmdSSHViaProxy(proxy *sshpool.Client, assetID int64) int {
 
 // cmdSSHDirect 直连建立交互式 SSH（原逻辑）
 func cmdSSHDirect(ctx context.Context, assetID int64) int {
-	client, err := ai.DialSSHClient(ctx, assetID)
+	client, cleanup, err := ai.DialSSHClient(ctx, assetID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}
-	defer func() {
-		if err := client.Close(); err != nil {
-			logger.Default().Warn("close SSH client", zap.Error(err))
-		}
-	}()
+	defer cleanup()
 
 	session, err := client.NewSession()
 	if err != nil {

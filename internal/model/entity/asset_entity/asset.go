@@ -94,7 +94,7 @@ type SSHConfig struct {
 
 // ProxyConfig 代理配置
 type ProxyConfig struct {
-	Type     string `json:"type"` // "socks5" | "socks4" | "http"
+	Type     string `json:"type"` // "socks5"
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
 	Username string `json:"username,omitempty"`

@@ -1,13 +1,18 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from "react";
 import { useTranslation } from "react-i18next";
-import { X, Table2, Code2, Database, Loader2, Play } from "lucide-react";
-import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Input, Textarea } from "@opskat/ui";
+import { X, Table2, Code2, Database, Loader2, Play, Filter, Download } from "lucide-react";
+import type * as MonacoNS from "monaco-editor";
+import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Input } from "@opskat/ui";
 import { useResizeHandle } from "@opskat/ui";
+import { toast } from "sonner";
 import { useQueryStore, type MongoInnerTab } from "@/stores/queryStore";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
+import { isMac } from "@/stores/shortcutStore";
 import { MongoDBCollectionBrowser } from "./MongoDBCollectionBrowser";
 import { MongoDBResultView } from "./MongoDBResultView";
 import { ExecuteMongo } from "../../../wailsjs/go/app/App";
+import { CodeEditor } from "@/components/CodeEditor";
+import { parseMongosh, type ParsedMongosh } from "@/lib/mongosh-parser";
 
 interface MongoDBPanelProps {
   tabId: string;
@@ -15,17 +20,20 @@ interface MongoDBPanelProps {
 
 export function MongoDBPanel({ tabId }: MongoDBPanelProps) {
   const { t } = useTranslation();
-  const { mongoStates, closeMongoInnerTab, setActiveMongoInnerTab } = useQueryStore();
-  const mongoState = mongoStates[tabId];
+  const mongoState = useQueryStore((s) => s.mongoStates[tabId]);
+  const closeMongoInnerTab = useQueryStore((s) => s.closeMongoInnerTab);
+  const setActiveMongoInnerTab = useQueryStore((s) => s.setActiveMongoInnerTab);
 
   const tab = useTabStore((s) => s.tabs.find((t) => t.id === tabId));
   const meta = tab?.meta as QueryTabMeta | undefined;
   const assetId = meta?.assetId ?? 0;
 
-  const { width: sidebarWidth, handleMouseDown } = useResizeHandle({
-    defaultWidth: 200,
-    minWidth: 140,
-    maxWidth: 400,
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const { size: sidebarWidth, handleMouseDown } = useResizeHandle({
+    defaultSize: 200,
+    minSize: 140,
+    maxSize: 400,
+    targetRef: sidebarRef,
   });
 
   if (!mongoState) return null;
@@ -36,6 +44,7 @@ export function MongoDBPanel({ tabId }: MongoDBPanelProps) {
     <div className="flex h-full w-full">
       {/* Left sidebar: Collection browser */}
       <div
+        ref={sidebarRef}
         className="shrink-0 border-r border-border bg-sidebar h-full overflow-hidden"
         style={{ width: sidebarWidth }}
       >
@@ -99,19 +108,18 @@ export function MongoDBPanel({ tabId }: MongoDBPanelProps) {
           {innerTabs.map((innerTab) => {
             const isActive = innerTab.id === activeInnerTabId;
             return (
-              <div
-                key={innerTab.id}
-                className="absolute inset-0"
-                style={{ display: isActive ? "block" : "none" }}
-              >
+              <div key={innerTab.id} className="absolute inset-0" style={{ display: isActive ? "block" : "none" }}>
                 {innerTab.type === "collection" ? (
                   <MongoCollectionContent
+                    tabId={tabId}
+                    innerTabId={innerTab.id}
                     assetId={assetId}
                     database={innerTab.database}
                     collection={innerTab.collection}
+                    pendingLoad={innerTab.pendingLoad === true}
                   />
                 ) : (
-                  <MongoQueryContent assetId={assetId} innerTab={innerTab} />
+                  <MongoQueryContent tabId={tabId} assetId={assetId} innerTab={innerTab} />
                 )}
               </div>
             );
@@ -125,23 +133,86 @@ export function MongoDBPanel({ tabId }: MongoDBPanelProps) {
 // --- Collection Tab Content ---
 
 interface MongoCollectionContentProps {
+  tabId: string;
+  innerTabId: string;
   assetId: number;
   database: string;
   collection: string;
+  pendingLoad: boolean;
 }
 
-function MongoCollectionContent({ assetId, database, collection }: MongoCollectionContentProps) {
+const MONGO_REFRESH_SHORTCUT_LABEL = isMac ? "⌘R" : "Ctrl+R";
+
+function MongoCollectionContent(props: MongoCollectionContentProps) {
+  const { t } = useTranslation();
+  const { markMongoCollectionTabLoaded } = useQueryStore();
+  const isOuterActive = useTabStore((s) => s.activeTabId === props.tabId);
+  const isInnerActive = useQueryStore((s) => s.mongoStates[props.tabId]?.activeInnerTabId === props.innerTabId);
+
+  useEffect(() => {
+    if (!props.pendingLoad || !isOuterActive || !isInnerActive) return;
+    const handler = (e: KeyboardEvent) => {
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (mod && e.code === "KeyR" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        markMongoCollectionTabLoaded(props.tabId, props.innerTabId);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [props.pendingLoad, isOuterActive, isInnerActive, markMongoCollectionTabLoaded, props.tabId, props.innerTabId]);
+
+  if (props.pendingLoad) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+        <p className="text-xs">
+          {t("query.tableRestoredHint", {
+            table: `${props.database}.${props.collection}`,
+            shortcut: MONGO_REFRESH_SHORTCUT_LABEL,
+          })}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs gap-1"
+          onClick={() => markMongoCollectionTabLoaded(props.tabId, props.innerTabId)}
+        >
+          <Download className="h-3.5 w-3.5" />
+          {t("query.loadData")}
+        </Button>
+      </div>
+    );
+  }
+
+  return <MongoCollectionContentBody {...props} />;
+}
+
+function MongoCollectionContentBody({ tabId, innerTabId, assetId, database, collection }: MongoCollectionContentProps) {
+  const { t } = useTranslation();
   const [data, setData] = useState("");
   const [loading, setLoading] = useState(true);
   const [skip, setSkip] = useState(0);
-  const limit = 20;
+  const [limit, setLimit] = useState(100);
+  const isOuterActive = useTabStore((s) => s.activeTabId === tabId);
+  const isInnerActive = useQueryStore((s) => s.mongoStates[tabId]?.activeInnerTabId === innerTabId);
+
+  // In-progress edit state
+  const [filterInput, setFilterInput] = useState("");
+  const [sortInput, setSortInput] = useState("");
+  // Committed state (what the server is currently using). Decoupling the two
+  // means pagination / refresh keep using the last valid query even if the
+  // user has half-typed something new in the inputs.
+  const [appliedFilter, setAppliedFilter] = useState("");
+  const [appliedSort, setAppliedSort] = useState("");
 
   const loadData = useCallback(
-    async (newSkip: number) => {
+    async (newSkip: number, newLimit: number, filterJSON: string, sortJSON: string) => {
       setLoading(true);
       try {
-        const query = JSON.stringify({ skip: newSkip, limit });
-        const result = await ExecuteMongo(assetId, "find", database, collection, query);
+        const query: Record<string, unknown> = { skip: newSkip, limit: newLimit };
+        if (filterJSON.trim()) query.filter = JSON.parse(filterJSON);
+        if (sortJSON.trim()) query.sort = JSON.parse(sortJSON);
+        const result = await ExecuteMongo(assetId, "find", database, collection, JSON.stringify(query));
         setData(result);
         setSkip(newSkip);
       } catch (err) {
@@ -154,15 +225,117 @@ function MongoCollectionContent({ assetId, database, collection }: MongoCollecti
   );
 
   useEffect(() => {
-    loadData(0);
+    loadData(0, limit, "", "");
+    // Intentionally only depends on loadData — limit / filter / sort changes are
+    // driven by their own handlers which call loadData directly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadData]);
 
-  return <MongoDBResultView data={data} loading={loading} skip={skip} limit={limit} onPageChange={loadData} />;
+  const handleApply = () => {
+    if (filterInput.trim()) {
+      try {
+        JSON.parse(filterInput);
+      } catch {
+        toast.error(t("query.mongoInvalidFilter"));
+        return;
+      }
+    }
+    if (sortInput.trim()) {
+      try {
+        JSON.parse(sortInput);
+      } catch {
+        toast.error(t("query.mongoInvalidSort"));
+        return;
+      }
+    }
+    setAppliedFilter(filterInput);
+    setAppliedSort(sortInput);
+    loadData(0, limit, filterInput, sortInput);
+  };
+
+  const handlePageSizeChange = (size: number) => {
+    setLimit(size);
+    loadData(0, size, appliedFilter, appliedSort);
+  };
+
+  const handleRefresh = useCallback(
+    () => loadData(skip, limit, appliedFilter, appliedSort),
+    [loadData, skip, limit, appliedFilter, appliedSort]
+  );
+
+  useEffect(() => {
+    if (!isOuterActive || !isInnerActive) return;
+    const handler = (e: KeyboardEvent) => {
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (mod && e.code === "KeyR" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        handleRefresh();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isOuterActive, isInnerActive, handleRefresh]);
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Filter / sort bar */}
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-muted/20 shrink-0">
+        <div className="flex items-center gap-1 flex-1 min-w-0">
+          <span className="text-[11px] font-mono text-muted-foreground">FILTER</span>
+          <Input
+            className="h-7 text-xs font-mono"
+            value={filterInput}
+            onChange={(e) => setFilterInput(e.target.value)}
+            placeholder={t("query.mongoFilterPlaceholder")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                handleApply();
+              }
+            }}
+          />
+        </div>
+        <div className="flex items-center gap-1 flex-1 min-w-0">
+          <span className="text-[11px] font-mono text-muted-foreground whitespace-nowrap">SORT</span>
+          <Input
+            className="h-7 text-xs font-mono"
+            value={sortInput}
+            onChange={(e) => setSortInput(e.target.value)}
+            placeholder={t("query.mongoSortPlaceholder")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                handleApply();
+              }
+            }}
+          />
+        </div>
+        <Button variant="outline" size="sm" className="h-7 text-xs gap-1 shrink-0" onClick={handleApply}>
+          <Filter className="h-3.5 w-3.5" />
+          {t("query.applyFilter")}
+        </Button>
+      </div>
+
+      {/* Result */}
+      <div className="flex-1 min-h-0">
+        <MongoDBResultView
+          data={data}
+          loading={loading}
+          skip={skip}
+          limit={limit}
+          onPageChange={(s) => loadData(s, limit, appliedFilter, appliedSort)}
+          onPageSizeChange={handlePageSizeChange}
+          onRefresh={handleRefresh}
+          refreshShortcutLabel={MONGO_REFRESH_SHORTCUT_LABEL}
+        />
+      </div>
+    </div>
+  );
 }
 
 // --- Query Tab Content ---
 
-const MONGO_OPERATIONS = [
+const MONGO_COLLECTION_METHODS = [
   "find",
   "findOne",
   "insertOne",
@@ -173,135 +346,284 @@ const MONGO_OPERATIONS = [
   "deleteMany",
   "aggregate",
   "countDocuments",
-] as const;
+];
 
 interface MongoQueryContentProps {
+  tabId: string;
   assetId: number;
   innerTab: Extract<MongoInnerTab, { type: "query" }>;
 }
 
-function MongoQueryContent({ assetId, innerTab }: MongoQueryContentProps) {
+function MongoQueryContent({ tabId, assetId, innerTab }: MongoQueryContentProps) {
   const { t } = useTranslation();
-  const [operation, setOperation] = useState<string>("find");
-  const [database, setDatabase] = useState(innerTab.database || "");
-  const [collection, setCollection] = useState(innerTab.collection || "");
-  const [query, setQuery] = useState("{}");
+  const mongoState = useQueryStore((s) => s.mongoStates[tabId]);
+  const updateMongoInnerTab = useQueryStore((s) => s.updateMongoInnerTab);
+  const availableDbs = mongoState?.databases ?? [];
+
+  // 优先用 inner tab 自己记住的库，否则用当前选中的库
+  const [database, setDatabase] = useState<string>(innerTab.database || mongoState?.activeDatabase || "");
+  // 编辑器内容由 Monaco 自管（非受控）。queryRef 持最新值，query state 仅在 debounce 后同步用于驱动
+  // parsePreview / canExecute / 占位提示等低频派生信息。按键本身不再触发 React 重渲。
+  const editorRef = useRef<MonacoNS.editor.IStandaloneCodeEditor | null>(null);
+  const queryRef = useRef(innerTab.queryText || "");
+  const [query, setQuery] = useState(innerTab.queryText || "");
   const [data, setData] = useState("");
   const [loading, setLoading] = useState(false);
+  // 执行过后缓存解析结果；分页 / 刷新据此重放
+  const [lastParsed, setLastParsed] = useState<ParsedMongosh | null>(null);
   const [skip, setSkip] = useState(0);
-  const limit = 20;
+  const [limit, setLimit] = useState(100);
 
-  const operationLabels: Record<string, string> = {
-    find: t("query.mongoFind"),
-    findOne: t("query.mongoFindOne"),
-    insertOne: t("query.mongoInsert"),
-    insertMany: t("query.mongoInsertMany"),
-    updateOne: t("query.mongoUpdate"),
-    updateMany: t("query.mongoUpdateMany"),
-    deleteOne: t("query.mongoDelete"),
-    deleteMany: t("query.mongoDeleteMany"),
-    aggregate: t("query.mongoAggregate"),
-    countDocuments: t("query.mongoCount"),
-  };
+  // Editor/result split — drag the bar between them to adjust editor height.
+  const editorAreaRef = useRef<HTMLDivElement>(null);
+  const { size: editorHeight, handleMouseDown: handleSplitterDown } = useResizeHandle({
+    axis: "y",
+    defaultSize: innerTab.editorHeight && innerTab.editorHeight > 0 ? innerTab.editorHeight : 200,
+    minSize: 120,
+    maxSize: 800,
+    onResizeEnd: (h) => updateMongoInnerTab(tabId, innerTab.id, { editorHeight: h }),
+    targetRef: editorAreaRef,
+  });
 
-  const handleExecute = useCallback(
-    async (execSkip = 0) => {
-      if (!database || !collection) return;
+  // database 低频，直接 sync；queryText 走 commit 时机
+  useEffect(() => {
+    updateMongoInnerTab(tabId, innerTab.id, { database });
+  }, [database, tabId, innerTab.id, updateMongoInnerTab]);
+
+  const commitQueryRef = useRef<() => void>(() => {
+    updateMongoInnerTab(tabId, innerTab.id, { queryText: queryRef.current });
+  });
+  useEffect(() => {
+    commitQueryRef.current = () => {
+      updateMongoInnerTab(tabId, innerTab.id, { queryText: queryRef.current });
+    };
+  }, [tabId, innerTab.id, updateMongoInnerTab]);
+
+  useEffect(() => {
+    return () => {
+      commitQueryRef.current();
+    };
+  }, []);
+
+  // 预览解析结果（显示在编辑器下方小字提示），parse 错误不在此提示——只在执行时报错
+  // useDeferredValue 让 parser 以低优先级跑，遇到紧急渲染（如切 Tab）可被打断
+  const deferredQuery = useDeferredValue(query);
+  const deferredDatabase = useDeferredValue(database);
+  const parsePreview = useMemo(() => {
+    if (!deferredQuery.trim()) return null;
+    const r = parseMongosh(deferredQuery, deferredDatabase);
+    if (!r.ok) return null;
+    return r.value;
+  }, [deferredQuery, deferredDatabase]);
+
+  const execute = useCallback(
+    async (execSkip = 0, execLimit = limit) => {
+      const q = queryRef.current;
+      if (!q.trim()) {
+        toast.error(t("query.mongoshEmpty"));
+        return;
+      }
+      const parsed = parseMongosh(q, database);
+      if (!parsed.ok) {
+        setData(JSON.stringify({ error: parsed.error.message }));
+        toast.error(parsed.error.message);
+        return;
+      }
+      if (!parsed.value.database) {
+        toast.error(t("query.mongoshNoDatabase"));
+        return;
+      }
       setLoading(true);
+      setLastParsed(parsed.value);
       try {
-        let queryObj: Record<string, unknown>;
-        try {
-          queryObj = JSON.parse(query);
-        } catch {
-          queryObj = {};
+        const toSend: Record<string, unknown> = { ...parsed.value.query };
+        // 分页覆盖：用户在语句里没显式写 limit/skip 时，UI 注入默认值
+        if (parsed.value.operation === "find") {
+          if (toSend.skip === undefined) toSend.skip = execSkip;
+          if (toSend.limit === undefined) toSend.limit = execLimit;
         }
-        // Inject skip/limit for find operations
-        if (operation === "find") {
-          queryObj.skip = execSkip;
-          queryObj.limit = limit;
-        }
-        const result = await ExecuteMongo(assetId, operation, database, collection, JSON.stringify(queryObj));
+        const result = await ExecuteMongo(
+          assetId,
+          parsed.value.operation,
+          parsed.value.database,
+          parsed.value.collection,
+          JSON.stringify(toSend)
+        );
         setData(result);
-        setSkip(execSkip);
+        setSkip(typeof toSend.skip === "number" ? toSend.skip : execSkip);
+        if (typeof toSend.limit === "number") setLimit(toSend.limit);
       } catch (err) {
         setData(JSON.stringify({ error: String(err) }));
       } finally {
         setLoading(false);
       }
     },
-    [assetId, operation, database, collection, query]
+    [assetId, database, limit, t]
   );
 
-  const handlePageChange = useCallback(
-    (newSkip: number) => {
-      handleExecute(newSkip);
+  const handlePageChange = useCallback((newSkip: number) => execute(newSkip), [execute]);
+  const handlePageSizeChange = useCallback(
+    (size: number) => {
+      setLimit(size);
+      execute(0, size);
     },
-    [handleExecute]
+    [execute]
   );
+
+  // Bridge latest handleExecute into monaco command (registered once at mount).
+  const executeRef = useRef(execute);
+  useEffect(() => {
+    executeRef.current = execute;
+  }, [execute]);
+
+  const handleEditorMount = useCallback((editor: MonacoNS.editor.IStandaloneCodeEditor, monaco: typeof MonacoNS) => {
+    editorRef.current = editor;
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      executeRef.current(0);
+    });
+
+    // 订阅内容变化：更新 ref，debounce 300ms 同步 query state + 提交 store
+    const model = editor.getModel();
+    if (model) {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      model.onDidChangeContent(() => {
+        queryRef.current = model.getValue();
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          timer = null;
+          setQuery(queryRef.current);
+          commitQueryRef.current();
+        }, 300);
+      });
+    }
+
+    editor.onDidBlurEditorWidget(() => {
+      setQuery(queryRef.current);
+      commitQueryRef.current();
+    });
+  }, []);
+
+  // 当前库的集合列表——给 dynamicCompletions 用
+  const currentCollections = useMemo(() => {
+    if (!database || !mongoState) return [];
+    return mongoState.collections[database] ?? [];
+  }, [database, mongoState]);
+
+  const dynamicCompletions = useCallback(
+    (ctx: {
+      monaco: typeof MonacoNS;
+      range: MonacoNS.IRange;
+      model: MonacoNS.editor.ITextModel;
+      position: MonacoNS.Position;
+    }) => {
+      const line = ctx.model.getLineContent(ctx.position.lineNumber);
+      const before = line.slice(0, ctx.position.column - 1);
+      const items: MonacoNS.languages.CompletionItem[] = [];
+
+      // db.<cursor> → 集合名
+      if (/\bdb\.[\w$]*$/.test(before)) {
+        for (const col of currentCollections) {
+          items.push({
+            label: col,
+            kind: ctx.monaco.languages.CompletionItemKind.Class,
+            insertText: col,
+            range: ctx.range,
+            sortText: "0_" + col,
+            detail: t("query.mongoshCollection"),
+          });
+        }
+      }
+
+      // db.getSiblingDB("x").<cursor> — 暂不跨库查集合列表
+      // db.<collection>.<cursor> → 方法名（<collection> 必须匹配一个已知集合或任意标识符）
+      if (/\bdb\.[A-Za-z_$][\w$]*\.[\w$]*$/.test(before)) {
+        for (const m of MONGO_COLLECTION_METHODS) {
+          items.push({
+            label: m,
+            kind: ctx.monaco.languages.CompletionItemKind.Method,
+            insertText: m,
+            range: ctx.range,
+            sortText: "0_" + m,
+          });
+        }
+      }
+
+      return items;
+    },
+    [currentCollections, t]
+  );
+
+  const shortcutLabel = isMac ? "⌘⏎" : "Ctrl+Enter";
+  const canExecute = !!database || /getSiblingDB\s*\(/.test(query);
 
   return (
     <div className="flex flex-col h-full">
       {/* Query editor area */}
-      <div className="shrink-0 border-b border-border p-3 space-y-2">
-        <div className="flex items-center gap-2">
-          {/* Operation */}
-          <Select value={operation} onValueChange={setOperation}>
-            <SelectTrigger className="w-[140px] h-8 text-xs">
-              <SelectValue />
+      <div ref={editorAreaRef} className="shrink-0 flex flex-col p-3 gap-2" style={{ height: editorHeight }}>
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Current database */}
+          <Select
+            value={database || undefined}
+            onValueChange={(v) => setDatabase(v)}
+            disabled={availableDbs.length === 0}
+          >
+            <SelectTrigger className="w-[180px] h-8 text-xs">
+              <Database className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <SelectValue placeholder={t("query.mongoshPickDatabase")} />
             </SelectTrigger>
             <SelectContent>
-              {MONGO_OPERATIONS.map((op) => (
-                <SelectItem key={op} value={op}>
-                  {operationLabels[op] || op}
+              {availableDbs.map((db) => (
+                <SelectItem key={db} value={db}>
+                  {db}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
 
-          {/* Database */}
-          <Input
-            className="w-[140px] h-8 text-xs"
-            value={database}
-            onChange={(e) => setDatabase(e.target.value)}
-            placeholder={t("query.mongoDatabase")}
-          />
-
-          {/* Collection */}
-          <Input
-            className="flex-1 h-8 text-xs"
-            value={collection}
-            onChange={(e) => setCollection(e.target.value)}
-            placeholder={t("query.mongoCollections")}
-          />
+          {/* Parsed preview */}
+          <div className="flex-1 min-w-0 text-[11px] text-muted-foreground font-mono truncate">
+            {parsePreview
+              ? t("query.mongoshParsedAs", {
+                  op: parsePreview.operation,
+                  db: parsePreview.database || "?",
+                  coll: parsePreview.collection,
+                })
+              : query.trim()
+                ? t("query.mongoshWillParse")
+                : t("query.mongoshHint")}
+          </div>
 
           {/* Execute */}
           <Button
             size="sm"
             className="h-8 gap-1"
-            onClick={() => handleExecute(0)}
-            disabled={loading || !database || !collection}
+            onClick={() => execute(0)}
+            disabled={loading || !canExecute}
+            title={shortcutLabel}
           >
             {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
             {t("query.execute")}
           </Button>
         </div>
 
-        <Textarea
-          className="font-mono text-xs min-h-[60px] max-h-[200px] resize-y"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={operation === "aggregate" ? t("query.mongoPipeline") : t("query.mongoFilter")}
-          onKeyDown={(e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-              // IME 合成中：不触发执行，交给 IME 处理
-
-              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-              e.preventDefault();
-              handleExecute(0);
-            }
-          }}
-        />
+        <div className="flex-1 min-h-0 overflow-hidden border border-border rounded-md bg-background">
+          <CodeEditor
+            defaultValue={innerTab.queryText || ""}
+            language="javascript"
+            placeholder={t("query.mongoshPlaceholder")}
+            onMount={handleEditorMount}
+            dynamicCompletions={dynamicCompletions}
+          />
+        </div>
       </div>
+
+      {/* Vertical splitter between editor and results */}
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        className="h-[4px] shrink-0 cursor-row-resize border-y border-border bg-muted/30 hover:bg-ring/40 active:bg-ring/60 transition-colors"
+        onMouseDown={handleSplitterDown}
+      />
 
       {/* Result area */}
       <div className="flex-1 min-h-0">
@@ -311,7 +633,9 @@ function MongoQueryContent({ assetId, innerTab }: MongoQueryContentProps) {
             loading={loading}
             skip={skip}
             limit={limit}
-            onPageChange={operation === "find" ? handlePageChange : undefined}
+            onPageChange={lastParsed?.operation === "find" ? handlePageChange : undefined}
+            onPageSizeChange={lastParsed?.operation === "find" ? handlePageSizeChange : undefined}
+            onRefresh={() => execute(skip)}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-xs text-muted-foreground">

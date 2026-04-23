@@ -98,7 +98,7 @@ func (a *App) startApprovalServer(authToken string) {
 
 // startSSHPoolServer 启动 SSH 连接池 proxy 服务
 func (a *App) startSSHPoolServer(authToken string) {
-	dialer := &appPoolDialer{sshManager: a.sshManager}
+	dialer := &appPoolDialer{}
 	a.sshPool = sshpool.NewPool(dialer, 5*time.Minute)
 	a.sshProxyServer = sshpool.NewServer(a.sshPool, authToken)
 	sockPath := sshpool.SocketPath(bootstrap.AppDataDir())

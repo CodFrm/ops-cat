@@ -41,7 +41,32 @@ export function TabFilterPopover({ open, onOpenChange, children }: TabFilterPopo
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverAnchor asChild>{children}</PopoverAnchor>
-      <PopoverContent align="end" side="bottom" sideOffset={4} className="w-[320px] p-0">
+      <PopoverContent
+        align="end"
+        side="bottom"
+        sideOffset={4}
+        className="w-[320px] p-0"
+        onOpenAutoFocus={(e) => {
+          // Let the input's own autoFocus handle focus; Radix's default focus move
+          // can race with the still-animating DropdownMenu above.
+          e.preventDefault();
+        }}
+        onFocusOutside={(e) => {
+          // The sibling DropdownMenu (via which the user arrived here) animates out
+          // over ~150ms. During that window it can fire "focus outside" in two ways:
+          //   1) pointer hover steals focus onto a still-mounted closing menu item
+          //   2) the focused item unmounts and focus falls to <body>
+          // Both would dismiss this popover. Ignore them.
+          const t = e.target as HTMLElement | null;
+          if (!t || t === document.body || t.closest('[data-slot="dropdown-menu-content"]')) {
+            e.preventDefault();
+          }
+        }}
+        onPointerDownOutside={(e) => {
+          const t = e.target as HTMLElement | null;
+          if (t?.closest('[data-slot="dropdown-menu-content"]')) e.preventDefault();
+        }}
+      >
         <TabFilterInput
           autoFocus
           value={query}

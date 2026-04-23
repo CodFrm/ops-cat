@@ -96,7 +96,7 @@ func NewApp(skill SkillContent) *App {
 		shutdownCh:     make(chan struct{}),
 		flushAckCh:     make(chan struct{}, 1),
 	}
-	a.forwardManager = NewForwardManager(&appPoolDialer{sshManager: mgr})
+	a.forwardManager = NewForwardManager(&appPoolDialer{})
 	return a
 }
 
@@ -210,33 +210,11 @@ func (a *App) OnSecondInstanceLaunch() {
 
 // --- SSH 凭证解析（被多个文件共用的辅助方法）---
 
-// appPoolDialer 实现 sshpool.PoolDialer，使用 credential_resolver 解析凭据
-type appPoolDialer struct {
-	sshManager *ssh_svc.Manager
-}
+// appPoolDialer 实现 sshpool.PoolDialer，委托给 credential_resolver 统一 dial
+type appPoolDialer struct{}
 
 func (d *appPoolDialer) DialAsset(ctx context.Context, assetID int64) (*ssh.Client, []io.Closer, error) {
-	sshCfg, password, key, passphrase, jumpHosts, err := credential_resolver.Default().ResolveSSHConnectConfig(ctx, assetID)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	cfg := ssh_svc.ConnectConfig{
-		Host:              sshCfg.Host,
-		Port:              sshCfg.Port,
-		Username:          sshCfg.Username,
-		AuthType:          sshCfg.AuthType,
-		Password:          password,
-		Key:               key,
-		KeyPassphrase:     passphrase,
-		PrivateKeys:       sshCfg.PrivateKeys,
-		AssetID:           assetID,
-		Proxy:             sshCfg.Proxy,
-		JumpHosts:         jumpHosts,
-		HostKeyVerifyFunc: ssh_svc.AutoTrustFirstRejectChangeVerifyFunc(),
-	}
-
-	return d.sshManager.Dial(cfg)
+	return credential_resolver.Default().DialAssetSSH(ctx, assetID)
 }
 
 // resolveSSHCredentialsFull 解析 SSH 凭据，返回密码、密钥、passphrase

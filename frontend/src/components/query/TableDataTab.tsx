@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { memo, useEffect, useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ChevronLeft,
@@ -13,6 +13,9 @@ import {
   FileCode2,
   Copy,
   Plus,
+  Eye,
+  TriangleAlert,
+  Download,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -32,14 +35,17 @@ import {
   SelectValue,
 } from "@opskat/ui";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
+import { useQueryStore } from "@/stores/queryStore";
+import { isMac } from "@/stores/shortcutStore";
 import { ExecuteSQL } from "../../../wailsjs/go/app/App";
-import { QueryResultTable, CellEdit } from "./QueryResultTable";
+import { QueryResultTable, CellEdit, SortDir } from "./QueryResultTable";
 import { SqlPreviewDialog } from "./SqlPreviewDialog";
 import { InsertRowDialog } from "./InsertRowDialog";
 import { toast } from "sonner";
 
 interface TableDataTabProps {
   tabId: string;
+  innerTabId: string;
   database: string;
   table: string;
 }
@@ -67,10 +73,58 @@ function quoteIdent(name: string, driver?: string): string {
   return `\`${name}\``;
 }
 
-export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
+const REFRESH_SHORTCUT_LABEL = isMac ? "⌘R" : "Ctrl+R";
+
+// 字符串 props 稳定 —— memo 避免 DatabasePanel 的 innerTabs 结构变化传导
+export const TableDataTab = memo(function TableDataTab(props: TableDataTabProps) {
+  const { t } = useTranslation();
+  const { markTableTabLoaded } = useQueryStore();
+  const innerTab = useQueryStore((s) => s.dbStates[props.tabId]?.innerTabs.find((it) => it.id === props.innerTabId));
+  const pendingLoad = innerTab?.type === "table" && innerTab.pendingLoad === true;
+  const isOuterActive = useTabStore((s) => s.activeTabId === props.tabId);
+  const isInnerActive = useQueryStore((s) => s.dbStates[props.tabId]?.activeInnerTabId === props.innerTabId);
+
+  useEffect(() => {
+    if (!pendingLoad || !isOuterActive || !isInnerActive) return;
+    const handler = (e: KeyboardEvent) => {
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (mod && e.code === "KeyR" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        markTableTabLoaded(props.tabId, props.innerTabId);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [pendingLoad, isOuterActive, isInnerActive, markTableTabLoaded, props.tabId, props.innerTabId]);
+
+  if (pendingLoad) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+        <p className="text-xs">
+          {t("query.tableRestoredHint", { table: props.table, shortcut: REFRESH_SHORTCUT_LABEL })}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs gap-1"
+          onClick={() => markTableTabLoaded(props.tabId, props.innerTabId)}
+        >
+          <Download className="h-3.5 w-3.5" />
+          {t("query.loadData")}
+        </Button>
+      </div>
+    );
+  }
+
+  return <TableDataTabContent {...props} />;
+});
+
+function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTabProps) {
   const { t } = useTranslation();
   const tab = useTabStore((s) => s.tabs.find((t) => t.id === tabId));
   const queryMeta = tab?.meta as QueryTabMeta | undefined;
+  const isOuterActive = useTabStore((s) => s.activeTabId === tabId);
+  const isInnerActive = useQueryStore((s) => s.dbStates[tabId]?.activeInnerTabId === innerTabId);
 
   const [columns, setColumns] = useState<string[]>([]);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
@@ -82,7 +136,9 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
   const [error, setError] = useState<string | null>(null);
   const [edits, setEdits] = useState<Map<string, unknown>>(new Map());
   const [submitting, setSubmitting] = useState(false);
-  const [showSqlPreview, setShowSqlPreview] = useState(false);
+  // `preview` = read-only view (opened by the "Preview SQL" button).
+  // `confirm` = confirmation before submit (opened by the "Submit" button).
+  const [dialogMode, setDialogMode] = useState<"preview" | "confirm" | null>(null);
   const [showDDLDialog, setShowDDLDialog] = useState(false);
   const [showInsertDialog, setShowInsertDialog] = useState(false);
   const [ddlLoading, setDdlLoading] = useState(false);
@@ -91,12 +147,45 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
   const [orderByInput, setOrderByInput] = useState("");
   const [whereClause, setWhereClause] = useState("");
   const [orderByClause, setOrderByClause] = useState("");
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>(null);
   const [applyVersion, setApplyVersion] = useState(0);
+  const [primaryKeys, setPrimaryKeys] = useState<string[]>([]);
+  const [pkLoaded, setPkLoaded] = useState(false);
 
   const driver = queryMeta?.driver;
   const assetId = queryMeta?.assetId ?? 0;
 
   const totalPages = totalRows != null ? Math.max(1, Math.ceil(totalRows / pageSize)) : null;
+
+  // Fetch primary key column names for the current table. Used to build a
+  // concise UPDATE WHERE clause instead of matching every column.
+  const fetchPrimaryKeys = useCallback(async () => {
+    if (!assetId) return;
+    try {
+      let sql: string;
+      if (driver === "postgresql") {
+        const escapedTable = table.replace(/'/g, "''");
+        sql = `SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.table_schema = 'public' AND tc.table_name = '${escapedTable}' AND tc.constraint_type = 'PRIMARY KEY' ORDER BY kcu.ordinal_position`;
+      } else {
+        sql = `SHOW KEYS FROM ${quoteIdent(database, driver)}.${quoteIdent(table, driver)} WHERE Key_name = 'PRIMARY'`;
+      }
+      const result = await ExecuteSQL(assetId, sql, database);
+      const parsed: SQLResult = JSON.parse(result);
+      const cols = (parsed.rows ?? []).map((r) => String(r["Column_name"] ?? r["column_name"] ?? "")).filter(Boolean);
+      setPrimaryKeys(cols);
+    } catch {
+      setPrimaryKeys([]);
+    } finally {
+      setPkLoaded(true);
+    }
+  }, [assetId, database, table, driver]);
+
+  useEffect(() => {
+    setPrimaryKeys([]);
+    setPkLoaded(false);
+    fetchPrimaryKeys();
+  }, [fetchPrimaryKeys]);
 
   // Fetch total count
   const fetchCount = useCallback(async () => {
@@ -128,7 +217,11 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
       const tableName =
         driver === "postgresql" ? `"${table}"` : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
       const where = whereClause.trim();
-      const orderBy = orderByClause.trim();
+      // Header-click sort takes precedence over the manual ORDER BY input.
+      const orderBy =
+        sortColumn && sortDir
+          ? `${quoteIdent(sortColumn, driver)} ${sortDir === "asc" ? "ASC" : "DESC"}`
+          : orderByClause.trim();
       const wherePart = where ? ` WHERE ${where}` : "";
       const orderByPart = orderBy ? ` ORDER BY ${orderBy}` : "";
       const sql = `SELECT * FROM ${tableName}${wherePart}${orderByPart} LIMIT ${pageSize} OFFSET ${offset}`;
@@ -146,7 +239,7 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
         setLoading(false);
       }
     },
-    [assetId, database, table, driver, pageSize, whereClause, orderByClause]
+    [assetId, database, table, driver, pageSize, whereClause, orderByClause, sortColumn, sortDir]
   );
 
   useEffect(() => {
@@ -202,8 +295,12 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
         setClauses.push(`${quoteIdent(col, driver)} = ${sqlQuote(value)}`);
       }
 
+      // 优先用主键定位：WHERE 短、避免 TEXT/BLOB 模糊匹配，也能处理 PG 浮点等列等值不稳的情况。
+      // 没主键时退回全列匹配；PG 还要用 ctid 包一层把"匹配到的多行"收敛为物理一行。
+      const hasPK = primaryKeys.length > 0;
+      const whereCols = hasPK ? primaryKeys : columns;
       const whereClauses: string[] = [];
-      for (const col of columns) {
+      for (const col of whereCols) {
         const origVal = row[col];
         if (origVal == null) {
           whereClauses.push(`${quoteIdent(col, driver)} IS NULL`);
@@ -214,53 +311,63 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
 
       const tableName =
         driver === "postgresql" ? `"${table}"` : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+      const whereSQL = whereClauses.join(" AND ");
 
       if (driver === "postgresql") {
-        statements.push(
-          `UPDATE ${tableName} SET ${setClauses.join(", ")} WHERE ctid = (SELECT ctid FROM ${tableName} WHERE ${whereClauses.join(" AND ")} LIMIT 1);`
-        );
+        if (hasPK) {
+          statements.push(`UPDATE ${tableName} SET ${setClauses.join(", ")} WHERE ${whereSQL};`);
+        } else {
+          statements.push(
+            `UPDATE ${tableName} SET ${setClauses.join(", ")} WHERE ctid = (SELECT ctid FROM ${tableName} WHERE ${whereSQL} LIMIT 1);`
+          );
+        }
       } else {
-        statements.push(
-          `UPDATE ${tableName} SET ${setClauses.join(", ")} WHERE ${whereClauses.join(" AND ")} LIMIT 1;`
-        );
+        statements.push(`UPDATE ${tableName} SET ${setClauses.join(", ")} WHERE ${whereSQL} LIMIT 1;`);
       }
     }
     return statements;
-  }, [edits, rows, columns, driver, database, table]);
+  }, [edits, rows, columns, driver, database, table, primaryKeys]);
 
   const previewStatements = useMemo(() => {
-    if (!showSqlPreview) return [];
+    if (dialogMode === null) return [];
     return buildUpdateStatements();
-  }, [showSqlPreview, buildUpdateStatements]);
+  }, [dialogMode, buildUpdateStatements]);
 
   const handleSubmit = useCallback(async () => {
     if (edits.size === 0 || !assetId) return;
 
     const statements = buildUpdateStatements();
     setSubmitting(true);
-    let successCount = 0;
+    let affectedTotal = 0;
+    let zeroAffected = 0;
     let errorMsg = "";
 
     for (const sql of statements) {
       try {
-        await ExecuteSQL(assetId, sql, database);
-        successCount++;
+        const result = await ExecuteSQL(assetId, sql, database);
+        const parsed: SQLResult = JSON.parse(result);
+        const affected = Number(parsed.affected_rows ?? 0);
+        if (affected > 0) affectedTotal += affected;
+        else zeroAffected++;
       } catch (e) {
         errorMsg += String(e) + "\n";
       }
     }
 
     setSubmitting(false);
-    setShowSqlPreview(false);
+    setDialogMode(null);
 
-    if (errorMsg) {
-      toast.error(errorMsg.trim());
-    }
-    if (successCount > 0) {
-      toast.success(t("query.updateSuccess", { count: successCount }));
+    if (affectedTotal > 0) {
+      toast.success(t("query.updateSuccessAffected", { affected: affectedTotal }));
       setEdits(new Map());
       fetchData(page);
       fetchCount();
+    }
+    if (zeroAffected > 0) {
+      toast.warning(t("query.updateMismatch", { count: zeroAffected }));
+    }
+    if (errorMsg) {
+      toast.error(errorMsg.trim());
     }
   }, [edits, assetId, database, buildUpdateStatements, page, fetchData, fetchCount, t]);
 
@@ -279,13 +386,43 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
     fetchCount();
   }, [fetchData, fetchCount, page]);
 
+  useEffect(() => {
+    if (!isOuterActive || !isInnerActive) return;
+    const handler = (e: KeyboardEvent) => {
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (mod && e.code === "KeyR" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        handleRefresh();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isOuterActive, isInnerActive, handleRefresh]);
+
   const handleApplyQuery = useCallback(() => {
     setWhereClause(whereInput.trim());
     setOrderByClause(orderByInput.trim());
+    // Manual ORDER BY input overrides the header-click sort state.
+    if (orderByInput.trim()) {
+      setSortColumn(null);
+      setSortDir(null);
+    }
     setPage(0);
     setEdits(new Map());
     setApplyVersion((v) => v + 1);
   }, [whereInput, orderByInput]);
+
+  const handleSortChange = useCallback((col: string | null, dir: SortDir) => {
+    setSortColumn(col);
+    setSortDir(dir);
+    // Header click takes precedence — clear the manual ORDER BY input so the user
+    // can see which sort is actually applied.
+    setOrderByInput("");
+    setOrderByClause("");
+    setPage(0);
+    setEdits(new Map());
+    setApplyVersion((v) => v + 1);
+  }, []);
 
   const handleViewDDL = useCallback(async () => {
     if (!assetId) return;
@@ -421,6 +558,15 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
           <FileCode2 className="h-3.5 w-3.5" />
           {t("query.viewDDL")}
         </Button>
+        {driver !== "postgresql" && pkLoaded && primaryKeys.length === 0 && columns.length > 0 && (
+          <span
+            className="flex items-center gap-1 text-[11px] text-amber-600 shrink-0"
+            title={t("query.noPrimaryKeyTooltip")}
+          >
+            <TriangleAlert className="h-3.5 w-3.5" />
+            {t("query.noPrimaryKey")}
+          </span>
+        )}
       </div>
 
       {/* Table content */}
@@ -434,6 +580,10 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
         onCellEdit={handleCellEdit}
         showRowNumber
         rowNumberOffset={page * pageSize}
+        sortColumn={sortColumn}
+        sortDir={sortDir}
+        onSortChange={handleSortChange}
+        enableColumnFilter
       />
 
       {/* Edit action bar */}
@@ -452,10 +602,20 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
               {t("query.discardEdits")}
             </Button>
             <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1"
+              onClick={() => setDialogMode("preview")}
+              disabled={submitting}
+            >
+              <Eye className="h-3.5 w-3.5" />
+              {t("query.previewSql")}
+            </Button>
+            <Button
               variant="default"
               size="sm"
               className="h-7 text-xs gap-1"
-              onClick={() => setShowSqlPreview(true)}
+              onClick={() => setDialogMode("confirm")}
               disabled={submitting}
             >
               {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
@@ -476,7 +636,7 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
           className="h-6 w-6"
           onClick={handleRefresh}
           disabled={loading}
-          title={t("query.refreshTable")}
+          title={`${t("query.refreshTable")} (${REFRESH_SHORTCUT_LABEL})`}
         >
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
         </Button>
@@ -604,12 +764,14 @@ export function TableDataTab({ tabId, database, table }: TableDataTabProps) {
         onSuccess={handleInsertSuccess}
       />
 
-      {/* SQL Preview confirmation dialog */}
+      {/* SQL preview / submit confirmation */}
       <SqlPreviewDialog
-        open={showSqlPreview}
-        onOpenChange={setShowSqlPreview}
+        open={dialogMode !== null}
+        onOpenChange={(open) => {
+          if (!open && !submitting) setDialogMode(null);
+        }}
         statements={previewStatements}
-        onConfirm={handleSubmit}
+        onConfirm={dialogMode === "confirm" ? handleSubmit : undefined}
         submitting={submitting}
       />
     </div>

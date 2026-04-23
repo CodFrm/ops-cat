@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Table2, Code2, Database } from "lucide-react";
 import { useQueryStore } from "@/stores/queryStore";
@@ -12,13 +13,16 @@ interface DatabasePanelProps {
 
 export function DatabasePanel({ tabId }: DatabasePanelProps) {
   const { t } = useTranslation();
-  const { dbStates, closeInnerTab, setActiveInnerTab } = useQueryStore();
-  const dbState = dbStates[tabId];
+  const dbState = useQueryStore((s) => s.dbStates[tabId]);
+  const closeInnerTab = useQueryStore((s) => s.closeInnerTab);
+  const setActiveInnerTab = useQueryStore((s) => s.setActiveInnerTab);
 
-  const { width: sidebarWidth, handleMouseDown } = useResizeHandle({
-    defaultWidth: 200,
-    minWidth: 140,
-    maxWidth: 400,
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const { size: sidebarWidth, handleMouseDown } = useResizeHandle({
+    defaultSize: 200,
+    minSize: 140,
+    maxSize: 400,
+    targetRef: sidebarRef,
   });
 
   if (!dbState) return null;
@@ -29,6 +33,7 @@ export function DatabasePanel({ tabId }: DatabasePanelProps) {
     <div className="flex h-full w-full">
       {/* Left sidebar: Database tree */}
       <div
+        ref={sidebarRef}
         className="shrink-0 border-r border-border bg-sidebar h-full overflow-hidden"
         style={{ width: sidebarWidth }}
       >
@@ -92,13 +97,9 @@ export function DatabasePanel({ tabId }: DatabasePanelProps) {
           {innerTabs.map((tab) => {
             const isActive = tab.id === activeInnerTabId;
             return (
-              <div
-                key={tab.id}
-                className="absolute inset-0"
-                style={{ display: isActive ? "block" : "none" }}
-              >
+              <div key={tab.id} className="absolute inset-0" style={{ display: isActive ? "block" : "none" }}>
                 {tab.type === "table" ? (
-                  <TableDataTab tabId={tabId} database={tab.database} table={tab.table} />
+                  <TableDataTab tabId={tabId} innerTabId={tab.id} database={tab.database} table={tab.table} />
                 ) : (
                   <SqlEditorTab tabId={tabId} innerTabId={tab.id} />
                 )}

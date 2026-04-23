@@ -23,13 +23,21 @@ export interface QueryTab {
 }
 
 export type InnerTab =
-  | { id: string; type: "table"; database: string; table: string }
-  | { id: string; type: "sql"; title: string; sql?: string; selectedDb?: string };
+  | { id: string; type: "table"; database: string; table: string; pendingLoad?: boolean }
+  | {
+      id: string;
+      type: "sql";
+      title: string;
+      sql?: string;
+      selectedDb?: string;
+      editorHeight?: number;
+      history?: string[];
+    };
 
 export interface DatabaseTabState {
   databases: string[];
   tables: Record<string, string[]>; // db -> table[]
-  expandedDbs: Set<string>;
+  expandedDbs: string[];
   loadingDbs: boolean;
   innerTabs: InnerTab[];
   activeInnerTabId: string | null;
@@ -63,12 +71,22 @@ export interface RedisTabState {
 }
 
 export type MongoInnerTab =
-  | { id: string; type: "collection"; database: string; collection: string }
-  | { id: string; type: "query"; title: string; database?: string; collection?: string };
+  | { id: string; type: "collection"; database: string; collection: string; pendingLoad?: boolean }
+  | {
+      id: string;
+      type: "query";
+      title: string;
+      database?: string;
+      collection?: string;
+      operation?: string;
+      queryText?: string;
+      editorHeight?: number;
+    };
 
 export interface MongoDBTabState {
   databases: string[];
   collections: Record<string, string[]>;
+  expandedDbs: string[];
   activeDatabase: string | null;
   innerTabs: MongoInnerTab[];
   activeInnerTabId: string | null;
@@ -92,6 +110,8 @@ interface QueryState {
   closeInnerTab: (tabId: string, innerTabId: string) => void;
   setActiveInnerTab: (tabId: string, innerTabId: string) => void;
   updateInnerTab: (tabId: string, innerTabId: string, patch: Record<string, unknown>) => void;
+  markTableTabLoaded: (tabId: string, innerTabId: string) => void;
+  addSqlHistory: (tabId: string, innerTabId: string, sql: string) => void;
 
   // Redis actions
   scanKeys: (tabId: string, reset?: boolean) => Promise<void>;
@@ -105,10 +125,13 @@ interface QueryState {
   // MongoDB actions
   loadMongoDatabases: (tabId: string) => Promise<void>;
   loadMongoCollections: (tabId: string, database: string) => Promise<void>;
+  toggleMongoDbExpand: (tabId: string, database: string) => void;
   openCollectionTab: (tabId: string, database: string, collection: string) => void;
   openMongoQueryTab: (tabId: string, database?: string, collection?: string) => void;
   closeMongoInnerTab: (tabId: string, innerTabId: string) => void;
   setActiveMongoInnerTab: (tabId: string, innerTabId: string) => void;
+  updateMongoInnerTab: (tabId: string, innerTabId: string, patch: Record<string, unknown>) => void;
+  markMongoCollectionTabLoaded: (tabId: string, innerTabId: string) => void;
 }
 
 // --- Helpers ---
@@ -121,7 +144,7 @@ function defaultDbState(): DatabaseTabState {
   return {
     databases: [],
     tables: {},
-    expandedDbs: new Set(),
+    expandedDbs: [],
     loadingDbs: false,
     innerTabs: [],
     activeInnerTabId: null,
@@ -148,6 +171,7 @@ function defaultMongoState(): MongoDBTabState {
   return {
     databases: [],
     collections: {},
+    expandedDbs: [],
     activeDatabase: null,
     innerTabs: [],
     activeInnerTabId: null,
@@ -352,15 +376,11 @@ export const useQueryStore = create<QueryState>((set, get) => ({
   toggleDbExpand: (tabId, database) => {
     const state = get().dbStates[tabId];
     if (!state) return;
-    const expanded = new Set(state.expandedDbs);
-    if (expanded.has(database)) {
-      expanded.delete(database);
-    } else {
-      expanded.add(database);
+    const isExpanded = state.expandedDbs.includes(database);
+    const expanded = isExpanded ? state.expandedDbs.filter((d) => d !== database) : [...state.expandedDbs, database];
+    if (!isExpanded && !state.tables[database]) {
       // Load tables if not loaded
-      if (!state.tables[database]) {
-        get().loadTables(tabId, database);
-      }
+      get().loadTables(tabId, database);
     }
     set((s) => ({
       dbStates: {
@@ -450,6 +470,43 @@ export const useQueryStore = create<QueryState>((set, get) => ({
         [tabId]: {
           ...state,
           innerTabs: state.innerTabs.map((t) => (t.id === innerTabId ? ({ ...t, ...patch } as InnerTab) : t)),
+        },
+      },
+    }));
+  },
+
+  markTableTabLoaded: (tabId, innerTabId) => {
+    const state = get().dbStates[tabId];
+    if (!state) return;
+    set((s) => ({
+      dbStates: {
+        ...s.dbStates,
+        [tabId]: {
+          ...state,
+          innerTabs: state.innerTabs.map((t) =>
+            t.id === innerTabId && t.type === "table" ? { ...t, pendingLoad: false } : t
+          ),
+        },
+      },
+    }));
+  },
+
+  addSqlHistory: (tabId, innerTabId, sql) => {
+    const state = get().dbStates[tabId];
+    if (!state) return;
+    const trimmed = sql.trim();
+    if (!trimmed) return;
+    set((s) => ({
+      dbStates: {
+        ...s.dbStates,
+        [tabId]: {
+          ...state,
+          innerTabs: state.innerTabs.map((t) => {
+            if (t.id !== innerTabId || t.type !== "sql") return t;
+            const prev = t.history || [];
+            const next = [trimmed, ...prev.filter((h) => h !== trimmed)].slice(0, 30);
+            return { ...t, history: next };
+          }),
         },
       },
     }));
@@ -837,7 +894,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       set((s) => ({
         mongoStates: {
           ...s.mongoStates,
-          [tabId]: { ...s.mongoStates[tabId], databases },
+          [tabId]: { ...s.mongoStates[tabId], databases, error: null },
         },
       }));
     } catch (err) {
@@ -876,6 +933,27 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     }
   },
 
+  toggleMongoDbExpand: (tabId, database) => {
+    const state = get().mongoStates[tabId];
+    if (!state) return;
+    const isExpanded = state.expandedDbs.includes(database);
+    const expanded = isExpanded ? state.expandedDbs.filter((d) => d !== database) : [...state.expandedDbs, database];
+    if (!isExpanded && !state.collections[database]) {
+      get().loadMongoCollections(tabId, database);
+    }
+    set((s) => ({
+      mongoStates: {
+        ...s.mongoStates,
+        [tabId]: {
+          ...s.mongoStates[tabId],
+          expandedDbs: expanded,
+          // 展开某个库时把它当作"当前库"，方便新开 Query Tab 时继承
+          activeDatabase: !isExpanded ? database : s.mongoStates[tabId].activeDatabase,
+        },
+      },
+    }));
+  },
+
   openCollectionTab: (tabId, database, collection) => {
     const state = get().mongoStates[tabId];
     if (!state) return;
@@ -906,14 +984,24 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     if (!state) return;
     const count = state.innerTabs.filter((t) => t.type === "query").length + 1;
     const innerId = `mongo-query:${Date.now()}`;
+    const resolvedDb = database ?? state.activeDatabase ?? undefined;
+    const queryText = collection ? `db.${collection}.find({})` : "";
     set((s) => ({
       mongoStates: {
         ...s.mongoStates,
         [tabId]: {
           ...s.mongoStates[tabId],
+          activeDatabase: resolvedDb ?? s.mongoStates[tabId].activeDatabase,
           innerTabs: [
             ...state.innerTabs,
-            { id: innerId, type: "query", title: `Query ${count}`, database, collection },
+            {
+              id: innerId,
+              type: "query",
+              title: `Query ${count}`,
+              database: resolvedDb,
+              collection,
+              queryText,
+            },
           ],
           activeInnerTabId: innerId,
         },
@@ -949,7 +1037,135 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       },
     }));
   },
+
+  updateMongoInnerTab: (tabId, innerTabId, patch) => {
+    const state = get().mongoStates[tabId];
+    if (!state) return;
+    set((s) => ({
+      mongoStates: {
+        ...s.mongoStates,
+        [tabId]: {
+          ...state,
+          innerTabs: state.innerTabs.map((t) => (t.id === innerTabId ? ({ ...t, ...patch } as MongoInnerTab) : t)),
+        },
+      },
+    }));
+  },
+
+  markMongoCollectionTabLoaded: (tabId, innerTabId) => {
+    const state = get().mongoStates[tabId];
+    if (!state) return;
+    set((s) => ({
+      mongoStates: {
+        ...s.mongoStates,
+        [tabId]: {
+          ...state,
+          innerTabs: state.innerTabs.map((t) =>
+            t.id === innerTabId && t.type === "collection" ? { ...t, pendingLoad: false } : t
+          ),
+        },
+      },
+    }));
+  },
 }));
+
+// === Persistence ===
+//
+// Caches sidebar metadata (database / table / collection lists, expanded
+// state, inner tabs, sql history, editor height) so the sidebar is ready
+// immediately on reload. Query results are NOT cached; table / collection
+// inner tabs are restored with pendingLoad = true so the user must click
+// to re-fetch the current page — avoiding a burst of queries on startup.
+
+const QUERY_STORE_KEY = "query_store_v1";
+
+interface PersistedDbState {
+  databases: string[];
+  tables: Record<string, string[]>;
+  expandedDbs: string[];
+  innerTabs: InnerTab[];
+  activeInnerTabId: string | null;
+}
+
+interface PersistedMongoState {
+  databases: string[];
+  collections: Record<string, string[]>;
+  expandedDbs: string[];
+  innerTabs: MongoInnerTab[];
+  activeInnerTabId: string | null;
+}
+
+interface PersistedQueryStore {
+  dbStates: Record<string, PersistedDbState>;
+  mongoStates: Record<string, PersistedMongoState>;
+}
+
+function stripDbState(s: DatabaseTabState): PersistedDbState {
+  return {
+    databases: s.databases,
+    tables: s.tables,
+    expandedDbs: s.expandedDbs,
+    innerTabs: s.innerTabs,
+    activeInnerTabId: s.activeInnerTabId,
+  };
+}
+
+function stripMongoState(s: MongoDBTabState): PersistedMongoState {
+  return {
+    databases: s.databases,
+    collections: s.collections,
+    expandedDbs: s.expandedDbs,
+    innerTabs: s.innerTabs,
+    activeInnerTabId: s.activeInnerTabId,
+  };
+}
+
+function loadPersistedQueryStore(): PersistedQueryStore {
+  try {
+    const raw = localStorage.getItem(QUERY_STORE_KEY);
+    if (!raw) return { dbStates: {}, mongoStates: {} };
+    const parsed = JSON.parse(raw) as Partial<PersistedQueryStore>;
+    return {
+      dbStates: parsed.dbStates || {},
+      mongoStates: parsed.mongoStates || {},
+    };
+  } catch {
+    return { dbStates: {}, mongoStates: {} };
+  }
+}
+
+function savePersistedQueryStore() {
+  const state = useQueryStore.getState();
+  const data: PersistedQueryStore = {
+    dbStates: {},
+    mongoStates: {},
+  };
+  for (const [tabId, s] of Object.entries(state.dbStates)) {
+    data.dbStates[tabId] = stripDbState(s);
+  }
+  for (const [tabId, s] of Object.entries(state.mongoStates)) {
+    data.mongoStates[tabId] = stripMongoState(s);
+  }
+  try {
+    localStorage.setItem(QUERY_STORE_KEY, JSON.stringify(data));
+  } catch {
+    /* storage full — ignore */
+  }
+}
+
+let _persistReady = false;
+let _saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+useQueryStore.subscribe((state, prevState) => {
+  if (!_persistReady) return;
+  if (state.dbStates === prevState.dbStates && state.mongoStates === prevState.mongoStates) return;
+  // Debounce: SQL editor / MongoDB query editor writes on every keystroke.
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    _saveTimer = null;
+    savePersistedQueryStore();
+  }, 300);
+});
 
 // === Close Hook: clean up when tabStore closes a query tab ===
 
@@ -969,20 +1185,58 @@ registerTabCloseHook((tab) => {
 // === Restore Hook: initialize query tab states ===
 
 registerTabRestoreHook("query", (tabs) => {
-  if (tabs.length === 0) return;
+  const persisted = loadPersistedQueryStore();
+  // Drop persisted entries whose tab is no longer open
+  const openIds = new Set(tabs.map((t) => t.id));
 
   const dbStates: Record<string, DatabaseTabState> = {};
   const redisStates: Record<string, RedisTabState> = {};
   const mongoStates: Record<string, MongoDBTabState> = {};
+
   for (const tab of tabs) {
     const m = tab.meta as QueryTabMeta;
     if (m.assetType === "database") {
-      dbStates[tab.id] = defaultDbState();
+      const saved = persisted.dbStates[tab.id];
+      if (saved) {
+        dbStates[tab.id] = {
+          ...defaultDbState(),
+          databases: saved.databases || [],
+          tables: saved.tables || {},
+          expandedDbs: saved.expandedDbs || [],
+          innerTabs: (saved.innerTabs || []).map((it) => (it.type === "table" ? { ...it, pendingLoad: true } : it)),
+          activeInnerTabId: saved.activeInnerTabId ?? null,
+        };
+      } else {
+        dbStates[tab.id] = defaultDbState();
+      }
     } else if (m.assetType === "mongodb") {
-      mongoStates[tab.id] = defaultMongoState();
+      const saved = persisted.mongoStates[tab.id];
+      if (saved) {
+        mongoStates[tab.id] = {
+          ...defaultMongoState(),
+          databases: saved.databases || [],
+          collections: saved.collections || {},
+          expandedDbs: saved.expandedDbs || [],
+          innerTabs: (saved.innerTabs || []).map((it) =>
+            it.type === "collection" ? { ...it, pendingLoad: true } : it
+          ),
+          activeInnerTabId: saved.activeInnerTabId ?? null,
+        };
+      } else {
+        mongoStates[tab.id] = defaultMongoState();
+      }
     } else {
       redisStates[tab.id] = defaultRedisState();
     }
   }
+
   useQueryStore.setState({ dbStates, redisStates, mongoStates });
+  _persistReady = true;
+
+  // Drop stale persisted entries (tabs no longer open) by writing the current
+  // trimmed state back.
+  const hasStale =
+    Object.keys(persisted.dbStates).some((id) => !openIds.has(id)) ||
+    Object.keys(persisted.mongoStates).some((id) => !openIds.has(id));
+  if (hasStale) savePersistedQueryStore();
 });

@@ -9,7 +9,7 @@ interface SessionToolbarProps {
   tabId: string;
 }
 
-function useUptime(connectedAt: number | undefined, connected: boolean): string {
+function useUptime(connectedAt: number | undefined, connected: boolean, active: boolean): string {
   const [elapsed, setElapsed] = useState("");
   useEffect(() => {
     if (!connected || !connectedAt) {
@@ -29,9 +29,10 @@ function useUptime(connectedAt: number | undefined, connected: boolean): string 
       );
     };
     update();
+    if (!active) return; // 非活跃 tab 不启动 interval，切回时 effect 会重入并 update 一次
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
-  }, [connectedAt, connected]);
+  }, [connectedAt, connected, active]);
   return elapsed;
 }
 
@@ -40,11 +41,12 @@ export function SessionToolbar({ tabId }: SessionToolbarProps) {
   const tabData = useTerminalStore((s) => s.tabData[tabId]);
   const splitPane = useTerminalStore((s) => s.splitPane);
   const reconnect = useTerminalStore((s) => s.reconnect);
+  const isActive = useTabStore((s) => s.activeTabId === tabId);
 
   // hooks 必须在所有条件分支之前调用
   const activePane = tabData ? tabData.panes[tabData.activePaneId] : undefined;
   const activeConnected = activePane?.connected ?? false;
-  const uptime = useUptime(activePane?.connectedAt, activeConnected);
+  const uptime = useUptime(activePane?.connectedAt, activeConnected, isActive);
 
   const tabMeta = useTabStore((s) => {
     const t = s.tabs.find((t) => t.id === tabId);

@@ -34,7 +34,7 @@ describe("DatabaseTree", () => {
         "query-1": {
           databases: ["appdb"],
           tables: {},
-          expandedDbs: new Set(),
+          expandedDbs: [],
           loadingDbs: false,
           innerTabs: [],
           activeInnerTabId: null,

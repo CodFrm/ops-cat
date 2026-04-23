@@ -3,7 +3,10 @@ package credential_resolver
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+
+	"golang.org/x/crypto/ssh"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/model/entity/credential_entity"
@@ -257,4 +260,29 @@ func (r *Resolver) ResolveSSHConnectConfig(ctx context.Context, assetID int64) (
 	}
 
 	return sshCfg, password, key, passphrase, jumpHosts, nil
+}
+
+// DialAssetSSH 一站式解析资产并建立 SSH 连接，自动处理代理密码解密、跳板机链。
+// 除返回的 *ssh.Client 外，调用方还须负责关闭返回的所有额外 closer（跳板机链的
+// 中间连接等）；否则会泄漏连接。失败时返回的 closer 列表为 nil。
+func (r *Resolver) DialAssetSSH(ctx context.Context, assetID int64) (*ssh.Client, []io.Closer, error) {
+	sshCfg, password, key, passphrase, jumpHosts, err := r.ResolveSSHConnectConfig(ctx, assetID)
+	if err != nil {
+		return nil, nil, err
+	}
+	cfg := ssh_svc.ConnectConfig{
+		Host:              sshCfg.Host,
+		Port:              sshCfg.Port,
+		Username:          sshCfg.Username,
+		AuthType:          sshCfg.AuthType,
+		Password:          password,
+		Key:               key,
+		KeyPassphrase:     passphrase,
+		PrivateKeys:       sshCfg.PrivateKeys,
+		AssetID:           assetID,
+		Proxy:             r.DecryptProxyPassword(sshCfg.Proxy),
+		JumpHosts:         jumpHosts,
+		HostKeyVerifyFunc: ssh_svc.AutoTrustFirstRejectChangeVerifyFunc(),
+	}
+	return ssh_svc.NewManager().Dial(cfg)
 }

@@ -41,6 +41,12 @@ export function SideTabList() {
     [tabs, query, t]
   );
 
+  // 稳定 Context value —— 否则每次父组件 render 都会强制所有 SideTabItem 消费者重渲
+  const dragContextValue = useMemo(
+    () => ({ dragKeyRef, reorder: reorderTab, moveTo: moveTabTo, tabs }),
+    [reorderTab, moveTabTo, tabs]
+  );
+
   const resolveMeta = (
     tab: Tab
   ): {
@@ -128,7 +134,7 @@ export function SideTabList() {
         />
       )}
 
-      <SideTabDragContext.Provider value={{ dragKeyRef, reorder: reorderTab, moveTo: moveTabTo, tabs }}>
+      <SideTabDragContext.Provider value={dragContextValue}>
         <div className="flex-1 overflow-y-auto py-1 px-1">
           {matchedWithLabel.length === 0 ? (
             <p className="px-3 py-2 text-xs text-muted-foreground text-center">
