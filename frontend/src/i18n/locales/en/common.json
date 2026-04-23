@@ -1245,6 +1245,11 @@
       "empty": "No snippets for this context.",
       "openManager": "Create in Snippets page",
       "triggerButton": "Insert snippet"
+    },
+    "slash": {
+      "noMatch": "No matching snippets",
+      "empty": "No prompt snippets yet",
+      "openManager": "Create in Snippets page"
     }
   }
 }

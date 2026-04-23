@@ -1,14 +1,23 @@
-import { useEffect, useRef, useImperativeHandle, forwardRef, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, useImperativeHandle, forwardRef, type MutableRefObject } from "react";
 import { EditorContent, useEditor, ReactRenderer, type Editor } from "@tiptap/react";
+import { Extension } from "@tiptap/core";
 import Document from "@tiptap/extension-document";
 import Paragraph from "@tiptap/extension-paragraph";
 import Text from "@tiptap/extension-text";
 import Placeholder from "@tiptap/extension-placeholder";
 import Mention from "@tiptap/extension-mention";
-import type { SuggestionProps, SuggestionKeyDownProps } from "@tiptap/suggestion";
+import Suggestion, { type SuggestionProps, type SuggestionKeyDownProps } from "@tiptap/suggestion";
 import tippy, { type Instance } from "tippy.js";
 import { MentionList, type MentionListRef, type MentionItem } from "./MentionList";
+import {
+  SnippetSuggestionList,
+  type SnippetSuggestionItem,
+  type SnippetSuggestionListRef,
+} from "./SnippetSuggestionList";
 import type { MentionRef } from "@/stores/aiStore";
+import { useSnippetStore } from "@/stores/snippetStore";
+import { ListSnippets } from "../../../wailsjs/go/app/App";
+import type { snippet_svc } from "../../../wailsjs/go/models";
 
 export interface AIChatInputDraft {
   content: string;
@@ -190,6 +199,123 @@ function buildEditorDocFromMessage(message: string | AIChatInputDraft): TipTapDo
   };
 }
 
+/** First non-empty line of snippet content, used as the popup preview line. */
+function firstLine(s: string): string {
+  const i = s.indexOf("\n");
+  return i === -1 ? s.trim() : s.slice(0, i).trim();
+}
+
+/**
+ * Build a ProseMirror plugin that triggers on `/` and inserts the picked snippet
+ * as PLAIN TEXT (not a Mention node) — prompt snippets are just template text.
+ *
+ * The factory takes the component-local `activeRef` so the editor's Enter-handler
+ * can yield to the popup (mirroring how the `@` mention suggestion works).
+ */
+function createSnippetSuggestionExtension(activeRef: MutableRefObject<boolean>) {
+  return Extension.create({
+    name: "snippetSuggestion",
+    addProseMirrorPlugins() {
+      // Shared closure: items() writes the unfiltered count here, render() reads
+      // it when building props so the list can distinguish "filter zeroed out"
+      // from "no prompt snippets at all". Avoids a separate fetch AND the earlier
+      // item-stamping hack where an empty `items` array lost the total.
+      let lastTotal = 0;
+      return [
+        Suggestion<SnippetSuggestionItem>({
+          editor: this.editor,
+          char: "/",
+          // Rely on TipTap's default `allowedPrefixes: [" "]` — it already
+          // enforces "doc-start or after whitespace" (that's why `http:/`
+          // doesn't trigger — `:` is not in allowedPrefixes). A custom `allow`
+          // here had an off-by-one and blocked legitimate "after space" cases
+          // like `hello /`.
+          command: ({ editor, range, props }) => {
+            editor.chain().focus().deleteRange(range).insertContent(props.content).run();
+            useSnippetStore.getState().recordUse(props.id);
+          },
+          items: async ({ query }) => {
+            try {
+              const req = {
+                categories: ["prompt"],
+                assetId: undefined,
+                includeGlobal: true,
+                keyword: "",
+                tag: "",
+                limit: 0,
+                offset: 0,
+                orderBy: "",
+              } as unknown as snippet_svc.ListReq;
+              const all = await ListSnippets(req);
+              const list: SnippetSuggestionItem[] = (all ?? []).map((s) => ({
+                id: s.ID,
+                name: s.Name,
+                preview: firstLine(s.Content ?? "").slice(0, 80),
+                content: s.Content ?? "",
+                readOnly: (s.Source ?? "").startsWith("ext:"),
+              }));
+              lastTotal = list.length;
+              const q = query.toLowerCase();
+              const filtered = q
+                ? list.filter((i) => i.name.toLowerCase().includes(q) || i.preview.toLowerCase().includes(q))
+                : list;
+              return filtered.slice(0, 20);
+            } catch {
+              return [];
+            }
+          },
+          render: () => {
+            let component: ReactRenderer<SnippetSuggestionListRef> | null = null;
+            let popup: Instance[] = [];
+            const buildProps = (p: SuggestionProps<SnippetSuggestionItem>) => ({
+              items: p.items,
+              totalAvailable: lastTotal,
+              command: p.command,
+            });
+            return {
+              onStart: (props) => {
+                activeRef.current = true;
+                component = new ReactRenderer(SnippetSuggestionList, {
+                  props: buildProps(props),
+                  editor: props.editor,
+                });
+                if (!props.clientRect) return;
+                popup = tippy("body", {
+                  getReferenceClientRect: props.clientRect as () => DOMRect,
+                  appendTo: () => document.body,
+                  content: component.element,
+                  showOnCreate: true,
+                  interactive: true,
+                  trigger: "manual",
+                  placement: "bottom-start",
+                });
+              },
+              onUpdate: (props) => {
+                component?.updateProps(buildProps(props));
+                if (popup[0] && props.clientRect) {
+                  popup[0].setProps({ getReferenceClientRect: props.clientRect as () => DOMRect });
+                }
+              },
+              onKeyDown: (props: SuggestionKeyDownProps) => {
+                if (props.event.key === "Escape") {
+                  popup[0]?.hide();
+                  return true;
+                }
+                return component?.ref?.onKeyDown(props) || false;
+              },
+              onExit: () => {
+                activeRef.current = false;
+                popup[0]?.destroy();
+                component?.destroy();
+              },
+            };
+          },
+        }),
+      ];
+    },
+  });
+}
+
 // 仅在首行首字符接管向上历史，避免影响富文本输入的原生光标移动。
 function shouldStartInputHistory(editor: Editor) {
   const { selection } = editor.state;
@@ -261,6 +387,14 @@ export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(funct
   // @ 提及弹窗是否处于激活状态。ProseMirror 会先调用 editorProps.handleKeyDown
   // 再分发给插件，所以需要在此处主动让路，避免 Enter 直接触发发送。
   const mentionActiveRef = useRef(false);
+  // `/` 片段弹窗的激活态；语义同 mentionActiveRef，两者互不冲突（不同插件）。
+  const snippetSuggestionActiveRef = useRef(false);
+  // Stable extension instance — `useMemo([])` ensures the plugin (and its tippy
+  // lifecycle state) is created exactly once per mount, not rebuilt on each render.
+  // The ref is only *stored* by the extension (mutated/read later in suggestion
+  // callbacks), never read during render; the rule can't detect that.
+  // eslint-disable-next-line react-hooks/refs
+  const snippetSuggestionExtension = useMemo(() => createSnippetSuggestionExtension(snippetSuggestionActiveRef), []);
 
   const editor = useEditor({
     extensions: [
@@ -327,6 +461,7 @@ export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(funct
           },
         },
       }),
+      snippetSuggestionExtension,
     ],
     editorProps: {
       attributes: {
@@ -367,8 +502,9 @@ export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(funct
           }
         }
 
-        // 提及弹窗激活时，把 Enter 让给 suggestion 插件用于选中候选项
-        if (isEnter && mentionActiveRef.current) {
+        // 提及 / 片段弹窗激活时，把 Enter 让给 suggestion 插件用于选中候选项
+        const suggestionActive = mentionActiveRef.current || snippetSuggestionActiveRef.current;
+        if (isEnter && suggestionActive) {
           return false;
         }
         if (isEnter && shouldSendOnEnter && !event.shiftKey && !mod) {

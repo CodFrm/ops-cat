@@ -1245,6 +1245,11 @@
       "empty": "此场景暂无片段。",
       "openManager": "到代码片段页创建",
       "triggerButton": "插入代码片段"
+    },
+    "slash": {
+      "noMatch": "无匹配的片段",
+      "empty": "还没有 prompt 片段",
+      "openManager": "到代码片段页创建"
     }
   }
 }
