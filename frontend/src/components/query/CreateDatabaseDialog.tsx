@@ -14,6 +14,7 @@ import {
 } from "@opskat/ui";
 import { ExecuteSQL } from "../../../wailsjs/go/app/App";
 import { toast } from "sonner";
+import { SqlPreviewDialog } from "./SqlPreviewDialog";
 
 interface CreateDatabaseDialogProps {
   open: boolean;
@@ -83,6 +84,9 @@ export function CreateDatabaseDialog({
   const [charset, setCharset] = useState(driver === "postgresql" ? "UTF8" : "utf8mb4");
   const [collation, setCollation] = useState(driver === "postgresql" ? "en_US.UTF-8" : "utf8mb4_0900_ai_ci");
   const [submitting, setSubmitting] = useState(false);
+  const [showSqlPreview, setShowSqlPreview] = useState(false);
+  const [previewStatements, setPreviewStatements] = useState<string[]>([]);
+  const [pendingName, setPendingName] = useState("");
 
   const resetForm = useCallback(() => {
     setDatabaseName("");
@@ -90,7 +94,7 @@ export function CreateDatabaseDialog({
     setCollation(driver === "postgresql" ? "en_US.UTF-8" : "utf8mb4_0900_ai_ci");
   }, [driver]);
 
-  const handleSubmit = useCallback(async () => {
+  const handlePreview = useCallback(() => {
     if (!assetId) return;
 
     const name = databaseName.trim();
@@ -104,11 +108,21 @@ export function CreateDatabaseDialog({
     }
 
     const sql = buildCreateDatabaseSql(name, charset, collation, driver);
+    setPreviewStatements([sql]);
+    setPendingName(name);
+    setShowSqlPreview(true);
+  }, [assetId, databaseName, charset, collation, driver, t]);
+
+  const handleConfirmSubmit = useCallback(async () => {
+    if (!assetId || previewStatements.length === 0) return;
 
     setSubmitting(true);
     try {
-      await ExecuteSQL(assetId, sql, defaultDatabase);
-      toast.success(t("query.createDatabaseSuccess", { database: name }));
+      for (const sql of previewStatements) {
+        await ExecuteSQL(assetId, sql, defaultDatabase);
+      }
+      toast.success(t("query.createDatabaseSuccess", { database: pendingName }));
+      setShowSqlPreview(false);
       onOpenChange(false);
       onSuccess();
       resetForm();
@@ -117,71 +131,83 @@ export function CreateDatabaseDialog({
     } finally {
       setSubmitting(false);
     }
-  }, [assetId, databaseName, charset, collation, driver, defaultDatabase, t, onOpenChange, onSuccess, resetForm]);
+  }, [assetId, previewStatements, defaultDatabase, t, pendingName, onOpenChange, onSuccess, resetForm]);
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(nextOpen) => {
-        if (!submitting && !nextOpen) resetForm();
-        onOpenChange(nextOpen);
-      }}
-    >
-      <DialogContent className="max-w-lg" showCloseButton={!submitting}>
-        <DialogHeader>
-          <DialogTitle>{t("query.createDatabaseDialogTitle")}</DialogTitle>
-          <DialogDescription>{t("query.createDatabaseDialogDesc")}</DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen) => {
+          if (!submitting && !nextOpen) resetForm();
+          onOpenChange(nextOpen);
+        }}
+      >
+        <DialogContent className="max-w-lg" showCloseButton={!submitting}>
+          <DialogHeader>
+            <DialogTitle>{t("query.createDatabaseDialogTitle")}</DialogTitle>
+            <DialogDescription>{t("query.createDatabaseDialogDesc")}</DialogDescription>
+          </DialogHeader>
 
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label className="text-xs">{t("query.databaseNameLabel")}</Label>
-            <Input
-              className="h-8 text-xs font-mono"
-              value={databaseName}
-              onChange={(e) => setDatabaseName(e.target.value)}
-              placeholder={t("query.databaseNamePlaceholder")}
-              disabled={submitting}
-            />
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">{t("query.databaseNameLabel")}</Label>
+              <Input
+                className="h-8 text-xs font-mono"
+                value={databaseName}
+                onChange={(e) => setDatabaseName(e.target.value)}
+                placeholder={t("query.databaseNamePlaceholder")}
+                disabled={submitting}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">{t("query.charsetLabel")}</Label>
+              <Input
+                className="h-8 text-xs font-mono"
+                value={charset}
+                onChange={(e) => setCharset(e.target.value)}
+                placeholder={t("query.charsetPlaceholder")}
+                disabled={submitting}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">{t("query.collationLabel")}</Label>
+              <Input
+                className="h-8 text-xs font-mono"
+                value={collation}
+                onChange={(e) => setCollation(e.target.value)}
+                placeholder={t("query.collationPlaceholder")}
+                disabled={submitting}
+              />
+            </div>
           </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">{t("query.charsetLabel")}</Label>
-            <Input
-              className="h-8 text-xs font-mono"
-              value={charset}
-              onChange={(e) => setCharset(e.target.value)}
-              placeholder={t("query.charsetPlaceholder")}
-              disabled={submitting}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">{t("query.collationLabel")}</Label>
-            <Input
-              className="h-8 text-xs font-mono"
-              value={collation}
-              onChange={(e) => setCollation(e.target.value)}
-              placeholder={t("query.collationPlaceholder")}
-              disabled={submitting}
-            />
-          </div>
-        </div>
 
-        <DialogFooter>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs"
-            onClick={() => onOpenChange(false)}
-            disabled={submitting}
-          >
-            {t("action.cancel")}
-          </Button>
-          <Button size="sm" className="h-8 text-xs" onClick={handleSubmit} disabled={submitting}>
-            {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-            {t("query.createDatabaseSubmit")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => onOpenChange(false)}
+              disabled={submitting}
+            >
+              {t("action.cancel")}
+            </Button>
+            <Button size="sm" className="h-8 text-xs" onClick={handlePreview} disabled={submitting}>
+              {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              {t("query.designTablePreviewChanges")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <SqlPreviewDialog
+        open={showSqlPreview}
+        onOpenChange={(nextOpen) => {
+          if (!submitting) setShowSqlPreview(nextOpen);
+        }}
+        statements={previewStatements}
+        onConfirm={handleConfirmSubmit}
+        submitting={submitting}
+      />
+    </>
   );
 }

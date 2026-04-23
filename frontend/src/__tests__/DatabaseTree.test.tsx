@@ -5,6 +5,10 @@ import { useQueryStore } from "../stores/queryStore";
 import { useTabStore } from "../stores/tabStore";
 import { ExecuteSQL } from "../../wailsjs/go/app/App";
 
+vi.mock("@/components/CodeEditor", () => ({
+  CodeEditor: ({ value }: { value: string }) => <pre data-testid="code-editor">{value}</pre>,
+}));
+
 function makeDatabaseTab(id = "query-1"): void {
   useTabStore.setState({
     tabs: [
@@ -63,7 +67,13 @@ describe("DatabaseTree", () => {
     fireEvent.change(screen.getByPlaceholderText("query.collationPlaceholder"), {
       target: { value: "utf8mb4_0900_ai_ci" },
     });
-    fireEvent.click(screen.getByText("query.createDatabaseSubmit"));
+    fireEvent.click(screen.getByText("query.designTablePreviewChanges"));
+
+    await waitFor(() => {
+      expect(screen.getByText("query.sqlPreviewTitle")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("query.confirmExecute"));
 
     await waitFor(() => {
       expect(ExecuteSQL).toHaveBeenCalledWith(
