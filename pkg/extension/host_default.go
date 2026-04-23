@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync/atomic"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -44,8 +46,9 @@ type DefaultHostConfig struct {
 }
 
 type DefaultHostProvider struct {
-	cfg DefaultHostConfig
-	io  *IOHandleManager
+	cfg          DefaultHostConfig
+	io           *IOHandleManager
+	activeCancel atomic.Pointer[ActionCancellation]
 }
 
 func NewDefaultHostProvider(cfg DefaultHostConfig) *DefaultHostProvider {
@@ -68,9 +71,40 @@ func (h *DefaultHostProvider) IOOpen(params IOOpenParams) (uint32, IOMeta, error
 			}
 		}
 		return h.io.OpenHTTP(params, dial)
+	case "tcp":
+		return h.openTCP(params)
 	default:
 		return 0, IOMeta{}, fmt.Errorf("unknown IO type: %q", params.Type)
 	}
+}
+
+func (h *DefaultHostProvider) openTCP(params IOOpenParams) (uint32, IOMeta, error) {
+	if params.Addr == "" {
+		return 0, IOMeta{}, fmt.Errorf("tcp: addr is required")
+	}
+	timeout := time.Duration(params.Timeout) * time.Millisecond
+	if timeout == 0 {
+		timeout = 10 * time.Second
+	}
+
+	var conn net.Conn
+	var err error
+	if h.cfg.AssetSSHTunnelID > 0 && h.cfg.TunnelDialer != nil {
+		conn, err = h.cfg.TunnelDialer.Dial(h.cfg.AssetSSHTunnelID, params.Addr)
+	} else {
+		dialer := &net.Dialer{Timeout: timeout}
+		conn, err = dialer.Dial("tcp", params.Addr)
+	}
+	if err != nil {
+		return 0, IOMeta{}, err
+	}
+
+	id, err := h.io.Register(conn, conn, conn, IOMeta{})
+	if err != nil {
+		conn.Close()
+		return 0, IOMeta{}, err
+	}
+	return id, IOMeta{}, nil
 }
 
 func (h *DefaultHostProvider) IORead(handleID uint32, size int) ([]byte, error) {
@@ -100,6 +134,14 @@ func (h *DefaultHostProvider) IOFlush(handleID uint32) (*IOMeta, error) {
 
 func (h *DefaultHostProvider) IOClose(handleID uint32) error {
 	return h.io.Close(handleID)
+}
+
+func (h *DefaultHostProvider) IOSetDeadline(handleID uint32, kind string, unixNanos int64) error {
+	var t time.Time
+	if unixNanos != 0 {
+		t = time.Unix(0, unixNanos)
+	}
+	return h.io.SetDeadline(handleID, kind, t)
 }
 
 func (h *DefaultHostProvider) GetAssetConfig(assetID int64) (json.RawMessage, error) {
@@ -153,6 +195,15 @@ func (h *DefaultHostProvider) ActionEvent(eventType string, data json.RawMessage
 		return nil
 	}
 	return h.cfg.ActionEvents.OnActionEvent(eventType, data)
+}
+
+func (h *DefaultHostProvider) ActionShouldStop() bool {
+	c := h.activeCancel.Load()
+	return c != nil && c.ShouldStop()
+}
+
+func (h *DefaultHostProvider) SetActiveCancellation(c *ActionCancellation) {
+	h.activeCancel.Store(c)
 }
 
 func (h *DefaultHostProvider) CloseAll() {

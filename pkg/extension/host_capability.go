@@ -58,7 +58,14 @@ func (c *capHost) KVGet(key string) ([]byte, error) {
 	return c.inner.KVGet(key)
 }
 func (c *capHost) KVSet(key string, value []byte) error { return c.inner.KVSet(key, value) }
+func (c *capHost) IOSetDeadline(handleID uint32, kind string, unixNanos int64) error {
+	return c.inner.IOSetDeadline(handleID, kind, unixNanos)
+}
 func (c *capHost) ActionEvent(eventType string, data json.RawMessage) error {
 	return c.inner.ActionEvent(eventType, data)
+}
+func (c *capHost) ActionShouldStop() bool { return c.inner.ActionShouldStop() }
+func (c *capHost) SetActiveCancellation(ac *ActionCancellation) {
+	c.inner.SetActiveCancellation(ac)
 }
 func (c *capHost) CloseAll() { c.inner.CloseAll() }

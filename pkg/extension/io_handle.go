@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
@@ -232,4 +233,37 @@ func (m *IOHandleManager) get(id uint32) (*ioEntry, error) {
 		return nil, fmt.Errorf("handle %d id mismatch (got %d)", id, e.id)
 	}
 	return e, nil
+}
+
+// deadliner is the interface satisfied by net.Conn and *os.File (Go 1.10+).
+type deadliner interface {
+	SetDeadline(time.Time) error
+	SetReadDeadline(time.Time) error
+	SetWriteDeadline(time.Time) error
+}
+
+// SetDeadline sets read/write deadline on a handle whose underlying resource supports it.
+// kind ∈ {"read", "write", "both"}.
+func (m *IOHandleManager) SetDeadline(id uint32, kind string, t time.Time) error {
+	e, err := m.get(id)
+	if err != nil {
+		return err
+	}
+	d, ok := e.reader.(deadliner)
+	if !ok {
+		d, ok = e.closer.(deadliner)
+	}
+	if !ok {
+		return fmt.Errorf("handle %d does not support deadlines", id)
+	}
+	switch kind {
+	case "read":
+		return d.SetReadDeadline(t)
+	case "write":
+		return d.SetWriteDeadline(t)
+	case "both":
+		return d.SetDeadline(t)
+	default:
+		return fmt.Errorf("unknown deadline kind: %q", kind)
+	}
 }
