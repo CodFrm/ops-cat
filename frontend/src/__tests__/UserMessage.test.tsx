@@ -52,7 +52,7 @@ describe("UserMessage", () => {
     expect(useTabStore.getState().tabs.some((t) => t.id === "info-asset-42")).toBe(true);
   });
 
-  it("提供编辑入口时同时保留复制按钮，并触发 onEdit", async () => {
+  it("keeps the copy button when edit is available and triggers onEdit", async () => {
     const onEdit = vi.fn();
     const msg = {
       role: "user",

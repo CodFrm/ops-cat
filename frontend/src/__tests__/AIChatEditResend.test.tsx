@@ -126,7 +126,7 @@ function setupConversationFixture({
   );
 }
 
-describe("AIChat edit-and-resend 聚合回归", () => {
+describe("AIChat edit-and-resend regression", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockInputSpies.clear.mockReset();
@@ -156,7 +156,7 @@ describe("AIChat edit-and-resend 聚合回归", () => {
     vi.mocked(EventsOn).mockImplementation((() => vi.fn()) as never);
   });
 
-  it("tab 模式会预填 mention 草稿并沿真实 store 链路截断重发", async () => {
+  it("preloads mention drafts in tab mode and truncates/resends through the real store path", async () => {
     const user = userEvent.setup();
     const conversationId = 201;
     const tabId = "ai-201";
@@ -205,7 +205,7 @@ describe("AIChat edit-and-resend 聚合回归", () => {
     await waitFor(() => expect(screen.queryByText(editingBannerName)).not.toBeInTheDocument());
   });
 
-  it("conversationId 直连模式支持 sidebar 路径的 edit-and-resend", async () => {
+  it("supports sidebar edit-and-resend through direct conversationId mode", async () => {
     const user = userEvent.setup();
     const conversationId = 202;
 
@@ -246,7 +246,7 @@ describe("AIChat edit-and-resend 聚合回归", () => {
     await waitFor(() => expect(screen.queryByText(editingBannerName)).not.toBeInTheDocument());
   });
 
-  it("发送中编辑会清空 pendingQueue，并只保留新的后续分支", async () => {
+  it("clears pendingQueue while sending and keeps only the new follow-up branch", async () => {
     const user = userEvent.setup();
     const conversationId = 203;
 

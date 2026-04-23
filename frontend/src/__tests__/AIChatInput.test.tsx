@@ -145,7 +145,7 @@ describe("AIChatInput", () => {
     expect(mentions[0].end).toBeGreaterThan(mentions[0].start);
   });
 
-  it("外部预填 draft 后提交仍能恢复多段落 mention", async () => {
+  it("preserves multi-paragraph mentions when submitting an externally loaded draft", async () => {
     const onSubmit = vi.fn();
     const editorRef = { current: null as Editor | null };
     const handleRef = createRef<AIChatInputHandle>();
@@ -169,7 +169,7 @@ describe("AIChatInput", () => {
     expect(submittedMentions).toEqual(draftMentions);
   });
 
-  it("外部预填后重置历史游标，ArrowUp 从最新消息重新开始", async () => {
+  it("resets the history cursor after loading an external draft so ArrowUp restarts from latest", async () => {
     const handleRef = createRef<AIChatInputHandle>();
     const editorRef = { current: null as Editor | null };
     const history = ["最新", "次新", "更早"];

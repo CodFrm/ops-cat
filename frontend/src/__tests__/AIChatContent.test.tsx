@@ -102,7 +102,7 @@ describe("AIChatContent", () => {
     });
   });
 
-  it("从 conversationMessages 渲染 tab 会话消息", () => {
+  it("renders messages read from conversationMessages (not tabStates)", () => {
     const tabId = "ai-5";
     useTabStore.setState({
       tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 5, title: "t" } }],
@@ -122,7 +122,7 @@ describe("AIChatContent", () => {
     expect(screen.getByText("从 conversationMessages 读到")).toBeInTheDocument();
   });
 
-  it("支持直接传 conversationId 渲染消息", () => {
+  it("accepts conversationId directly without tabId and renders messages", () => {
     useAIStore.setState({
       conversationMessages: { 99: [{ role: "user", content: "直接用 convId", blocks: [] }] },
       conversationStreaming: { 99: { sending: false, pendingQueue: [] } },
@@ -132,7 +132,7 @@ describe("AIChatContent", () => {
     expect(screen.getByText("直接用 convId")).toBeInTheDocument();
   });
 
-  it("compact 模式会暴露 data-compact 属性", () => {
+  it("compact mode adds data-compact attribute for CSS hooks", () => {
     useAIStore.setState({
       conversationMessages: { 1: [] },
       conversationStreaming: { 1: { sending: false, pendingQueue: [] } },
@@ -142,7 +142,7 @@ describe("AIChatContent", () => {
     expect(container.querySelector("[data-compact='true']")).toBeTruthy();
   });
 
-  it("edit mode 会加载 draft，并改走 conversation 级 edit-and-resend", async () => {
+  it("edit mode loads the draft and routes submit through conversation-level edit-and-resend", async () => {
     const user = userEvent.setup();
     const sendToTab = vi.fn();
     const editAndResendConversation = vi.fn().mockResolvedValue(undefined);
@@ -179,7 +179,7 @@ describe("AIChatContent", () => {
     await waitFor(() => expect(screen.queryByText(editingBannerName)).not.toBeInTheDocument());
   });
 
-  it("取消编辑会清空预填草稿并退出 edit mode", async () => {
+  it("canceling edit clears the prefetched draft and exits edit mode", async () => {
     const user = userEvent.setup();
 
     useAIStore.setState({
@@ -202,7 +202,7 @@ describe("AIChatContent", () => {
     expect(screen.queryByText(editingBannerName)).not.toBeInTheDocument();
   });
 
-  it("会话切换时会显式复位 edit mode，避免状态泄漏", async () => {
+  it("switching conversations resets edit mode to avoid state leakage", async () => {
     const user = userEvent.setup();
 
     useAIStore.setState({
@@ -227,7 +227,7 @@ describe("AIChatContent", () => {
     expect(screen.queryByText(editingBannerName)).not.toBeInTheDocument();
   });
 
-  it("普通发送仍然走 onSendOverride", async () => {
+  it("regular sends still go through onSendOverride", async () => {
     const user = userEvent.setup();
     const onSendOverride = vi.fn().mockResolvedValue(undefined);
     const editAndResendConversation = vi.fn().mockResolvedValue(undefined);
