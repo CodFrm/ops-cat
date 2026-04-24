@@ -50,7 +50,10 @@ export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelPr
     storageKey: "ai_sidebar_width",
     targetRef: panelRef,
   });
-  const sessionRailWidth = width >= 460 ? 144 : width >= 360 ? 128 : 112;
+  // Keep the conversation rail light on narrower panels so the chat area
+  // stays usable, but give it enough width to avoid awkward multi-line rows.
+  const isCompactSessionRail = width < 430;
+  const sessionRailWidth = width >= 500 ? 176 : isCompactSessionRail ? 128 : 156;
 
   useEffect(() => {
     if (configured) fetchConversations();
@@ -179,7 +182,7 @@ export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelPr
 
           {sidebarTabs.length > 0 && (
             <aside
-              className="min-h-0 shrink-0 border-l border-panel-divider/80 bg-muted/15"
+              className="min-h-0 shrink-0 border-l border-panel-divider/70 bg-sidebar/65"
               style={{ width: sessionRailWidth }}
               data-ai-session-rail="right"
             >
@@ -187,6 +190,7 @@ export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelPr
                 tabs={sidebarTabs}
                 activeTabId={activeSidebarTabId}
                 getStatus={getSidebarTabStatus}
+                compact={isCompactSessionRail}
                 onActivate={activateSidebarTab}
                 onClose={closeSidebarTab}
               />

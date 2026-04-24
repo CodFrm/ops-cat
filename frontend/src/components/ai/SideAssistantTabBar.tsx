@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { LoaderCircle, X } from "lucide-react";
 import { cn, Button } from "@opskat/ui";
 import { useTranslation } from "react-i18next";
 import type { SidebarAITab, SidebarTabStatus } from "@/stores/aiStore";
@@ -7,6 +7,7 @@ interface SideAssistantTabBarProps {
   tabs: SidebarAITab[];
   activeTabId: string | null;
   getStatus: (tabId: string) => SidebarTabStatus;
+  compact?: boolean;
   onActivate: (tabId: string) => void;
   onClose: (tabId: string) => void;
 }
@@ -18,8 +19,39 @@ const statusClassNames: Record<Exclude<SidebarTabStatus, null>, string> = {
   error: "bg-rose-500",
 };
 
-export function SideAssistantTabBar({ tabs, activeTabId, getStatus, onActivate, onClose }: SideAssistantTabBarProps) {
+export function SideAssistantTabBar({
+  tabs,
+  activeTabId,
+  getStatus,
+  compact = false,
+  onActivate,
+  onClose,
+}: SideAssistantTabBarProps) {
   const { t } = useTranslation();
+  const renderStatusIndicator = (status: SidebarTabStatus, isBlankSession: boolean) => {
+    if (status === "running") {
+      return (
+        <span className="mt-1 flex h-3 w-3 shrink-0 items-center justify-center" title={t("ai.sidebar.status.running")}>
+          <LoaderCircle className="h-3 w-3 animate-spin text-sky-500" aria-hidden="true" />
+        </span>
+      );
+    }
+
+    if (status) {
+      return (
+        <span
+          className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", statusClassNames[status])}
+          title={t(`ai.sidebar.status.${status}`)}
+        />
+      );
+    }
+
+    if (isBlankSession) {
+      return <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/35" />;
+    }
+
+    return <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-transparent" />;
+  };
 
   return (
     <div
@@ -28,53 +60,77 @@ export function SideAssistantTabBar({ tabs, activeTabId, getStatus, onActivate, 
       aria-orientation="vertical"
       aria-label={t("ai.sidebar.sessions")}
     >
-      <div className="flex items-center justify-between border-b border-panel-divider px-3 py-2">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80">
+      <div className="flex items-center justify-between border-b border-panel-divider/70 px-3 py-2">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/65">
           {t("ai.sidebar.sessions")}
         </span>
-        <span className="rounded-full bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+        <span className="rounded-full border border-panel-divider/70 bg-background/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/85">
           {tabs.length}
         </span>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-        <div className="space-y-1.5">
+        <div className="space-y-1">
           {tabs.map((tab) => {
             const isActive = tab.id === activeTabId;
             const status = getStatus(tab.id);
-            const subtitle = status ? t(`ai.sidebar.status.${status}`) : t("ai.sidebar.newChat");
+            const isBlankSession = tab.conversationId == null;
+            const subtitle = isBlankSession
+              ? t("ai.sidebar.newChat")
+              : status
+                ? t(`ai.sidebar.status.${status}`)
+                : null;
+            const showSubtitle = Boolean(subtitle && (!compact || isActive || isBlankSession));
+
             return (
               <div
                 key={tab.id}
                 className={cn(
-                  "group relative min-w-0 rounded-xl border text-xs transition-colors",
+                  "group relative min-w-0 overflow-hidden rounded-lg text-xs transition-colors",
                   isActive
-                    ? "border-primary/30 bg-background text-foreground shadow-sm ring-1 ring-primary/10"
-                    : "border-transparent bg-background/35 text-muted-foreground hover:bg-background/80"
+                    ? "bg-background/95 text-foreground shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]"
+                    : "bg-transparent text-muted-foreground hover:bg-background/45"
                 )}
                 role="presentation"
               >
+                <span
+                  className={cn(
+                    "absolute bottom-2 left-0 top-2 w-px rounded-full transition-colors",
+                    isActive ? "bg-primary/65" : "bg-transparent"
+                  )}
+                />
                 <button
                   type="button"
                   role="tab"
                   aria-selected={isActive}
-                  className="flex w-full min-w-0 items-start gap-2 rounded-[inherit] px-2.5 py-2.5 pr-8 text-left"
+                  className={cn(
+                    "flex w-full min-w-0 items-start gap-2 rounded-[inherit] pl-3 pr-8 text-left",
+                    compact ? "py-2" : "py-2.5"
+                  )}
                   onClick={() => onActivate(tab.id)}
                   title={tab.title || t("ai.newConversation")}
                 >
-                  {status ? (
-                    <span
-                      className={cn("mt-1 h-1.5 w-1.5 shrink-0 rounded-full", statusClassNames[status])}
-                      title={t(`ai.sidebar.status.${status}`)}
-                    />
-                  ) : (
-                    <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-transparent" />
-                  )}
+                  {renderStatusIndicator(status, isBlankSession)}
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-medium leading-5 text-foreground">
+                    <span
+                      className={cn(
+                        "block truncate font-medium",
+                        compact ? "text-[11px] leading-5" : "text-xs leading-5",
+                        isActive ? "text-foreground" : "text-foreground/92"
+                      )}
+                    >
                       {tab.title || t("ai.newConversation")}
                     </span>
-                    <span className="block truncate text-[11px] leading-4 text-muted-foreground">{subtitle}</span>
+                    {showSubtitle && (
+                      <span
+                        className={cn(
+                          "block truncate text-muted-foreground/80",
+                          compact ? "text-[10px] leading-4" : "text-[11px] leading-4"
+                        )}
+                      >
+                        {subtitle}
+                      </span>
+                    )}
                   </span>
                 </button>
                 <Button
@@ -82,7 +138,7 @@ export function SideAssistantTabBar({ tabs, activeTabId, getStatus, onActivate, 
                   variant="ghost"
                   size="icon"
                   className={cn(
-                    "absolute right-1.5 top-1.5 h-5 w-5 shrink-0 rounded-md opacity-0 transition-opacity hover:opacity-100",
+                    "absolute right-1.5 top-1/2 h-5 w-5 shrink-0 -translate-y-1/2 rounded-md text-muted-foreground/70 opacity-0 transition-opacity hover:opacity-100",
                     isActive && "opacity-70"
                   )}
                   onClick={(event) => {

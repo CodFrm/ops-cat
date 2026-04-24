@@ -76,9 +76,12 @@ describe("SideAssistantPanel", () => {
         { ID: 1, Title: "Conv A", Updatetime: Math.floor(Date.now() / 1000) } as any,
         { ID: 2, Title: "Conv B", Updatetime: Math.floor(Date.now() / 1000) } as any,
       ],
-      conversationMessages: { 1: [], 2: [] },
+      conversationMessages: {
+        1: [{ role: "user", content: "hello", blocks: [], streaming: false } as any],
+        2: [],
+      },
       conversationStreaming: {
-        1: { sending: false, pendingQueue: [] },
+        1: { sending: true, pendingQueue: [] },
         2: { sending: false, pendingQueue: [] },
       },
     });
@@ -88,6 +91,7 @@ describe("SideAssistantPanel", () => {
     const tablist = screen.getByRole("tablist", { name: "ai.sidebar.sessions" });
     expect(tablist).toHaveAttribute("aria-orientation", "vertical");
     expect(tablist.closest('[data-ai-session-rail="right"]')).not.toBeNull();
+    expect(screen.getByTitle("ai.sidebar.status.running")).toBeInTheDocument();
   });
 
   it("history selection binds the active blank tab instead of opening a duplicate", async () => {
