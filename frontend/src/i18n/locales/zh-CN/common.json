@@ -629,7 +629,13 @@
       "collapse": "折叠",
       "emptyGuide": "点击 + 新建对话，或从 <history/> 历史中继续",
       "noConversation": "未选择对话",
-      "attachedAssets": "关联资产"
+      "attachedAssets": "关联资产",
+      "status": {
+        "waiting_approval": "待审批",
+        "running": "运行中",
+        "done": "已完成",
+        "error": "错误"
+      }
     }
   },
   "shortcut": {

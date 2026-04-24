@@ -1,9 +1,8 @@
 import { useState, useMemo } from "react";
-import { MessageSquare, Search, Trash2 } from "lucide-react";
+import { MessageSquare, Plus, Search, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger } from "@opskat/ui";
 import { useAIStore } from "@/stores/aiStore";
-import { useTabStore, type AITabMeta } from "@/stores/tabStore";
 
 function formatRelativeTime(timestamp: number, locale: string): string {
   const now = Date.now() / 1000;
@@ -20,27 +19,22 @@ function formatRelativeTime(timestamp: number, locale: string): string {
 interface SideAssistantHistoryDropdownProps {
   activeConversationId: number | null;
   onSelect: (conversationId: number) => void;
+  onOpenInTab: (conversationId: number) => void;
   onClose: () => void;
 }
 
 export function SideAssistantHistoryDropdown({
   activeConversationId,
   onSelect,
+  onOpenInTab,
   onClose,
 }: SideAssistantHistoryDropdownProps) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language || "zh-CN";
-  const { conversations, deleteConversation } = useAIStore();
-  const tabs = useTabStore((s) => s.tabs);
+  const { conversations, deleteConversation, sidebarTabs } = useAIStore();
   const openInTabIds = useMemo(
-    () =>
-      new Set(
-        tabs
-          .filter((tb) => tb.type === "ai")
-          .map((tb) => (tb.meta as AITabMeta).conversationId)
-          .filter((x): x is number => x != null)
-      ),
-    [tabs]
+    () => new Set(sidebarTabs.map((tab) => tab.conversationId).filter((x): x is number => x != null)),
+    [sidebarTabs]
   );
 
   const [query, setQuery] = useState("");
@@ -101,6 +95,19 @@ export function SideAssistantHistoryDropdown({
                     {isInTab && ` · ${t("ai.sidebar.promoteHint")}`}
                   </p>
                 </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100"
+                  title={t("action.openInTab")}
+                  aria-label={t("action.openInTab")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenInTab(conv.ID);
+                  }}
+                >
+                  <Plus className="h-3 w-3" />
+                </Button>
                 <Popover open={isDeleting} onOpenChange={(open) => setDeleteTarget(open ? conv.ID : null)}>
                   <PopoverTrigger asChild>
                     <Button

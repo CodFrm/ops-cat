@@ -629,7 +629,13 @@
       "collapse": "Collapse",
       "emptyGuide": "Click + to start a new chat, or pick one from <history/> History",
       "noConversation": "No conversation selected",
-      "attachedAssets": "Attached assets"
+      "attachedAssets": "Attached assets",
+      "status": {
+        "waiting_approval": "Waiting approval",
+        "running": "Running",
+        "done": "Done",
+        "error": "Error"
+      }
     }
   },
   "shortcut": {

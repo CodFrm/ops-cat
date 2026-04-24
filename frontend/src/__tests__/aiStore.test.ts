@@ -8,6 +8,7 @@ vi.mock("../i18n", () => ({
 import { useAIStore, getAISendOnEnter, setAISendOnEnter } from "../stores/aiStore";
 import { useTabStore, type AITabMeta } from "../stores/tabStore";
 import {
+  CreateConversation,
   GetActiveAIProvider,
   ListConversations,
   DeleteConversation,
@@ -27,6 +28,14 @@ async function waitForStoreCondition(predicate: () => boolean, timeoutMs = 1000)
     }
     await new Promise((r) => setTimeout(r, 5));
   }
+}
+
+function createTabState() {
+  return {
+    inputDraft: { content: "", mentions: [] },
+    scrollTop: 0,
+    editTarget: null,
+  };
 }
 
 describe("aiStore", () => {
@@ -152,6 +161,31 @@ describe("aiStore", () => {
       expect(msgs).toHaveLength(1);
       expect(msgs[0].role).toBe("user");
     });
+
+    it("reuses in-memory live state without reloading or clearing the queue", async () => {
+      useAIStore.setState({
+        conversations: [{ ID: 3, Title: "Live Chat" }] as any,
+        conversationMessages: {
+          3: [
+            { role: "user", content: "Hello", blocks: [] },
+            { role: "assistant", content: "partial", blocks: [], streaming: true },
+          ],
+        },
+        conversationStreaming: {
+          3: { sending: true, pendingQueue: [{ text: "queued-1" }] },
+        },
+      });
+
+      const tabId = await useAIStore.getState().openConversationTab(3);
+
+      expect(tabId).toBe("ai-3");
+      expect(LoadConversationMessages).not.toHaveBeenCalled();
+      expect(useAIStore.getState().conversationMessages[3][1].content).toBe("partial");
+      expect(useAIStore.getState().conversationStreaming[3]).toEqual({
+        sending: true,
+        pendingQueue: [{ text: "queued-1" }],
+      });
+    });
   });
 
   describe("isAnySending", () => {
@@ -255,7 +289,7 @@ describe("conversationMessages (Phase 1)", () => {
       activeTabId: tabId,
     });
     useAIStore.setState({
-      tabStates: { [tabId]: {} },
+      tabStates: { [tabId]: createTabState() },
     });
 
     vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
@@ -275,7 +309,7 @@ describe("conversationMessages (Phase 1)", () => {
       activeTabId: tabId,
     });
     useAIStore.setState({
-      tabStates: { [tabId]: {} },
+      tabStates: { [tabId]: createTabState() },
       conversations: [{ ID: 52, Title: "旧标题", Updatetime: 0 } as any],
       conversationMessages: { 52: [] },
       conversationStreaming: { 52: { sending: false, pendingQueue: [] } },
@@ -297,7 +331,7 @@ describe("conversationMessages (Phase 1)", () => {
       tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 77, title: "t" } }],
       activeTabId: tabId,
     });
-    useAIStore.setState({ tabStates: { [tabId]: {} } });
+    useAIStore.setState({ tabStates: { [tabId]: createTabState() } });
 
     await useAIStore.getState().sendToTab(tabId, "hi");
 
@@ -317,54 +351,72 @@ describe("sidebar state", () => {
       conversations: [],
       conversationMessages: {},
       conversationStreaming: {},
-      sidebarConversationId: null,
-      sidebarUIState: { inputDraft: "", scrollTop: 0 },
+      sidebarTabs: [],
+      activeSidebarTabId: null,
     });
   });
 
-  it("bindSidebar sets sidebarConversationId", () => {
-    useAIStore.getState().bindSidebar(10);
-    expect(useAIStore.getState().sidebarConversationId).toBe(10);
+  const buildSidebarTab = (id: string, conversationId: number | null, title = "新对话") => ({
+    id,
+    conversationId,
+    title,
+    createdAt: 1,
+    uiState: {
+      inputDraft: { content: "", mentions: [] },
+      scrollTop: 0,
+      editTarget: null,
+    },
   });
 
-  it("bindSidebar persists to localStorage", () => {
-    useAIStore.getState().bindSidebar(20);
-    expect(localStorage.getItem("ai_sidebar_conversation_id")).toBe("20");
+  it("openNewSidebarTab creates a blank active tab and persists the new storage keys", () => {
+    const tabId = useAIStore.getState().openNewSidebarTab();
+    expect(useAIStore.getState().activeSidebarTabId).toBe(tabId);
+    expect(useAIStore.getState().sidebarTabs).toHaveLength(1);
+    expect(useAIStore.getState().sidebarTabs[0].conversationId).toBeNull();
+    expect(localStorage.getItem("ai_sidebar_tabs")).toContain(tabId);
+    expect(localStorage.getItem("ai_sidebar_active_tab_id")).toBe(tabId);
   });
 
-  it("bindSidebar(null) removes the localStorage key", () => {
-    localStorage.setItem("ai_sidebar_conversation_id", "30");
-    useAIStore.getState().bindSidebar(null);
-    expect(localStorage.getItem("ai_sidebar_conversation_id")).toBeNull();
-  });
-
-  it("bindSidebar loads conversation messages when binding to an unseen convId", async () => {
+  it("openSidebarConversationInSidebar loads messages and reuses an existing host", async () => {
+    useAIStore.setState({
+      conversations: [{ ID: 42, Title: "Conv 42", Updatetime: 0 } as any],
+    });
     vi.mocked(LoadConversationMessages).mockResolvedValue([
       { role: "user", content: "hi", blocks: [] },
       { role: "assistant", content: "hello", blocks: [] },
     ] as any);
 
-    useAIStore.getState().bindSidebar(42);
+    const firstTabId = useAIStore.getState().openSidebarConversationInSidebar(42);
+    const reusedTabId = useAIStore
+      .getState()
+      .openSidebarConversationInSidebar(42, { activate: false, reuseIfOpen: true });
 
     await waitForStoreCondition(() => useAIStore.getState().conversationMessages[42] !== undefined);
 
+    expect(reusedTabId).toBe(firstTabId);
+    expect(useAIStore.getState().sidebarTabs).toHaveLength(1);
     expect(LoadConversationMessages).toHaveBeenCalledWith(42);
     expect(useAIStore.getState().conversationMessages[42]).toHaveLength(2);
     expect(useAIStore.getState().conversationStreaming[42]).toEqual({ sending: false, pendingQueue: [] });
   });
 
-  it("bindSidebar skips loading when messages for that convId are already present", async () => {
+  it("openSidebarConversationInSidebar can create another host for the same conversation", async () => {
     useAIStore.setState({
-      conversationMessages: { 55: [{ role: "user", content: "cached", blocks: [], streaming: false }] },
-      conversationStreaming: { 55: { sending: false, pendingQueue: [] } },
+      conversations: [{ ID: 42, Title: "Conv 42", Updatetime: 0 } as any],
+      sidebarTabs: [buildSidebarTab("sidebar-42-a", 42, "Conv 42")],
+      activeSidebarTabId: "sidebar-42-a",
     });
+    vi.mocked(LoadConversationMessages).mockResolvedValue([{ role: "user", content: "hi", blocks: [] }] as any);
 
-    useAIStore.getState().bindSidebar(55);
-    // Wait one microtask tick for the fire-and-forget promise to settle.
-    await Promise.resolve();
+    const newTabId = useAIStore
+      .getState()
+      .openSidebarConversationInSidebar(42, { activate: false, reuseIfOpen: false });
 
-    expect(LoadConversationMessages).not.toHaveBeenCalled();
-    expect(useAIStore.getState().conversationMessages[55]).toHaveLength(1);
+    await waitForStoreCondition(() => useAIStore.getState().sidebarTabs.length === 2);
+
+    expect(newTabId).not.toBe("sidebar-42-a");
+    expect(useAIStore.getState().sidebarTabs.filter((tab) => tab.conversationId === 42)).toHaveLength(2);
+    expect(useAIStore.getState().activeSidebarTabId).toBe("sidebar-42-a");
   });
 
   it("fetchConversations loads messages for sidebar-bound conv restored from localStorage", async () => {
@@ -372,8 +424,12 @@ describe("sidebar state", () => {
     vi.mocked(LoadConversationMessages).mockResolvedValue([
       { role: "user", content: "from backend", blocks: [] },
     ] as any);
-    // Simulate localStorage restore: sidebarConversationId set, but no messages in store.
-    useAIStore.setState({ sidebarConversationId: 7, conversationMessages: {}, conversationStreaming: {} });
+    useAIStore.setState({
+      sidebarTabs: [buildSidebarTab("sidebar-7", 7, "Restored")],
+      activeSidebarTabId: "sidebar-7",
+      conversationMessages: {},
+      conversationStreaming: {},
+    });
 
     await useAIStore.getState().fetchConversations();
     await waitForStoreCondition(() => useAIStore.getState().conversationMessages[7] !== undefined);
@@ -382,70 +438,78 @@ describe("sidebar state", () => {
     expect(useAIStore.getState().conversationMessages[7]).toHaveLength(1);
   });
 
-  it("validateSidebarConversation clears sidebar if bound conv was deleted", () => {
+  it("validateSidebarTabs removes deleted conversations but keeps blank tabs", () => {
     useAIStore.setState({
-      sidebarConversationId: 999,
+      sidebarTabs: [buildSidebarTab("dead", 999, "gone"), buildSidebarTab("blank", null)],
+      activeSidebarTabId: "dead",
       conversations: [{ ID: 1, Title: "t", Updatetime: 0 } as any],
     });
-    localStorage.setItem("ai_sidebar_last_bound", "999");
 
-    useAIStore.getState().validateSidebarConversation();
+    useAIStore.getState().validateSidebarTabs();
 
-    expect(useAIStore.getState().sidebarConversationId).toBeNull();
-    expect(localStorage.getItem("ai_sidebar_last_bound")).toBeNull();
+    expect(useAIStore.getState().sidebarTabs.map((tab) => tab.id)).toEqual(["blank"]);
+    expect(useAIStore.getState().activeSidebarTabId).toBe("blank");
   });
 
-  it("validateSidebarConversation keeps binding if conv still exists", () => {
+  it("bindSidebarTabToConversation reuses an existing sidebar host instead of duplicating", () => {
     useAIStore.setState({
-      sidebarConversationId: 1,
+      sidebarTabs: [buildSidebarTab("sidebar-a", 1, "A"), buildSidebarTab("sidebar-b", null)],
+      activeSidebarTabId: "sidebar-b",
       conversations: [{ ID: 1, Title: "t", Updatetime: 0 } as any],
     });
-    useAIStore.getState().validateSidebarConversation();
-    expect(useAIStore.getState().sidebarConversationId).toBe(1);
+    const reusedId = useAIStore.getState().bindSidebarTabToConversation("sidebar-b", 1);
+    expect(reusedId).toBe("sidebar-a");
+    expect(useAIStore.getState().sidebarTabs).toHaveLength(2);
+    expect(useAIStore.getState().activeSidebarTabId).toBe("sidebar-a");
   });
 
-  it("openConversationTab evicts sidebar when the same convId is in sidebar", () => {
-    useAIStore.setState({
-      sidebarConversationId: 42,
-      conversations: [{ ID: 42, Title: "t", Updatetime: 0 } as any],
-    });
-    vi.mocked(LoadConversationMessages).mockResolvedValue([] as any);
-    void useAIStore.getState().openConversationTab(42);
-    expect(useAIStore.getState().sidebarConversationId).toBeNull();
-  });
-
-  it("sendFromSidebar appends user message and subscribes ai:event:${convId}", async () => {
+  it("sendFromSidebarTab lazily creates a conversation and syncs the title on first send", async () => {
     vi.mocked(EventsOn).mockReturnValue(() => {});
     vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
-
-    useAIStore.setState({
-      sidebarConversationId: 88,
-      conversationMessages: { 88: [] },
-      conversationStreaming: { 88: { sending: false, pendingQueue: [] } },
-    });
-
-    await useAIStore.getState().sendFromSidebar(88, "ping");
-
-    const msgs = useAIStore.getState().conversationMessages[88];
-    expect(msgs.some((m) => m.role === "user" && m.content === "ping")).toBe(true);
-    expect(vi.mocked(EventsOn).mock.calls.some((c) => c[0] === "ai:event:88")).toBe(true);
-  });
-
-  it("sendFromSidebar syncs local and backend titles for the first user message", async () => {
-    vi.mocked(EventsOn).mockReturnValue(() => {});
-    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+    vi.mocked(CreateConversation).mockResolvedValue({ ID: 89, Title: "旧标题", Updatetime: 0 } as any);
+    vi.mocked(ListConversations).mockResolvedValue([{ ID: 89, Title: "sidebar first", Updatetime: 0 }] as any);
     vi.mocked(UpdateConversationTitle).mockResolvedValue(undefined as any);
     useAIStore.setState({
-      sidebarConversationId: 89,
-      conversations: [{ ID: 89, Title: "旧标题", Updatetime: 0 } as any],
-      conversationMessages: { 89: [] },
-      conversationStreaming: { 89: { sending: false, pendingQueue: [] } },
+      sidebarTabs: [buildSidebarTab("sidebar-89", null)],
+      activeSidebarTabId: "sidebar-89",
     });
 
-    await useAIStore.getState().sendFromSidebar(89, "sidebar first");
+    await useAIStore.getState().sendFromSidebarTab("sidebar-89", "sidebar first");
 
     expect(UpdateConversationTitle).toHaveBeenCalledWith(89, "sidebar first");
-    expect(useAIStore.getState().conversations.find((conv) => conv.ID === 89)?.Title).toBe("sidebar first");
+    expect(useAIStore.getState().sidebarTabs[0].conversationId).toBe(89);
+    expect(useAIStore.getState().sidebarTabs[0].title).toBe("sidebar first");
+    expect(vi.mocked(EventsOn).mock.calls.some((c) => c[0] === "ai:event:89")).toBe(true);
+  });
+
+  it("getSidebarTabStatus applies waiting approval > error > running > done priority", () => {
+    useAIStore.setState({
+      sidebarTabs: [
+        buildSidebarTab("approval", 10, "Approval"),
+        buildSidebarTab("error", 11, "Error"),
+        buildSidebarTab("running", 12, "Running"),
+        buildSidebarTab("done", 13, "Done"),
+      ],
+      conversationMessages: {
+        10: [
+          { role: "assistant", content: "", blocks: [{ type: "approval", content: "", status: "pending_confirm" }] },
+        ],
+        11: [{ role: "assistant", content: "", blocks: [{ type: "tool", content: "", status: "error" }] }],
+        12: [{ role: "assistant", content: "", blocks: [], streaming: true }],
+        13: [{ role: "assistant", content: "done", blocks: [{ type: "text", content: "done", status: "completed" }] }],
+      },
+      conversationStreaming: {
+        10: { sending: false, pendingQueue: [] },
+        11: { sending: false, pendingQueue: [] },
+        12: { sending: true, pendingQueue: [] },
+        13: { sending: false, pendingQueue: [] },
+      },
+    });
+
+    expect(useAIStore.getState().getSidebarTabStatus("approval")).toBe("waiting_approval");
+    expect(useAIStore.getState().getSidebarTabStatus("error")).toBe("error");
+    expect(useAIStore.getState().getSidebarTabStatus("running")).toBe("running");
+    expect(useAIStore.getState().getSidebarTabStatus("done")).toBe("done");
   });
 
   it("stopConversation calls StopAIGeneration with the convId", async () => {
@@ -454,6 +518,39 @@ describe("sidebar state", () => {
     await useAIStore.getState().stopConversation(123);
 
     expect(StopAIGeneration).toHaveBeenCalledWith(123);
+  });
+
+  it("sidebar persistence strips mentions before writing to localStorage", () => {
+    useAIStore.setState({
+      sidebarTabs: [
+        {
+          id: "sidebar-secure",
+          conversationId: 1,
+          title: "Secure",
+          createdAt: 1,
+          uiState: {
+            inputDraft: {
+              content: "@prod-db",
+              mentions: [{ assetId: 42, name: "prod-db", start: 0, end: 8 }],
+            },
+            scrollTop: 12,
+            editTarget: {
+              conversationId: 1,
+              messageIndex: 0,
+              draft: {
+                content: "@prod-db again",
+                mentions: [{ assetId: 42, name: "prod-db", start: 0, end: 8 }],
+              },
+            },
+          },
+        },
+      ],
+      activeSidebarTabId: "sidebar-secure",
+    });
+
+    const persisted = JSON.parse(localStorage.getItem("ai_sidebar_tabs") || "[]");
+    expect(persisted[0]?.uiState?.inputDraft?.mentions).toEqual([]);
+    expect(persisted[0]?.uiState?.editTarget?.draft?.mentions).toEqual([]);
   });
 });
 
@@ -467,8 +564,8 @@ describe("editAndResendConversation", () => {
       conversations: [],
       conversationMessages: {},
       conversationStreaming: {},
-      sidebarConversationId: null,
-      sidebarUIState: { inputDraft: "", scrollTop: 0 },
+      sidebarTabs: [],
+      activeSidebarTabId: null,
     });
     vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
     vi.mocked(SaveConversationMessages).mockResolvedValue(undefined as any);
@@ -492,11 +589,21 @@ describe("editAndResendConversation", () => {
     }) as any);
 
     useAIStore.setState({
+      sidebarTabs: [
+        {
+          id: "sidebar-55",
+          conversationId: 55,
+          title: "t",
+          createdAt: 1,
+          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+        },
+      ],
+      activeSidebarTabId: "sidebar-55",
       conversationMessages: { 55: [] },
       conversationStreaming: { 55: { sending: false, pendingQueue: [] } },
     });
 
-    await useAIStore.getState().sendFromSidebar(55, "original");
+    await useAIStore.getState().sendFromSidebarTab("sidebar-55", "original");
     useAIStore.setState({
       conversationStreaming: { 55: { sending: true, pendingQueue: [{ text: "queued-1" }, { text: "queued-2" }] } },
     });
@@ -524,10 +631,19 @@ describe("editAndResendConversation", () => {
     ).toEqual([["user", "edited"]]);
   });
 
-  it("supports sidebar edits by conversationId without a tab host", async () => {
+  it("supports sidebar edits by conversationId with a sidebar host", async () => {
     vi.mocked(EventsOn).mockReturnValue(() => {});
     useAIStore.setState({
-      sidebarConversationId: 88,
+      sidebarTabs: [
+        {
+          id: "sidebar-88",
+          conversationId: 88,
+          title: "t",
+          createdAt: 1,
+          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+        },
+      ],
+      activeSidebarTabId: "sidebar-88",
       conversationMessages: {
         88: [
           { role: "user", content: "sidebar old", blocks: [] },
@@ -615,7 +731,7 @@ describe("editAndResendConversation", () => {
     });
     useAIStore.setState({
       conversations: [{ ID: 92, Title: "old title", Updatetime: 0 } as any],
-      tabStates: { "ai-92": {} },
+      tabStates: { "ai-92": createTabState() },
       conversationMessages: {
         92: [
           { role: "user", content: "old title", blocks: [] },
@@ -663,7 +779,7 @@ describe("persistence debounce & streaming snapshot", () => {
       tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 100, title: "t" } }],
       activeTabId: tabId,
     });
-    useAIStore.setState({ tabStates: { [tabId]: {} } });
+    useAIStore.setState({ tabStates: { [tabId]: createTabState() } });
 
     // sendToTab 新行为：用户消息立即落盘一次（避免防抖窗口内崩溃丢失用户输入），
     // 紧接着的 assistant placeholder 更新走 300ms 防抖。
@@ -683,7 +799,7 @@ describe("persistence debounce & streaming snapshot", () => {
     });
     // Pre-seed an in-progress assistant message with blocks in transient states.
     useAIStore.setState({
-      tabStates: { [tabId]: {} },
+      tabStates: { [tabId]: createTabState() },
       conversationMessages: {
         101: [
           {
@@ -717,7 +833,7 @@ describe("persistence debounce & streaming snapshot", () => {
       tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 102, title: "t" } }],
       activeTabId: tabId,
     });
-    useAIStore.setState({ tabStates: { [tabId]: {} } });
+    useAIStore.setState({ tabStates: { [tabId]: createTabState() } });
 
     // sendToTab 会立即落盘一次（用户消息），后续 assistant placeholder 走 300ms 防抖。
     await useAIStore.getState().sendToTab(tabId, "hi");
@@ -739,7 +855,7 @@ describe("persistence debounce & streaming snapshot", () => {
       activeTabId: tabId,
     });
     useAIStore.setState({
-      tabStates: { [tabId]: {} },
+      tabStates: { [tabId]: createTabState() },
       conversationMessages: {
         103: [
           { role: "user", content: "go", blocks: [] },
@@ -769,8 +885,9 @@ describe("persistence debounce & streaming snapshot", () => {
   });
 });
 
-describe("single-host invariant", () => {
+describe("sidebar and main tab multi-host behavior", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     localStorage.clear();
     useTabStore.setState({ tabs: [], activeTabId: null });
     useAIStore.setState({
@@ -778,41 +895,137 @@ describe("single-host invariant", () => {
       conversations: [{ ID: 50, Title: "t", Updatetime: 0 } as any],
       conversationMessages: { 50: [] },
       conversationStreaming: { 50: { sending: false, pendingQueue: [] } },
-      sidebarConversationId: 50,
+      sidebarTabs: [
+        {
+          id: "sidebar-50",
+          conversationId: 50,
+          title: "t",
+          createdAt: 1,
+          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+        },
+      ],
+      activeSidebarTabId: "sidebar-50",
     });
     vi.mocked(LoadConversationMessages).mockResolvedValue([] as any);
   });
 
-  it("openConversationTab evicts sidebar if sidebar already holds that conv", async () => {
+  it("openConversationTab keeps the sidebar host for the same conversation", async () => {
     await useAIStore.getState().openConversationTab(50);
-    expect(useAIStore.getState().sidebarConversationId).toBeNull();
+    expect(useAIStore.getState().sidebarTabs).toHaveLength(1);
+    expect(useAIStore.getState().sidebarTabs[0].conversationId).toBe(50);
   });
 
-  it("promoteSidebarToTab calls openConversationTab and clears sidebar", async () => {
-    const tabId = await useAIStore.getState().promoteSidebarToTab();
+  it("promoteSidebarToTab opens a main tab without clearing the sidebar host", async () => {
+    const tabId = await useAIStore.getState().promoteSidebarToTab("sidebar-50");
     expect(tabId).toBeTruthy();
-    expect(useAIStore.getState().sidebarConversationId).toBeNull();
+    expect(useAIStore.getState().sidebarTabs[0].conversationId).toBe(50);
+    expect(useTabStore.getState().tabs.find((tab) => tab.id === tabId)?.type).toBe("ai");
   });
 
-  it("deleteConversation clears sidebar if it holds that conv", async () => {
+  it("deleteConversation removes every sidebar host for that conversation", async () => {
     vi.mocked(DeleteConversation).mockResolvedValue(undefined as any);
     await useAIStore.getState().deleteConversation(50);
-    expect(useAIStore.getState().sidebarConversationId).toBeNull();
+    expect(useAIStore.getState().sidebarTabs).toEqual([]);
   });
 
-  it("closing a tab whose conversation was last sidebar-bound restores sidebar", () => {
-    localStorage.setItem("ai_sidebar_last_bound", "77");
-    useAIStore.setState({ sidebarConversationId: null });
-    const tab = {
-      id: "ai-77",
-      type: "ai" as const,
-      label: "t",
-      meta: { type: "ai" as const, conversationId: 77, title: "t" },
-    };
-    useTabStore.setState({ tabs: [tab], activeTabId: "ai-77" });
+  it("deleteConversation falls back to the right sidebar neighbor when the active host is removed", async () => {
+    vi.mocked(DeleteConversation).mockResolvedValue(undefined as any);
+    vi.mocked(ListConversations).mockResolvedValue([
+      { ID: 51, Title: "left", Updatetime: 0 },
+      { ID: 53, Title: "right", Updatetime: 0 },
+    ] as any);
+    useAIStore.setState({
+      conversations: [
+        { ID: 51, Title: "left", Updatetime: 0 } as any,
+        { ID: 52, Title: "middle", Updatetime: 0 } as any,
+        { ID: 53, Title: "right", Updatetime: 0 } as any,
+      ],
+      sidebarTabs: [
+        {
+          id: "sidebar-left",
+          conversationId: 51,
+          title: "left",
+          createdAt: 1,
+          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+        },
+        {
+          id: "sidebar-middle",
+          conversationId: 52,
+          title: "middle",
+          createdAt: 1,
+          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+        },
+        {
+          id: "sidebar-right",
+          conversationId: 53,
+          title: "right",
+          createdAt: 1,
+          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+        },
+      ],
+      activeSidebarTabId: "sidebar-middle",
+    });
 
-    useTabStore.getState().closeTab("ai-77");
+    await useAIStore.getState().deleteConversation(52);
 
-    expect(useAIStore.getState().sidebarConversationId).toBe(77);
+    expect(useAIStore.getState().sidebarTabs.map((tab) => tab.id)).toEqual(["sidebar-left", "sidebar-right"]);
+    expect(useAIStore.getState().activeSidebarTabId).toBe("sidebar-right");
+  });
+
+  it("background-opened sidebar tabs do not steal the active sidebar tab", () => {
+    useAIStore.getState().openSidebarConversationInSidebar(50, { activate: false, reuseIfOpen: true });
+    const newTabId = useAIStore.getState().openSidebarConversationInSidebar(77, { activate: false, reuseIfOpen: true });
+    expect(useAIStore.getState().activeSidebarTabId).toBe("sidebar-50");
+    expect(useAIStore.getState().sidebarTabs.some((tab) => tab.id === newTabId)).toBe(true);
+  });
+
+  it("closing the last sidebar host stops the live conversation and keeps queued messages until stop completes", async () => {
+    const callbacks: Array<(event: any) => void> = [];
+    const cancels: Array<ReturnType<typeof vi.fn>> = [];
+    vi.mocked(EventsOn).mockImplementation(((_eventName: string, handler: (event: any) => void) => {
+      callbacks.push(handler);
+      const cancel = vi.fn();
+      cancels.push(cancel);
+      return cancel;
+    }) as any);
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+    vi.mocked(StopAIGeneration).mockResolvedValue(undefined as any);
+
+    useAIStore.setState({
+      sidebarTabs: [
+        {
+          id: "sidebar-live",
+          conversationId: 60,
+          title: "Live",
+          createdAt: 1,
+          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+        },
+      ],
+      activeSidebarTabId: "sidebar-live",
+      conversationMessages: { 60: [] },
+      conversationStreaming: { 60: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendFromSidebarTab("sidebar-live", "first");
+    useAIStore.setState({
+      conversationStreaming: {
+        60: { sending: true, pendingQueue: [{ text: "queued-1" }, { text: "queued-2" }] },
+      },
+    });
+
+    useAIStore.getState().closeSidebarTab("sidebar-live");
+
+    expect(StopAIGeneration).toHaveBeenCalledWith(60);
+    expect(cancels[0]).not.toHaveBeenCalled();
+    expect(useAIStore.getState().sidebarTabs).toEqual([]);
+
+    callbacks[0]?.({ type: "stopped" });
+    await waitForStoreCondition(() => cancels[0]?.mock.calls.length === 1);
+
+    expect(useAIStore.getState().conversationStreaming[60]).toEqual({
+      sending: false,
+      pendingQueue: [{ text: "queued-1" }, { text: "queued-2" }],
+    });
+    expect(vi.mocked(SendAIMessage)).toHaveBeenCalledTimes(1);
   });
 });

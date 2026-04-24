@@ -1,11 +1,11 @@
 import { useRef, useState, useEffect } from "react";
 import { cn, useResizeHandle } from "@opskat/ui";
 import { useAIStore, type MentionRef } from "@/stores/aiStore";
-import { useTabStore } from "@/stores/tabStore";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { SideAssistantHeader } from "./SideAssistantHeader";
 import { SideAssistantContextBar } from "./SideAssistantContextBar";
 import { SideAssistantHistoryDropdown } from "./SideAssistantHistoryDropdown";
+import { SideAssistantTabBar } from "./SideAssistantTabBar";
 import { AIChatContent } from "./AIChatContent";
 import { Trans } from "react-i18next";
 import { History } from "lucide-react";
@@ -18,15 +18,22 @@ interface SideAssistantPanelProps {
 export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelProps) {
   const isFullscreen = useFullscreen();
   const {
-    sidebarConversationId,
+    sidebarTabs,
+    activeSidebarTabId,
     configured,
     fetchConversations,
-    bindSidebar,
-    createAndBindSidebarConversation,
+    getSidebarTabStatus,
+    openNewSidebarTab,
+    bindSidebarTabToConversation,
+    openSidebarConversationInSidebar,
+    activateSidebarTab,
+    closeSidebarTab,
     promoteSidebarToTab,
-    sendFromSidebar,
-    stopConversation,
+    sendFromSidebarTab,
+    stopSidebarTab,
   } = useAIStore();
+  const activeSidebarTab = sidebarTabs.find((tab) => tab.id === activeSidebarTabId) ?? null;
+  const activeConversationId = activeSidebarTab?.conversationId ?? null;
 
   const [historyOpen, setHistoryOpen] = useState(false);
 
@@ -68,37 +75,40 @@ export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelPr
     return () => document.removeEventListener("mousedown", handler);
   }, [historyOpen]);
 
-  const handleNewChat = async () => {
-    await createAndBindSidebarConversation();
+  const handleNewChat = () => {
+    openNewSidebarTab();
   };
 
   const handlePromote = async () => {
-    await promoteSidebarToTab();
+    if (activeSidebarTabId) {
+      await promoteSidebarToTab(activeSidebarTabId);
+    }
   };
 
   const handleHistorySelect = (convId: number) => {
-    const tabStore = useTabStore.getState();
-    const existingTab = tabStore.tabs.find(
-      (tb) => tb.type === "ai" && (tb.meta as { conversationId: number | null }).conversationId === convId
-    );
-    if (existingTab) {
-      tabStore.activateTab(existingTab.id);
-      return;
+    if (activeSidebarTabId) {
+      bindSidebarTabToConversation(activeSidebarTabId, convId);
+    } else {
+      openSidebarConversationInSidebar(convId);
     }
-    bindSidebar(convId);
+    setHistoryOpen(false);
+  };
+
+  const handleHistoryOpenInTab = (convId: number) => {
+    openSidebarConversationInSidebar(convId, { activate: false, reuseIfOpen: false });
+    setHistoryOpen(false);
   };
 
   const handleSendOverride = async (text: string, mentions?: MentionRef[]) => {
-    let convId = sidebarConversationId;
-    if (convId == null) {
-      convId = await createAndBindSidebarConversation();
+    if (!activeSidebarTabId) {
+      return;
     }
-    await sendFromSidebar(convId, text, mentions);
+    await sendFromSidebarTab(activeSidebarTabId, text, mentions);
   };
 
   const handleStopOverride = async () => {
-    if (sidebarConversationId != null) {
-      await stopConversation(sidebarConversationId);
+    if (activeSidebarTabId) {
+      await stopSidebarTab(activeSidebarTabId);
     }
   };
 
@@ -128,20 +138,31 @@ export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelPr
             onOpenHistory={() => setHistoryOpen((x) => !x)}
             onNewChat={handleNewChat}
             onPromoteToTab={handlePromote}
-            canPromote={sidebarConversationId != null}
+            canPromote={activeConversationId != null}
           />
           {historyOpen && (
             <SideAssistantHistoryDropdown
-              activeConversationId={sidebarConversationId}
+              activeConversationId={activeConversationId}
               onSelect={handleHistorySelect}
+              onOpenInTab={handleHistoryOpenInTab}
               onClose={() => setHistoryOpen(false)}
             />
           )}
         </div>
 
-        <SideAssistantContextBar conversationId={sidebarConversationId} />
+        {sidebarTabs.length > 0 && (
+          <SideAssistantTabBar
+            tabs={sidebarTabs}
+            activeTabId={activeSidebarTabId}
+            getStatus={getSidebarTabStatus}
+            onActivate={activateSidebarTab}
+            onClose={closeSidebarTab}
+          />
+        )}
 
-        {sidebarConversationId == null ? (
+        <SideAssistantContextBar conversationId={activeConversationId} />
+
+        {!activeSidebarTab ? (
           <div className="flex-1 flex items-center justify-center p-4 text-center text-sm text-muted-foreground">
             <Trans
               i18nKey="ai.sidebar.emptyGuide"
@@ -153,7 +174,8 @@ export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelPr
         ) : (
           <div className="flex-1 min-h-0 flex flex-col">
             <AIChatContent
-              conversationId={sidebarConversationId}
+              sideTabId={activeSidebarTab.id}
+              conversationId={activeConversationId}
               compact
               onSendOverride={handleSendOverride}
               onStopOverride={handleStopOverride}

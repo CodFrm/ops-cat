@@ -63,6 +63,7 @@ const DEFAULT_STREAMING = { sending: false, pendingQueue: [] as PendingQueueItem
 
 interface AIChatContentProps {
   tabId?: string;
+  sideTabId?: string;
   conversationId?: number | null;
   compact?: boolean;
   /** Optional: if provided, replaces the default sendToTab-based send path. */
@@ -125,19 +126,34 @@ function splitBlocksByApproval(blocks: ContentBlock[]): Array<{ type: "bubble" |
 
 export function AIChatContent({
   tabId,
+  sideTabId,
   conversationId: propConvId,
   compact = false,
   onSendOverride,
   onStopOverride,
 }: AIChatContentProps) {
   const { t } = useTranslation();
-  const { configured, sendToTab, stopGeneration, regenerate, removeFromQueue, clearQueue, editAndResendConversation } =
-    useAIStore();
+  const {
+    configured,
+    sendToTab,
+    stopGeneration,
+    regenerate,
+    regenerateConversation,
+    removeFromQueue,
+    clearQueue,
+    editAndResendConversation,
+    setSidebarTabInputDraft,
+    setSidebarTabEditTarget,
+    setSidebarTabScrollTop,
+  } = useAIStore();
   const derivedConvId = useTabStore((s) => {
     if (!tabId) return null;
     const tab = s.tabs.find((x) => x.id === tabId);
     return tab ? (tab.meta as AITabMeta).conversationId : null;
   });
+  const sidebarTabState = useAIStore((s) =>
+    sideTabId ? (s.sidebarTabs.find((tab) => tab.id === sideTabId)?.uiState ?? null) : null
+  );
   const conversationId = propConvId ?? derivedConvId;
 
   const messages = useAIStore((s) =>
@@ -160,11 +176,14 @@ export function AIChatContent({
   }, [messages]);
 
   const [regenerateTarget, setRegenerateTarget] = useState<number | null>(null);
-  const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  const [localEditTarget, setLocalEditTarget] = useState<EditTarget | null>(null);
   const [empty, setEmpty] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<AIChatInputHandle>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
   const previousConversationIdRef = useRef<number | null | undefined>(conversationId);
+  const previousSideHostKeyRef = useRef<string>("");
+  const editTarget = sideTabId ? (sidebarTabState?.editTarget ?? null) : localEditTarget;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -172,29 +191,47 @@ export function AIChatContent({
 
   useEffect(() => {
     inputRef.current?.focus();
-  }, [tabId]);
-
-  // 编辑态依赖 conversationId 和消息索引，切换会话时要显式清掉草稿，避免把旧草稿带到新会话。
-  // 用 updater 读取并清空 state（幂等），副作用放在 updater 外执行，避免 StrictMode 下重复触发。
-  const resetEditMode = useCallback((options?: { clearDraft?: boolean }) => {
-    let wasActive = false;
-    setEditTarget((current) => {
-      if (!current) return current;
-      wasActive = true;
-      return null;
-    });
-    if (wasActive && options?.clearDraft) {
-      inputRef.current?.clear();
-    }
-  }, []);
+  }, [sideTabId, tabId]);
 
   useEffect(() => {
+    if (!sideTabId) return;
+    const hostKey = `${sideTabId}:${conversationId ?? "blank"}`;
+    if (previousSideHostKeyRef.current === hostKey) return;
+    previousSideHostKeyRef.current = hostKey;
+    // 侧边助手：同一个 conversation 切到不同 side tab 时，
+    // 输入框要恢复各自保存的 draft，而不是共用一份 singleton 草稿。
+    inputRef.current?.loadDraft(sidebarTabState?.inputDraft ?? { content: "", mentions: [] });
+  }, [conversationId, sideTabId, sidebarTabState]);
+
+  // 编辑态依赖 conversationId 和消息索引，切换会话时要显式清掉草稿，避免把旧草稿带到新会话。
+  const resetEditMode = useCallback(
+    (options?: { clearDraft?: boolean }) => {
+      const hadEditTarget = sideTabId
+        ? !!useAIStore.getState().sidebarTabs.find((tab) => tab.id === sideTabId)?.uiState.editTarget
+        : !!localEditTarget;
+      if (sideTabId) {
+        setSidebarTabEditTarget(sideTabId, null);
+      } else {
+        setLocalEditTarget(null);
+      }
+      if (hadEditTarget && options?.clearDraft) {
+        inputRef.current?.clear();
+        if (sideTabId) {
+          setSidebarTabInputDraft(sideTabId, { content: "", mentions: [] });
+        }
+      }
+    },
+    [localEditTarget, setSidebarTabEditTarget, setSidebarTabInputDraft, sideTabId]
+  );
+
+  useEffect(() => {
+    if (sideTabId) return;
     if (previousConversationIdRef.current === conversationId) return;
     previousConversationIdRef.current = conversationId;
     if (editTarget) {
       resetEditMode({ clearDraft: true });
     }
-  }, [conversationId, editTarget, resetEditMode]);
+  }, [conversationId, editTarget, resetEditMode, sideTabId]);
 
   useEffect(() => {
     // 会话消息被刷新、截断或替换后，如果编辑目标不再匹配当前消息，就立即退出编辑态。
@@ -214,6 +251,19 @@ export function AIChatContent({
     }
   }, [conversationId, editTarget, messages, resetEditMode]);
 
+  useEffect(() => {
+    if (!sideTabId) return;
+    const viewport = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]") as HTMLDivElement | null;
+    if (!viewport) return;
+    const handleScroll = () => {
+      setSidebarTabScrollTop(sideTabId, viewport.scrollTop);
+    };
+    // 滚动位置同样按宿主维度恢复，保证多个侧边 tab 来回切换时各自停在原来的阅读位置。
+    viewport.scrollTop = useAIStore.getState().sidebarTabs.find((tab) => tab.id === sideTabId)?.uiState.scrollTop ?? 0;
+    viewport.addEventListener("scroll", handleScroll, { passive: true });
+    return () => viewport.removeEventListener("scroll", handleScroll);
+  }, [conversationId, setSidebarTabScrollTop, sideTabId]);
+
   const handleSend = useCallback(
     (text: string, mentions: MentionRef[]) => {
       const trimmed = text.trim();
@@ -223,7 +273,19 @@ export function AIChatContent({
         const activeTarget = editTarget;
         // 编辑模式改走 conversation 级 replay，提交成功后只在目标仍未变化时退出编辑态。
         void editAndResendConversation(conversationId, activeTarget.messageIndex, text, nextMentions).then(() => {
-          setEditTarget((current) =>
+          if (sideTabId) {
+            const currentEditTarget = useAIStore.getState().sidebarTabs.find((tab) => tab.id === sideTabId)
+              ?.uiState.editTarget;
+            if (
+              currentEditTarget &&
+              currentEditTarget.conversationId === activeTarget.conversationId &&
+              currentEditTarget.messageIndex === activeTarget.messageIndex
+            ) {
+              setSidebarTabEditTarget(sideTabId, null);
+            }
+            return;
+          }
+          setLocalEditTarget((current) =>
             current &&
             current.conversationId === activeTarget.conversationId &&
             current.messageIndex === activeTarget.messageIndex
@@ -239,7 +301,16 @@ export function AIChatContent({
         sendToTab(tabId, text, nextMentions);
       }
     },
-    [conversationId, editAndResendConversation, editTarget, onSendOverride, sendToTab, tabId]
+    [
+      conversationId,
+      editAndResendConversation,
+      editTarget,
+      onSendOverride,
+      sendToTab,
+      setSidebarTabEditTarget,
+      sideTabId,
+      tabId,
+    ]
   );
 
   const handleStop = () => {
@@ -263,15 +334,23 @@ export function AIChatContent({
       };
       // 进入编辑态时直接把原消息回填到输入框，保证 mention 和多段文本都按原样重发。
       inputRef.current?.loadDraft(draft);
-      setEditTarget({ conversationId, messageIndex: index, draft });
+      if (sideTabId) {
+        setSidebarTabEditTarget(sideTabId, { conversationId, messageIndex: index, draft });
+      } else {
+        setLocalEditTarget({ conversationId, messageIndex: index, draft });
+      }
     },
-    [conversationId]
+    [conversationId, setSidebarTabEditTarget, sideTabId]
   );
 
   const confirmRegenerate = () => {
     if (regenerateTarget !== null) {
       if (tabId) {
         regenerate(tabId, regenerateTarget);
+      } else if (conversationId != null) {
+        // 侧边助手没有主工作区 tabId，重生成必须直连 conversationId，
+        // 否则 sidebar 内点击“重新生成”不会触发任何 replay。
+        regenerateConversation(conversationId, regenerateTarget);
       }
       setRegenerateTarget(null);
     }
@@ -287,7 +366,7 @@ export function AIChatContent({
     <CompactContext.Provider value={compact}>
       <div className="flex h-full flex-col" data-compact={compact}>
         {/* Messages */}
-        <ScrollArea className="flex-1 min-h-0 overflow-hidden">
+        <ScrollArea ref={scrollAreaRef} className="flex-1 min-h-0 overflow-hidden">
           <div className="max-w-3xl mx-auto p-4 space-y-6">
             {messages.length === 0 && (
               <p className="text-sm text-muted-foreground text-center mt-16">{t("ai.placeholder")}</p>
@@ -380,6 +459,11 @@ export function AIChatContent({
                 ref={inputRef}
                 onSubmit={handleSend}
                 onEmptyChange={setEmpty}
+                onDraftChange={(draft) => {
+                  if (sideTabId) {
+                    setSidebarTabInputDraft(sideTabId, draft);
+                  }
+                }}
                 sendOnEnter={sendOnEnter}
                 userMessageHistory={userMessageHistory}
                 placeholder={t("ai.sendPlaceholder")}

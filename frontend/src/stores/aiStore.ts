@@ -108,13 +108,200 @@ interface StreamEventData {
 }
 
 interface TabState {
-  // Phase 1 清理后：tabStates 保留为 UI 态占位（将来放 scrollTop / inputDraft 等），
-  // messages/sending/pendingQueue 已全部迁移到 conversationMessages / conversationStreaming。
-  _marker?: "tab-state";
+  inputDraft: {
+    content: string;
+    mentions?: MentionRef[];
+  };
+  scrollTop: number;
+  editTarget: {
+    conversationId: number;
+    messageIndex: number;
+    draft: {
+      content: string;
+      mentions?: MentionRef[];
+    };
+  } | null;
+}
+
+export interface SidebarAITab {
+  id: string;
+  conversationId: number | null;
+  title: string;
+  createdAt: number;
+  uiState: TabState;
+}
+
+export type SidebarTabStatus = "waiting_approval" | "error" | "running" | "done" | null;
+
+const SIDEBAR_TABS_STORAGE_KEY = "ai_sidebar_tabs";
+const SIDEBAR_ACTIVE_TAB_STORAGE_KEY = "ai_sidebar_active_tab_id";
+const LEGACY_SIDEBAR_CONVERSATION_KEY = "ai_sidebar_conversation_id";
+const LEGACY_SIDEBAR_INPUT_DRAFT_KEY = "ai_sidebar_input_draft";
+const LEGACY_SIDEBAR_LAST_BOUND_KEY = "ai_sidebar_last_bound";
+
+function createDefaultTabState(overrides?: Partial<TabState> | null): TabState {
+  return {
+    inputDraft: {
+      content: overrides?.inputDraft?.content ?? "",
+      mentions: overrides?.inputDraft?.mentions ?? [],
+    },
+    scrollTop: typeof overrides?.scrollTop === "number" ? overrides.scrollTop : 0,
+    editTarget: overrides?.editTarget
+      ? {
+          conversationId: overrides.editTarget.conversationId,
+          messageIndex: overrides.editTarget.messageIndex,
+          draft: {
+            content: overrides.editTarget.draft.content ?? "",
+            mentions: overrides.editTarget.draft.mentions ?? [],
+          },
+        }
+      : null,
+  };
+}
+
+function getDefaultSidebarTitle() {
+  return i18n.t("ai.newConversation", "新对话");
+}
+
+function createSidebarTabId() {
+  return `sidebar-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createSidebarTab(overrides?: Partial<SidebarAITab>): SidebarAITab {
+  return {
+    id: overrides?.id ?? createSidebarTabId(),
+    conversationId: overrides?.conversationId ?? null,
+    title: overrides?.title ?? getDefaultSidebarTitle(),
+    createdAt: overrides?.createdAt ?? Date.now(),
+    uiState: createDefaultTabState(overrides?.uiState),
+  };
+}
+
+function stripSidebarMentionsForPersistence(uiState: Partial<TabState> | null | undefined): TabState | undefined {
+  if (!uiState) return undefined;
+  return createDefaultTabState({
+    ...uiState,
+    inputDraft: {
+      content: uiState.inputDraft?.content ?? "",
+      mentions: [],
+    },
+    editTarget: uiState.editTarget
+      ? {
+          conversationId: uiState.editTarget.conversationId,
+          messageIndex: uiState.editTarget.messageIndex,
+          draft: {
+            content: uiState.editTarget.draft.content ?? "",
+            mentions: [],
+          },
+        }
+      : null,
+  });
+}
+
+function sanitizeSidebarTab(raw: unknown): SidebarAITab | null {
+  if (!raw || typeof raw !== "object") return null;
+  const tab = raw as Partial<SidebarAITab>;
+  if (typeof tab.id !== "string" || tab.id.length === 0) return null;
+  const conversationId =
+    typeof tab.conversationId === "number" && Number.isFinite(tab.conversationId) ? tab.conversationId : null;
+  return createSidebarTab({
+    id: tab.id,
+    conversationId,
+    title: typeof tab.title === "string" && tab.title.length > 0 ? tab.title : undefined,
+    createdAt: typeof tab.createdAt === "number" && Number.isFinite(tab.createdAt) ? tab.createdAt : undefined,
+    // 本地存储属于不可信输入，草稿里的 mentions/资产上下文不允许从 localStorage 恢复，
+    // 否则用户或第三方篡改 storage 后可以伪造后续发送时的资产引用。
+    uiState: stripSidebarMentionsForPersistence(tab.uiState),
+  });
+}
+
+function clearLegacySidebarKeys() {
+  localStorage.removeItem(LEGACY_SIDEBAR_CONVERSATION_KEY);
+  localStorage.removeItem(LEGACY_SIDEBAR_INPUT_DRAFT_KEY);
+  localStorage.removeItem(LEGACY_SIDEBAR_LAST_BOUND_KEY);
+}
+
+function persistSidebarTabs(tabs: SidebarAITab[], activeSidebarTabId: string | null) {
+  if (tabs.length === 0) {
+    localStorage.removeItem(SIDEBAR_TABS_STORAGE_KEY);
+    localStorage.removeItem(SIDEBAR_ACTIVE_TAB_STORAGE_KEY);
+    clearLegacySidebarKeys();
+    return;
+  }
+  localStorage.setItem(
+    SIDEBAR_TABS_STORAGE_KEY,
+    JSON.stringify(
+      tabs.map((tab) => ({
+        ...tab,
+        uiState: stripSidebarMentionsForPersistence(tab.uiState),
+      }))
+    )
+  );
+  localStorage.setItem(SIDEBAR_ACTIVE_TAB_STORAGE_KEY, activeSidebarTabId ?? tabs[0].id);
+  clearLegacySidebarKeys();
+}
+
+function loadInitialSidebarState() {
+  const storedTabs = localStorage.getItem(SIDEBAR_TABS_STORAGE_KEY);
+  const storedActive = localStorage.getItem(SIDEBAR_ACTIVE_TAB_STORAGE_KEY);
+  if (storedTabs) {
+    try {
+      const parsed = JSON.parse(storedTabs);
+      const tabs = Array.isArray(parsed)
+        ? parsed.map(sanitizeSidebarTab).filter((tab): tab is SidebarAITab => !!tab)
+        : [];
+      const activeSidebarTabId = tabs.some((tab) => tab.id === storedActive) ? storedActive : (tabs[0]?.id ?? null);
+      return {
+        tabs,
+        activeSidebarTabId,
+        migratedLegacy: false,
+      };
+    } catch {
+      // ignore invalid persisted data and fall back to legacy migration
+    }
+  }
+
+  const legacyConversation = localStorage.getItem(LEGACY_SIDEBAR_CONVERSATION_KEY);
+  const legacyLastBound = localStorage.getItem(LEGACY_SIDEBAR_LAST_BOUND_KEY);
+  const legacyDraft = localStorage.getItem(LEGACY_SIDEBAR_INPUT_DRAFT_KEY) || "";
+  const parsedConversationId = legacyConversation ? Number.parseInt(legacyConversation, 10) : Number.NaN;
+  const conversationId = Number.isFinite(parsedConversationId) ? parsedConversationId : null;
+  const hasLegacyState =
+    legacyConversation !== null ||
+    legacyLastBound !== null ||
+    localStorage.getItem(LEGACY_SIDEBAR_INPUT_DRAFT_KEY) !== null;
+
+  // 从旧版单 sidebar key 平滑迁移到多 tab 模型：
+  // 只要检测到任意旧 key，就恢复成一个初始侧边 tab，避免升级后直接丢上下文。
+  if (!hasLegacyState) {
+    return {
+      tabs: [] as SidebarAITab[],
+      activeSidebarTabId: null as string | null,
+      migratedLegacy: false,
+    };
+  }
+
+  const initialTab = createSidebarTab({
+    conversationId,
+    title: conversationId == null ? getDefaultSidebarTitle() : undefined,
+    uiState: createDefaultTabState({
+      inputDraft: {
+        content: legacyDraft,
+        mentions: [],
+      },
+    }),
+  });
+
+  return {
+    tabs: [initialTab],
+    activeSidebarTabId: initialTab.id,
+    migratedLegacy: true,
+  };
 }
 
 // 模块级 per-conversation 事件监听管理（不放 zustand，因为含函数引用）
 const conversationListeners = new Map<number, { cancel: (() => void) | null; generation: number }>();
+const conversationStopRequests = new Set<number>();
 
 // 每个 conversation 只保留一个待执行的落盘定时器。
 // 流式输出期间会持续增量更新消息，如果每次都立即保存，磁盘写入会过于频繁。
@@ -131,6 +318,7 @@ function cleanupConvListener(convId: number) {
   const listener = conversationListeners.get(convId);
   if (listener?.cancel) listener.cancel();
   conversationListeners.delete(convId);
+  conversationStopRequests.delete(convId);
   cleanupStreamBuffer(convId);
   cleanupPersistTimer(convId);
 }
@@ -383,6 +571,7 @@ function buildConversationTitle(content: string) {
 function syncConversationTitleLocally(convId: number, title: string) {
   useAIStore.setState((state) => ({
     conversations: state.conversations.map((conv) => (conv.ID === convId ? { ...conv, Title: title } : conv)),
+    sidebarTabs: state.sidebarTabs.map((tab) => (tab.conversationId === convId ? { ...tab, title } : tab)),
   }));
 
   const tabStore = useTabStore.getState();
@@ -395,6 +584,80 @@ function syncConversationTitleLocally(convId: number, title: string) {
       meta: { ...meta, title },
     });
   }
+}
+
+function visitBlockStatuses(blocks: ContentBlock[] | undefined, visitor: (status: ContentBlock["status"]) => boolean) {
+  for (const block of blocks || []) {
+    if (visitor(block.status)) return true;
+    if (visitBlockStatuses(block.childBlocks, visitor)) return true;
+  }
+  return false;
+}
+
+function getConversationStatus(convId: number | null): SidebarTabStatus {
+  if (convId == null) return null;
+  const state = useAIStore.getState();
+  const messages = state.conversationMessages[convId] || [];
+  const streaming = state.conversationStreaming[convId] || { sending: false, pendingQueue: [] };
+  const lastAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant");
+  if (!lastAssistantMessage && messages.length === 0) return null;
+
+  if (visitBlockStatuses(lastAssistantMessage?.blocks, (status) => status === "pending_confirm")) {
+    return "waiting_approval";
+  }
+  if (visitBlockStatuses(lastAssistantMessage?.blocks, (status) => status === "error")) {
+    return "error";
+  }
+  if (
+    streaming.sending ||
+    !!lastAssistantMessage?.streaming ||
+    visitBlockStatuses(lastAssistantMessage?.blocks, (status) => status === "running")
+  ) {
+    return "running";
+  }
+  return messages.length > 0 ? "done" : null;
+}
+
+function getConversationHostCount(convId: number, options?: { ignoreSidebarTabId?: string; ignoreMainTabId?: string }) {
+  const sidebarHostCount = useAIStore
+    .getState()
+    .sidebarTabs.filter((tab) => tab.id !== options?.ignoreSidebarTabId && tab.conversationId === convId).length;
+  const mainTabHostCount = useTabStore
+    .getState()
+    .tabs.filter(
+      (tab) =>
+        tab.id !== options?.ignoreMainTabId && tab.type === "ai" && (tab.meta as AITabMeta).conversationId === convId
+    ).length;
+  return sidebarHostCount + mainTabHostCount;
+}
+
+function hasConversationHosts(convId: number, options?: { ignoreSidebarTabId?: string; ignoreMainTabId?: string }) {
+  return getConversationHostCount(convId, options) > 0;
+}
+
+function cleanupConversationIfUnused(
+  convId: number,
+  options?: { ignoreSidebarTabId?: string; ignoreMainTabId?: string }
+) {
+  if (hasConversationHosts(convId, options)) {
+    conversationStopRequests.delete(convId);
+    return;
+  }
+
+  const streaming = useAIStore.getState().conversationStreaming[convId] || { sending: false, pendingQueue: [] };
+  if (streaming.sending) {
+    // 最后一个宿主关闭/改绑时，不能立刻解绑 listener；
+    // 否则 stop/done 等迟到事件会丢失，最后一段响应和终态快照也无法落盘。
+    if (!conversationStopRequests.has(convId)) {
+      conversationStopRequests.add(convId);
+      StopAIGeneration(convId).catch(() => {
+        conversationStopRequests.delete(convId);
+      });
+    }
+    return;
+  }
+
+  cleanupConvListener(convId);
 }
 
 // 所有“首条消息决定标题”的场景都走同一条同步链路，避免首次发送和编辑重发出现两套规则。
@@ -455,6 +718,7 @@ function updateConversation(
 function drainQueue(convId: number) {
   const streaming = useAIStore.getState().conversationStreaming[convId];
   if (!streaming || streaming.pendingQueue.length === 0) return;
+  if (!hasConversationHosts(convId)) return;
 
   const queue = [...streaming.pendingQueue];
   updateConversation(convId, { pendingQueue: [] });
@@ -481,6 +745,7 @@ function drainQueue(convId: number) {
 
 // replay 前先让旧 listener 和 pending queue 失效，避免 stop 产生的迟到事件回放到新分支。
 function prepareConversationForReplay(convId: number) {
+  conversationStopRequests.delete(convId);
   invalidateConvListenerForReplay(convId);
   cleanupPersistTimer(convId);
   updateConversation(convId, { sending: false, pendingQueue: [] });
@@ -839,8 +1104,11 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       persistConversationSnapshot(convId);
       useAIStore.getState().fetchConversations();
 
-      // 消费队列
-      drainQueue(convId);
+      if (hasConversationHosts(convId)) {
+        drainQueue(convId);
+      } else {
+        cleanupConversationIfUnused(convId);
+      }
       break;
     }
 
@@ -893,8 +1161,11 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
           }
         });
 
-      // 消费队列
-      drainQueue(convId);
+      if (hasConversationHosts(convId)) {
+        drainQueue(convId);
+      } else {
+        cleanupConversationIfUnused(convId);
+      }
       break;
     }
 
@@ -914,6 +1185,7 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       // 错误态同样需要落盘，否则强制重启后会丢掉最后一次失败上下文。
       cleanupPersistTimer(convId);
       persistConversationSnapshot(convId, true);
+      cleanupConversationIfUnused(convId);
       break;
     }
   }
@@ -953,6 +1225,7 @@ function resolveMentionedAssets(mentions: MentionRef[] | undefined): ai.Mentione
 
 // 核心发送：完全基于 convId，共享给 sendToTab / sendFromSidebar / regenerate
 async function _sendForConversation(convId: number, content: string, mentions?: MentionRef[]) {
+  conversationStopRequests.delete(convId);
   const state = useAIStore.getState();
   const streaming = state.conversationStreaming[convId] || { sending: false, pendingQueue: [] };
 
@@ -1069,8 +1342,8 @@ interface AIState {
   modelName: string;
 
   // 侧边助手状态
-  sidebarConversationId: number | null;
-  sidebarUIState: { inputDraft: string; scrollTop: number };
+  sidebarTabs: SidebarAITab[];
+  activeSidebarTabId: string | null;
 
   // 配置
   checkConfigured: () => Promise<void>;
@@ -1078,7 +1351,7 @@ interface AIState {
   // 发送
   send: (content: string, mentions?: MentionRef[]) => Promise<void>;
   sendToTab: (tabId: string, content: string, mentions?: MentionRef[]) => Promise<void>;
-  sendFromSidebar: (convId: number, content: string, mentions?: MentionRef[]) => Promise<void>;
+  sendFromSidebarTab: (tabId: string, content: string, mentions?: MentionRef[]) => Promise<void>;
   editAndResendConversation: (
     convId: number,
     messageIndex: number,
@@ -1088,6 +1361,7 @@ interface AIState {
   stopConversation: (convId: number) => Promise<void>;
   stopGeneration: (tabId: string) => Promise<void>;
   regenerate: (tabId: string, messageIndex: number) => Promise<void>;
+  regenerateConversation: (convId: number, messageIndex: number) => Promise<void>;
   removeFromQueue: (convId: number, index: number) => void;
   clearQueue: (convId: number) => void;
 
@@ -1101,11 +1375,31 @@ interface AIState {
   deleteConversation: (id: number) => Promise<void>;
 
   // 侧边助手 actions
-  bindSidebar: (conversationId: number | null) => void;
-  promoteSidebarToTab: () => Promise<string | null>;
-  createAndBindSidebarConversation: () => Promise<number>;
-  validateSidebarConversation: () => void;
-  setSidebarInputDraft: (draft: string) => void;
+  getActiveSidebarTab: () => SidebarAITab | null;
+  getActiveSidebarConversationId: () => number | null;
+  getSidebarTabState: (tabId: string) => TabState;
+  getSidebarTabStatus: (tabId: string) => SidebarTabStatus;
+  openNewSidebarTab: (options?: { activate?: boolean }) => string;
+  bindSidebarTabToConversation: (tabId: string, conversationId: number, options?: { activate?: boolean }) => string;
+  openSidebarConversationInSidebar: (
+    conversationId: number,
+    options?: { activate?: boolean; reuseIfOpen?: boolean }
+  ) => string;
+  activateSidebarTab: (tabId: string) => void;
+  closeSidebarTab: (tabId: string) => void;
+  promoteSidebarToTab: (tabId?: string) => Promise<string | null>;
+  validateSidebarTabs: () => void;
+  setSidebarTabInputDraft: (tabId: string, draft: { content: string; mentions?: MentionRef[] }) => void;
+  setSidebarTabScrollTop: (tabId: string, scrollTop: number) => void;
+  setSidebarTabEditTarget: (
+    tabId: string,
+    editTarget: {
+      conversationId: number;
+      messageIndex: number;
+      draft: { content: string; mentions?: MentionRef[] };
+    } | null
+  ) => void;
+  stopSidebarTab: (tabId: string) => Promise<void>;
 
   // 查询
   isAnySending: () => boolean;
@@ -1117,6 +1411,7 @@ interface AIState {
 }
 
 export const useAIStore = create<AIState>((set, get) => {
+  const initialSidebarState = loadInitialSidebarState();
   return {
     tabStates: {},
     conversationMessages: {},
@@ -1127,11 +1422,8 @@ export const useAIStore = create<AIState>((set, get) => {
     providerName: "",
     modelName: "",
 
-    sidebarConversationId: (() => {
-      const saved = localStorage.getItem("ai_sidebar_conversation_id");
-      return saved ? parseInt(saved, 10) : null;
-    })(),
-    sidebarUIState: { inputDraft: localStorage.getItem("ai_sidebar_input_draft") || "", scrollTop: 0 },
+    sidebarTabs: initialSidebarState.tabs,
+    activeSidebarTabId: initialSidebarState.activeSidebarTabId,
 
     checkConfigured: async () => {
       try {
@@ -1150,12 +1442,16 @@ export const useAIStore = create<AIState>((set, get) => {
       try {
         const convs = await ListConversations();
         set({ conversations: convs || [] });
-        get().validateSidebarConversation();
-        // 启动时 sidebarConversationId 从 localStorage 恢复，但消息未加载。
-        // 在验证通过（conv 仍存在）后触发一次历史消息拉取。
-        const sidebarId = get().sidebarConversationId;
-        if (sidebarId != null) {
-          void ensureConversationMessagesLoaded(sidebarId);
+        get().validateSidebarTabs();
+        const sidebarConversationIds = Array.from(
+          new Set(
+            get()
+              .sidebarTabs.map((tab) => tab.conversationId)
+              .filter((convId): convId is number => convId != null)
+          )
+        );
+        for (const convId of sidebarConversationIds) {
+          void ensureConversationMessagesLoaded(convId);
         }
       } catch {
         set({ conversations: [] });
@@ -1165,22 +1461,38 @@ export const useAIStore = create<AIState>((set, get) => {
     deleteConversation: async (id: number) => {
       try {
         await DeleteConversation(id);
-        // If there's an open tab for this conversation, close it
         const tabStore = useTabStore.getState();
-        const tab = tabStore.tabs.find((t) => t.type === "ai" && (t.meta as AITabMeta).conversationId === id);
-        if (tab) {
-          tabStore.closeTab(tab.id);
-        }
+        const openAITabIds = tabStore.tabs
+          .filter((tab) => tab.type === "ai" && (tab.meta as AITabMeta).conversationId === id)
+          .map((tab) => tab.id);
 
-        // 侧边绑定联动：若侧边仍持有该会话，清除之
-        if (get().sidebarConversationId === id) {
-          get().bindSidebar(null);
+        set((state) => {
+          const nextSidebarTabs = state.sidebarTabs.filter((tab) => tab.conversationId !== id);
+          const activeSidebarTabIndex = state.sidebarTabs.findIndex((tab) => tab.id === state.activeSidebarTabId);
+          const activeSidebarTabWasRemoved =
+            activeSidebarTabIndex !== -1 && state.sidebarTabs[activeSidebarTabIndex]?.conversationId === id;
+          const nextActiveSidebarTabId = nextSidebarTabs.some((tab) => tab.id === state.activeSidebarTabId)
+            ? state.activeSidebarTabId
+            : activeSidebarTabWasRemoved
+              ? (nextSidebarTabs[activeSidebarTabIndex]?.id ??
+                nextSidebarTabs[activeSidebarTabIndex - 1]?.id ??
+                nextSidebarTabs[0]?.id ??
+                null)
+              : (nextSidebarTabs[0]?.id ?? null);
+          const { [id]: _removedMessages, ...conversationMessages } = state.conversationMessages;
+          const { [id]: _removedStreaming, ...conversationStreaming } = state.conversationStreaming;
+          return {
+            sidebarTabs: nextSidebarTabs,
+            activeSidebarTabId: nextActiveSidebarTabId,
+            conversationMessages,
+            conversationStreaming,
+          };
+        });
+
+        for (const tabId of openAITabIds) {
+          tabStore.closeTab(tabId);
         }
-        // 清理最近绑定记录，避免关闭 Tab 时误恢复已删除会话
-        const lastBound = localStorage.getItem("ai_sidebar_last_bound");
-        if (lastBound && parseInt(lastBound, 10) === id) {
-          localStorage.removeItem("ai_sidebar_last_bound");
-        }
+        cleanupConvListener(id);
 
         await get().fetchConversations();
       } catch (e) {
@@ -1190,63 +1502,243 @@ export const useAIStore = create<AIState>((set, get) => {
 
     // === 侧边助手 ===
 
-    bindSidebar: (conversationId: number | null) => {
-      set({ sidebarConversationId: conversationId });
-      if (conversationId === null) {
-        localStorage.removeItem("ai_sidebar_conversation_id");
-      } else {
-        localStorage.setItem("ai_sidebar_conversation_id", String(conversationId));
-        localStorage.setItem("ai_sidebar_last_bound", String(conversationId));
-        // 侧边绑定的会话需要立即把历史消息加载进来，否则 AIChatContent 读到空数组会显示"无消息"。
-        // fire-and-forget：helper 内部做了"已加载则跳过"判断。
-        void ensureConversationMessagesLoaded(conversationId);
-      }
+    getActiveSidebarTab: () => {
+      const { sidebarTabs, activeSidebarTabId } = get();
+      return sidebarTabs.find((tab) => tab.id === activeSidebarTabId) ?? null;
     },
 
-    createAndBindSidebarConversation: async () => {
-      const conv = await CreateConversation();
+    getActiveSidebarConversationId: () => {
+      return get().getActiveSidebarTab()?.conversationId ?? null;
+    },
+
+    getSidebarTabState: (tabId: string) => {
+      return get().sidebarTabs.find((tab) => tab.id === tabId)?.uiState ?? createDefaultTabState();
+    },
+
+    getSidebarTabStatus: (tabId: string) => {
+      const tab = get().sidebarTabs.find((item) => item.id === tabId);
+      return getConversationStatus(tab?.conversationId ?? null);
+    },
+
+    openNewSidebarTab: (options) => {
+      const nextTab = createSidebarTab();
       set((state) => ({
-        conversations: [conv, ...state.conversations],
-        conversationMessages: { ...state.conversationMessages, [conv.ID]: [] },
-        conversationStreaming: {
-          ...state.conversationStreaming,
-          [conv.ID]: { sending: false, pendingQueue: [] },
-        },
+        sidebarTabs: [...state.sidebarTabs, nextTab],
+        activeSidebarTabId:
+          options?.activate === false && state.activeSidebarTabId ? state.activeSidebarTabId : nextTab.id,
       }));
-      get().bindSidebar(conv.ID);
-      return conv.ID;
+      return nextTab.id;
     },
 
-    promoteSidebarToTab: async () => {
-      const convId = get().sidebarConversationId;
-      if (convId == null) return null;
-      const tabId = await get().openConversationTab(convId);
+    bindSidebarTabToConversation: (tabId: string, conversationId: number, options) => {
+      const targetTab = get().sidebarTabs.find((tab) => tab.id === tabId);
+      if (!targetTab) {
+        return get().openSidebarConversationInSidebar(conversationId, {
+          activate: options?.activate,
+          reuseIfOpen: true,
+        });
+      }
+
+      // 当前 blank tab 绑定到一个已在侧边打开的会话时，直接复用现有宿主，
+      // 避免同一个 conversationId 在侧边产生重复 tab。
+      const reusedTab = get().sidebarTabs.find((tab) => tab.id !== tabId && tab.conversationId === conversationId);
+      if (reusedTab) {
+        if (options?.activate !== false || !get().activeSidebarTabId) {
+          get().activateSidebarTab(reusedTab.id);
+        }
+        return reusedTab.id;
+      }
+
+      const previousConversationId = targetTab.conversationId;
+      const title = get().conversations.find((conv) => conv.ID === conversationId)?.Title || targetTab.title;
+      set((state) => ({
+        sidebarTabs: state.sidebarTabs.map((tab) =>
+          tab.id === tabId
+            ? {
+                ...tab,
+                conversationId,
+                title,
+                uiState: createDefaultTabState(),
+              }
+            : tab
+        ),
+        activeSidebarTabId: options?.activate === false && state.activeSidebarTabId ? state.activeSidebarTabId : tabId,
+      }));
+      conversationStopRequests.delete(conversationId);
+      void ensureConversationMessagesLoaded(conversationId);
+      if (previousConversationId != null && previousConversationId !== conversationId) {
+        cleanupConversationIfUnused(previousConversationId, { ignoreSidebarTabId: tabId });
+      }
       return tabId;
     },
 
-    validateSidebarConversation: () => {
-      const convId = get().sidebarConversationId;
-      if (convId == null) return;
-      const exists = get().conversations.some((c) => c.ID === convId);
-      if (!exists) {
-        get().bindSidebar(null);
-        localStorage.removeItem("ai_sidebar_last_bound");
+    openSidebarConversationInSidebar: (conversationId: number, options) => {
+      const existingTab = get().sidebarTabs.find((tab) => tab.conversationId === conversationId);
+      if (existingTab && options?.reuseIfOpen !== false) {
+        if (options?.activate !== false || !get().activeSidebarTabId) {
+          get().activateSidebarTab(existingTab.id);
+        }
+        void ensureConversationMessagesLoaded(conversationId);
+        return existingTab.id;
+      }
+
+      const title = get().conversations.find((conv) => conv.ID === conversationId)?.Title || getDefaultSidebarTitle();
+      const nextTab = createSidebarTab({ conversationId, title });
+      set((state) => ({
+        sidebarTabs: [...state.sidebarTabs, nextTab],
+        activeSidebarTabId:
+          options?.activate === false && state.activeSidebarTabId ? state.activeSidebarTabId : nextTab.id,
+      }));
+      conversationStopRequests.delete(conversationId);
+      void ensureConversationMessagesLoaded(conversationId);
+      return nextTab.id;
+    },
+
+    activateSidebarTab: (tabId: string) => {
+      if (!get().sidebarTabs.some((tab) => tab.id === tabId)) return;
+      set({ activeSidebarTabId: tabId });
+    },
+
+    closeSidebarTab: (tabId: string) => {
+      const state = get();
+      const index = state.sidebarTabs.findIndex((tab) => tab.id === tabId);
+      if (index === -1) return;
+
+      const closingTab = state.sidebarTabs[index];
+      if (closingTab.conversationId != null) {
+        // 侧边宿主关闭前先把当前会话快照刷盘；
+        // 但真正的 listener / persist timer 回收要等到确认没有其它宿主仍引用该会话。
+        cleanupPersistTimer(closingTab.conversationId);
+        persistConversationSnapshot(closingTab.conversationId, true);
+      }
+
+      set((currentState) => {
+        const nextSidebarTabs = currentState.sidebarTabs.filter((tab) => tab.id !== tabId);
+        let nextActiveSidebarTabId = currentState.activeSidebarTabId;
+        if (currentState.activeSidebarTabId === tabId) {
+          // 关闭当前 tab 时优先激活右邻居，其次左邻居，最后退化到首个剩余 tab。
+          nextActiveSidebarTabId =
+            nextSidebarTabs[index]?.id ?? nextSidebarTabs[index - 1]?.id ?? nextSidebarTabs[0]?.id ?? null;
+        }
+        return {
+          sidebarTabs: nextSidebarTabs,
+          activeSidebarTabId: nextActiveSidebarTabId,
+        };
+      });
+
+      if (closingTab.conversationId != null) {
+        cleanupConversationIfUnused(closingTab.conversationId, { ignoreSidebarTabId: tabId });
       }
     },
 
-    setSidebarInputDraft: (draft: string) => {
-      set({ sidebarUIState: { ...get().sidebarUIState, inputDraft: draft } });
-      localStorage.setItem("ai_sidebar_input_draft", draft);
+    promoteSidebarToTab: async (tabId?: string) => {
+      const targetTab = tabId
+        ? (get().sidebarTabs.find((tab) => tab.id === tabId) ?? null)
+        : get().getActiveSidebarTab();
+      if (!targetTab?.conversationId) return null;
+      return get().openConversationTab(targetTab.conversationId);
+    },
+
+    validateSidebarTabs: () => {
+      const conversationsById = new Map(
+        get().conversations.map((conversation) => [conversation.ID, conversation] as const)
+      );
+      const removedConversationIds = get()
+        .sidebarTabs.filter((tab) => tab.conversationId != null && !conversationsById.has(tab.conversationId))
+        .map((tab) => tab.conversationId)
+        .filter((conversationId): conversationId is number => conversationId != null);
+
+      set((state) => {
+        const nextSidebarTabs = state.sidebarTabs
+          .filter((tab) => tab.conversationId == null || conversationsById.has(tab.conversationId))
+          .map((tab) => {
+            if (tab.conversationId == null) return tab;
+            const conversation = conversationsById.get(tab.conversationId);
+            return conversation && conversation.Title !== tab.title ? { ...tab, title: conversation.Title } : tab;
+          });
+        return {
+          sidebarTabs: nextSidebarTabs,
+          activeSidebarTabId: nextSidebarTabs.some((tab) => tab.id === state.activeSidebarTabId)
+            ? state.activeSidebarTabId
+            : (nextSidebarTabs[0]?.id ?? null),
+        };
+      });
+
+      for (const conversationId of new Set(removedConversationIds)) {
+        cleanupConversationIfUnused(conversationId);
+      }
+    },
+
+    setSidebarTabInputDraft: (tabId: string, draft) => {
+      set((state) => ({
+        sidebarTabs: state.sidebarTabs.map((tab) =>
+          tab.id === tabId
+            ? {
+                ...tab,
+                uiState: {
+                  ...tab.uiState,
+                  inputDraft: {
+                    content: draft.content ?? "",
+                    mentions: draft.mentions ?? [],
+                  },
+                },
+              }
+            : tab
+        ),
+      }));
+    },
+
+    setSidebarTabScrollTop: (tabId: string, scrollTop: number) => {
+      set((state) => ({
+        sidebarTabs: state.sidebarTabs.map((tab) =>
+          tab.id === tabId
+            ? {
+                ...tab,
+                uiState: {
+                  ...tab.uiState,
+                  scrollTop,
+                },
+              }
+            : tab
+        ),
+      }));
+    },
+
+    setSidebarTabEditTarget: (tabId: string, editTarget) => {
+      set((state) => ({
+        sidebarTabs: state.sidebarTabs.map((tab) =>
+          tab.id === tabId
+            ? {
+                ...tab,
+                uiState: {
+                  ...tab.uiState,
+                  editTarget: editTarget
+                    ? {
+                        conversationId: editTarget.conversationId,
+                        messageIndex: editTarget.messageIndex,
+                        draft: {
+                          content: editTarget.draft.content ?? "",
+                          mentions: editTarget.draft.mentions ?? [],
+                        },
+                      }
+                    : null,
+                },
+              }
+            : tab
+        ),
+      }));
+    },
+
+    stopSidebarTab: async (tabId: string) => {
+      const conversationId = get().sidebarTabs.find((tab) => tab.id === tabId)?.conversationId;
+      if (conversationId != null) {
+        await get().stopConversation(conversationId);
+      }
     },
 
     // === Tab 管理 ===
 
     openConversationTab: async (conversationId: number) => {
-      // Single-host invariant: evict sidebar when it holds the same conv
-      if (get().sidebarConversationId === conversationId) {
-        get().bindSidebar(null);
-      }
-
       const tabStore = useTabStore.getState();
 
       // If already open, activate
@@ -1262,38 +1754,43 @@ export const useAIStore = create<AIState>((set, get) => {
       const state = get();
       const conv = state.conversations.find((c) => c.ID === conversationId);
       const title = conv?.Title || "对话";
+      let loadedMessages = state.conversationMessages[conversationId];
 
-      // Load messages（只读加载，避免后端 currentConversationID 被多 Tab 竞争覆盖）
-      try {
-        const displayMsgs = await LoadConversationMessages(conversationId);
-        const messages = convertDisplayMessages(displayMsgs);
-
-        // Open tab in tabStore
-        tabStore.openTab({
-          id: tabId,
-          type: "ai",
-          label: title,
-          meta: { type: "ai", conversationId, title },
-        });
-
-        // Register empty UI placeholder entry + write to conversation-keyed stores
-        set((state) => ({
-          tabStates: {
-            ...state.tabStates,
-            [tabId]: {},
-          },
-          conversationMessages: { ...state.conversationMessages, [conversationId]: messages },
-          conversationStreaming: {
-            ...state.conversationStreaming,
-            [conversationId]: { sending: false, pendingQueue: [] },
-          },
-        }));
-
-        return tabId;
-      } catch (e) {
-        console.error("打开会话失败:", e);
-        throw e;
+      // 同一 conversation 可能已经在侧边栏 live streaming。
+      // 主工作区打开时优先复用内存里的消息/队列状态，避免重新加载后把 pendingQueue 和 sending 状态清空。
+      if (loadedMessages === undefined) {
+        try {
+          const displayMsgs = await LoadConversationMessages(conversationId);
+          loadedMessages = convertDisplayMessages(displayMsgs);
+        } catch (e) {
+          console.error("打开会话失败:", e);
+          throw e;
+        }
       }
+
+      conversationStopRequests.delete(conversationId);
+      tabStore.openTab({
+        id: tabId,
+        type: "ai",
+        label: title,
+        meta: { type: "ai", conversationId, title },
+      });
+
+      set((currentState) => ({
+        tabStates: {
+          ...currentState.tabStates,
+          [tabId]: createDefaultTabState(),
+        },
+        conversationMessages:
+          currentState.conversationMessages[conversationId] !== undefined || loadedMessages === undefined
+            ? currentState.conversationMessages
+            : { ...currentState.conversationMessages, [conversationId]: loadedMessages },
+        conversationStreaming: currentState.conversationStreaming[conversationId]
+          ? currentState.conversationStreaming
+          : { ...currentState.conversationStreaming, [conversationId]: { sending: false, pendingQueue: [] } },
+      }));
+
+      return tabId;
     },
 
     openNewConversationTab: () => {
@@ -1310,7 +1807,7 @@ export const useAIStore = create<AIState>((set, get) => {
       set((state) => ({
         tabStates: {
           ...state.tabStates,
-          [tabId]: {},
+          [tabId]: createDefaultTabState(),
         },
       }));
 
@@ -1380,9 +1877,46 @@ export const useAIStore = create<AIState>((set, get) => {
       await _sendForConversation(convId, content, mentions);
     },
 
-    sendFromSidebar: async (convId: number, content: string, mentions?: MentionRef[]) => {
+    sendFromSidebarTab: async (tabId: string, content: string, mentions?: MentionRef[]) => {
+      const sidebarTab = get().sidebarTabs.find((tab) => tab.id === tabId);
+      if (!sidebarTab) return;
+      let convId = sidebarTab.conversationId;
+      const existingMessages = convId != null ? get().conversationMessages[convId] || [] : [];
+      if (!content.trim() && existingMessages.length === 0) return;
+
+      let createdConversation = false;
+      if (convId == null) {
+        try {
+          const conv = await CreateConversation();
+          convId = conv.ID;
+          createdConversation = true;
+          set((state) => ({
+            conversations: [conv, ...state.conversations.filter((item) => item.ID !== conv.ID)],
+            conversationMessages: { ...state.conversationMessages, [conv.ID]: [] },
+            conversationStreaming: {
+              ...state.conversationStreaming,
+              [conv.ID]: { sending: false, pendingQueue: [] },
+            },
+            sidebarTabs: state.sidebarTabs.map((tab) =>
+              tab.id === tabId
+                ? {
+                    ...tab,
+                    conversationId: conv.ID,
+                    title: conv.Title || tab.title,
+                  }
+                : tab
+            ),
+          }));
+        } catch {
+          return;
+        }
+      }
+
       if (shouldSyncConversationTitleBeforeSend(convId, content)) {
         await updateConversationTitleForMessage(convId, content);
+      }
+      if (createdConversation) {
+        void get().fetchConversations();
       }
       await _sendForConversation(convId, content, mentions);
     },
@@ -1439,6 +1973,10 @@ export const useAIStore = create<AIState>((set, get) => {
       const convId = (tab.meta as AITabMeta).conversationId;
       if (convId == null) return;
 
+      await get().regenerateConversation(convId, messageIndex);
+    },
+
+    regenerateConversation: async (convId: number, messageIndex: number) => {
       const messages = get().conversationMessages[convId] || [];
       if (messageIndex < 0 || messageIndex >= messages.length) return;
 
@@ -1465,7 +2003,7 @@ export const useAIStore = create<AIState>((set, get) => {
     },
 
     getTabState: (tabId: string) => {
-      return get().tabStates[tabId] || {};
+      return get().tabStates[tabId] || createDefaultTabState();
     },
 
     getMessagesByConversationId: (convId: number) => {
@@ -1476,6 +2014,13 @@ export const useAIStore = create<AIState>((set, get) => {
       return get().conversationStreaming[convId] || { sending: false, pendingQueue: [] };
     },
   };
+});
+
+persistSidebarTabs(useAIStore.getState().sidebarTabs, useAIStore.getState().activeSidebarTabId);
+useAIStore.subscribe((state, prevState) => {
+  if (state.sidebarTabs !== prevState.sidebarTabs || state.activeSidebarTabId !== prevState.activeSidebarTabId) {
+    persistSidebarTabs(state.sidebarTabs, state.activeSidebarTabId);
+  }
 });
 
 // === Close Hook: clean up when tabStore closes an AI tab ===
@@ -1491,26 +2036,13 @@ registerTabCloseHook((tab) => {
     // 把最后一段 assistant 消息一起落盘；toDisplayMessages 会把未完结的 block 归一为 cancelled。
     cleanupPersistTimer(meta.conversationId);
     persistConversationSnapshot(meta.conversationId, true);
-    cleanupConvListener(meta.conversationId);
+    cleanupConversationIfUnused(meta.conversationId, { ignoreMainTabId: tab.id });
   }
 
   useAIStore.setState((s) => {
     const { [tab.id]: _, ...newTabStates } = s.tabStates;
     return { tabStates: newTabStates };
   });
-
-  // 单宿主不变量：若关闭的 Tab 对应的 conversation 是最近的侧边绑定，且当前侧边为空，
-  // 则恢复侧边绑定，使得会话继续以侧边形态存在。
-  if (meta.conversationId) {
-    const lastBound = localStorage.getItem("ai_sidebar_last_bound");
-    if (
-      lastBound &&
-      parseInt(lastBound, 10) === meta.conversationId &&
-      useAIStore.getState().sidebarConversationId == null
-    ) {
-      useAIStore.getState().bindSidebar(meta.conversationId);
-    }
-  }
 });
 
 // === Restore Hook: load AI settings and restore conversation tabs ===
@@ -1543,7 +2075,7 @@ async function restoreAITabs(tabs: Tab[]) {
           const displayMsgs = await LoadConversationMessages(meta.conversationId);
           const messages = convertDisplayMessages(displayMsgs);
           useAIStore.setState((s) => ({
-            tabStates: { ...s.tabStates, [tab.id]: {} },
+            tabStates: { ...s.tabStates, [tab.id]: createDefaultTabState() },
             conversationMessages: { ...s.conversationMessages, [meta.conversationId!]: messages },
             conversationStreaming: {
               ...s.conversationStreaming,
@@ -1559,7 +2091,7 @@ async function restoreAITabs(tabs: Tab[]) {
         }
       } else {
         useAIStore.setState((s) => ({
-          tabStates: { ...s.tabStates, [tab.id]: {} },
+          tabStates: { ...s.tabStates, [tab.id]: createDefaultTabState() },
         }));
       }
     }
