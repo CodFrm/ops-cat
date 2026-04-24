@@ -521,7 +521,6 @@ function App() {
               onEditAsset={handleEditAsset}
               onDeleteAsset={handleDeleteAsset}
               onConnectAsset={handleConnectAsset}
-              homeSection={homeSection}
             />
             <SideAssistantPanel collapsed={aiPanelCollapsed} onToggle={toggleAIPanel} />
             {aiPanelCollapsed && <EdgeRevealStrip side="right" onClick={toggleAIPanel} />}

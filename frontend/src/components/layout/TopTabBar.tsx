@@ -3,39 +3,14 @@ import { useTranslation } from "react-i18next";
 import { X, MessageSquare, Server, Folder } from "lucide-react";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { useTabDragAndDrop } from "@/hooks/useTabDragAndDrop";
-import { useTabStore, type Tab, type InfoTabMeta, type QueryTabMeta } from "@/stores/tabStore";
+import { useTabStore, type Tab, type InfoTabMeta } from "@/stores/tabStore";
 import { useTerminalStore } from "@/stores/terminalStore";
-import { useAssetStore } from "@/stores/assetStore";
-import { normalizeAssetSection } from "@/lib/assetTypes";
-import {
-  cn,
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@opskat/ui";
+import { cn, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@opskat/ui";
 import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
 import { TabPanelMenu } from "./TabPanelMenu";
 import { TabFilterPopover } from "./TabFilterPopover";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { getBuiltinPageMeta } from "./pageTabMeta";
-
-type HomeSection = "home" | "database" | "ssh" | "redis" | "mongodb";
-
-function matchHomeSection(tab: Tab, section: HomeSection) {
-  if (section === "home") return true;
-  if (tab.type === "terminal") return section === "ssh";
-  if (tab.type === "query") return normalizeAssetSection((tab.meta as QueryTabMeta).assetType) === section;
-  if (tab.type === "info") {
-    const meta = tab.meta as InfoTabMeta;
-    if (meta.targetType !== "asset") return false;
-    const asset = useAssetStore.getState().assets.find((a) => a.ID === meta.targetId);
-    if (!asset) return false;
-    return normalizeAssetSection(asset.Type) === section;
-  }
-  return false;
-}
 
 interface TabBarContextValue {
   tabs: Tab[];
@@ -154,13 +129,12 @@ function TabItem({
   );
 }
 
-export function TopTabBar({ homeSection = "home" }: { homeSection?: HomeSection }) {
+export function TopTabBar() {
   const { t } = useTranslation();
   const isFullscreen = useFullscreen();
 
   const tabs = useTabStore((s) => s.tabs);
   const activeTabId = useTabStore((s) => s.activeTabId);
-  const visibleTabs = tabs.filter((tab) => matchHomeSection(tab, homeSection));
   const activateTab = useTabStore((s) => s.activateTab);
   const closeTab = useTabStore((s) => s.closeTab);
   const reorderTab = useTabStore((s) => s.reorderTab);
@@ -175,7 +149,7 @@ export function TopTabBar({ homeSection = "home" }: { homeSection?: HomeSection 
   const dragKeyRef = useRef<string | null>(null);
 
   const tabBarCtx: TabBarContextValue = {
-    tabs: visibleTabs,
+    tabs,
     dragKeyRef,
     reorder: reorderTab,
     moveTo: moveTabTo,
@@ -303,8 +277,8 @@ export function TopTabBar({ homeSection = "home" }: { homeSection?: HomeSection 
         className={`flex items-center border-b overflow-hidden bg-background ${isFullscreen ? "pt-0" : "pt-8"}`}
         style={{ "--wails-draggable": "drag" } as React.CSSProperties}
       >
-        <div className="flex items-center min-w-0 flex-1">{visibleTabs.map((tab) => renderTabItem(tab))}</div>
-        <TabFilterPopover open={filterOpen} onOpenChange={setFilterOpen} tabs={visibleTabs}>
+        <div className="flex items-center min-w-0 flex-1">{tabs.map((tab) => renderTabItem(tab))}</div>
+        <TabFilterPopover open={filterOpen} onOpenChange={setFilterOpen} tabs={tabs}>
           <div
             className="flex items-center shrink-0 px-1"
             style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}
