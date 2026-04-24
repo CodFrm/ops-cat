@@ -283,7 +283,7 @@ func (s *snippetSvc) KnownCategoryIDs() []string {
 }
 
 // SyncExtensionSeeds 同步单个扩展的 seed 片段到数据库。幂等：
-//   - 若 (source=ext:<ext>, source_ref=seed.key) 存在：覆盖 name/category/content/description/tags，
+//   - 若 (source=ext:<ext>, source_ref=seed.key) 存在：覆盖 name/category/content/description，
 //     保留 use_count/last_used_at/status/created_at。
 //   - 若不存在：以 source="ext:<ext>" / source_ref=seed.key 新建。
 //   - 扫尾：删除当前 source 下不在 seed.key 集合中的记录（扩展升级时 seed 被移除）。

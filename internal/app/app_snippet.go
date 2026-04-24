@@ -47,10 +47,10 @@ func (a *App) RecordSnippetUse(id int64) error {
 
 // SetSnippetLastAssets records the asset IDs most recently used to run a snippet.
 func (a *App) SetSnippetLastAssets(id int64, assetIDs []int64) error {
-	return snippet_svc.Snippet().SetLastAssets(a.ctx, id, assetIDs)
+	return snippet_svc.Snippet().SetLastAssets(a.langCtx(), id, assetIDs)
 }
 
 // GetSnippetLastAssets returns the (live-filtered) asset IDs last used to run a snippet.
 func (a *App) GetSnippetLastAssets(id int64) ([]int64, error) {
-	return snippet_svc.Snippet().GetLastAssets(a.ctx, id)
+	return snippet_svc.Snippet().GetLastAssets(a.langCtx(), id)
 }

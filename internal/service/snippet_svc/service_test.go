@@ -239,6 +239,37 @@ func TestSnippetSvc_SetGetLastAssets(t *testing.T) {
 			_, err := f.svc.GetLastAssets(f.ctx, 0)
 			assert.Error(t, err)
 		})
+
+		convey.Convey("GetLastAssets: StatusDeleted asset filtered out", func() {
+			f := setupSvcTest(t)
+			f.snippets.EXPECT().GetByID(gomock.Any(), int64(5)).Return(&snippet_entity.Snippet{
+				ID: 5, Category: snippet_entity.CategoryShell, LastAssetIDs: "1,2",
+				Status: snippet_entity.StatusActive,
+			}, nil)
+			f.assets.EXPECT().Find(gomock.Any(), int64(1)).Return(&asset_entity.Asset{
+				ID: 1, Type: asset_entity.AssetTypeSSH, Status: asset_entity.StatusDeleted,
+			}, nil)
+			f.assets.EXPECT().Find(gomock.Any(), int64(2)).Return(&asset_entity.Asset{
+				ID: 2, Type: asset_entity.AssetTypeSSH, Status: asset_entity.StatusActive,
+			}, nil)
+			ids, err := f.svc.GetLastAssets(f.ctx, 5)
+			assert.NoError(t, err)
+			assert.Equal(t, []int64{2}, ids)
+		})
+
+		convey.Convey("SetLastAssets caps at 50 IDs", func() {
+			f := setupSvcTest(t)
+			ids60 := make([]int64, 60)
+			for i := range ids60 {
+				ids60[i] = int64(i + 1)
+			}
+			f.snippets.EXPECT().SetLastAssets(gomock.Any(), int64(5), gomock.Any()).
+				Do(func(_ context.Context, _ int64, got []int64) {
+					assert.Len(t, got, 50)
+					assert.Equal(t, ids60[:50], got)
+				}).Return(nil)
+			assert.NoError(t, f.svc.SetLastAssets(f.ctx, 5, ids60))
+		})
 	})
 }
 
