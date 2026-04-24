@@ -107,7 +107,9 @@ interface StreamEventData {
   };
 }
 
-interface TabState {
+// Sidebar 专用 UI 态（inputDraft / scrollTop / editTarget）。workspace tab 不使用这些字段，
+// 工作区 tab 只在 tabStates 里放一个空占位对象标记 "该 tab 已注册"。
+interface SidebarTabUIState {
   inputDraft: {
     content: string;
     mentions?: MentionRef[];
@@ -128,7 +130,7 @@ export interface SidebarAITab {
   conversationId: number | null;
   title: string;
   createdAt: number;
-  uiState: TabState;
+  uiState: SidebarTabUIState;
 }
 
 export type SidebarTabStatus = "waiting_approval" | "error" | "running" | "done" | null;
@@ -139,7 +141,7 @@ const LEGACY_SIDEBAR_CONVERSATION_KEY = "ai_sidebar_conversation_id";
 const LEGACY_SIDEBAR_INPUT_DRAFT_KEY = "ai_sidebar_input_draft";
 const LEGACY_SIDEBAR_LAST_BOUND_KEY = "ai_sidebar_last_bound";
 
-function createDefaultTabState(overrides?: Partial<TabState> | null): TabState {
+function createDefaultSidebarUiState(overrides?: Partial<SidebarTabUIState> | null): SidebarTabUIState {
   return {
     inputDraft: {
       content: overrides?.inputDraft?.content ?? "",
@@ -159,6 +161,26 @@ function createDefaultTabState(overrides?: Partial<TabState> | null): TabState {
   };
 }
 
+// 选项里 activate 明确为 false 才保留旧 active，否则把 active 切到新 tab。
+function resolveNextActiveId(prevActive: string | null, candidate: string, activate: boolean | undefined): string {
+  return activate === false && prevActive ? prevActive : candidate;
+}
+
+// 统一的"如果 host 没 conversation 就新建一个"小助手：只负责 CreateConversation + try/catch。
+// 更新 store 的工作交给 attach 回调——sendToTab 需要更新 workspace tab meta，
+// sendFromSidebarTab 需要更新 sidebar tab + 预置 conversations/messages/streaming。
+async function createConversationForEmptyHost(
+  attach: (conv: conversation_entity.Conversation) => void
+): Promise<number | null> {
+  try {
+    const conv = await CreateConversation();
+    attach(conv);
+    return conv.ID;
+  } catch {
+    return null;
+  }
+}
+
 function getDefaultSidebarTitle() {
   return i18n.t("ai.newConversation", "新对话");
 }
@@ -173,13 +195,15 @@ function createSidebarTab(overrides?: Partial<SidebarAITab>): SidebarAITab {
     conversationId: overrides?.conversationId ?? null,
     title: overrides?.title ?? getDefaultSidebarTitle(),
     createdAt: overrides?.createdAt ?? Date.now(),
-    uiState: createDefaultTabState(overrides?.uiState),
+    uiState: createDefaultSidebarUiState(overrides?.uiState),
   };
 }
 
-function stripSidebarMentionsForPersistence(uiState: Partial<TabState> | null | undefined): TabState | undefined {
+function stripSidebarMentionsForPersistence(
+  uiState: Partial<SidebarTabUIState> | null | undefined
+): SidebarTabUIState | undefined {
   if (!uiState) return undefined;
-  return createDefaultTabState({
+  return createDefaultSidebarUiState({
     ...uiState,
     inputDraft: {
       content: uiState.inputDraft?.content ?? "",
@@ -284,7 +308,7 @@ function loadInitialSidebarState() {
   const initialTab = createSidebarTab({
     conversationId,
     title: conversationId == null ? getDefaultSidebarTitle() : undefined,
-    uiState: createDefaultTabState({
+    uiState: createDefaultSidebarUiState({
       inputDraft: {
         content: legacyDraft,
         mentions: [],
@@ -1337,8 +1361,11 @@ async function _sendForConversation(convId: number, content: string, mentions?: 
 
 // === Store ===
 
+// workspace tab 只需要一个空占位："此 tab 已注册"。实际 draft/scrollTop/editTarget 在组件内部管理。
+type WorkspaceTabPlaceholder = Record<string, unknown>;
+
 interface AIState {
-  tabStates: Record<string, TabState>;
+  tabStates: Record<string, WorkspaceTabPlaceholder>;
   conversationMessages: Record<number, ChatMessage[]>;
   conversationStreaming: Record<number, { sending: boolean; pendingQueue: PendingQueueItem[] }>;
 
@@ -1384,7 +1411,7 @@ interface AIState {
   // 侧边助手 actions
   getActiveSidebarTab: () => SidebarAITab | null;
   getActiveSidebarConversationId: () => number | null;
-  getSidebarTabState: (tabId: string) => TabState;
+  getSidebarTabState: (tabId: string) => SidebarTabUIState;
   getSidebarTabStatus: (tabId: string) => SidebarTabStatus;
   openNewSidebarTab: (options?: { activate?: boolean }) => string;
   bindSidebarTabToConversation: (tabId: string, conversationId: number, options?: { activate?: boolean }) => string;
@@ -1410,7 +1437,6 @@ interface AIState {
 
   // 查询
   isAnySending: () => boolean;
-  getTabState: (tabId: string) => TabState;
 
   // NEW — 派生 getter
   getMessagesByConversationId: (convId: number) => ChatMessage[];
@@ -1419,6 +1445,18 @@ interface AIState {
 
 export const useAIStore = create<AIState>((set, get) => {
   const initialSidebarState = loadInitialSidebarState();
+
+  // 侧边 tab uiState 的浅 merge：只替换 patch 里出现的字段，其余保持原引用。
+  // 引用稳定性很重要——仅改动 inputDraft 时，editTarget/scrollTop 的引用不变，
+  // 使得按 editTarget 订阅的组件不会因键盘输入而重渲染。
+  const patchSidebarTabUiState = (tabId: string, patch: Partial<SidebarTabUIState>) => {
+    set((state) => ({
+      sidebarTabs: state.sidebarTabs.map((tab) =>
+        tab.id === tabId ? { ...tab, uiState: { ...tab.uiState, ...patch } } : tab
+      ),
+    }));
+  };
+
   return {
     tabStates: {},
     conversationMessages: {},
@@ -1532,7 +1570,7 @@ export const useAIStore = create<AIState>((set, get) => {
     },
 
     getSidebarTabState: (tabId: string) => {
-      return get().sidebarTabs.find((tab) => tab.id === tabId)?.uiState ?? createDefaultTabState();
+      return get().sidebarTabs.find((tab) => tab.id === tabId)?.uiState ?? createDefaultSidebarUiState();
     },
 
     getSidebarTabStatus: (tabId: string) => {
@@ -1544,8 +1582,7 @@ export const useAIStore = create<AIState>((set, get) => {
       const nextTab = createSidebarTab();
       set((state) => ({
         sidebarTabs: [...state.sidebarTabs, nextTab],
-        activeSidebarTabId:
-          options?.activate === false && state.activeSidebarTabId ? state.activeSidebarTabId : nextTab.id,
+        activeSidebarTabId: resolveNextActiveId(state.activeSidebarTabId, nextTab.id, options?.activate),
       }));
       return nextTab.id;
     },
@@ -1578,11 +1615,11 @@ export const useAIStore = create<AIState>((set, get) => {
                 ...tab,
                 conversationId,
                 title,
-                uiState: createDefaultTabState(),
+                uiState: createDefaultSidebarUiState(),
               }
             : tab
         ),
-        activeSidebarTabId: options?.activate === false && state.activeSidebarTabId ? state.activeSidebarTabId : tabId,
+        activeSidebarTabId: resolveNextActiveId(state.activeSidebarTabId, tabId, options?.activate),
       }));
       conversationStopRequests.delete(conversationId);
       void ensureConversationMessagesLoaded(conversationId);
@@ -1606,8 +1643,7 @@ export const useAIStore = create<AIState>((set, get) => {
       const nextTab = createSidebarTab({ conversationId, title });
       set((state) => ({
         sidebarTabs: [...state.sidebarTabs, nextTab],
-        activeSidebarTabId:
-          options?.activate === false && state.activeSidebarTabId ? state.activeSidebarTabId : nextTab.id,
+        activeSidebarTabId: resolveNextActiveId(state.activeSidebarTabId, nextTab.id, options?.activate),
       }));
       conversationStopRequests.delete(conversationId);
       void ensureConversationMessagesLoaded(conversationId);
@@ -1690,63 +1726,31 @@ export const useAIStore = create<AIState>((set, get) => {
     },
 
     setSidebarTabInputDraft: (tabId: string, draft) => {
-      set((state) => ({
-        sidebarTabs: state.sidebarTabs.map((tab) =>
-          tab.id === tabId
-            ? {
-                ...tab,
-                uiState: {
-                  ...tab.uiState,
-                  inputDraft: {
-                    content: draft.content ?? "",
-                    mentions: draft.mentions ?? [],
-                  },
-                },
-              }
-            : tab
-        ),
-      }));
+      patchSidebarTabUiState(tabId, {
+        inputDraft: {
+          content: draft.content ?? "",
+          mentions: draft.mentions ?? [],
+        },
+      });
     },
 
     setSidebarTabScrollTop: (tabId: string, scrollTop: number) => {
-      set((state) => ({
-        sidebarTabs: state.sidebarTabs.map((tab) =>
-          tab.id === tabId
-            ? {
-                ...tab,
-                uiState: {
-                  ...tab.uiState,
-                  scrollTop,
-                },
-              }
-            : tab
-        ),
-      }));
+      patchSidebarTabUiState(tabId, { scrollTop });
     },
 
     setSidebarTabEditTarget: (tabId: string, editTarget) => {
-      set((state) => ({
-        sidebarTabs: state.sidebarTabs.map((tab) =>
-          tab.id === tabId
-            ? {
-                ...tab,
-                uiState: {
-                  ...tab.uiState,
-                  editTarget: editTarget
-                    ? {
-                        conversationId: editTarget.conversationId,
-                        messageIndex: editTarget.messageIndex,
-                        draft: {
-                          content: editTarget.draft.content ?? "",
-                          mentions: editTarget.draft.mentions ?? [],
-                        },
-                      }
-                    : null,
-                },
-              }
-            : tab
-        ),
-      }));
+      patchSidebarTabUiState(tabId, {
+        editTarget: editTarget
+          ? {
+              conversationId: editTarget.conversationId,
+              messageIndex: editTarget.messageIndex,
+              draft: {
+                content: editTarget.draft.content ?? "",
+                mentions: editTarget.draft.mentions ?? [],
+              },
+            }
+          : null,
+      });
     },
 
     stopSidebarTab: async (tabId: string) => {
@@ -1799,7 +1803,7 @@ export const useAIStore = create<AIState>((set, get) => {
       set((currentState) => ({
         tabStates: {
           ...currentState.tabStates,
-          [tabId]: createDefaultTabState(),
+          [tabId]: {},
         },
         conversationMessages:
           currentState.conversationMessages[conversationId] !== undefined || loadedMessages === undefined
@@ -1827,7 +1831,7 @@ export const useAIStore = create<AIState>((set, get) => {
       set((state) => ({
         tabStates: {
           ...state.tabStates,
-          [tabId]: createDefaultTabState(),
+          [tabId]: {},
         },
       }));
 
@@ -1873,18 +1877,16 @@ export const useAIStore = create<AIState>((set, get) => {
       // Ensure tab has a conversation ID *before* writing any message state —
       // conversationMessages / conversationStreaming are keyed by convId.
       let createdConversation = false;
-      if (!convId) {
-        try {
-          const conv = await CreateConversation();
-          convId = conv.ID;
-          createdConversation = true;
+      if (convId == null) {
+        const newId = await createConversationForEmptyHost((conv) => {
           const curTab = useTabStore.getState().tabs.find((t) => t.id === tabId);
           useTabStore.getState().updateTab(tabId, {
-            meta: { type: "ai", conversationId: convId, title: curTab?.label || "对话" },
+            meta: { type: "ai", conversationId: conv.ID, title: curTab?.label || "对话" },
           });
-        } catch {
-          return;
-        }
+        });
+        if (newId == null) return;
+        convId = newId;
+        createdConversation = true;
       }
 
       if (shouldSyncConversationTitleBeforeSend(convId, content)) {
@@ -1906,30 +1908,22 @@ export const useAIStore = create<AIState>((set, get) => {
 
       let createdConversation = false;
       if (convId == null) {
-        try {
-          const conv = await CreateConversation();
-          convId = conv.ID;
-          createdConversation = true;
+        const newId = await createConversationForEmptyHost((conv) => {
           set((state) => ({
-            conversations: [conv, ...state.conversations.filter((item) => item.ID !== conv.ID)],
+            conversations: [conv, ...state.conversations],
             conversationMessages: { ...state.conversationMessages, [conv.ID]: [] },
             conversationStreaming: {
               ...state.conversationStreaming,
               [conv.ID]: { sending: false, pendingQueue: [] },
             },
             sidebarTabs: state.sidebarTabs.map((tab) =>
-              tab.id === tabId
-                ? {
-                    ...tab,
-                    conversationId: conv.ID,
-                    title: conv.Title || tab.title,
-                  }
-                : tab
+              tab.id === tabId ? { ...tab, conversationId: conv.ID, title: conv.Title || tab.title } : tab
             ),
           }));
-        } catch {
-          return;
-        }
+        });
+        if (newId == null) return;
+        convId = newId;
+        createdConversation = true;
       }
 
       if (shouldSyncConversationTitleBeforeSend(convId, content)) {
@@ -2020,10 +2014,6 @@ export const useAIStore = create<AIState>((set, get) => {
     isAnySending: () => {
       const { conversationStreaming } = get();
       return Object.values(conversationStreaming).some((s) => s.sending);
-    },
-
-    getTabState: (tabId: string) => {
-      return get().tabStates[tabId] || createDefaultTabState();
     },
 
     getMessagesByConversationId: (convId: number) => {
@@ -2149,7 +2139,7 @@ async function restoreAITabs(tabs: Tab[]) {
           const displayMsgs = await LoadConversationMessages(meta.conversationId);
           const messages = convertDisplayMessages(displayMsgs);
           useAIStore.setState((s) => ({
-            tabStates: { ...s.tabStates, [tab.id]: createDefaultTabState() },
+            tabStates: { ...s.tabStates, [tab.id]: {} },
             conversationMessages: { ...s.conversationMessages, [meta.conversationId!]: messages },
             conversationStreaming: {
               ...s.conversationStreaming,
@@ -2165,7 +2155,7 @@ async function restoreAITabs(tabs: Tab[]) {
         }
       } else {
         useAIStore.setState((s) => ({
-          tabStates: { ...s.tabStates, [tab.id]: createDefaultTabState() },
+          tabStates: { ...s.tabStates, [tab.id]: {} },
         }));
       }
     }

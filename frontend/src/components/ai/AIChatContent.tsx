@@ -152,8 +152,11 @@ export function AIChatContent({
     const tab = s.tabs.find((x) => x.id === tabId);
     return tab ? (tab.meta as AITabMeta).conversationId : null;
   });
-  const sidebarTabState = useAIStore((s) =>
-    sideTabId ? (s.sidebarTabs.find((tab) => tab.id === sideTabId)?.uiState ?? null) : null
+  // 只订阅 editTarget 字段，不订阅 inputDraft / scrollTop。
+  // 得益于 store 侧 patchSidebarTabUiState 的浅 merge，仅输入草稿变化时 editTarget 引用保持不变，
+  // 这里的 selector 会得到同一引用 → Object.is 通过 → 不触发 AIChatContent 重渲染。
+  const sidebarEditTarget = useAIStore((s) =>
+    sideTabId ? (s.sidebarTabs.find((tab) => tab.id === sideTabId)?.uiState.editTarget ?? null) : null
   );
   const conversationId = propConvId ?? derivedConvId;
 
@@ -183,8 +186,7 @@ export function AIChatContent({
   const inputRef = useRef<AIChatInputHandle>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const previousConversationIdRef = useRef<number | null | undefined>(conversationId);
-  const previousSideHostKeyRef = useRef<string>("");
-  const editTarget = sideTabId ? (sidebarTabState?.editTarget ?? null) : localEditTarget;
+  const editTarget = sideTabId ? sidebarEditTarget : localEditTarget;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -196,13 +198,11 @@ export function AIChatContent({
 
   useEffect(() => {
     if (!sideTabId) return;
-    const hostKey = `${sideTabId}:${conversationId ?? "blank"}`;
-    if (previousSideHostKeyRef.current === hostKey) return;
-    previousSideHostKeyRef.current = hostKey;
-    // 侧边助手：同一个 conversation 切到不同 side tab 时，
-    // 输入框要恢复各自保存的 draft，而不是共用一份 singleton 草稿。
-    inputRef.current?.loadDraft(sidebarTabState?.inputDraft ?? { content: "", mentions: [] });
-  }, [conversationId, sideTabId, sidebarTabState]);
+    // 侧边助手：切换 side tab 或刚绑定到新 conversation 时，恢复各自保存的 draft。
+    // 通过 getState() 一次性读取，不订阅 inputDraft —— 否则每次按键都会重跑该 effect。
+    const uiState = useAIStore.getState().sidebarTabs.find((tab) => tab.id === sideTabId)?.uiState;
+    inputRef.current?.loadDraft(uiState?.inputDraft ?? { content: "", mentions: [] });
+  }, [conversationId, sideTabId]);
 
   // 编辑态依赖 conversationId 和消息索引，切换会话时要显式清掉草稿，避免把旧草稿带到新会话。
   const resetEditMode = useCallback(
