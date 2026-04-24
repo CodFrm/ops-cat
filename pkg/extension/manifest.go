@@ -88,12 +88,11 @@ type SnippetCategoryDef struct {
 //   - Name and Content must be non-empty after trimming.
 //   - Category must be either a builtin category id or a category declared in THIS manifest.
 type SeedSnippetDef struct {
-	Key         string   `json:"key"`
-	Name        string   `json:"name"`
-	Category    string   `json:"category"`
-	Content     string   `json:"content"`
-	Description string   `json:"description"`
-	Tags        []string `json:"tags"`
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	Content     string `json:"content"`
+	Description string `json:"description"`
 }
 
 // Capabilities declares what host resources an extension is permitted to access.

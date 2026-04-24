@@ -12,7 +12,6 @@ import (
 	"github.com/opskat/opskat/internal/model/entity/policy"
 	"github.com/opskat/opskat/internal/pkg/sortutil"
 	"github.com/opskat/opskat/internal/repository/asset_repo"
-	"github.com/opskat/opskat/internal/service/snippet_svc"
 )
 
 // AssetSvc 资产业务接口
@@ -76,17 +75,7 @@ func (s *assetSvc) Update(ctx context.Context, asset *asset_entity.Asset) error 
 }
 
 func (s *assetSvc) Delete(ctx context.Context, id int64) error {
-	if err := asset_repo.Asset().Delete(ctx, id); err != nil {
-		return err
-	}
-	// 资产删除后，将绑定到该资产的片段转为全局（asset_id = NULL）
-	// 非致命：失败仅记日志，不阻断资产删除流程。
-	if svc := snippet_svc.Snippet(); svc != nil {
-		if err := svc.DetachFromAsset(ctx, id); err != nil {
-			logger.Ctx(ctx).Warn("detach snippets from asset", zap.Int64("asset_id", id), zap.Error(err))
-		}
-	}
-	return nil
+	return asset_repo.Asset().Delete(ctx, id)
 }
 
 // Move 移动资产排序（up/down/top）

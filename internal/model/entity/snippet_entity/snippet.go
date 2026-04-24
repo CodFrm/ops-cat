@@ -63,20 +63,19 @@ func CategoryAssetType(cat string) string {
 
 // Snippet 片段实体
 type Snippet struct {
-	ID          int64      `gorm:"primaryKey"`
-	Name        string     `gorm:"size:128;not null;index"`
-	Category    string     `gorm:"size:32;not null;index"`
-	Content     string     `gorm:"type:text;not null"`
-	Description string     `gorm:"size:512;not null;default:''"`
-	Tags        string     `gorm:"size:512;not null;default:''"` // 逗号分隔
-	AssetID     *int64     `gorm:"index"`
-	Source      string     `gorm:"size:64;not null;default:user;index"`
-	SourceRef   string     `gorm:"size:128;not null;default:''"`
-	UseCount    uint       `gorm:"not null;default:0"`
-	LastUsedAt  *time.Time `gorm:"column:last_used_at"`
-	Status      int8       `gorm:"not null;default:1;index"`
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID           int64      `gorm:"primaryKey"`
+	Name         string     `gorm:"size:128;not null;index"`
+	Category     string     `gorm:"size:32;not null;index"`
+	Content      string     `gorm:"type:text;not null"`
+	Description  string     `gorm:"size:512;not null;default:''"`
+	LastAssetIDs string     `gorm:"size:1024;not null;default:''"` // comma-separated int64; UI-authoritative
+	Source       string     `gorm:"size:64;not null;default:user;index"`
+	SourceRef    string     `gorm:"size:128;not null;default:''"`
+	UseCount     uint       `gorm:"not null;default:0"`
+	LastUsedAt   *time.Time `gorm:"column:last_used_at"`
+	Status       int8       `gorm:"not null;default:1;index"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // TableName GORM 表名

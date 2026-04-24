@@ -166,6 +166,8 @@ export function GetSkillPreview():Promise<string>;
 
 export function GetSnippet(arg1:number):Promise<snippet_entity.Snippet>;
 
+export function GetSnippetLastAssets(arg1:number):Promise<Array<number>>;
+
 export function GetStoredGitHubUser():Promise<string>;
 
 export function GetSystemStatus():Promise<Array<status.Entry>>;
@@ -295,6 +297,8 @@ export function SetActiveAIProvider(arg1:number):Promise<void>;
 export function SetDownloadMirror(arg1:string):Promise<void>;
 
 export function SetLanguage(arg1:string):Promise<void>;
+
+export function SetSnippetLastAssets(arg1:number,arg2:Array<number>):Promise<void>;
 
 export function SetUpdateChannel(arg1:string):Promise<void>;
 

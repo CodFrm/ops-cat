@@ -11,18 +11,11 @@ import (
 // SnippetQuery 查询参数
 type SnippetQuery struct {
 	Categories []string // 空表示不过滤
-	// 资产过滤：
-	//   AssetID == nil：不按资产过滤
-	//   AssetID != nil 且 IncludeGlobal == false：仅返回该资产绑定的片段
-	//   AssetID != nil 且 IncludeGlobal == true：返回该资产绑定 + 全局（asset_id IS NULL）
-	AssetID       *int64
-	IncludeGlobal bool
-	Keyword       string   // 对 name / description / content 做 LIKE
-	Tag           string   // tags 列子串匹配
-	Sources       []string // 空表示不过滤；可选 "user" / "ext:foo"
-	Limit         int      // 0 表示不限制
-	Offset        int
-	OrderBy       string // "use_count_desc" | "updated_at_desc" | ""（默认：last_used_at DESC NULLS LAST, updated_at DESC）
+	Keyword    string   // 对 name / description / content 做 LIKE
+	Sources    []string // 空表示不过滤；可选 "user" / "ext:foo"
+	Limit      int      // 0 表示不限制
+	Offset     int
+	OrderBy    string // "use_count_desc" | "updated_at_desc" | ""（默认：last_used_at DESC NULLS LAST, updated_at DESC）
 }
 
 // SnippetRepo 数据访问接口
@@ -35,10 +28,12 @@ type SnippetRepo interface {
 	Find(ctx context.Context, q SnippetQuery) ([]*snippet_entity.Snippet, error)
 	FindBySourceRef(ctx context.Context, source, ref string) (*snippet_entity.Snippet, error)
 	TouchUsage(ctx context.Context, id int64) error
-	DetachFromAsset(ctx context.Context, assetID int64) error
+	// SetLastAssets overwrites last_asset_ids for an active snippet. No dedupe,
+	// no reorder — UI is authoritative. Service caps length before calling.
+	SetLastAssets(ctx context.Context, id int64, assetIDs []int64) error
 
 	// UpsertExtensionSeed 以 (source, source_ref) 为联合键幂等写入扩展 seed。
-	// 命中已有行则覆盖 name/category/content/description/tags + updated_at，
+	// 命中已有行则覆盖 name/category/content/description + updated_at，
 	// 保留 use_count/last_used_at/status/created_at。
 	// 不存在则插入并为 src.ID 赋值。仅供扩展 seed 同步路径使用，不对用户侧暴露。
 	UpsertExtensionSeed(ctx context.Context, src *snippet_entity.Snippet) error

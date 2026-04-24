@@ -254,7 +254,6 @@ func manifestSeedsToSvc(m *extension.Manifest) []snippet_svc.SeedDef {
 			Category:    s.Category,
 			Content:     s.Content,
 			Description: s.Description,
-			Tags:        s.Tags,
 		})
 	}
 	return out

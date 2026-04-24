@@ -1177,6 +1177,92 @@ export namespace extension {
 	        this.description = source["description"];
 	    }
 	}
+	export class SeedSnippetDef {
+	    key: string;
+	    name: string;
+	    category: string;
+	    content: string;
+	    description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SeedSnippetDef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.name = source["name"];
+	        this.category = source["category"];
+	        this.content = source["content"];
+	        this.description = source["description"];
+	    }
+	}
+	export class SnippetCategoryDef {
+	    id: string;
+	    assetType: string;
+	    i18n: I18nName;
+	
+	    static createFrom(source: any = {}) {
+	        return new SnippetCategoryDef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.assetType = source["assetType"];
+	        this.i18n = this.convertValues(source["i18n"], I18nName);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SnippetsDef {
+	    categories: SnippetCategoryDef[];
+	    seed: SeedSnippetDef[];
+	
+	    static createFrom(source: any = {}) {
+	        return new SnippetsDef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.categories = this.convertValues(source["categories"], SnippetCategoryDef);
+	        this.seed = this.convertValues(source["seed"], SeedSnippetDef);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class PolicyGroupDef {
 	    id: string;
 	    i18n: I18nNameDesc;
@@ -1322,6 +1408,7 @@ export namespace extension {
 	    tools: ToolDef[];
 	    policies: PoliciesDef;
 	    frontend: FrontendDef;
+	    snippets: SnippetsDef;
 	
 	    static createFrom(source: any = {}) {
 	        return new Manifest(source);
@@ -1341,6 +1428,7 @@ export namespace extension {
 	        this.tools = this.convertValues(source["tools"], ToolDef);
 	        this.policies = this.convertValues(source["policies"], PoliciesDef);
 	        this.frontend = this.convertValues(source["frontend"], FrontendDef);
+	        this.snippets = this.convertValues(source["snippets"], SnippetsDef);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1361,6 +1449,9 @@ export namespace extension {
 		    return a;
 		}
 	}
+	
+	
+	
 	
 	
 	
@@ -1729,8 +1820,7 @@ export namespace snippet_entity {
 	    Category: string;
 	    Content: string;
 	    Description: string;
-	    Tags: string;
-	    AssetID?: number;
+	    LastAssetIDs: string;
 	    Source: string;
 	    SourceRef: string;
 	    UseCount: number;
@@ -1753,8 +1843,7 @@ export namespace snippet_entity {
 	        this.Category = source["Category"];
 	        this.Content = source["Content"];
 	        this.Description = source["Description"];
-	        this.Tags = source["Tags"];
-	        this.AssetID = source["AssetID"];
+	        this.LastAssetIDs = source["LastAssetIDs"];
 	        this.Source = source["Source"];
 	        this.SourceRef = source["SourceRef"];
 	        this.UseCount = source["UseCount"];
@@ -1810,8 +1899,6 @@ export namespace snippet_svc {
 	    category: string;
 	    content: string;
 	    description: string;
-	    tags: string;
-	    assetId?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new CreateReq(source);
@@ -1823,16 +1910,11 @@ export namespace snippet_svc {
 	        this.category = source["category"];
 	        this.content = source["content"];
 	        this.description = source["description"];
-	        this.tags = source["tags"];
-	        this.assetId = source["assetId"];
 	    }
 	}
 	export class ListReq {
 	    categories: string[];
-	    assetId?: number;
-	    includeGlobal: boolean;
 	    keyword: string;
-	    tag: string;
 	    limit: number;
 	    offset: number;
 	    orderBy: string;
@@ -1844,10 +1926,7 @@ export namespace snippet_svc {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.categories = source["categories"];
-	        this.assetId = source["assetId"];
-	        this.includeGlobal = source["includeGlobal"];
 	        this.keyword = source["keyword"];
-	        this.tag = source["tag"];
 	        this.limit = source["limit"];
 	        this.offset = source["offset"];
 	        this.orderBy = source["orderBy"];
@@ -1858,8 +1937,6 @@ export namespace snippet_svc {
 	    name: string;
 	    content: string;
 	    description: string;
-	    tags: string;
-	    assetId?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new UpdateReq(source);
@@ -1871,8 +1948,6 @@ export namespace snippet_svc {
 	        this.name = source["name"];
 	        this.content = source["content"];
 	        this.description = source["description"];
-	        this.tags = source["tags"];
-	        this.assetId = source["assetId"];
 	    }
 	}
 

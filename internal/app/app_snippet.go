@@ -44,3 +44,13 @@ func (a *App) DuplicateSnippet(id int64) (*snippet_entity.Snippet, error) {
 func (a *App) RecordSnippetUse(id int64) error {
 	return snippet_svc.Snippet().RecordUse(a.langCtx(), id)
 }
+
+// SetSnippetLastAssets records the asset IDs most recently used to run a snippet.
+func (a *App) SetSnippetLastAssets(id int64, assetIDs []int64) error {
+	return snippet_svc.Snippet().SetLastAssets(a.ctx, id, assetIDs)
+}
+
+// GetSnippetLastAssets returns the (live-filtered) asset IDs last used to run a snippet.
+func (a *App) GetSnippetLastAssets(id int64) ([]int64, error) {
+	return snippet_svc.Snippet().GetLastAssets(a.ctx, id)
+}

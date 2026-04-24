@@ -3,6 +3,8 @@ package snippet_repo
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cago-frame/cago/database/db"
@@ -39,8 +41,6 @@ func (r *snippetRepo) Update(ctx context.Context, s *snippet_entity.Snippet) err
 			"name":        s.Name,
 			"content":     s.Content,
 			"description": s.Description,
-			"tags":        s.Tags,
-			"asset_id":    s.AssetID,
 			"updated_at":  time.Now(),
 		}).Error
 }
@@ -80,19 +80,9 @@ func (r *snippetRepo) Find(ctx context.Context, q SnippetQuery) ([]*snippet_enti
 	if len(q.Categories) > 0 {
 		query = query.Where("category IN ?", q.Categories)
 	}
-	if q.AssetID != nil {
-		if q.IncludeGlobal {
-			query = query.Where("asset_id = ? OR asset_id IS NULL", *q.AssetID)
-		} else {
-			query = query.Where("asset_id = ?", *q.AssetID)
-		}
-	}
 	if q.Keyword != "" {
 		kw := "%" + q.Keyword + "%"
 		query = query.Where("name LIKE ? OR description LIKE ? OR content LIKE ?", kw, kw, kw)
-	}
-	if q.Tag != "" {
-		query = query.Where("tags LIKE ?", "%"+q.Tag+"%")
 	}
 	if len(q.Sources) > 0 {
 		query = query.Where("source IN ?", q.Sources)
@@ -148,11 +138,20 @@ func (r *snippetRepo) TouchUsage(ctx context.Context, id int64) error {
 	).Error
 }
 
-func (r *snippetRepo) DetachFromAsset(ctx context.Context, assetID int64) error {
-	return db.Ctx(ctx).Exec(
-		`UPDATE snippets SET asset_id = NULL, updated_at = ? WHERE asset_id = ?`,
-		time.Now(), assetID,
-	).Error
+// SetLastAssets overwrites last_asset_ids. Empty slice writes empty string.
+func (r *snippetRepo) SetLastAssets(ctx context.Context, id int64, assetIDs []int64) error {
+	if id == 0 {
+		return errors.New("snippet id is required")
+	}
+	strs := make([]string, 0, len(assetIDs))
+	for _, a := range assetIDs {
+		strs = append(strs, strconv.FormatInt(a, 10))
+	}
+	joined := strings.Join(strs, ",")
+	return db.Ctx(ctx).
+		Model(&snippet_entity.Snippet{}).
+		Where("id = ? AND status = ?", id, snippet_entity.StatusActive).
+		Update("last_asset_ids", joined).Error
 }
 
 // UpsertExtensionSeed 幂等写入扩展 seed，以 (source, source_ref) 为联合键。
@@ -175,8 +174,6 @@ func (r *snippetRepo) UpsertExtensionSeed(ctx context.Context, src *snippet_enti
 				"category":    src.Category,
 				"content":     src.Content,
 				"description": src.Description,
-				"tags":        src.Tags,
-				"asset_id":    nil, // seed 默认无绑定；用户无法改扩展 seed，故无覆盖旧值风险
 				"updated_at":  time.Now(),
 			}
 			if err := tx.Model(&snippet_entity.Snippet{}).

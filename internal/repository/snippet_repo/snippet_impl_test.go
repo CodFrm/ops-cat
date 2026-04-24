@@ -25,22 +25,19 @@ func setupRepo(t *testing.T) (context.Context, SnippetRepo) {
 	return context.Background(), NewSnippet()
 }
 
-func int64Ptr(v int64) *int64 { return &v }
-
-func newSnippet(name, category string, assetID *int64) *snippet_entity.Snippet {
+func newSnippet(name, category string) *snippet_entity.Snippet {
 	return &snippet_entity.Snippet{
 		Name:     name,
 		Category: category,
 		Content:  "echo " + name,
 		Source:   snippet_entity.SourceUser,
 		Status:   snippet_entity.StatusActive,
-		AssetID:  assetID,
 	}
 }
 
 func TestSnippetRepo_CreateAndGetByID(t *testing.T) {
 	ctx, r := setupRepo(t)
-	s := newSnippet("a", snippet_entity.CategoryShell, nil)
+	s := newSnippet("a", snippet_entity.CategoryShell)
 	require.NoError(t, r.Create(ctx, s))
 	assert.NotZero(t, s.ID)
 
@@ -53,40 +50,23 @@ func TestSnippetRepo_CreateAndGetByID(t *testing.T) {
 
 func TestSnippetRepo_Update(t *testing.T) {
 	ctx, r := setupRepo(t)
-	s := newSnippet("a", snippet_entity.CategoryShell, nil)
+	s := newSnippet("a", snippet_entity.CategoryShell)
 	require.NoError(t, r.Create(ctx, s))
 
 	s.Name = "a-renamed"
 	s.Description = "desc"
-	s.Tags = "t1,t2"
 	require.NoError(t, r.Update(ctx, s))
 
 	got, err := r.GetByID(ctx, s.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "a-renamed", got.Name)
 	assert.Equal(t, "desc", got.Description)
-	assert.Equal(t, "t1,t2", got.Tags)
-}
-
-func TestSnippetRepo_Update_ClearsAssetIDToNull(t *testing.T) {
-	ctx, r := setupRepo(t)
-	// 创建时带资产绑定
-	s := newSnippet("a", snippet_entity.CategoryShell, int64Ptr(42))
-	require.NoError(t, r.Create(ctx, s))
-
-	// UI 的 "解除资产绑定" 流程：AssetID 置 nil 后调用 Update
-	s.AssetID = nil
-	require.NoError(t, r.Update(ctx, s))
-
-	got, err := r.GetByID(ctx, s.ID)
-	require.NoError(t, err)
-	assert.Nil(t, got.AssetID, "expected asset_id to be NULL after Update with nil pointer")
 }
 
 func TestSnippetRepo_Update_IgnoresProtectedFields(t *testing.T) {
 	ctx, r := setupRepo(t)
 	// 用户片段，带初始 category / source
-	s := newSnippet("a", snippet_entity.CategoryShell, nil)
+	s := newSnippet("a", snippet_entity.CategoryShell)
 	require.NoError(t, r.Create(ctx, s))
 
 	// 尝试在传入实体上篡改受保护字段
@@ -106,7 +86,7 @@ func TestSnippetRepo_Update_IgnoresProtectedFields(t *testing.T) {
 
 func TestSnippetRepo_SoftDelete(t *testing.T) {
 	ctx, r := setupRepo(t)
-	s := newSnippet("a", snippet_entity.CategoryShell, nil)
+	s := newSnippet("a", snippet_entity.CategoryShell)
 	require.NoError(t, r.Create(ctx, s))
 
 	require.NoError(t, r.SoftDelete(ctx, s.ID))
@@ -117,49 +97,26 @@ func TestSnippetRepo_SoftDelete(t *testing.T) {
 
 func TestSnippetRepo_Find_CategoriesFilter(t *testing.T) {
 	ctx, r := setupRepo(t)
-	require.NoError(t, r.Create(ctx, newSnippet("a", snippet_entity.CategoryShell, nil)))
-	require.NoError(t, r.Create(ctx, newSnippet("b", snippet_entity.CategorySQL, nil)))
-	require.NoError(t, r.Create(ctx, newSnippet("c", snippet_entity.CategoryPrompt, nil)))
+	require.NoError(t, r.Create(ctx, newSnippet("a", snippet_entity.CategoryShell)))
+	require.NoError(t, r.Create(ctx, newSnippet("b", snippet_entity.CategorySQL)))
+	require.NoError(t, r.Create(ctx, newSnippet("c", snippet_entity.CategoryPrompt)))
 
 	list, err := r.Find(ctx, SnippetQuery{Categories: []string{snippet_entity.CategoryShell, snippet_entity.CategorySQL}})
 	require.NoError(t, err)
 	assert.Len(t, list, 2)
 }
 
-func TestSnippetRepo_Find_AssetIDAndIncludeGlobal(t *testing.T) {
+func TestSnippetRepo_Find_KeywordSources(t *testing.T) {
 	ctx, r := setupRepo(t)
-	require.NoError(t, r.Create(ctx, newSnippet("global", snippet_entity.CategoryShell, nil)))
-	require.NoError(t, r.Create(ctx, newSnippet("a1", snippet_entity.CategoryShell, int64Ptr(1))))
-	require.NoError(t, r.Create(ctx, newSnippet("a2", snippet_entity.CategoryShell, int64Ptr(2))))
-
-	// 仅该资产绑定
-	only, err := r.Find(ctx, SnippetQuery{AssetID: int64Ptr(1)})
-	require.NoError(t, err)
-	assert.Len(t, only, 1)
-	assert.Equal(t, "a1", only[0].Name)
-
-	// 并集：该资产绑定 + 全局
-	both, err := r.Find(ctx, SnippetQuery{AssetID: int64Ptr(1), IncludeGlobal: true})
-	require.NoError(t, err)
-	assert.Len(t, both, 2)
-	names := []string{both[0].Name, both[1].Name}
-	assert.Contains(t, names, "a1")
-	assert.Contains(t, names, "global")
-}
-
-func TestSnippetRepo_Find_KeywordTagSources(t *testing.T) {
-	ctx, r := setupRepo(t)
-	s1 := newSnippet("alpha", snippet_entity.CategoryShell, nil)
+	s1 := newSnippet("alpha", snippet_entity.CategoryShell)
 	s1.Description = "first"
-	s1.Tags = "foo,bar"
 	require.NoError(t, r.Create(ctx, s1))
 
-	s2 := newSnippet("beta", snippet_entity.CategoryShell, nil)
+	s2 := newSnippet("beta", snippet_entity.CategoryShell)
 	s2.Description = "second alpha-ish"
-	s2.Tags = "baz"
 	require.NoError(t, r.Create(ctx, s2))
 
-	s3 := newSnippet("gamma", snippet_entity.CategoryShell, nil)
+	s3 := newSnippet("gamma", snippet_entity.CategoryShell)
 	s3.Source = "ext:foo"
 	require.NoError(t, r.Create(ctx, s3))
 
@@ -167,12 +124,6 @@ func TestSnippetRepo_Find_KeywordTagSources(t *testing.T) {
 	list, err := r.Find(ctx, SnippetQuery{Keyword: "alpha"})
 	require.NoError(t, err)
 	assert.Len(t, list, 2)
-
-	// Tag filter
-	list, err = r.Find(ctx, SnippetQuery{Tag: "foo"})
-	require.NoError(t, err)
-	assert.Len(t, list, 1)
-	assert.Equal(t, "alpha", list[0].Name)
 
 	// Sources filter: user only
 	list, err = r.Find(ctx, SnippetQuery{Sources: []string{snippet_entity.SourceUser}})
@@ -189,11 +140,11 @@ func TestSnippetRepo_Find_KeywordTagSources(t *testing.T) {
 func TestSnippetRepo_Find_Ordering(t *testing.T) {
 	ctx, r := setupRepo(t)
 
-	s1 := newSnippet("a", snippet_entity.CategoryShell, nil)
+	s1 := newSnippet("a", snippet_entity.CategoryShell)
 	require.NoError(t, r.Create(ctx, s1))
-	s2 := newSnippet("b", snippet_entity.CategoryShell, nil)
+	s2 := newSnippet("b", snippet_entity.CategoryShell)
 	require.NoError(t, r.Create(ctx, s2))
-	s3 := newSnippet("c", snippet_entity.CategoryShell, nil)
+	s3 := newSnippet("c", snippet_entity.CategoryShell)
 	require.NoError(t, r.Create(ctx, s3))
 
 	// 使 s2 的 use_count=5, s3 的 use_count=1; s1 的 last_used_at 最新
@@ -219,7 +170,7 @@ func TestSnippetRepo_Find_Ordering(t *testing.T) {
 
 func TestSnippetRepo_FindBySourceRef(t *testing.T) {
 	ctx, r := setupRepo(t)
-	s := newSnippet("ext-seed", snippet_entity.CategoryShell, nil)
+	s := newSnippet("ext-seed", snippet_entity.CategoryShell)
 	s.Source = "ext:foo"
 	s.SourceRef = "seed-1"
 	require.NoError(t, r.Create(ctx, s))
@@ -236,7 +187,7 @@ func TestSnippetRepo_FindBySourceRef(t *testing.T) {
 
 func TestSnippetRepo_TouchUsage(t *testing.T) {
 	ctx, r := setupRepo(t)
-	s := newSnippet("a", snippet_entity.CategoryShell, nil)
+	s := newSnippet("a", snippet_entity.CategoryShell)
 	require.NoError(t, r.Create(ctx, s))
 	assert.EqualValues(t, 0, s.UseCount)
 
@@ -248,25 +199,52 @@ func TestSnippetRepo_TouchUsage(t *testing.T) {
 	require.NotNil(t, got.LastUsedAt)
 }
 
-func TestSnippetRepo_DetachFromAsset(t *testing.T) {
-	ctx, r := setupRepo(t)
-	require.NoError(t, r.Create(ctx, newSnippet("a1", snippet_entity.CategoryShell, int64Ptr(1))))
-	require.NoError(t, r.Create(ctx, newSnippet("a1b", snippet_entity.CategoryShell, int64Ptr(1))))
-	require.NoError(t, r.Create(ctx, newSnippet("a2", snippet_entity.CategoryShell, int64Ptr(2))))
+func TestSnippetRepo_SetLastAssets(t *testing.T) {
+	t.Run("writes comma-separated IDs", func(t *testing.T) {
+		ctx, r := setupRepo(t)
+		s := newSnippet("a", snippet_entity.CategoryShell)
+		require.NoError(t, r.Create(ctx, s))
 
-	require.NoError(t, r.DetachFromAsset(ctx, 1))
+		require.NoError(t, r.SetLastAssets(ctx, s.ID, []int64{3, 1, 2}))
 
-	list, err := r.Find(ctx, SnippetQuery{})
-	require.NoError(t, err)
-	require.Len(t, list, 3)
-	for _, s := range list {
-		if s.Name == "a2" {
-			require.NotNil(t, s.AssetID)
-			assert.EqualValues(t, 2, *s.AssetID)
-		} else {
-			assert.Nil(t, s.AssetID, "expected asset_id NULL for %s", s.Name)
-		}
-	}
+		got, err := r.GetByID(ctx, s.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "3,1,2", got.LastAssetIDs)
+	})
+
+	t.Run("empty slice clears last_asset_ids", func(t *testing.T) {
+		ctx, r := setupRepo(t)
+		s := newSnippet("b", snippet_entity.CategoryShell)
+		require.NoError(t, r.Create(ctx, s))
+		require.NoError(t, r.SetLastAssets(ctx, s.ID, []int64{5}))
+
+		require.NoError(t, r.SetLastAssets(ctx, s.ID, []int64{}))
+
+		got, err := r.GetByID(ctx, s.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "", got.LastAssetIDs)
+	})
+
+	t.Run("rejects id=0", func(t *testing.T) {
+		ctx, r := setupRepo(t)
+		err := r.SetLastAssets(ctx, 0, []int64{1})
+		assert.Error(t, err)
+	})
+
+	t.Run("no-op on soft-deleted snippet", func(t *testing.T) {
+		ctx, r := setupRepo(t)
+		s := newSnippet("c", snippet_entity.CategoryShell)
+		require.NoError(t, r.Create(ctx, s))
+		require.NoError(t, r.SoftDelete(ctx, s.ID))
+
+		// SetLastAssets on soft-deleted row should not error but also not update
+		require.NoError(t, r.SetLastAssets(ctx, s.ID, []int64{99}))
+
+		// Verify the deleted row still has empty last_asset_ids (can't GetByID — it's deleted)
+		var check snippet_entity.Snippet
+		db.Ctx(ctx).Unscoped().Where("id = ?", s.ID).First(&check)
+		assert.Equal(t, "", check.LastAssetIDs, "soft-deleted snippet should not be updated")
+	})
 }
 
 func TestSnippetRepo_UpsertExtensionSeed_Insert(t *testing.T) {
@@ -302,7 +280,6 @@ func TestSnippetRepo_UpsertExtensionSeed_UpdatePreservesCounters(t *testing.T) {
 	// 再次 upsert：name/content 变更，use_count/last_used_at 必须保留
 	second := &snippet_entity.Snippet{
 		Name: "n1-updated", Category: "kafka", Content: "v2", Description: "new desc",
-		Tags:   "a,b",
 		Source: "ext:kafka-ext", SourceRef: "seed-1", Status: snippet_entity.StatusActive,
 	}
 	require.NoError(t, r.UpsertExtensionSeed(ctx, second))
@@ -314,7 +291,6 @@ func TestSnippetRepo_UpsertExtensionSeed_UpdatePreservesCounters(t *testing.T) {
 	assert.Equal(t, "n1-updated", got.Name)
 	assert.Equal(t, "v2", got.Content)
 	assert.Equal(t, "new desc", got.Description)
-	assert.Equal(t, "a,b", got.Tags)
 	assert.EqualValues(t, 2, got.UseCount, "use_count must be preserved across upsert")
 	assert.NotNil(t, got.LastUsedAt)
 }
@@ -329,7 +305,7 @@ func TestSnippetRepo_DeleteExtensionSeedsMissing(t *testing.T) {
 		}
 		require.NoError(t, r.Create(ctx, s))
 	}
-	user := newSnippet("user-one", snippet_entity.CategoryShell, nil)
+	user := newSnippet("user-one", snippet_entity.CategoryShell)
 	require.NoError(t, r.Create(ctx, user))
 
 	// 只保留 k1
@@ -365,17 +341,17 @@ func TestSnippetRepo_DeleteExtensionSeedsMissing_EmptyKeepClearsAll(t *testing.T
 
 func TestSnippetRepo_HardDeleteBySource(t *testing.T) {
 	ctx, r := setupRepo(t)
-	s1 := newSnippet("a", snippet_entity.CategoryShell, nil)
+	s1 := newSnippet("a", snippet_entity.CategoryShell)
 	s1.Source = "ext:foo"
 	s1.SourceRef = "r1"
 	require.NoError(t, r.Create(ctx, s1))
 
-	s2 := newSnippet("b", snippet_entity.CategoryShell, nil)
+	s2 := newSnippet("b", snippet_entity.CategoryShell)
 	s2.Source = "ext:foo"
 	s2.SourceRef = "r2"
 	require.NoError(t, r.Create(ctx, s2))
 
-	s3 := newSnippet("c", snippet_entity.CategoryShell, nil)
+	s3 := newSnippet("c", snippet_entity.CategoryShell)
 	require.NoError(t, r.Create(ctx, s3))
 
 	require.NoError(t, r.HardDeleteBySource(ctx, "ext:foo"))

@@ -43,11 +43,9 @@ func setupSvcTest(t *testing.T) *svcFixture {
 	}
 }
 
-func int64Ptr(v int64) *int64 { return &v }
-
 func TestSnippetSvc_Create(t *testing.T) {
 	convey.Convey("Create 片段", t, func() {
-		convey.Convey("合法无资产片段创建成功", func() {
+		convey.Convey("合法片段创建成功", func() {
 			f := setupSvcTest(t)
 			f.snippets.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
 				func(_ context.Context, s *snippet_entity.Snippet) error {
@@ -87,63 +85,6 @@ func TestSnippetSvc_Create(t *testing.T) {
 			})
 			assert.Error(t, err)
 		})
-
-		convey.Convey("prompt 分类绑定资产被拒绝", func() {
-			f := setupSvcTest(t)
-			_, err := f.svc.Create(f.ctx, CreateReq{
-				Name: "x", Category: snippet_entity.CategoryPrompt, Content: "hi",
-				AssetID: int64Ptr(1),
-			})
-			assert.Error(t, err)
-		})
-
-		convey.Convey("资产不存在拒绝", func() {
-			f := setupSvcTest(t)
-			f.assets.EXPECT().Find(gomock.Any(), int64(1)).Return(nil, gorm.ErrRecordNotFound)
-			_, err := f.svc.Create(f.ctx, CreateReq{
-				Name: "x", Category: snippet_entity.CategoryShell, Content: "ls",
-				AssetID: int64Ptr(1),
-			})
-			assert.Error(t, err)
-		})
-
-		convey.Convey("资产类型不匹配拒绝", func() {
-			f := setupSvcTest(t)
-			f.assets.EXPECT().Find(gomock.Any(), int64(1)).Return(&asset_entity.Asset{
-				ID: 1, Type: asset_entity.AssetTypeDatabase, Status: asset_entity.StatusActive,
-			}, nil)
-			_, err := f.svc.Create(f.ctx, CreateReq{
-				Name: "x", Category: snippet_entity.CategoryShell, Content: "ls",
-				AssetID: int64Ptr(1),
-			})
-			assert.Error(t, err)
-		})
-
-		convey.Convey("资产已软删除拒绝", func() {
-			f := setupSvcTest(t)
-			f.assets.EXPECT().Find(gomock.Any(), int64(1)).Return(&asset_entity.Asset{
-				ID: 1, Type: asset_entity.AssetTypeSSH, Status: asset_entity.StatusDeleted,
-			}, nil)
-			_, err := f.svc.Create(f.ctx, CreateReq{
-				Name: "x", Category: snippet_entity.CategoryShell, Content: "ls",
-				AssetID: int64Ptr(1),
-			})
-			assert.Error(t, err)
-		})
-
-		convey.Convey("资产类型匹配成功", func() {
-			f := setupSvcTest(t)
-			f.assets.EXPECT().Find(gomock.Any(), int64(1)).Return(&asset_entity.Asset{
-				ID: 1, Type: asset_entity.AssetTypeSSH, Status: asset_entity.StatusActive,
-			}, nil)
-			f.snippets.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-
-			_, err := f.svc.Create(f.ctx, CreateReq{
-				Name: "x", Category: snippet_entity.CategoryShell, Content: "ls",
-				AssetID: int64Ptr(1),
-			})
-			assert.NoError(t, err)
-		})
 	})
 }
 
@@ -173,21 +114,6 @@ func TestSnippetSvc_Update(t *testing.T) {
 				Source: "ext:foo", Status: snippet_entity.StatusActive,
 			}, nil)
 			_, err := f.svc.Update(f.ctx, UpdateReq{ID: 10, Name: "new", Content: "pwd"})
-			assert.Error(t, err)
-		})
-
-		convey.Convey("资产类型不匹配拒绝", func() {
-			f := setupSvcTest(t)
-			f.snippets.EXPECT().GetByID(gomock.Any(), int64(10)).Return(&snippet_entity.Snippet{
-				ID: 10, Name: "n", Category: snippet_entity.CategoryShell, Content: "ls",
-				Source: snippet_entity.SourceUser, Status: snippet_entity.StatusActive,
-			}, nil)
-			f.assets.EXPECT().Find(gomock.Any(), int64(2)).Return(&asset_entity.Asset{
-				ID: 2, Type: asset_entity.AssetTypeDatabase, Status: asset_entity.StatusActive,
-			}, nil)
-			_, err := f.svc.Update(f.ctx, UpdateReq{
-				ID: 10, Name: "n", Content: "ls", AssetID: int64Ptr(2),
-			})
 			assert.Error(t, err)
 		})
 	})
@@ -249,10 +175,71 @@ func TestSnippetSvc_RecordUse_Errors(t *testing.T) {
 	assert.Error(t, f.svc.RecordUse(f.ctx, 1))
 }
 
-func TestSnippetSvc_DetachFromAsset(t *testing.T) {
-	f := setupSvcTest(t)
-	f.snippets.EXPECT().DetachFromAsset(gomock.Any(), int64(7)).Return(nil)
-	assert.NoError(t, f.svc.DetachFromAsset(f.ctx, 7))
+func TestSnippetSvc_SetGetLastAssets(t *testing.T) {
+	convey.Convey("SetLastAssets / GetLastAssets", t, func() {
+		convey.Convey("happy-path: SetLastAssets delegates to repo", func() {
+			f := setupSvcTest(t)
+			f.snippets.EXPECT().SetLastAssets(gomock.Any(), int64(5), []int64{1, 2, 3}).Return(nil)
+			assert.NoError(t, f.svc.SetLastAssets(f.ctx, 5, []int64{1, 2, 3}))
+		})
+
+		convey.Convey("SetLastAssets rejects id=0", func() {
+			f := setupSvcTest(t)
+			assert.Error(t, f.svc.SetLastAssets(f.ctx, 0, []int64{1}))
+		})
+
+		convey.Convey("GetLastAssets: happy-path returns live asset IDs", func() {
+			f := setupSvcTest(t)
+			f.snippets.EXPECT().GetByID(gomock.Any(), int64(5)).Return(&snippet_entity.Snippet{
+				ID: 5, Category: snippet_entity.CategoryShell, LastAssetIDs: "1,2",
+				Status: snippet_entity.StatusActive,
+			}, nil)
+			f.assets.EXPECT().Find(gomock.Any(), int64(1)).Return(&asset_entity.Asset{
+				ID: 1, Type: asset_entity.AssetTypeSSH, Status: asset_entity.StatusActive,
+			}, nil)
+			f.assets.EXPECT().Find(gomock.Any(), int64(2)).Return(&asset_entity.Asset{
+				ID: 2, Type: asset_entity.AssetTypeSSH, Status: asset_entity.StatusActive,
+			}, nil)
+			ids, err := f.svc.GetLastAssets(f.ctx, 5)
+			assert.NoError(t, err)
+			assert.Equal(t, []int64{1, 2}, ids)
+		})
+
+		convey.Convey("GetLastAssets: stale ID filtered out (not found)", func() {
+			f := setupSvcTest(t)
+			f.snippets.EXPECT().GetByID(gomock.Any(), int64(5)).Return(&snippet_entity.Snippet{
+				ID: 5, Category: snippet_entity.CategoryShell, LastAssetIDs: "1,999",
+				Status: snippet_entity.StatusActive,
+			}, nil)
+			f.assets.EXPECT().Find(gomock.Any(), int64(1)).Return(&asset_entity.Asset{
+				ID: 1, Type: asset_entity.AssetTypeSSH, Status: asset_entity.StatusActive,
+			}, nil)
+			f.assets.EXPECT().Find(gomock.Any(), int64(999)).Return(nil, gorm.ErrRecordNotFound)
+			ids, err := f.svc.GetLastAssets(f.ctx, 5)
+			assert.NoError(t, err)
+			assert.Equal(t, []int64{1}, ids)
+		})
+
+		convey.Convey("GetLastAssets: type-mismatch filtered out", func() {
+			f := setupSvcTest(t)
+			f.snippets.EXPECT().GetByID(gomock.Any(), int64(5)).Return(&snippet_entity.Snippet{
+				ID: 5, Category: snippet_entity.CategoryShell, LastAssetIDs: "1",
+				Status: snippet_entity.StatusActive,
+			}, nil)
+			f.assets.EXPECT().Find(gomock.Any(), int64(1)).Return(&asset_entity.Asset{
+				ID: 1, Type: asset_entity.AssetTypeDatabase, Status: asset_entity.StatusActive,
+			}, nil)
+			ids, err := f.svc.GetLastAssets(f.ctx, 5)
+			assert.NoError(t, err)
+			assert.Empty(t, ids)
+		})
+
+		convey.Convey("GetLastAssets rejects id=0", func() {
+			f := setupSvcTest(t)
+			_, err := f.svc.GetLastAssets(f.ctx, 0)
+			assert.Error(t, err)
+		})
+	})
 }
 
 func TestSnippetSvc_ListCategories(t *testing.T) {
@@ -304,7 +291,7 @@ func TestSnippetSvc_SyncExtensionSeeds(t *testing.T) {
 
 			err := f.svc.SyncExtensionSeeds(context.Background(), "foo", []SeedDef{
 				{Key: "k1", Name: "n1", Category: snippet_entity.CategoryShell, Content: "echo 1"},
-				{Key: "k2", Name: "n2", Category: snippet_entity.CategoryShell, Content: "echo 2", Tags: []string{"a", "B"}},
+				{Key: "k2", Name: "n2", Category: snippet_entity.CategoryShell, Content: "echo 2"},
 				{Key: "k3", Name: "n3", Category: snippet_entity.CategoryShell, Content: "echo 3"},
 			})
 			assert.NoError(t, err)

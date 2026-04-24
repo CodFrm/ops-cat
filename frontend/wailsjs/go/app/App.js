@@ -294,6 +294,10 @@ export function GetSnippet(arg1) {
   return window['go']['app']['App']['GetSnippet'](arg1);
 }
 
+export function GetSnippetLastAssets(arg1) {
+  return window['go']['app']['App']['GetSnippetLastAssets'](arg1);
+}
+
 export function GetStoredGitHubUser() {
   return window['go']['app']['App']['GetStoredGitHubUser']();
 }
@@ -552,6 +556,10 @@ export function SetDownloadMirror(arg1) {
 
 export function SetLanguage(arg1) {
   return window['go']['app']['App']['SetLanguage'](arg1);
+}
+
+export function SetSnippetLastAssets(arg1, arg2) {
+  return window['go']['app']['App']['SetSnippetLastAssets'](arg1, arg2);
 }
 
 export function SetUpdateChannel(arg1) {
