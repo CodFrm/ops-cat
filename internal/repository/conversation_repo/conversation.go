@@ -6,6 +6,7 @@ import (
 	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
 
 	"github.com/cago-frame/cago/database/db"
+	"gorm.io/gorm"
 )
 
 // ConversationRepo 会话数据访问接口
@@ -14,6 +15,7 @@ type ConversationRepo interface {
 	List(ctx context.Context) ([]*conversation_entity.Conversation, error)
 	Create(ctx context.Context, conv *conversation_entity.Conversation) error
 	Update(ctx context.Context, conv *conversation_entity.Conversation) error
+	UpdateTitle(ctx context.Context, id int64, title string, updatetime int64) error
 	Delete(ctx context.Context, id int64) error
 
 	// 消息操作
@@ -65,6 +67,23 @@ func (r *conversationRepo) Create(ctx context.Context, conv *conversation_entity
 
 func (r *conversationRepo) Update(ctx context.Context, conv *conversation_entity.Conversation) error {
 	return db.Ctx(ctx).Save(conv).Error
+}
+
+func (r *conversationRepo) UpdateTitle(ctx context.Context, id int64, title string, updatetime int64) error {
+	result := db.Ctx(ctx).
+		Model(&conversation_entity.Conversation{}).
+		Where("id = ? AND status = ?", id, conversation_entity.StatusActive).
+		Updates(map[string]any{
+			"title":      title,
+			"updatetime": updatetime,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (r *conversationRepo) Delete(ctx context.Context, id int64) error {

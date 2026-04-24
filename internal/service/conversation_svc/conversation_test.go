@@ -127,6 +127,24 @@ func TestConversationSvc_Update(t *testing.T) {
 	})
 }
 
+func TestConversationSvc_UpdateTitle(t *testing.T) {
+	ctx, mockRepo := setupTest(t)
+
+	convey.Convey("更新会话标题", t, func() {
+		convey.Convey("仅更新标题和 updatetime", func() {
+			mockRepo.EXPECT().UpdateTitle(gomock.Any(), int64(1), "更新标题", gomock.Any()).DoAndReturn(
+				func(_ context.Context, _ int64, _ string, updatetime int64) error {
+					assert.Greater(t, updatetime, int64(0))
+					return nil
+				},
+			)
+
+			err := Conversation().UpdateTitle(ctx, 1, "更新标题")
+			assert.NoError(t, err)
+		})
+	})
+}
+
 func TestConversationSvc_Delete(t *testing.T) {
 	ctx, mockRepo := setupTest(t)
 

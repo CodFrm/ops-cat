@@ -1033,6 +1033,123 @@ func (a *App) GetAppVersion() string {
 	return v
 }
 
+// BugReportInfo 用于前端拼接 GitHub Issue 预填 URL 的诊断信息。
+type BugReportInfo struct {
+	Version string `json:"version"`
+	Commit  string `json:"commit"`
+	OS      string `json:"os"`
+	Arch    string `json:"arch"`
+	OSLabel string `json:"osLabel"`
+}
+
+// GetDebugMode 返回当前是否开启 debug 日志
+func (a *App) GetDebugMode() bool {
+	cfg := bootstrap.GetConfig()
+	if cfg == nil {
+		return false
+	}
+	return cfg.DebugMode
+}
+
+// SetDebugMode 开启/关闭 debug 日志，写入配置并重建全局 logger
+func (a *App) SetDebugMode(enabled bool) error {
+	cfg := bootstrap.GetConfig()
+	if cfg == nil {
+		return fmt.Errorf("config not loaded")
+	}
+	cfg.DebugMode = enabled
+	if err := bootstrap.SaveConfig(cfg); err != nil {
+		return err
+	}
+	return bootstrap.InitLogger()
+}
+
+// OpenLogsDir 在系统文件管理器中打开日志目录
+func (a *App) OpenLogsDir() error {
+	dir := bootstrap.GetLogsDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return a.OpenDirectory(dir)
+}
+
+// GetBugReportInfo 返回用于 Bug 反馈模板预填的系统信息。
+func (a *App) GetBugReportInfo() BugReportInfo {
+	osVer := detectOSVersion()
+	archSuffix := runtime.GOARCH
+	osLabel := ""
+	switch runtime.GOOS {
+	case "darwin":
+		if runtime.GOARCH == "arm64" {
+			archSuffix = "Apple Silicon"
+		} else {
+			archSuffix = "Intel"
+		}
+		if osVer != "" {
+			osLabel = fmt.Sprintf("macOS %s (%s)", osVer, archSuffix)
+		} else {
+			osLabel = fmt.Sprintf("macOS (%s)", archSuffix)
+		}
+	case "windows":
+		if osVer != "" {
+			osLabel = fmt.Sprintf("Windows %s (%s)", osVer, archSuffix)
+		} else {
+			osLabel = fmt.Sprintf("Windows (%s)", archSuffix)
+		}
+	case "linux":
+		if osVer != "" {
+			osLabel = fmt.Sprintf("%s (%s)", osVer, archSuffix)
+		} else {
+			osLabel = fmt.Sprintf("Linux (%s)", archSuffix)
+		}
+	default:
+		osLabel = fmt.Sprintf("%s (%s)", runtime.GOOS, archSuffix)
+	}
+	return BugReportInfo{
+		Version: configs.Version,
+		Commit:  buildinfo.ShortCommitID(),
+		OS:      runtime.GOOS,
+		Arch:    runtime.GOARCH,
+		OSLabel: osLabel,
+	}
+}
+
+// detectOSVersion 尝试获取当前操作系统版本号/发行版名称，失败返回空串。
+func detectOSVersion() string {
+	switch runtime.GOOS {
+	case "darwin":
+		out, err := exec.Command("sw_vers", "-productVersion").Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	case "linux":
+		data, err := os.ReadFile("/etc/os-release")
+		if err != nil {
+			return ""
+		}
+		for line := range strings.SplitSeq(string(data), "\n") {
+			if name, ok := strings.CutPrefix(line, "PRETTY_NAME="); ok {
+				return strings.Trim(strings.TrimSpace(name), `"`)
+			}
+		}
+		return ""
+	case "windows":
+		out, err := exec.Command("cmd", "/c", "ver").Output()
+		if err != nil {
+			return ""
+		}
+		s := strings.TrimSpace(string(out))
+		if i := strings.Index(s, "[Version "); i >= 0 {
+			if j := strings.Index(s[i:], "]"); j > 0 {
+				return strings.TrimPrefix(s[i:i+j], "[Version ")
+			}
+		}
+		return ""
+	}
+	return ""
+}
+
 // GetUpdateChannel 获取当前更新通道
 func (a *App) GetUpdateChannel() string {
 	cfg := bootstrap.GetConfig()

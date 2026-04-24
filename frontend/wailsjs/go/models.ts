@@ -300,6 +300,26 @@ export namespace app {
 		    return a;
 		}
 	}
+	export class BugReportInfo {
+	    version: string;
+	    commit: string;
+	    os: string;
+	    arch: string;
+	    osLabel: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BugReportInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.commit = source["commit"];
+	        this.os = source["os"];
+	        this.arch = source["arch"];
+	        this.osLabel = source["osLabel"];
+	    }
+	}
 	export class ConversationDisplayMessage {
 	    role: string;
 	    content: string;
@@ -1177,6 +1197,92 @@ export namespace extension {
 	        this.description = source["description"];
 	    }
 	}
+	export class SeedSnippetDef {
+	    key: string;
+	    name: string;
+	    category: string;
+	    content: string;
+	    description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SeedSnippetDef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.name = source["name"];
+	        this.category = source["category"];
+	        this.content = source["content"];
+	        this.description = source["description"];
+	    }
+	}
+	export class SnippetCategoryDef {
+	    id: string;
+	    assetType: string;
+	    i18n: I18nName;
+	
+	    static createFrom(source: any = {}) {
+	        return new SnippetCategoryDef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.assetType = source["assetType"];
+	        this.i18n = this.convertValues(source["i18n"], I18nName);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SnippetsDef {
+	    categories: SnippetCategoryDef[];
+	    seed: SeedSnippetDef[];
+	
+	    static createFrom(source: any = {}) {
+	        return new SnippetsDef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.categories = this.convertValues(source["categories"], SnippetCategoryDef);
+	        this.seed = this.convertValues(source["seed"], SeedSnippetDef);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class PolicyGroupDef {
 	    id: string;
 	    i18n: I18nNameDesc;
@@ -1322,6 +1428,7 @@ export namespace extension {
 	    tools: ToolDef[];
 	    policies: PoliciesDef;
 	    frontend: FrontendDef;
+	    snippets: SnippetsDef;
 	
 	    static createFrom(source: any = {}) {
 	        return new Manifest(source);
@@ -1341,6 +1448,7 @@ export namespace extension {
 	        this.tools = this.convertValues(source["tools"], ToolDef);
 	        this.policies = this.convertValues(source["policies"], PoliciesDef);
 	        this.frontend = this.convertValues(source["frontend"], FrontendDef);
+	        this.snippets = this.convertValues(source["snippets"], SnippetsDef);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1361,6 +1469,9 @@ export namespace extension {
 		    return a;
 		}
 	}
+	
+	
+	
 	
 	
 	
@@ -1716,6 +1827,147 @@ export namespace sftp_svc {
 	        this.size = source["size"];
 	        this.isDir = source["isDir"];
 	        this.modTime = source["modTime"];
+	    }
+	}
+
+}
+
+export namespace snippet_entity {
+	
+	export class Snippet {
+	    ID: number;
+	    Name: string;
+	    Category: string;
+	    Content: string;
+	    Description: string;
+	    LastAssetIDs: string;
+	    Source: string;
+	    SourceRef: string;
+	    UseCount: number;
+	    // Go type: time
+	    LastUsedAt?: any;
+	    Status: number;
+	    // Go type: time
+	    CreatedAt: any;
+	    // Go type: time
+	    UpdatedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new Snippet(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.Name = source["Name"];
+	        this.Category = source["Category"];
+	        this.Content = source["Content"];
+	        this.Description = source["Description"];
+	        this.LastAssetIDs = source["LastAssetIDs"];
+	        this.Source = source["Source"];
+	        this.SourceRef = source["SourceRef"];
+	        this.UseCount = source["UseCount"];
+	        this.LastUsedAt = this.convertValues(source["LastUsedAt"], null);
+	        this.Status = source["Status"];
+	        this.CreatedAt = this.convertValues(source["CreatedAt"], null);
+	        this.UpdatedAt = this.convertValues(source["UpdatedAt"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace snippet_svc {
+	
+	export class Category {
+	    id: string;
+	    assetType: string;
+	    label: string;
+	    source: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Category(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.assetType = source["assetType"];
+	        this.label = source["label"];
+	        this.source = source["source"];
+	    }
+	}
+	export class CreateReq {
+	    name: string;
+	    category: string;
+	    content: string;
+	    description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateReq(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.category = source["category"];
+	        this.content = source["content"];
+	        this.description = source["description"];
+	    }
+	}
+	export class ListReq {
+	    categories: string[];
+	    keyword: string;
+	    limit: number;
+	    offset: number;
+	    orderBy: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListReq(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.categories = source["categories"];
+	        this.keyword = source["keyword"];
+	        this.limit = source["limit"];
+	        this.offset = source["offset"];
+	        this.orderBy = source["orderBy"];
+	    }
+	}
+	export class UpdateReq {
+	    id: number;
+	    name: string;
+	    content: string;
+	    description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateReq(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.content = source["content"];
+	        this.description = source["description"];
 	    }
 	}
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/opskat/opskat/pkg/extension"
 	"go.uber.org/zap"
@@ -54,6 +55,8 @@ func (h *DevServerHost) IOOpen(params extension.IOOpenParams) (uint32, extension
 		return h.io.OpenFile(params.Path, params.Mode)
 	case "http":
 		return h.io.OpenHTTP(params, nil)
+	case "tcp":
+		return 0, extension.IOMeta{}, fmt.Errorf("tcp IO not supported in DevServer")
 	default:
 		return 0, extension.IOMeta{}, fmt.Errorf("unknown IO type: %q", params.Type)
 	}
@@ -141,12 +144,24 @@ func (h *DevServerHost) KVSet(key string, value []byte) error {
 	return nil
 }
 
+func (h *DevServerHost) IOSetDeadline(handleID uint32, kind string, unixNanos int64) error {
+	var t time.Time
+	if unixNanos != 0 {
+		t = time.Unix(0, unixNanos)
+	}
+	return h.io.SetDeadline(handleID, kind, t)
+}
+
 func (h *DevServerHost) ActionEvent(eventType string, data json.RawMessage) error {
 	if h.eventCb != nil {
 		h.eventCb(eventType, data)
 	}
 	return nil
 }
+
+func (h *DevServerHost) ActionShouldStop() bool { return false }
+
+func (h *DevServerHost) SetActiveCancellation(_ *extension.ActionCancellation) {}
 
 func (h *DevServerHost) CloseAll() {
 	h.io.CloseAll()

@@ -1,17 +1,18 @@
 import { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from "react";
 import { useTranslation } from "react-i18next";
-import { X, Table2, Code2, Database, Loader2, Play, Filter, Download } from "lucide-react";
+import { X, Table2, Code2, Database, Loader2, Play, Filter, Download, FileCode } from "lucide-react";
 import type * as MonacoNS from "monaco-editor";
 import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Input } from "@opskat/ui";
 import { useResizeHandle } from "@opskat/ui";
 import { toast } from "sonner";
 import { useQueryStore, type MongoInnerTab } from "@/stores/queryStore";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
-import { isMac } from "@/stores/shortcutStore";
+import { isMac, formatModKey } from "@/stores/shortcutStore";
 import { MongoDBCollectionBrowser } from "./MongoDBCollectionBrowser";
 import { MongoDBResultView } from "./MongoDBResultView";
 import { ExecuteMongo } from "../../../wailsjs/go/app/App";
 import { CodeEditor } from "@/components/CodeEditor";
+import { SnippetPopover } from "@/components/snippet/SnippetPopover";
 import { parseMongosh, type ParsedMongosh } from "@/lib/mongosh-parser";
 
 interface MongoDBPanelProps {
@@ -141,7 +142,7 @@ interface MongoCollectionContentProps {
   pendingLoad: boolean;
 }
 
-const MONGO_REFRESH_SHORTCUT_LABEL = isMac ? "⌘R" : "Ctrl+R";
+const MONGO_REFRESH_SHORTCUT_LABEL = formatModKey("KeyR");
 
 function MongoCollectionContent(props: MongoCollectionContentProps) {
   const { t } = useTranslation();
@@ -503,6 +504,22 @@ function MongoQueryContent({ tabId, assetId, innerTab }: MongoQueryContentProps)
     });
   }, []);
 
+  // Insert snippet text at current Monaco selection / cursor. No auto-execute.
+  const handleSnippetInsert = useCallback((content: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const selection = editor.getSelection();
+    if (!selection) return;
+    editor.executeEdits("snippet-insert", [
+      {
+        range: selection,
+        text: content,
+        forceMoveMarkers: true,
+      },
+    ]);
+    editor.focus();
+  }, []);
+
   // 当前库的集合列表——给 dynamicCompletions 用
   const currentCollections = useMemo(() => {
     if (!database || !mongoState) return [];
@@ -553,7 +570,7 @@ function MongoQueryContent({ tabId, assetId, innerTab }: MongoQueryContentProps)
     [currentCollections, t]
   );
 
-  const shortcutLabel = isMac ? "⌘⏎" : "Ctrl+Enter";
+  const shortcutLabel = formatModKey("Enter");
   const canExecute = !!database || /getSiblingDB\s*\(/.test(query);
 
   return (
@@ -592,6 +609,23 @@ function MongoQueryContent({ tabId, assetId, innerTab }: MongoQueryContentProps)
                 ? t("query.mongoshWillParse")
                 : t("query.mongoshHint")}
           </div>
+
+          <SnippetPopover
+            category="mongo"
+            onInsert={handleSnippetInsert}
+            trigger={
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1"
+                title={t("snippet.popover.triggerButton")}
+                aria-label={t("snippet.popover.triggerButton")}
+              >
+                <FileCode className="h-3.5 w-3.5" />
+                {t("snippet.popover.insert")}
+              </Button>
+            }
+          />
 
           {/* Execute */}
           <Button

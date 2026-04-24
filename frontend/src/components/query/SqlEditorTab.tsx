@@ -1,6 +1,6 @@
 import { memo, useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Play, Loader2, History, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { Play, Loader2, History, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileCode } from "lucide-react";
 import type * as MonacoNS from "monaco-editor";
 import {
   Button,
@@ -21,6 +21,7 @@ import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { ExecuteSQLPaged } from "../../../wailsjs/go/app/App";
 import { QueryResultTable } from "./QueryResultTable";
 import { CodeEditor } from "@/components/CodeEditor";
+import { SnippetPopover } from "@/components/snippet/SnippetPopover";
 import type { DynamicCompletionGetter } from "@/lib/monaco-completions";
 
 interface SqlEditorTabProps {
@@ -262,6 +263,22 @@ export const SqlEditorTab = memo(function SqlEditorTab({ tabId, innerTabId }: Sq
     });
   }, []);
 
+  // Insert snippet text at the current Monaco selection / cursor, without auto-execute.
+  const handleSnippetInsert = useCallback((content: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const selection = editor.getSelection();
+    if (!selection) return;
+    editor.executeEdits("snippet-insert", [
+      {
+        range: selection,
+        text: content,
+        forceMoveMarkers: true,
+      },
+    ]);
+    editor.focus();
+  }, []);
+
   // 把当前选中库的表名注入到 monaco 补全（在 . 触发或主动唤起时一并出现）
   const tables = useMemo(() => dbState?.tables?.[selectedDb] ?? [], [dbState?.tables, selectedDb]);
   const tableCompletions = useCallback<DynamicCompletionGetter>(
@@ -319,6 +336,22 @@ export const SqlEditorTab = memo(function SqlEditorTab({ tabId, innerTabId }: Sq
               ))}
             </SelectContent>
           </Select>
+          <SnippetPopover
+            category="sql"
+            onInsert={handleSnippetInsert}
+            trigger={
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                title={t("snippet.popover.triggerButton")}
+                aria-label={t("snippet.popover.triggerButton")}
+              >
+                <FileCode className="h-3.5 w-3.5" />
+                {t("snippet.popover.insert")}
+              </Button>
+            }
+          />
           {sqlHistory.length > 0 && (
             <Popover open={showHistory} onOpenChange={setShowHistory}>
               <PopoverTrigger asChild>

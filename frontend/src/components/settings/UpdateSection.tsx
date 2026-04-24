@@ -21,6 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   Input,
+  Switch,
 } from "@opskat/ui";
 import {
   GetAppVersion,
@@ -31,8 +32,12 @@ import {
   GetDownloadMirror,
   SetDownloadMirror,
   GetAvailableMirrors,
+  GetBugReportInfo,
+  GetDebugMode,
+  SetDebugMode,
+  OpenLogsDir,
 } from "../../../wailsjs/go/app/App";
-import { Download, Loader2, ExternalLink, RefreshCw } from "lucide-react";
+import { Bug, Download, FolderOpen, Loader2, ExternalLink, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { BrowserOpenURL, Quit } from "../../../wailsjs/runtime/runtime";
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
@@ -58,6 +63,7 @@ export function UpdateSection() {
   const [mirrors, setMirrors] = useState<{ id: string; name: string; url: string }[]>([]);
   const [customMirror, setCustomMirror] = useState("");
   const [showChecksumDialog, setShowChecksumDialog] = useState(false);
+  const [debugMode, setDebugModeState] = useState(false);
 
   useEffect(() => {
     GetAppVersion()
@@ -65,6 +71,9 @@ export function UpdateSection() {
       .catch(() => {});
     GetUpdateChannel()
       .then(setChannel)
+      .catch(() => {});
+    GetDebugMode()
+      .then(setDebugModeState)
       .catch(() => {});
     GetDownloadMirror()
       .then((m) => {
@@ -79,6 +88,38 @@ export function UpdateSection() {
       })
       .catch(() => {});
   }, []);
+
+  const handleDebugModeChange = async (enabled: boolean) => {
+    setDebugModeState(enabled);
+    try {
+      await SetDebugMode(enabled);
+      toast.success(enabled ? t("appUpdate.debugModeOn") : t("appUpdate.debugModeOff"));
+    } catch (e: unknown) {
+      setDebugModeState(!enabled);
+      toast.error(errMsg(e));
+    }
+  };
+
+  const handleOpenLogsDir = async () => {
+    try {
+      await OpenLogsDir();
+    } catch (e: unknown) {
+      toast.error(errMsg(e));
+    }
+  };
+
+  const handleReportBug = async () => {
+    const params = new URLSearchParams({ template: "bug_report.yml", labels: "bug" });
+    try {
+      const info = await GetBugReportInfo();
+      const version = info.version + (info.commit ? ` (${info.commit})` : "");
+      if (version.trim()) params.set("version", version);
+      if (info.osLabel) params.set("os", info.osLabel);
+    } catch {
+      // 取不到诊断信息时仍然打开模板，让用户手动填写
+    }
+    BrowserOpenURL(`https://github.com/opskat/opskat/issues/new?${params.toString()}`);
+  };
 
   const handleChannelChange = async (value: string) => {
     setChannel(value);
@@ -225,7 +266,15 @@ export function UpdateSection() {
           </div>
         )}
 
-        <div className="flex gap-2">
+        <div className="flex justify-between items-start text-sm pt-2 border-t">
+          <div className="space-y-0.5">
+            <div>{t("appUpdate.debugMode")}</div>
+            <div className="text-xs text-muted-foreground">{t("appUpdate.debugModeDesc")}</div>
+          </div>
+          <Switch checked={debugMode} onCheckedChange={handleDebugModeChange} />
+        </div>
+
+        <div className="flex gap-2 flex-wrap">
           <Button onClick={handleCheck} disabled={checking || updating} size="sm" variant="outline">
             {checking ? (
               <>
@@ -238,6 +287,14 @@ export function UpdateSection() {
                 {t("appUpdate.checkUpdate")}
               </>
             )}
+          </Button>
+          <Button onClick={handleReportBug} size="sm" variant="outline" title={t("appUpdate.reportBugDesc")}>
+            <Bug className="h-3.5 w-3.5 mr-1.5" />
+            {t("appUpdate.reportBug")}
+          </Button>
+          <Button onClick={handleOpenLogsDir} size="sm" variant="outline">
+            <FolderOpen className="h-3.5 w-3.5 mr-1.5" />
+            {t("appUpdate.openLogsDir")}
           </Button>
         </div>
 

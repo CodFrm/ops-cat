@@ -214,3 +214,11 @@ export function formatBinding(binding: ShortcutBinding): string {
   parts.push(codeToDisplay(binding.code));
   return isMac ? parts.join("") : parts.join("+");
 }
+
+// Platform-convention modifier shortcut (Cmd on Mac, Ctrl elsewhere) — for
+// system-level bindings NOT in the shortcut registry (browser/xterm copy-paste,
+// editor shortcuts, etc.). User-configurable shortcuts must use
+// formatBinding(shortcuts[action]) so the UI follows rebindings.
+export function formatModKey(code: string, options: { shift?: boolean; alt?: boolean } = {}): string {
+  return formatBinding({ code, mod: true, shift: options.shift ?? false, alt: options.alt ?? false });
+}

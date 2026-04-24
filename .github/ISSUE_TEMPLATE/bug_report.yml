@@ -1,0 +1,48 @@
+name: 🐛 Bug 反馈 / Bug Report
+description: 报告一个 Bug / Report a bug
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！为方便定位问题，建议：
+
+        1. **打开 Debug 日志**：设置 → 关于&更新 → 开启「Debug 日志」，然后复现问题
+        2. **附上日志**：设置 → 关于&更新 → 「打开日志目录」，压缩后拖入下方「日志 / 截图」
+        3. **脱敏**：日志/截图中的主机名、IP、Token、凭据等请先移除
+
+        Tips for a faster fix:
+        1. Enable **Debug Logging** in Settings → About & Update, then reproduce.
+        2. Attach logs via Settings → About & Update → **Open Logs Folder**.
+        3. Redact hostnames, IPs, tokens, and credentials before pasting.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述 / Description
+      description: 简述遇到的问题、复现步骤、预期结果。 / Describe the issue, steps to reproduce, and expected behavior.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: OpsKat 版本 / Version
+      placeholder: 例如 v1.0.0
+    validations:
+      required: false
+
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统 / OS
+      placeholder: 例如 macOS 14.5 (arm64) / Windows 11 / Ubuntu 22.04
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 截图 / Logs & Screenshots
+      description: 粘贴前请移除凭据、Token 等敏感信息。 / Please redact credentials and tokens before pasting.

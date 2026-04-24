@@ -13,6 +13,7 @@ import { SettingsPage } from "@/components/settings/SettingsPage";
 import { CredentialManager } from "@/components/settings/CredentialManager";
 import { AuditLogPage } from "@/components/audit/AuditLogPage";
 import { PortForwardPage } from "@/components/forward/PortForwardPage";
+import { SnippetsPage } from "@/components/snippet/SnippetsPage";
 import { AIChatContent } from "@/components/ai/AIChatContent";
 import { DatabasePanel } from "@/components/query/DatabasePanel";
 import { RedisPanel } from "@/components/query/RedisPanel";
@@ -114,6 +115,12 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPa
             return (
               <div className="absolute inset-0 bg-background">
                 <PortForwardPage />
+              </div>
+            );
+          case "snippets":
+            return (
+              <div className="absolute inset-0 bg-background">
+                <SnippetsPage />
               </div>
             );
           default:

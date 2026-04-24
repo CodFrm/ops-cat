@@ -8,6 +8,8 @@ import {conversation_entity} from '../models';
 import {forward_entity} from '../models';
 import {group_entity} from '../models';
 import {credential_entity} from '../models';
+import {snippet_svc} from '../models';
+import {snippet_entity} from '../models';
 import {backup_svc} from '../models';
 import {extension_svc} from '../models';
 import {extension} from '../models';
@@ -21,6 +23,8 @@ import {sftp_svc} from '../models';
 export function CallExtensionAction(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function CallExtensionTool(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function CancelExtensionAction(arg1:string):Promise<void>;
 
 export function CancelGitHubAuth():Promise<void>;
 
@@ -52,6 +56,8 @@ export function CreatePasswordCredential(arg1:string,arg2:string,arg3:string,arg
 
 export function CreatePolicyGroup(arg1:policy_group_entity.PolicyGroup):Promise<policy_group_entity.PolicyGroup>;
 
+export function CreateSnippet(arg1:snippet_svc.CreateReq):Promise<snippet_entity.Snippet>;
+
 export function DeleteAIProvider(arg1:number):Promise<void>;
 
 export function DeleteAsset(arg1:number):Promise<void>;
@@ -66,6 +72,8 @@ export function DeleteGroup(arg1:number,arg2:boolean):Promise<void>;
 
 export function DeletePolicyGroup(arg1:string):Promise<void>;
 
+export function DeleteSnippet(arg1:number):Promise<void>;
+
 export function DetectOpsctl():Promise<app.OpsctlInfo>;
 
 export function DetectSkills():Promise<Array<app.SkillTarget>>;
@@ -77,6 +85,8 @@ export function DisconnectSSH(arg1:string):Promise<void>;
 export function DownloadAndInstallUpdate(arg1:boolean):Promise<void>;
 
 export function DrainAIFlushAck():Promise<void>;
+
+export function DuplicateSnippet(arg1:number):Promise<snippet_entity.Snippet>;
 
 export function EnableExtension(arg1:string):Promise<void>;
 
@@ -118,6 +128,8 @@ export function GetAvailableAssetTypes():Promise<Array<app.AssetTypeInfo>>;
 
 export function GetAvailableMirrors():Promise<Array<update_svc.MirrorInfo>>;
 
+export function GetBugReportInfo():Promise<app.BugReportInfo>;
+
 export function GetCredentialPublicKey(arg1:number):Promise<string>;
 
 export function GetCredentialUsage(arg1:number):Promise<Array<string>>;
@@ -125,6 +137,8 @@ export function GetCredentialUsage(arg1:number):Promise<Array<string>>;
 export function GetCurrentConversationID():Promise<number>;
 
 export function GetDataDir():Promise<string>;
+
+export function GetDebugMode():Promise<boolean>;
 
 export function GetDecryptedExtensionConfig(arg1:number,arg2:string):Promise<string>;
 
@@ -153,6 +167,10 @@ export function GetPluginReferenceDir():Promise<string>;
 export function GetSSHPoolConnections():Promise<Array<sshpool.PoolEntryInfo>>;
 
 export function GetSkillPreview():Promise<string>;
+
+export function GetSnippet(arg1:number):Promise<snippet_entity.Snippet>;
+
+export function GetSnippetLastAssets(arg1:number):Promise<Array<number>>;
 
 export function GetStoredGitHubUser():Promise<string>;
 
@@ -210,6 +228,10 @@ export function ListMongoDatabases(arg1:number):Promise<string>;
 
 export function ListPolicyGroups(arg1:string):Promise<Array<policy_group_entity.PolicyGroupItem>>;
 
+export function ListSnippetCategories():Promise<Array<snippet_svc.Category>>;
+
+export function ListSnippets(arg1:snippet_svc.ListReq):Promise<Array<snippet_entity.Snippet>>;
+
 export function LoadConversationMessages(arg1:number):Promise<Array<app.ConversationDisplayMessage>>;
 
 export function MoveAsset(arg1:number,arg2:string):Promise<void>;
@@ -220,6 +242,8 @@ export function OnSecondInstanceLaunch():Promise<void>;
 
 export function OpenDirectory(arg1:string):Promise<void>;
 
+export function OpenLogsDir():Promise<void>;
+
 export function PreviewGistBackup(arg1:string,arg2:string,arg3:string):Promise<backup_svc.BackupSummary>;
 
 export function PreviewImportFile(arg1:string,arg2:string):Promise<backup_svc.BackupSummary>;
@@ -229,6 +253,8 @@ export function PreviewSSHConfig():Promise<import_svc.PreviewResult>;
 export function PreviewTabbyConfig():Promise<import_svc.PreviewResult>;
 
 export function QueueAIMessage(arg1:number,arg2:string,arg3:Array<ai.MentionedAsset>):Promise<void>;
+
+export function RecordSnippetUse(arg1:number):Promise<void>;
 
 export function ReloadExtensions():Promise<void>;
 
@@ -274,9 +300,13 @@ export function SendAIMessage(arg1:number,arg2:Array<ai.Message>,arg3:ai.AIConte
 
 export function SetActiveAIProvider(arg1:number):Promise<void>;
 
+export function SetDebugMode(arg1:boolean):Promise<void>;
+
 export function SetDownloadMirror(arg1:string):Promise<void>;
 
 export function SetLanguage(arg1:string):Promise<void>;
+
+export function SetSnippetLastAssets(arg1:number,arg2:Array<number>):Promise<void>;
 
 export function SetUpdateChannel(arg1:string):Promise<void>;
 
@@ -310,6 +340,8 @@ export function UpdateAsset(arg1:asset_entity.Asset):Promise<void>;
 
 export function UpdateAssetPassword(arg1:number,arg2:string):Promise<void>;
 
+export function UpdateConversationTitle(arg1:number,arg2:string):Promise<void>;
+
 export function UpdateCredential(arg1:number,arg2:string,arg3:string,arg4:string,arg5:string):Promise<credential_entity.Credential>;
 
 export function UpdateCredentialPassphrase(arg1:number,arg2:string,arg3:string):Promise<void>;
@@ -321,6 +353,8 @@ export function UpdateForwardConfig(arg1:number,arg2:string,arg3:number,arg4:Arr
 export function UpdateGroup(arg1:group_entity.Group):Promise<void>;
 
 export function UpdatePolicyGroup(arg1:policy_group_entity.PolicyGroup):Promise<void>;
+
+export function UpdateSnippet(arg1:snippet_svc.UpdateReq):Promise<snippet_entity.Snippet>;
 
 export function WaitAIFlushAck():Promise<any>;
 

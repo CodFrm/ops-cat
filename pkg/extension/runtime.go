@@ -19,12 +19,13 @@ import (
 
 // Plugin represents a loaded WASM extension.
 type Plugin struct {
-	manifest *Manifest
-	compiled wazero.CompiledModule
-	runtime  wazero.Runtime
-	host     HostProvider
-	mu       sync.Mutex
-	closed   atomic.Bool
+	manifest     *Manifest
+	compiled     wazero.CompiledModule
+	runtime      wazero.Runtime
+	host         HostProvider
+	mu           sync.Mutex
+	closed       atomic.Bool
+	activeCancel atomic.Pointer[ActionCancellation]
 }
 
 // LoadPlugin compiles a WASM binary and prepares it for execution.
@@ -75,6 +76,11 @@ func (p *Plugin) CallTool(ctx context.Context, toolName string, args json.RawMes
 }
 
 // CallAction calls execute_action on the extension.
+//
+// The cancellation is installed AFTER acquiring p.mu so that concurrent
+// CallAction invocations don't race on host.activeCancel: the setup and the
+// WASM execution live in the same critical section, and the defer clears the
+// cancel before releasing the lock, so the next caller installs fresh state.
 func (p *Plugin) CallAction(ctx context.Context, actionName string, args json.RawMessage) (json.RawMessage, error) {
 	input, err := json.Marshal(map[string]any{
 		"action": actionName,
@@ -83,7 +89,31 @@ func (p *Plugin) CallAction(ctx context.Context, actionName string, args json.Ra
 	if err != nil {
 		return nil, fmt.Errorf("marshal %s input: %w", "execute_action", err)
 	}
-	return p.call(ctx, "execute_action", input)
+	if p.closed.Load() {
+		return nil, fmt.Errorf("plugin closed")
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	cancel := NewActionCancellation()
+	p.host.SetActiveCancellation(cancel)
+	p.activeCancel.Store(cancel)
+	defer func() {
+		p.activeCancel.Store(nil)
+		p.host.SetActiveCancellation(nil)
+	}()
+
+	return p.callLocked(ctx, "execute_action", input)
+}
+
+// CancelActiveAction triggers cancellation of the currently running action.
+// Due to Plugin.mu serializing CallAction invocations, at most one action
+// runs per plugin at a time — this cancels that one. No-op if idle.
+func (p *Plugin) CancelActiveAction() {
+	if c := p.activeCancel.Load(); c != nil {
+		c.Cancel()
+	}
 }
 
 // CheckPolicy calls check_policy on the extension.
@@ -148,6 +178,11 @@ func (p *Plugin) call(ctx context.Context, fnName string, input []byte) (json.Ra
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	return p.callLocked(ctx, fnName, input)
+}
+
+// callLocked executes a WASM function. Caller must hold p.mu.
+func (p *Plugin) callLocked(ctx context.Context, fnName string, input []byte) (json.RawMessage, error) {
 	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -188,7 +223,7 @@ func (p *Plugin) call(ctx context.Context, fnName string, input []byte) (json.Ra
 	return out, nil
 }
 
-// registerHostModule registers all 12 host functions as a wazero host module named "opskat".
+// registerHostModule registers all 13 host functions as a wazero host module named "opskat".
 // Guest and host share memory using the convention:
 //   - Guest exports malloc(size) -> ptr and free(ptr)
 //   - Return values packed as uint64: high 32 bits = ptr, low 32 bits = size
@@ -258,6 +293,15 @@ func registerHostModule(ctx context.Context, r wazero.Runtime, host HostProvider
 		}
 	}).Export("host_io_close")
 
+	// host_io_set_deadline(handle_id, kind_ptr, kind_len, unix_nanos) -> packed(err_ptr, err_len) or 0 on success
+	b.NewFunctionBuilder().WithFunc(func(ctx context.Context, mod api.Module, handleID, kindPtr, kindLen uint32, unixNanos int64) uint64 {
+		kind := readGuestString(mod, kindPtr, kindLen)
+		if err := host.IOSetDeadline(handleID, kind, unixNanos); err != nil {
+			return encodeError(ctx, mod, err)
+		}
+		return 0
+	}).Export("host_io_set_deadline")
+
 	// host_asset_get_config(asset_id) -> packed(result_ptr, result_len)
 	b.NewFunctionBuilder().WithFunc(func(ctx context.Context, mod api.Module, assetID uint64) uint64 {
 		cfg, err := host.GetAssetConfig(int64(assetID))
@@ -310,6 +354,14 @@ func registerHostModule(ctx context.Context, r wazero.Runtime, host HostProvider
 			logger.Default().Warn("host action event", zap.String("eventType", eventType), zap.Error(err))
 		}
 	}).Export("host_action_event")
+
+	// host_action_should_stop() -> 0 or 1
+	b.NewFunctionBuilder().WithFunc(func(ctx context.Context, mod api.Module) uint32 {
+		if host.ActionShouldStop() {
+			return 1
+		}
+		return 0
+	}).Export("host_action_should_stop")
 
 	_, err := b.Instantiate(ctx)
 	return err

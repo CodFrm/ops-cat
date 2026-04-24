@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, memo, useCallback, createContext, useContext } from "react";
+import { useState, useRef, useEffect, useMemo, memo, useCallback } from "react";
 import {
   Loader2,
   CornerDownLeft,
@@ -41,14 +41,16 @@ import {
   type MentionRef,
   type TokenUsage,
 } from "@/stores/aiStore";
-import { AIChatInput, type AIChatInputHandle } from "@/components/ai/AIChatInput";
+import { AIChatInput, type AIChatInputDraft, type AIChatInputHandle } from "@/components/ai/AIChatInput";
 import { UserMessage } from "@/components/ai/UserMessage";
 import { useTabStore, type AITabMeta } from "@/stores/tabStore";
+import { formatModKey } from "@/stores/shortcutStore";
 import { ToolBlock } from "@/components/ai/ToolBlock";
 import { ThinkingBlock } from "@/components/ai/ThinkingBlock";
 import { AgentBlock } from "@/components/ai/AgentBlock";
 import { ApprovalBlock } from "@/components/approval/ApprovalBlock";
 import { AISetupWizard } from "@/components/ai/AISetupWizard";
+import { CompactContext, useCompact } from "@/components/ai/AIChatContentContext";
 
 // 常量化 Markdown 插件数组，避免每次渲染创建新引用导致 Markdown 重解析
 const mdRemarkPlugins = [remarkGfm];
@@ -70,9 +72,30 @@ interface AIChatContentProps {
   onStopOverride?: () => Promise<void>;
 }
 
-const CompactContext = createContext(false);
-export function useCompact() {
-  return useContext(CompactContext);
+interface EditTarget {
+  conversationId: number;
+  messageIndex: number;
+  draft: AIChatInputDraft;
+}
+
+// 编辑态需要比较 mentions 是否还是同一条消息，避免 messageIndex 没变但消息内容已被刷新时误复用草稿。
+function normalizeMentions(mentions: MentionRef[] | undefined): MentionRef[] {
+  return mentions ?? [];
+}
+
+function areMentionsEqual(left: MentionRef[] | undefined, right: MentionRef[] | undefined) {
+  const normalizedLeft = normalizeMentions(left);
+  const normalizedRight = normalizeMentions(right);
+  if (normalizedLeft.length !== normalizedRight.length) return false;
+  return normalizedLeft.every((mention, index) => {
+    const other = normalizedRight[index];
+    return (
+      mention.assetId === other.assetId &&
+      mention.name === other.name &&
+      mention.start === other.start &&
+      mention.end === other.end
+    );
+  });
 }
 
 /** Split blocks into segments: consecutive non-approval blocks form a 'bubble' segment,
@@ -109,7 +132,8 @@ export function AIChatContent({
   onStopOverride,
 }: AIChatContentProps) {
   const { t } = useTranslation();
-  const { configured, sendToTab, stopGeneration, regenerate, removeFromQueue, clearQueue } = useAIStore();
+  const { configured, sendToTab, stopGeneration, regenerate, removeFromQueue, clearQueue, editAndResendConversation } =
+    useAIStore();
   const derivedConvId = useTabStore((s) => {
     if (!tabId) return null;
     const tab = s.tabs.find((x) => x.id === tabId);
@@ -137,9 +161,11 @@ export function AIChatContent({
   }, [messages]);
 
   const [regenerateTarget, setRegenerateTarget] = useState<number | null>(null);
+  const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [empty, setEmpty] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<AIChatInputHandle>(null);
+  const previousConversationIdRef = useRef<number | null | undefined>(conversationId);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -149,17 +175,72 @@ export function AIChatContent({
     inputRef.current?.focus();
   }, [tabId]);
 
+  // 编辑态依赖 conversationId 和消息索引，切换会话时要显式清掉草稿，避免把旧草稿带到新会话。
+  // 用 updater 读取并清空 state（幂等），副作用放在 updater 外执行，避免 StrictMode 下重复触发。
+  const resetEditMode = useCallback((options?: { clearDraft?: boolean }) => {
+    let wasActive = false;
+    setEditTarget((current) => {
+      if (!current) return current;
+      wasActive = true;
+      return null;
+    });
+    if (wasActive && options?.clearDraft) {
+      inputRef.current?.clear();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (previousConversationIdRef.current === conversationId) return;
+    previousConversationIdRef.current = conversationId;
+    if (editTarget) {
+      resetEditMode({ clearDraft: true });
+    }
+  }, [conversationId, editTarget, resetEditMode]);
+
+  useEffect(() => {
+    // 会话消息被刷新、截断或替换后，如果编辑目标不再匹配当前消息，就立即退出编辑态。
+    if (!editTarget) return;
+    if (editTarget.conversationId !== conversationId) {
+      resetEditMode({ clearDraft: true });
+      return;
+    }
+    const targetMessage = messages[editTarget.messageIndex];
+    if (
+      !targetMessage ||
+      targetMessage.role !== "user" ||
+      targetMessage.content !== editTarget.draft.content ||
+      !areMentionsEqual(targetMessage.mentions, editTarget.draft.mentions)
+    ) {
+      resetEditMode({ clearDraft: true });
+    }
+  }, [conversationId, editTarget, messages, resetEditMode]);
+
   const handleSend = useCallback(
     (text: string, mentions: MentionRef[]) => {
       const trimmed = text.trim();
       if (!trimmed && mentions.length === 0) return;
+      const nextMentions = mentions.length > 0 ? mentions : undefined;
+      if (editTarget && conversationId != null) {
+        const activeTarget = editTarget;
+        // 编辑模式改走 conversation 级 replay，提交成功后只在目标仍未变化时退出编辑态。
+        void editAndResendConversation(conversationId, activeTarget.messageIndex, text, nextMentions).then(() => {
+          setEditTarget((current) =>
+            current &&
+            current.conversationId === activeTarget.conversationId &&
+            current.messageIndex === activeTarget.messageIndex
+              ? null
+              : current
+          );
+        });
+        return;
+      }
       if (onSendOverride) {
-        void onSendOverride(text, mentions.length > 0 ? mentions : undefined);
+        void onSendOverride(text, nextMentions);
       } else if (tabId) {
-        sendToTab(tabId, text, mentions.length > 0 ? mentions : undefined);
+        sendToTab(tabId, text, nextMentions);
       }
     },
-    [onSendOverride, sendToTab, tabId]
+    [conversationId, editAndResendConversation, editTarget, onSendOverride, sendToTab, tabId]
   );
 
   const handleStop = () => {
@@ -173,6 +254,20 @@ export function AIChatContent({
   const handleRegenerate = useCallback((index: number) => {
     setRegenerateTarget(index);
   }, []);
+
+  const handleEditMessage = useCallback(
+    (index: number, msg: ChatMessage) => {
+      if (conversationId == null || msg.role !== "user") return;
+      const draft: AIChatInputDraft = {
+        content: msg.content,
+        mentions: msg.mentions,
+      };
+      // 进入编辑态时直接把原消息回填到输入框，保证 mention 和多段文本都按原样重发。
+      inputRef.current?.loadDraft(draft);
+      setEditTarget({ conversationId, messageIndex: index, draft });
+    },
+    [conversationId]
+  );
 
   const confirmRegenerate = () => {
     if (regenerateTarget !== null) {
@@ -207,7 +302,7 @@ export function AIChatContent({
               return (
                 <div key={i} className="text-sm" style={cvStyle}>
                   {msg.role === "user" ? (
-                    <UserMessage msg={msg} />
+                    <UserMessage msg={msg} onEdit={() => handleEditMessage(i, msg)} />
                   ) : (
                     <AssistantMessage msg={msg} index={i} sending={sending} onRegenerate={handleRegenerate} />
                   )}
@@ -263,6 +358,25 @@ export function AIChatContent({
         <div className="border-t p-3">
           <div className="max-w-3xl mx-auto">
             <div className="rounded-xl border border-input bg-background transition-colors duration-150 focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/50">
+              {editTarget && (
+                <div className="flex items-start justify-between gap-3 border-b px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-foreground">{t("ai.editingMessage", "正在编辑消息")}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {t("ai.editResendHint", "提交后会从这条消息重新发送后续对话。")}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 shrink-0 px-2 text-xs"
+                    onClick={() => resetEditMode({ clearDraft: true })}
+                  >
+                    {t("ai.cancelEdit", "取消编辑")}
+                  </Button>
+                </div>
+              )}
               <AIChatInput
                 ref={inputRef}
                 onSubmit={handleSend}
@@ -275,7 +389,7 @@ export function AIChatContent({
                 <span className="text-xs text-muted-foreground/40 select-none">
                   {sendOnEnter
                     ? `Enter ${t("ai.sendShortcutHint")}`
-                    : `${/mac/i.test(navigator.userAgent) ? "⌘+Enter" : "Ctrl+Enter"} ${t("ai.sendShortcutHint")}`}
+                    : `${formatModKey("Enter")} ${t("ai.sendShortcutHint")}`}
                 </span>
                 {sending ? (
                   <Button

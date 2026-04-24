@@ -34,6 +34,12 @@ func (c *capHost) IOOpen(params IOOpenParams) (uint32, IOMeta, error) {
 		}
 		// Pass tunnel capability to dial-time guard.
 		params.AllowPrivate = c.manifest.Capabilities.Tunnel
+	case "tcp":
+		// TCP IO is currently reserved for first-party extensions (e.g. Kafka). Until a
+		// manifest.Capabilities.TCP + CheckTCPAddr gate lands (post-Phase 1), no per-call
+		// enforcement is done here — the wazero host module exposes this to every loaded
+		// extension. Do not mark the capHost as publicly safe for third-party extensions
+		// until that gate is in place.
 	}
 	return c.inner.IOOpen(params)
 }
@@ -58,7 +64,14 @@ func (c *capHost) KVGet(key string) ([]byte, error) {
 	return c.inner.KVGet(key)
 }
 func (c *capHost) KVSet(key string, value []byte) error { return c.inner.KVSet(key, value) }
+func (c *capHost) IOSetDeadline(handleID uint32, kind string, unixNanos int64) error {
+	return c.inner.IOSetDeadline(handleID, kind, unixNanos)
+}
 func (c *capHost) ActionEvent(eventType string, data json.RawMessage) error {
 	return c.inner.ActionEvent(eventType, data)
+}
+func (c *capHost) ActionShouldStop() bool { return c.inner.ActionShouldStop() }
+func (c *capHost) SetActiveCancellation(ac *ActionCancellation) {
+	c.inner.SetActiveCancellation(ac)
 }
 func (c *capHost) CloseAll() { c.inner.CloseAll() }

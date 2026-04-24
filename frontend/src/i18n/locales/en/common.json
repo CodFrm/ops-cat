@@ -31,7 +31,8 @@
     "appearance": "Appearance",
     "ai": "AI Assistant",
     "audit": "Audit Log",
-    "forward": "Port Forward"
+    "forward": "Port Forward",
+    "snippets": "Snippets"
   },
   "forward": {
     "create": "New Config",
@@ -603,6 +604,10 @@
     "clearQueue": "Clear",
     "mentionNotFound": "No assets found",
     "mentionAssetDeleted": "Asset deleted",
+    "editMessage": "Edit message",
+    "editingMessage": "Editing message",
+    "cancelEdit": "Cancel edit",
+    "editResendHint": "Submitting will resend the conversation from this message.",
     "regenerate": "Regenerate",
     "regenerateTitle": "Regenerate",
     "regenerateConfirm": "Regenerating will delete this message and all messages after it. Are you sure?",
@@ -799,7 +804,14 @@
     "checksumFetchFailed": "Unable to fetch checksum file (SHA256SUMS.txt) from GitHub. The downloaded file cannot be verified for integrity.",
     "checksumSkipConfirm": "Continue without verification?",
     "checksumSkipAction": "Skip & Continue",
-    "checksumSkipCancel": "Cancel"
+    "checksumSkipCancel": "Cancel",
+    "reportBug": "Report Bug",
+    "reportBugDesc": "Open GitHub issue template with version & system info pre-filled",
+    "debugMode": "Debug Logging",
+    "debugModeDesc": "Lower log level to debug for troubleshooting. Turn off when done.",
+    "debugModeOn": "Debug logging enabled",
+    "debugModeOff": "Debug logging disabled",
+    "openLogsDir": "Open Logs Folder"
   },
   "opsctlApproval": {
     "title": "CLI Operation Approval",
@@ -1181,5 +1193,80 @@
     "noTools": "No tools",
     "noPolicies": "No policy groups",
     "noPages": "No pages"
+  },
+  "snippet": {
+    "title": "Snippets",
+    "newButton": "New snippet",
+    "searchPlaceholder": "Search name / description / content",
+    "filterByCategory": "Category",
+    "filterByTag": "Tag",
+    "allCategories": "All categories",
+    "emptyState": "No snippets yet. Click + New to create one.",
+    "emptyStateFiltered": "No snippets match current filter.",
+    "readOnlyTooltip": "Managed by extension — duplicate to edit",
+    "unknownCategory": "unknown:{{name}}",
+    "unknownCategoryTooltip": "This snippet's category is no longer registered. The providing extension may have been uninstalled.",
+    "orphanedSuffix": "(orphaned)",
+    "columns": {
+      "category": "Category",
+      "name": "Name",
+      "updated": "Updated",
+      "source": "Source",
+      "actions": "Actions"
+    },
+    "form": {
+      "createTitle": "Create snippet",
+      "editTitle": "Edit snippet",
+      "labelCategory": "Category",
+      "labelName": "Name",
+      "labelDescription": "Description",
+      "labelContent": "Content",
+      "duplicateNameHint": "Another snippet with this name exists in the same category."
+    },
+    "actions": {
+      "run": "Run",
+      "edit": "Edit",
+      "duplicate": "Duplicate",
+      "delete": "Delete",
+      "cancel": "Cancel",
+      "save": "Save",
+      "create": "Create"
+    },
+    "runDrawer": {
+      "title": "Select assets to run on",
+      "description": "Select one or more assets to run this snippet on",
+      "searchPlaceholder": "Search assets…",
+      "noAssets": "No matching assets"
+    },
+    "confirmDelete": {
+      "title": "Delete snippet?",
+      "message": "\"{{name}}\" will be permanently removed. This cannot be undone."
+    },
+    "toast": {
+      "created": "Snippet created",
+      "updated": "Snippet updated",
+      "deleted": "Snippet deleted",
+      "duplicated": "Snippet duplicated"
+    },
+    "categories": {
+      "shell": "Shell",
+      "sql": "SQL",
+      "redis": "Redis",
+      "mongo": "Mongo",
+      "prompt": "Prompt"
+    },
+    "popover": {
+      "searchPlaceholder": "Search snippets…",
+      "insert": "Insert",
+      "sendWithEnter": "Insert + Enter",
+      "empty": "No snippets for this context.",
+      "openManager": "Create in Snippets page",
+      "triggerButton": "Insert snippet"
+    },
+    "slash": {
+      "noMatch": "No matching snippets",
+      "empty": "No prompt snippets yet",
+      "openManager": "Create in Snippets page"
+    }
   }
 }

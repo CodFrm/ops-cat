@@ -29,3 +29,6 @@ coverage_new.out
 /devserver
 .superpowers/
 .worktrees/
+
+# e2e WASM fixture 本地产物（源码在 pkg/extension/testdata/tcp_e2e_fixture/ 下，编译物 gitignore）
+/pkg/extension/testdata/tcp_e2e_fixture.wasm

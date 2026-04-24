@@ -90,6 +90,24 @@ func (a *App) CallExtensionAction(extName, action string, argsJSON string) (stri
 	return string(result), nil
 }
 
+// CancelExtensionAction triggers cancellation of the currently running action
+// on a given extension. No-op if no action is in flight.
+// Exposed to frontend via Wails IPC.
+func (a *App) CancelExtensionAction(extName string) error {
+	if a.extSvc == nil {
+		return fmt.Errorf("extension system not initialized")
+	}
+	ext := a.extSvc.Manager().GetExtension(extName)
+	if ext == nil {
+		return fmt.Errorf("extension %q not loaded", extName)
+	}
+	if ext.Plugin == nil {
+		return fmt.Errorf("extension %q has no backend plugin", extName)
+	}
+	ext.Plugin.CancelActiveAction()
+	return nil
+}
+
 // CallExtensionTool calls an extension tool (for frontend config testing etc.)
 func (a *App) CallExtensionTool(extName, tool string, argsJSON string) (string, error) {
 	if a.extSvc == nil {

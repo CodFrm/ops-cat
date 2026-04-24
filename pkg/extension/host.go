@@ -11,12 +11,18 @@ type HostProvider interface {
 	IOWrite(handleID uint32, data []byte) (int, error)
 	IOFlush(handleID uint32) (*IOMeta, error)
 	IOClose(handleID uint32) error
+	// IOSetDeadline sets read/write/both deadline on a handle.
+	// unixNanos is an absolute deadline in Unix nanoseconds; 0 clears any existing deadline.
+	// kind ∈ {"read","write","both"}. Returns an error if the underlying handle type does not support deadlines.
+	IOSetDeadline(handleID uint32, kind string, unixNanos int64) error
 	GetAssetConfig(assetID int64) (json.RawMessage, error)
 	FileDialog(dialogType string, opts DialogOptions) (string, error)
 	Log(level, msg string)
 	KVGet(key string) ([]byte, error)
 	KVSet(key string, value []byte) error
 	ActionEvent(eventType string, data json.RawMessage) error
+	ActionShouldStop() bool
+	SetActiveCancellation(c *ActionCancellation)
 	CloseAll()
 }
 
@@ -28,6 +34,9 @@ type IOOpenParams struct {
 	URL          string            `json:"url"`
 	Headers      map[string]string `json:"headers"`
 	AllowPrivate bool              `json:"allowPrivate"` // dial-time guard: allow connections to private/loopback IPs
+	// tcp (new)
+	Addr    string `json:"addr,omitempty"`
+	Timeout int    `json:"timeout,omitempty"` // ms; 0 = default 10s
 }
 
 type DialogOptions struct {

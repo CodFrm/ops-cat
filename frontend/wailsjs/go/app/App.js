@@ -10,6 +10,10 @@ export function CallExtensionTool(arg1, arg2, arg3) {
   return window['go']['app']['App']['CallExtensionTool'](arg1, arg2, arg3);
 }
 
+export function CancelExtensionAction(arg1) {
+  return window['go']['app']['App']['CancelExtensionAction'](arg1);
+}
+
 export function CancelGitHubAuth() {
   return window['go']['app']['App']['CancelGitHubAuth']();
 }
@@ -70,6 +74,10 @@ export function CreatePolicyGroup(arg1) {
   return window['go']['app']['App']['CreatePolicyGroup'](arg1);
 }
 
+export function CreateSnippet(arg1) {
+  return window['go']['app']['App']['CreateSnippet'](arg1);
+}
+
 export function DeleteAIProvider(arg1) {
   return window['go']['app']['App']['DeleteAIProvider'](arg1);
 }
@@ -98,6 +106,10 @@ export function DeletePolicyGroup(arg1) {
   return window['go']['app']['App']['DeletePolicyGroup'](arg1);
 }
 
+export function DeleteSnippet(arg1) {
+  return window['go']['app']['App']['DeleteSnippet'](arg1);
+}
+
 export function DetectOpsctl() {
   return window['go']['app']['App']['DetectOpsctl']();
 }
@@ -120,6 +132,10 @@ export function DownloadAndInstallUpdate(arg1) {
 
 export function DrainAIFlushAck() {
   return window['go']['app']['App']['DrainAIFlushAck']();
+}
+
+export function DuplicateSnippet(arg1) {
+  return window['go']['app']['App']['DuplicateSnippet'](arg1);
 }
 
 export function EnableExtension(arg1) {
@@ -202,6 +218,10 @@ export function GetAvailableMirrors() {
   return window['go']['app']['App']['GetAvailableMirrors']();
 }
 
+export function GetBugReportInfo() {
+  return window['go']['app']['App']['GetBugReportInfo']();
+}
+
 export function GetCredentialPublicKey(arg1) {
   return window['go']['app']['App']['GetCredentialPublicKey'](arg1);
 }
@@ -216,6 +236,10 @@ export function GetCurrentConversationID() {
 
 export function GetDataDir() {
   return window['go']['app']['App']['GetDataDir']();
+}
+
+export function GetDebugMode() {
+  return window['go']['app']['App']['GetDebugMode']();
 }
 
 export function GetDecryptedExtensionConfig(arg1, arg2) {
@@ -272,6 +296,14 @@ export function GetSSHPoolConnections() {
 
 export function GetSkillPreview() {
   return window['go']['app']['App']['GetSkillPreview']();
+}
+
+export function GetSnippet(arg1) {
+  return window['go']['app']['App']['GetSnippet'](arg1);
+}
+
+export function GetSnippetLastAssets(arg1) {
+  return window['go']['app']['App']['GetSnippetLastAssets'](arg1);
 }
 
 export function GetStoredGitHubUser() {
@@ -386,6 +418,14 @@ export function ListPolicyGroups(arg1) {
   return window['go']['app']['App']['ListPolicyGroups'](arg1);
 }
 
+export function ListSnippetCategories() {
+  return window['go']['app']['App']['ListSnippetCategories']();
+}
+
+export function ListSnippets(arg1) {
+  return window['go']['app']['App']['ListSnippets'](arg1);
+}
+
 export function LoadConversationMessages(arg1) {
   return window['go']['app']['App']['LoadConversationMessages'](arg1);
 }
@@ -406,6 +446,10 @@ export function OpenDirectory(arg1) {
   return window['go']['app']['App']['OpenDirectory'](arg1);
 }
 
+export function OpenLogsDir() {
+  return window['go']['app']['App']['OpenLogsDir']();
+}
+
 export function PreviewGistBackup(arg1, arg2, arg3) {
   return window['go']['app']['App']['PreviewGistBackup'](arg1, arg2, arg3);
 }
@@ -424,6 +468,10 @@ export function PreviewTabbyConfig() {
 
 export function QueueAIMessage(arg1, arg2, arg3) {
   return window['go']['app']['App']['QueueAIMessage'](arg1, arg2, arg3);
+}
+
+export function RecordSnippetUse(arg1) {
+  return window['go']['app']['App']['RecordSnippetUse'](arg1);
 }
 
 export function ReloadExtensions() {
@@ -514,12 +562,20 @@ export function SetActiveAIProvider(arg1) {
   return window['go']['app']['App']['SetActiveAIProvider'](arg1);
 }
 
+export function SetDebugMode(arg1) {
+  return window['go']['app']['App']['SetDebugMode'](arg1);
+}
+
 export function SetDownloadMirror(arg1) {
   return window['go']['app']['App']['SetDownloadMirror'](arg1);
 }
 
 export function SetLanguage(arg1) {
   return window['go']['app']['App']['SetLanguage'](arg1);
+}
+
+export function SetSnippetLastAssets(arg1, arg2) {
+  return window['go']['app']['App']['SetSnippetLastAssets'](arg1, arg2);
 }
 
 export function SetUpdateChannel(arg1) {
@@ -586,6 +642,10 @@ export function UpdateAssetPassword(arg1, arg2) {
   return window['go']['app']['App']['UpdateAssetPassword'](arg1, arg2);
 }
 
+export function UpdateConversationTitle(arg1, arg2) {
+  return window['go']['app']['App']['UpdateConversationTitle'](arg1, arg2);
+}
+
 export function UpdateCredential(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['UpdateCredential'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -608,6 +668,10 @@ export function UpdateGroup(arg1) {
 
 export function UpdatePolicyGroup(arg1) {
   return window['go']['app']['App']['UpdatePolicyGroup'](arg1);
+}
+
+export function UpdateSnippet(arg1) {
+  return window['go']['app']['App']['UpdateSnippet'](arg1);
 }
 
 export function WaitAIFlushAck() {
