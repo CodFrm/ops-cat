@@ -396,7 +396,7 @@ function App() {
       }
       hideAssetListAfterConnect();
     },
-    [homeSection]
+    [homeSection, hideAssetListAfterConnect]
   );
 
   const tabBarLayout = useLayoutStore((s) => s.tabBarLayout);

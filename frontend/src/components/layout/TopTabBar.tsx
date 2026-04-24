@@ -5,7 +5,14 @@ import { useFullscreen } from "@/hooks/useFullscreen";
 import { useTabDragAndDrop } from "@/hooks/useTabDragAndDrop";
 import { useTabStore, type Tab, type InfoTabMeta } from "@/stores/tabStore";
 import { useTerminalStore } from "@/stores/terminalStore";
-import { cn, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@opskat/ui";
+import {
+  cn,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@opskat/ui";
 import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
 import { TabPanelMenu } from "./TabPanelMenu";
 import { TabFilterPopover } from "./TabFilterPopover";
