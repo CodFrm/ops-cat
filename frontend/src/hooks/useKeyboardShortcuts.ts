@@ -138,18 +138,15 @@ export function useKeyboardShortcuts({ onToggleAIPanel, onToggleSidebar }: Short
           break;
         }
         case "page.sshkeys": {
-          const existing = tabs.find((t) => t.id === "settings");
+          const existing = tabs.find((t) => t.id === "sshkeys");
           if (existing) {
-            tabStore.updateTab("settings", {
-              meta: { type: "page", pageId: "settings", settingTab: "sshkeys" },
-            });
-            tabStore.activateTab("settings");
+            tabStore.activateTab("sshkeys");
           } else {
             tabStore.openTab({
-              id: "settings",
+              id: "sshkeys",
               type: "page",
-              label: "settings",
-              meta: { type: "page", pageId: "settings", settingTab: "sshkeys" },
+              label: "sshkeys",
+              meta: { type: "page", pageId: "sshkeys" },
             });
           }
           break;

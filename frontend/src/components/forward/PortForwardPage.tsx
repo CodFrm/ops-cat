@@ -45,7 +45,7 @@ const emptyRule = (): EditRule => ({
   remotePort: "",
 });
 
-export function PortForwardPage({ embedded = false }: { embedded?: boolean }) {
+export function PortForwardPage() {
   const { t } = useTranslation();
   const [configs, setConfigs] = useState<app.ForwardConfigWithStatus[]>([]);
   const [loading, setLoading] = useState(false);
@@ -189,7 +189,7 @@ export function PortForwardPage({ embedded = false }: { embedded?: boolean }) {
   };
 
   return (
-    <div className={`${embedded ? "" : "absolute inset-0"} bg-background flex flex-col`}>
+    <div className="absolute inset-0 bg-background flex flex-col">
       <div className="px-4 py-3 border-b flex items-center justify-between">
         <h2 className="font-semibold">{t("nav.forward")}</h2>
         <Button size="sm" className="gap-1" onClick={openCreate}>

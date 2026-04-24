@@ -22,7 +22,7 @@ import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { getAssetType, normalizeAssetSection } from "@/lib/assetTypes";
-import { useTabStore, type InfoTabMeta, type PageTabMeta, type Tab } from "@/stores/tabStore";
+import { useTabStore, type InfoTabMeta, type PageTabMeta, type QueryTabMeta, type Tab } from "@/stores/tabStore";
 import { useExtensionStore } from "@/extension";
 import { bootstrapExtensions } from "@/extension/init";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -382,13 +382,9 @@ function App() {
         }
         return;
       }
+      // Page tabs: settings, forward, sshkeys, audit
       const existing = tabStore.tabs.find((t) => t.id === page);
       if (existing) {
-        if (page === "settings") {
-          tabStore.updateTab("settings", {
-            meta: { type: "page", pageId: "settings" },
-          });
-        }
         tabStore.activateTab(page);
       } else {
         tabStore.openTab({
@@ -398,6 +394,7 @@ function App() {
           meta: { type: "page", pageId: page },
         });
       }
+      hideAssetListAfterConnect();
     },
     [homeSection]
   );

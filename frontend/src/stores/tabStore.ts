@@ -33,7 +33,6 @@ export interface QueryTabMeta {
 export interface PageTabMeta {
   type: "page";
   pageId: string;
-  settingTab?: string;
   extensionName?: string;
   assetId?: number;
 }
