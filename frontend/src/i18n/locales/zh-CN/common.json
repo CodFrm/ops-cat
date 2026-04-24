@@ -1192,15 +1192,12 @@
     "emptyState": "暂无片段，点击“新建片段”开始创建。",
     "emptyStateFiltered": "没有符合当前筛选条件的片段。",
     "readOnlyTooltip": "由扩展管理 — 请复制后再编辑",
-    "globalBinding": "— 全局（不绑定资产）—",
     "unknownCategory": "未知分类:{{name}}",
     "unknownCategoryTooltip": "该片段的分类已不存在，提供此分类的扩展可能已被卸载。",
     "orphanedSuffix": "（孤立）",
     "columns": {
       "category": "分类",
       "name": "名称",
-      "asset": "资产",
-      "tags": "标签",
       "updated": "更新时间",
       "source": "来源",
       "actions": "操作"
@@ -1211,18 +1208,22 @@
       "labelCategory": "分类",
       "labelName": "名称",
       "labelDescription": "描述",
-      "labelTags": "标签（逗号分隔）",
-      "labelAsset": "绑定资产",
       "labelContent": "内容",
       "duplicateNameHint": "同分类下已有同名片段。"
     },
     "actions": {
+      "run": "运行",
       "edit": "编辑",
       "duplicate": "复制",
       "delete": "删除",
       "cancel": "取消",
       "save": "保存",
       "create": "创建"
+    },
+    "runDrawer": {
+      "title": "选择要运行的资产",
+      "searchPlaceholder": "搜索资产…",
+      "noAssets": "没有可运行的资产"
     },
     "confirmDelete": {
       "title": "删除片段？",

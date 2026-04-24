@@ -1192,15 +1192,12 @@
     "emptyState": "No snippets yet. Click + New to create one.",
     "emptyStateFiltered": "No snippets match current filter.",
     "readOnlyTooltip": "Managed by extension — duplicate to edit",
-    "globalBinding": "— Global (no binding) —",
     "unknownCategory": "unknown:{{name}}",
     "unknownCategoryTooltip": "This snippet's category is no longer registered. The providing extension may have been uninstalled.",
     "orphanedSuffix": "(orphaned)",
     "columns": {
       "category": "Category",
       "name": "Name",
-      "asset": "Asset",
-      "tags": "Tags",
       "updated": "Updated",
       "source": "Source",
       "actions": "Actions"
@@ -1211,18 +1208,22 @@
       "labelCategory": "Category",
       "labelName": "Name",
       "labelDescription": "Description",
-      "labelTags": "Tags (comma-separated)",
-      "labelAsset": "Asset binding",
       "labelContent": "Content",
       "duplicateNameHint": "Another snippet with this name exists in the same category."
     },
     "actions": {
+      "run": "Run",
       "edit": "Edit",
       "duplicate": "Duplicate",
       "delete": "Delete",
       "cancel": "Cancel",
       "save": "Save",
       "create": "Create"
+    },
+    "runDrawer": {
+      "title": "Select assets to run on",
+      "searchPlaceholder": "Search assets…",
+      "noAssets": "No runnable assets"
     },
     "confirmDelete": {
       "title": "Delete snippet?",

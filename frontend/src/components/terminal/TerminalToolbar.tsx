@@ -6,20 +6,10 @@ import { useSFTPStore } from "@/stores/sftpStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { SnippetPopover } from "@/components/snippet/SnippetPopover";
 import { WriteSSH } from "../../../wailsjs/go/app/App";
+import { bytesToBase64 } from "@/lib/terminalEncode";
 
 interface TerminalToolbarProps {
   tabId: string;
-}
-
-// Chunked binary -> base64 to match Terminal.tsx behavior (avoid stack overflow on large pastes).
-function bytesToBase64(bytes: Uint8Array): string {
-  const CHUNK = 0x8000;
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    const slice = bytes.subarray(i, i + CHUNK);
-    binary += String.fromCharCode.apply(null, slice as unknown as number[]);
-  }
-  return btoa(binary);
 }
 
 export function TerminalToolbar({ tabId }: TerminalToolbarProps) {

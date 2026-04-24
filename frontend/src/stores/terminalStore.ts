@@ -7,9 +7,11 @@ import {
   DisconnectSSH,
   SplitSSH,
   UpdateAssetPassword,
+  WriteSSH,
 } from "../../wailsjs/go/app/App";
 import { app, asset_entity } from "../../wailsjs/go/models";
 import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
+import { bytesToBase64 } from "../lib/terminalEncode";
 import { useTabStore, registerTabCloseHook, registerTabRestoreHook, type TerminalTabMeta } from "./tabStore";
 import { useAssetStore } from "./assetStore";
 
@@ -37,6 +39,8 @@ export interface TerminalTabData {
   splitTree: SplitNode;
   activePaneId: string;
   panes: Record<string, TerminalPane>;
+  /** Snippet content to send once the first pane becomes connected. Cleared after write. */
+  pendingInput?: string;
 }
 
 export interface SSHConnectMetadata {
@@ -289,7 +293,7 @@ interface TerminalState {
   connectingAssetIds: Set<number>;
   connections: Record<string, ConnectionState>;
 
-  connect: (asset: asset_entity.Asset, password?: string, forceNew?: boolean) => Promise<string>;
+  connect: (asset: asset_entity.Asset, password?: string, forceNew?: boolean, opts?: { initialInput?: string }) => Promise<string>;
   reconnect: (tabId: string) => void;
   disconnect: (sessionId: string) => void;
   markClosed: (sessionId: string) => void;
@@ -312,7 +316,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   connectingAssetIds: new Set(),
   connections: {},
 
-  connect: async (asset, password = "", forceNew = false) => {
+  connect: async (asset, password = "", forceNew = false, opts) => {
     const assetId = asset.ID;
     const assetPath = useAssetStore.getState().getAssetPath(asset);
     const assetIcon = asset.Icon || "";
@@ -379,6 +383,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             splitTree: { type: "connecting", connectionId },
             activePaneId: connectionId,
             panes: {},
+            pendingInput: opts?.initialInput,
           },
         },
         connections: {
@@ -399,9 +404,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         connectionId,
         (sessionId) => {
           // Migrate tabData from connectionId key to sessionId key
+          let pendingInput: string | undefined;
           set((s) => {
             const data = s.tabData[connectionId];
             if (!data) return s;
+
+            pendingInput = data.pendingInput;
 
             const newTree = replaceNode(data.splitTree, connectionId, {
               type: "terminal",
@@ -414,6 +422,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
               splitTree: newTree,
               activePaneId: sessionId,
               panes: { [sessionId]: { sessionId, connected: true, connectedAt: Date.now() } },
+              // pendingInput intentionally not forwarded — write happens below
             };
 
             const newConnections = { ...s.connections };
@@ -424,6 +433,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
           // Update tab id in tabStore
           tabStore.replaceTabId(connectionId, sessionId);
+
+          // Write pending snippet input (no trailing \r — user sees content and decides to execute)
+          if (pendingInput) {
+            WriteSSH(sessionId, bytesToBase64(new TextEncoder().encode(pendingInput))).catch(console.error);
+          }
         },
         () => {
           // Clear connectingAssetIds on connected or error

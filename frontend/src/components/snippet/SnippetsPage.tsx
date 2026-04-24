@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus, Pencil, Copy, Trash2, Lock, Search, Loader2 } from "lucide-react";
+import { Plus, Pencil, Copy, Trash2, Lock, Search, Loader2, Play } from "lucide-react";
 import { toast } from "sonner";
 import {
   Button,
@@ -17,6 +17,14 @@ import {
 import { useSnippetStore } from "@/stores/snippetStore";
 import { snippet_entity } from "../../../wailsjs/go/models";
 import { SnippetFormDialog } from "./SnippetFormDialog";
+import { SnippetAssetDrawer } from "./SnippetAssetDrawer";
+
+const RUNNABLE_ASSET_TYPES = new Set(["ssh", "database", "mongodb"]);
+
+function isRunnable(cat: string, cats: { id: string; assetType: string }[]): boolean {
+  const c = cats.find((x) => x.id === cat);
+  return !!c && RUNNABLE_ASSET_TYPES.has(c.assetType);
+}
 
 // Stable per-category badge styling. Order must be deterministic so a given
 // category always renders with the same hue across reloads.
@@ -68,6 +76,7 @@ export function SnippetsPage() {
   const [editTarget, setEditTarget] = useState<snippet_entity.Snippet | undefined>(undefined);
   const [confirmTarget, setConfirmTarget] = useState<snippet_entity.Snippet | null>(null);
   const [categoryFilterOpen, setCategoryFilterOpen] = useState(false);
+  const [runTarget, setRunTarget] = useState<snippet_entity.Snippet | null>(null);
 
   // Load categories + initial list on mount.
   useEffect(() => {
@@ -344,6 +353,22 @@ export function SnippetsPage() {
                   <td className="px-4 py-2 text-xs font-mono text-muted-foreground">{s.Source || "user"}</td>
                   <td className="px-4 py-2">
                     <div className="flex items-center justify-end gap-1">
+                      {isRunnable(s.Category, categories) && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              aria-label={t("snippet.actions.run")}
+                              onClick={() => setRunTarget(s)}
+                            >
+                              <Play className="h-3.5 w-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t("snippet.actions.run")}</TooltipContent>
+                        </Tooltip>
+                      )}
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Button
@@ -421,6 +446,13 @@ export function SnippetsPage() {
         variant="destructive"
         onConfirm={onConfirmDelete}
       />
+
+      {runTarget && (
+        <SnippetAssetDrawer
+          snippet={runTarget}
+          onClose={() => setRunTarget(null)}
+        />
+      )}
     </div>
   );
 }
