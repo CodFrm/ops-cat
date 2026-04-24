@@ -9,30 +9,15 @@ import {
   Keyboard,
   Palette,
   Loader2,
-  ChevronDown,
-  ChevronRight,
-  Folder,
-  Server,
   Eye,
   EyeOff,
   Shuffle,
   AlertTriangle,
 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  Button,
-  Input,
-  Label,
-  Switch,
-  ScrollArea,
-} from "@opskat/ui";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, Button, Input, Label, Switch } from "@opskat/ui";
 import { backup_svc } from "../../../wailsjs/go/models";
 import { ExportToFile } from "../../../wailsjs/go/app/App";
-import { getAssetType } from "@/lib/assetTypes";
+import { AssetMultiSelect } from "@/components/asset/AssetMultiSelect";
 import { useAssetStore } from "@/stores/assetStore";
 import { useShortcutStore, DEFAULT_SHORTCUTS } from "@/stores/shortcutStore";
 import { useTerminalThemeStore } from "@/stores/terminalThemeStore";
@@ -53,20 +38,14 @@ function generatePassword(length = 20): string {
   return Array.from(arr, (b) => chars[b % chars.length]).join("");
 }
 
-function AssetIcon({ type }: { type: string }) {
-  const Icon = getAssetType(type)?.icon ?? Server;
-  return <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
-}
-
 export function ExportDialog({ open, onOpenChange, mode, onGistExport }: ExportDialogProps) {
   const { t } = useTranslation();
-  const { assets, groups } = useAssetStore();
+  const { assets } = useAssetStore();
   const { shortcuts } = useShortcutStore();
   const { customThemes } = useTerminalThemeStore();
 
   const [selectionMode, setSelectionMode] = useState<AssetSelectionMode>("all");
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [expandedGroups, setExpandedGroups] = useState<Set<number | string>>(new Set());
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
   const [includeCredentials, setIncludeCredentials] = useState(false);
   const [includeForwards, setIncludeForwards] = useState(true);
@@ -82,7 +61,7 @@ export function ExportDialog({ open, onOpenChange, mode, onGistExport }: ExportD
   useMemo(() => {
     if (open) {
       setSelectionMode("all");
-      setSelectedIds(new Set());
+      setSelectedIds([]);
       setIncludeCredentials(false);
       setIncludeForwards(true);
       setIncludePolicyGroups(true);
@@ -90,80 +69,21 @@ export function ExportDialog({ open, onOpenChange, mode, onGistExport }: ExportD
       setIncludeThemes(false);
       setPassword("");
       setShowPassword(false);
-      // Expand all groups by default
-      setExpandedGroups(new Set([...groups.map((g) => g.ID), "__ungrouped__"]));
     }
-  }, [open, groups]);
+  }, [open]);
 
-  // Group assets by groupId
-  const groupedAssets = useMemo(() => {
-    const map = new Map<number | string, typeof assets>();
-    for (const asset of assets) {
-      const gid = asset.GroupID || "__ungrouped__";
-      if (!map.has(gid)) map.set(gid, []);
-      map.get(gid)!.push(asset);
-    }
-    return map;
-  }, [assets]);
-
-  const groupOrder = useMemo(() => {
-    const order: (number | string)[] = groups.map((g) => g.ID);
-    if (groupedAssets.has("__ungrouped__")) order.push("__ungrouped__");
-    return order;
-  }, [groups, groupedAssets]);
-
-  const groupNameMap = useMemo(() => {
-    const map = new Map<number | string, string>();
-    for (const g of groups) map.set(g.ID, g.Name);
-    return map;
-  }, [groups]);
-
-  const toggleAsset = useCallback((id: number) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const toggleGroup = useCallback(
-    (groupId: number | string) => {
-      const items = groupedAssets.get(groupId) || [];
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        const allSelected = items.every((a) => prev.has(a.ID));
-        for (const item of items) {
-          if (allSelected) next.delete(item.ID);
-          else next.add(item.ID);
-        }
-        return next;
-      });
-    },
-    [groupedAssets]
-  );
-
-  const toggleExpand = useCallback((groupId: number | string) => {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(groupId)) next.delete(groupId);
-      else next.add(groupId);
-      return next;
-    });
-  }, []);
-
-  const selectAll = () => setSelectedIds(new Set(assets.map((a) => a.ID)));
-  const selectNone = () => setSelectedIds(new Set());
+  const selectAll = () => setSelectedIds(assets.map((a) => a.ID));
+  const selectNone = () => setSelectedIds([]);
 
   const canExport = useMemo(() => {
     if (includeCredentials && !password) return false;
-    if (selectionMode === "specific" && selectedIds.size === 0) return false;
+    if (selectionMode === "specific" && selectedIds.length === 0) return false;
     return true;
   }, [includeCredentials, password, selectionMode, selectedIds]);
 
   const buildOptions = useCallback((): backup_svc.ExportOptions => {
     const opts = new backup_svc.ExportOptions();
-    opts.asset_ids = selectionMode === "all" ? [] : Array.from(selectedIds);
+    opts.asset_ids = selectionMode === "all" ? [] : selectedIds;
     opts.include_credentials = includeCredentials;
     opts.include_forwards = includeForwards;
     opts.include_policy_groups = includePolicyGroups;
@@ -246,17 +166,17 @@ export function ExportDialog({ open, onOpenChange, mode, onGistExport }: ExportD
                 size="sm"
                 onClick={() => {
                   setSelectionMode("specific");
-                  if (selectedIds.size === 0) selectAll();
+                  if (selectedIds.length === 0) selectAll();
                 }}
               >
-                {t("backup.selectedAssets", { count: selectionMode === "specific" ? selectedIds.size : assets.length })}
+                {t("backup.selectedAssets", { count: selectionMode === "specific" ? selectedIds.length : assets.length })}
               </Button>
             </div>
 
             {selectionMode === "specific" && (
               <>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>{t("backup.selectedCount", { selected: selectedIds.size, total: assets.length })}</span>
+                  <span>{t("backup.selectedCount", { selected: selectedIds.length, total: assets.length })}</span>
                   <span className="ml-auto flex gap-2">
                     <button className="hover:text-foreground underline" onClick={selectAll}>
                       {t("backup.selectAll")}
@@ -266,75 +186,12 @@ export function ExportDialog({ open, onOpenChange, mode, onGistExport }: ExportD
                     </button>
                   </span>
                 </div>
-                <ScrollArea
-                  className="max-h-[30vh] border rounded-lg"
-                  style={{
-                    overflowY: "auto",
-                  }}
-                >
-                  <div className="p-2 space-y-0.5">
-                    {groupOrder.map((gid) => {
-                      const items = groupedAssets.get(gid) || [];
-                      if (items.length === 0) return null;
-                      const groupName =
-                        gid === "__ungrouped__" ? t("asset.ungrouped") : groupNameMap.get(gid) || String(gid);
-                      const expanded = expandedGroups.has(gid);
-                      const allSelected = items.every((a) => selectedIds.has(a.ID));
-                      const someSelected = !allSelected && items.some((a) => selectedIds.has(a.ID));
-
-                      return (
-                        <div key={String(gid)}>
-                          <div
-                            className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium hover:bg-muted cursor-pointer"
-                            onClick={() => toggleExpand(gid)}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={allSelected}
-                              ref={(el) => {
-                                if (el) el.indeterminate = someSelected;
-                              }}
-                              onChange={(e) => {
-                                e.stopPropagation();
-                                toggleGroup(gid);
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                              className="rounded"
-                            />
-                            {expanded ? (
-                              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                            ) : (
-                              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                            )}
-                            <Folder className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span>{groupName}</span>
-                            <span className="ml-auto text-muted-foreground">{items.length}</span>
-                          </div>
-                          {expanded && (
-                            <div>
-                              {items.map((asset) => (
-                                <label
-                                  key={asset.ID}
-                                  className="flex items-center gap-1.5 rounded-md pl-9 pr-2 py-1.5 text-sm cursor-pointer hover:bg-muted"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedIds.has(asset.ID)}
-                                    onChange={() => toggleAsset(asset.ID)}
-                                    className="rounded"
-                                  />
-                                  <AssetIcon type={asset.Type} />
-                                  <span className="truncate flex-1">{asset.Name}</span>
-                                  <span className="text-xs text-muted-foreground font-mono shrink-0">{asset.Type}</span>
-                                </label>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </ScrollArea>
+                <AssetMultiSelect
+                  values={selectedIds}
+                  onValuesChange={setSelectedIds}
+                  activeOnly={false}
+                  className="max-h-[30vh] border rounded-lg p-2"
+                />
               </>
             )}
           </div>

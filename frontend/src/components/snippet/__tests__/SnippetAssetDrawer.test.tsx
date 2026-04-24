@@ -20,7 +20,10 @@ const assets = [
 ];
 
 vi.mock("@/stores/assetStore", () => ({
-  useAssetStore: (selector: (s: unknown) => unknown) => selector({ assets }),
+  useAssetStore: (selector?: (s: unknown) => unknown) => {
+    const state = { assets, groups: [] };
+    return selector ? selector(state) : state;
+  },
 }));
 
 vi.mock("@/stores/snippetStore", () => ({

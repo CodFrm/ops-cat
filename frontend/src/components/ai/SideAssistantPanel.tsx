@@ -102,19 +102,22 @@ export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelPr
     }
   };
 
-  if (collapsed) return null;
-
   return (
     <div
       ref={panelRef}
-      className="relative overflow-visible shrink-0 transition-[width] duration-200"
-      style={{ width }}
+      className="relative overflow-hidden shrink-0 transition-[width] duration-200"
+      style={{ width: collapsed ? 0 : width }}
     >
-      <div className="relative flex h-full w-full shrink-0 flex-col border-l border-panel-divider bg-sidebar">
-        <div
-          className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize z-10 hover:bg-primary/20 active:bg-primary/30 transition-colors"
-          onMouseDown={handleResizeStart}
-        />
+      <div
+        className="relative flex h-full shrink-0 flex-col border-l border-panel-divider bg-sidebar"
+        style={{ width }}
+      >
+        {!collapsed && (
+          <div
+            className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize z-10 hover:bg-primary/20 active:bg-primary/30 transition-colors"
+            onMouseDown={handleResizeStart}
+          />
+        )}
         {resizing && <div className="fixed inset-0 z-50 cursor-col-resize" />}
 
         <div
