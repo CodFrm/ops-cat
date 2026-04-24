@@ -253,7 +253,9 @@ describe("aiStore", () => {
 
       expect(useAIStore.getState().conversations.find((conv) => conv.ID === 6)?.Title).toBe("第一次标题");
       expect(useTabStore.getState().tabs.find((tab) => tab.id === "ai-6")?.label).toBe("第一次标题");
-      expect((useTabStore.getState().tabs.find((tab) => tab.id === "ai-6")?.meta as AITabMeta)?.title).toBe("第一次标题");
+      expect(
+        (useTabStore.getState().tabs.find((tab) => tab.id === "ai-6")?.meta as AITabMeta)?.title
+      ).toBe("第一次标题");
     });
 
     it("ignores a stale fetchConversations result that returns after a rename starts", async () => {
