@@ -44,6 +44,7 @@ import {
 import { AIChatInput, type AIChatInputDraft, type AIChatInputHandle } from "@/components/ai/AIChatInput";
 import { UserMessage } from "@/components/ai/UserMessage";
 import { useTabStore, type AITabMeta } from "@/stores/tabStore";
+import { formatModKey } from "@/stores/shortcutStore";
 import { ToolBlock } from "@/components/ai/ToolBlock";
 import { ThinkingBlock } from "@/components/ai/ThinkingBlock";
 import { AgentBlock } from "@/components/ai/AgentBlock";
@@ -472,7 +473,7 @@ export function AIChatContent({
                 <span className="text-xs text-muted-foreground/40 select-none">
                   {sendOnEnter
                     ? `Enter ${t("ai.sendShortcutHint")}`
-                    : `${/mac/i.test(navigator.userAgent) ? "⌘+Enter" : "Ctrl+Enter"} ${t("ai.sendShortcutHint")}`}
+                    : `${formatModKey("Enter")} ${t("ai.sendShortcutHint")}`}
                 </span>
                 {sending ? (
                   <Button

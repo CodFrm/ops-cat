@@ -1,4 +1,4 @@
-.PHONY: dev run build build-embed clean install build-cli install-cli lint test test-cover install-skill devserver build-devserver-ui
+.PHONY: dev run build build-embed clean install build-cli install-cli lint test test-cover test-fixtures test-e2e install-skill devserver build-devserver-ui
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
@@ -55,9 +55,17 @@ lint:
 lint-fix:
 	golangci-lint run --timeout 10m --fix
 
+# 构建 e2e 测试用 WASM fixture（依赖本地 ../extensions 仓库）
+test-fixtures:
+	cd pkg/extension/testdata/tcp_e2e_fixture && GOOS=wasip1 GOARCH=wasm go build -o ../tcp_e2e_fixture.wasm .
+
 # 运行测试
 test:
 	go test ./internal/... ./cmd/opsctl/... ./pkg/... ./cmd/devserver/...
+
+# 运行 e2e 测试（需先 make test-fixtures 且 ../extensions 可用）
+test-e2e: test-fixtures
+	go test -tags=e2e ./pkg/extension/...
 
 # 测试覆盖率（生成 HTML 报告并在浏览器打开）
 test-cover:

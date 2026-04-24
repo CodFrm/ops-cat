@@ -36,7 +36,7 @@ import {
 } from "@opskat/ui";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { useQueryStore } from "@/stores/queryStore";
-import { isMac } from "@/stores/shortcutStore";
+import { isMac, formatModKey } from "@/stores/shortcutStore";
 import { ExecuteSQL } from "../../../wailsjs/go/app/App";
 import { QueryResultTable, CellEdit, SortDir } from "./QueryResultTable";
 import { SqlPreviewDialog } from "./SqlPreviewDialog";
@@ -73,7 +73,7 @@ function quoteIdent(name: string, driver?: string): string {
   return `\`${name}\``;
 }
 
-const REFRESH_SHORTCUT_LABEL = isMac ? "⌘R" : "Ctrl+R";
+const REFRESH_SHORTCUT_LABEL = formatModKey("KeyR");
 
 // 字符串 props 稳定 —— memo 避免 DatabasePanel 的 innerTabs 结构变化传导
 export const TableDataTab = memo(function TableDataTab(props: TableDataTabProps) {

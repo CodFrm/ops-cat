@@ -22,6 +22,8 @@ export function CallExtensionAction(arg1:string,arg2:string,arg3:string):Promise
 
 export function CallExtensionTool(arg1:string,arg2:string,arg3:string):Promise<string>;
 
+export function CancelExtensionAction(arg1:string):Promise<void>;
+
 export function CancelGitHubAuth():Promise<void>;
 
 export function CancelSSHConnect(arg1:string):Promise<void>;

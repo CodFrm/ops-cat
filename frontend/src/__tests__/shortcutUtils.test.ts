@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { matchShortcut, formatBinding, DEFAULT_SHORTCUTS, type ShortcutBinding } from "../stores/shortcutStore";
+import {
+  matchShortcut,
+  formatBinding,
+  formatModKey,
+  DEFAULT_SHORTCUTS,
+  type ShortcutBinding,
+} from "../stores/shortcutStore";
 
 // In happy-dom test env, isMac = false (non-Mac).
 
@@ -86,5 +92,26 @@ describe("formatBinding", () => {
   it("formats key without modifiers", () => {
     const binding: ShortcutBinding = { code: "F5", mod: false, shift: false, alt: false };
     expect(formatBinding(binding)).toBe("F5");
+  });
+});
+
+describe("formatModKey", () => {
+  // happy-dom env → isMac = false → Windows-style output
+
+  it("formats letter keys", () => {
+    expect(formatModKey("KeyC")).toBe("Ctrl+C");
+    expect(formatModKey("KeyR")).toBe("Ctrl+R");
+  });
+
+  it("formats Enter", () => {
+    expect(formatModKey("Enter")).toBe("Ctrl+Enter");
+  });
+
+  it("applies shift modifier", () => {
+    expect(formatModKey("KeyF", { shift: true })).toBe("Ctrl+Shift+F");
+  });
+
+  it("applies alt modifier", () => {
+    expect(formatModKey("KeyD", { alt: true })).toBe("Ctrl+Alt+D");
   });
 });

@@ -10,6 +10,10 @@ export function CallExtensionTool(arg1, arg2, arg3) {
   return window['go']['app']['App']['CallExtensionTool'](arg1, arg2, arg3);
 }
 
+export function CancelExtensionAction(arg1) {
+  return window['go']['app']['App']['CancelExtensionAction'](arg1);
+}
+
 export function CancelGitHubAuth() {
   return window['go']['app']['App']['CancelGitHubAuth']();
 }
