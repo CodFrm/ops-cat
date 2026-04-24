@@ -347,4 +347,3 @@ func (s *snippetSvc) validateSeed(seed SeedDef) error {
 	}
 	return nil
 }
-

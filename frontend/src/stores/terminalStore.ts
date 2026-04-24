@@ -293,7 +293,12 @@ interface TerminalState {
   connectingAssetIds: Set<number>;
   connections: Record<string, ConnectionState>;
 
-  connect: (asset: asset_entity.Asset, password?: string, forceNew?: boolean, opts?: { initialInput?: string }) => Promise<string>;
+  connect: (
+    asset: asset_entity.Asset,
+    password?: string,
+    forceNew?: boolean,
+    opts?: { initialInput?: string }
+  ) => Promise<string>;
   reconnect: (tabId: string) => void;
   disconnect: (sessionId: string) => void;
   markClosed: (sessionId: string) => void;

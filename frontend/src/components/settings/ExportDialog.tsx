@@ -14,7 +14,17 @@ import {
   Shuffle,
   AlertTriangle,
 } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, Button, Input, Label, Switch } from "@opskat/ui";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  Button,
+  Input,
+  Label,
+  Switch,
+} from "@opskat/ui";
 import { backup_svc } from "../../../wailsjs/go/models";
 import { ExportToFile } from "../../../wailsjs/go/app/App";
 import { AssetMultiSelect } from "@/components/asset/AssetMultiSelect";
@@ -169,7 +179,9 @@ export function ExportDialog({ open, onOpenChange, mode, onGistExport }: ExportD
                   if (selectedIds.length === 0) selectAll();
                 }}
               >
-                {t("backup.selectedAssets", { count: selectionMode === "specific" ? selectedIds.length : assets.length })}
+                {t("backup.selectedAssets", {
+                  count: selectionMode === "specific" ? selectedIds.length : assets.length,
+                })}
               </Button>
             </div>
 

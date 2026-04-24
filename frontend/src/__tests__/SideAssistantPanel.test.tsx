@@ -38,11 +38,12 @@ describe("SideAssistantPanel", () => {
     cleanup();
   });
 
-  it("collapsed state renders nothing (triggered from left Sidebar / shortcut instead)", () => {
+  it("collapsed state collapses outer width to 0 (panel stays in DOM for width animation)", () => {
     const { container } = render(<SideAssistantPanel collapsed={true} onToggle={() => {}} />);
-    expect(container).toBeEmptyDOMElement();
-    expect(screen.queryByText("ai.sidebar.title")).not.toBeInTheDocument();
-    expect(screen.queryByText("ai.sidebar.emptyGuide")).not.toBeInTheDocument();
+    // Outer wrapper animates via width; collapsed means width: 0.
+    const outer = container.firstChild as HTMLElement;
+    expect(outer).toBeTruthy();
+    expect(outer.style.width).toBe("0px");
   });
 
   it("expanded with no conversation shows empty guide", () => {

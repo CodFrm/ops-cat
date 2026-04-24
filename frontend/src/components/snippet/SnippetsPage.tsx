@@ -447,12 +447,7 @@ export function SnippetsPage() {
         onConfirm={onConfirmDelete}
       />
 
-      {runTarget && (
-        <SnippetAssetDrawer
-          snippet={runTarget}
-          onClose={() => setRunTarget(null)}
-        />
-      )}
+      {runTarget && <SnippetAssetDrawer snippet={runTarget} onClose={() => setRunTarget(null)} />}
     </div>
   );
 }

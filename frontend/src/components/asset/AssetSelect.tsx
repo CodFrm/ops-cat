@@ -19,7 +19,14 @@ interface AssetSelectProps {
  * Supports search and type filtering. Node icons come from each asset/group's own
  * Icon field (see useAssetTree / buildAssetTree).
  */
-export function AssetSelect({ value, onValueChange, filterType, excludeIds, placeholder, className }: AssetSelectProps) {
+export function AssetSelect({
+  value,
+  onValueChange,
+  filterType,
+  excludeIds,
+  placeholder,
+  className,
+}: AssetSelectProps) {
   const { t } = useTranslation();
   const tree = useAssetTree({ filterType, excludeIds });
 
