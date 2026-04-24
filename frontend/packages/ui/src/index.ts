@@ -22,3 +22,4 @@ export * from "./components/tabs";
 export * from "./components/textarea";
 export * from "./components/tooltip";
 export * from "./components/tree-select";
+export * from "./components/tree-check-list";

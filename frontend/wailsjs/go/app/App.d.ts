@@ -8,6 +8,8 @@ import {conversation_entity} from '../models';
 import {forward_entity} from '../models';
 import {group_entity} from '../models';
 import {credential_entity} from '../models';
+import {snippet_svc} from '../models';
+import {snippet_entity} from '../models';
 import {backup_svc} from '../models';
 import {extension_svc} from '../models';
 import {extension} from '../models';
@@ -54,6 +56,8 @@ export function CreatePasswordCredential(arg1:string,arg2:string,arg3:string,arg
 
 export function CreatePolicyGroup(arg1:policy_group_entity.PolicyGroup):Promise<policy_group_entity.PolicyGroup>;
 
+export function CreateSnippet(arg1:snippet_svc.CreateReq):Promise<snippet_entity.Snippet>;
+
 export function DeleteAIProvider(arg1:number):Promise<void>;
 
 export function DeleteAsset(arg1:number):Promise<void>;
@@ -68,6 +72,8 @@ export function DeleteGroup(arg1:number,arg2:boolean):Promise<void>;
 
 export function DeletePolicyGroup(arg1:string):Promise<void>;
 
+export function DeleteSnippet(arg1:number):Promise<void>;
+
 export function DetectOpsctl():Promise<app.OpsctlInfo>;
 
 export function DetectSkills():Promise<Array<app.SkillTarget>>;
@@ -79,6 +85,8 @@ export function DisconnectSSH(arg1:string):Promise<void>;
 export function DownloadAndInstallUpdate(arg1:boolean):Promise<void>;
 
 export function DrainAIFlushAck():Promise<void>;
+
+export function DuplicateSnippet(arg1:number):Promise<snippet_entity.Snippet>;
 
 export function EnableExtension(arg1:string):Promise<void>;
 
@@ -156,6 +164,10 @@ export function GetSSHPoolConnections():Promise<Array<sshpool.PoolEntryInfo>>;
 
 export function GetSkillPreview():Promise<string>;
 
+export function GetSnippet(arg1:number):Promise<snippet_entity.Snippet>;
+
+export function GetSnippetLastAssets(arg1:number):Promise<Array<number>>;
+
 export function GetStoredGitHubUser():Promise<string>;
 
 export function GetSystemStatus():Promise<Array<status.Entry>>;
@@ -212,6 +224,10 @@ export function ListMongoDatabases(arg1:number):Promise<string>;
 
 export function ListPolicyGroups(arg1:string):Promise<Array<policy_group_entity.PolicyGroupItem>>;
 
+export function ListSnippetCategories():Promise<Array<snippet_svc.Category>>;
+
+export function ListSnippets(arg1:snippet_svc.ListReq):Promise<Array<snippet_entity.Snippet>>;
+
 export function LoadConversationMessages(arg1:number):Promise<Array<app.ConversationDisplayMessage>>;
 
 export function MoveAsset(arg1:number,arg2:string):Promise<void>;
@@ -231,6 +247,8 @@ export function PreviewSSHConfig():Promise<import_svc.PreviewResult>;
 export function PreviewTabbyConfig():Promise<import_svc.PreviewResult>;
 
 export function QueueAIMessage(arg1:number,arg2:string,arg3:Array<ai.MentionedAsset>):Promise<void>;
+
+export function RecordSnippetUse(arg1:number):Promise<void>;
 
 export function ReloadExtensions():Promise<void>;
 
@@ -280,6 +298,8 @@ export function SetDownloadMirror(arg1:string):Promise<void>;
 
 export function SetLanguage(arg1:string):Promise<void>;
 
+export function SetSnippetLastAssets(arg1:number,arg2:Array<number>):Promise<void>;
+
 export function SetUpdateChannel(arg1:string):Promise<void>;
 
 export function SplitSSH(arg1:string,arg2:number,arg3:number):Promise<string>;
@@ -325,6 +345,8 @@ export function UpdateForwardConfig(arg1:number,arg2:string,arg3:number,arg4:Arr
 export function UpdateGroup(arg1:group_entity.Group):Promise<void>;
 
 export function UpdatePolicyGroup(arg1:policy_group_entity.PolicyGroup):Promise<void>;
+
+export function UpdateSnippet(arg1:snippet_svc.UpdateReq):Promise<snippet_entity.Snippet>;
 
 export function WaitAIFlushAck():Promise<any>;
 

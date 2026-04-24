@@ -134,6 +134,37 @@ Use **gitmoji** for commit messages. Common prefixes:
 - i18n keys namespaced under `"common"` — use `t("key.subkey")`
 - Version info embedded via ldflags at build time
 
+### Code smells to avoid — reuse first, SOLID always
+
+**Before writing any new component, hook, util, or Go helper: grep the codebase first.** If similar behavior already exists, extend or wrap it — do NOT fork a parallel copy. Every parallel copy we've shipped has drifted from the canonical one (missing features, inconsistent UX, stale bugfixes) and turned into tech debt within weeks.
+
+Concrete smells we've hit and keep hitting:
+
+- **Parallel hand-rolled UI instead of the shared primitive.**
+  If a shared component exists — `AssetSelect` / `AssetMultiSelect` / `GroupSelect`, `TreeSelect` / `TreeCheckList`, `ConfirmDialog`, `PasswordSourceField`, `IconPicker`, terminal panes, query result grid, drawer/dialog wrappers, tab system, shortcut store — use it. Don't re-derive expand/collapse state, tri-state checkboxes, search/pinyin, keyboard shortcuts, approval flows, or icon resolution in a leaf component.
+- **Hardcoded defaults instead of reading the entity's own field.**
+  When an entity carries a user-configured property (asset/group `Icon`, asset `Type`, `Color`, policy group, etc.), render/resolve it via the canonical helper (`getIconComponent` + `getIconColor`, `getAssetType`, etc.), falling back to a generic default only when the field is empty. Never slap a fixed constant over every row.
+- **Duplicating filters, data loading, or derivations at call sites.**
+  Common filters (`Status === 1`, type filter, excludeIds, sort order) and data access belong in the shared hook/store (`useAssetStore`, `useAssetTree`, `useGroupTree`, `useShortcutStore`, …) — leaf components consume, not re-fetch. If a caller needs a new filter, add it to the hook, don't inline a new one.
+- **Fat Wails binding methods in `internal/app/*.go`.**
+  Binding methods should be thin: parse args, call a service, return. Business rules live in `internal/service/`; persistence in `internal/repository/`. If you're writing a query, a policy check, or a retry loop inside `App`, push it down a layer — otherwise the logic becomes unreachable from tests and from `opsctl`.
+- **Re-implementing cross-cutting concerns.**
+  Logging, audit, AI tool registration, approval flow, credential encryption, connection pools, i18n keys — all have canonical entry points (`internal/ai/`, `internal/approval/`, `internal/sshpool/`, `internal/connpool/`, `src/i18n`). Don't spin up a second logger, a second approval socket, or a parallel i18n scheme.
+
+SOLID reminders — the recurring regressions map back to these:
+
+- **SRP** — one responsibility per unit. A picker renders a picker; it doesn't own filtering, data fetching, icon theming, and Wails calls all at once.
+- **OCP** — extend the shared layer (add a prop / hook option / strategy) to absorb a new case; don't fork a parallel copy to add the feature.
+- **LSP** — when swapping a hand-rolled widget for a shared one, preserve the caller contract (value type, empty state, default filters like `activeOnly`).
+- **ISP** — keep prop and interface surfaces minimal. Prefer option-object props (`UseAssetTreeOptions`-style) over ten booleans; don't leak every internal knob.
+- **DIP** — UI depends on hooks/stores; services depend on repo interfaces; binding methods depend on services. Never skip layers to "save a line."
+
+Rules of thumb:
+
+- If a new file imports a primitive (`lucide-react`, tree component, Radix primitive, `ConfirmDialog`, xterm, etc.) **and** an entity list/store, you are probably re-implementing a picker/pane/dialog that already exists — stop and grep first.
+- If you're about to copy–paste more than ~10 lines from another file, that's the signal to extract, not copy.
+- If a fix has to be applied to two near-identical blocks, the second block is the bug — delete it, call the first one.
+
 ### ⚠️ Generated / auto-managed files — DO NOT edit by hand
 
 These files are produced by tools and will be overwritten. Change the source instead, then regenerate.

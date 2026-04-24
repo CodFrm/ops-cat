@@ -19,6 +19,7 @@ import (
 	"github.com/opskat/opskat/internal/service/credential_resolver"
 	"github.com/opskat/opskat/internal/service/extension_svc"
 	"github.com/opskat/opskat/internal/service/sftp_svc"
+	"github.com/opskat/opskat/internal/service/snippet_svc"
 	"github.com/opskat/opskat/internal/service/ssh_svc"
 	"github.com/opskat/opskat/internal/sshpool"
 	"github.com/opskat/opskat/pkg/extension"
@@ -145,12 +146,26 @@ func (a *App) Startup(ctx context.Context) {
 			zap.L(),
 			func(b *extension.Bridge) { ai.SetExecToolExecutor(b) },
 			func() { wailsRuntime.EventsEmit(a.ctx, "ext:reload", nil) },
+			&snippetExtensionHook{}, // proxies into snippet_svc.Snippet() lazily
 		)
+
+		// Wire snippet category registry → extension manager. The provider is
+		// re-queried every time snippet_svc.RefreshCategories() fires (on
+		// Install/Uninstall/Enable/Disable of extensions).
+		if svc := snippet_svc.Snippet(); svc != nil {
+			svc.Registry().SetExtensionProvider(snippet_svc.ExtensionCategoryProviderFunc(func() []snippet_svc.ExtensionCategory {
+				return collectExtensionCategories(mgr)
+			}))
+		}
 
 		// 异步初始化扩展，避免阻塞 Startup（WASM 编译较慢）
 		go func() {
 			if err := a.extSvc.Init(ctx); err != nil {
 				zap.L().Error("extension init failed", zap.Error(err))
+			}
+			// 扩展 Init 完成后刷新 snippet 分类表，以吸收预装扩展声明的分类。
+			if svc := snippet_svc.Snippet(); svc != nil {
+				svc.RefreshCategories()
 			}
 			// 通知前端扩展已就绪
 			wailsRuntime.EventsEmit(a.ctx, "ext:ready", nil)

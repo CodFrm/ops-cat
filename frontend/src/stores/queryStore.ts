@@ -98,7 +98,7 @@ interface QueryState {
   redisStates: Record<string, RedisTabState>;
   mongoStates: Record<string, MongoDBTabState>;
 
-  openQueryTab: (asset: asset_entity.Asset) => void;
+  openQueryTab: (asset: asset_entity.Asset, opts?: { initialSQL?: string; initialMongo?: string }) => void;
 
   // Database actions
   loadDatabases: (tabId: string) => Promise<void>;
@@ -249,13 +249,23 @@ export const useQueryStore = create<QueryState>((set, get) => ({
   redisStates: {},
   mongoStates: {},
 
-  openQueryTab: (asset) => {
+  openQueryTab: (asset, opts) => {
     const tabId = makeTabId(asset.ID);
     const tabStore = useTabStore.getState();
 
-    // If already open, activate
+    // If already open, activate and optionally inject initial content
     if (tabStore.tabs.some((t) => t.id === tabId)) {
       tabStore.activateTab(tabId);
+      if (asset.Type === "database" && opts?.initialSQL) {
+        get().openSqlTab(tabId, undefined, opts.initialSQL);
+      } else if (asset.Type === "mongodb" && opts?.initialMongo) {
+        get().openMongoQueryTab(tabId);
+        const mongoState = get().mongoStates[tabId];
+        const innerId = mongoState?.activeInnerTabId;
+        if (innerId) {
+          get().updateMongoInnerTab(tabId, innerId, { queryText: opts.initialMongo });
+        }
+      }
       return;
     }
 
@@ -290,10 +300,21 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       set((s) => ({
         dbStates: { ...s.dbStates, [tabId]: defaultDbState() },
       }));
+      if (opts?.initialSQL) {
+        get().openSqlTab(tabId, undefined, opts.initialSQL);
+      }
     } else if (asset.Type === "mongodb") {
       set((s) => ({
         mongoStates: { ...s.mongoStates, [tabId]: defaultMongoState() },
       }));
+      if (opts?.initialMongo) {
+        get().openMongoQueryTab(tabId);
+        const mongoState = get().mongoStates[tabId];
+        const innerId = mongoState?.activeInnerTabId;
+        if (innerId) {
+          get().updateMongoInnerTab(tabId, innerId, { queryText: opts.initialMongo });
+        }
+      }
     } else {
       set((s) => ({
         redisStates: { ...s.redisStates, [tabId]: defaultRedisState() },

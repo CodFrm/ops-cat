@@ -27,7 +27,8 @@
     "appearance": "外观",
     "ai": "AI 助手",
     "audit": "审计日志",
-    "forward": "端口转发"
+    "forward": "端口转发",
+    "snippets": "代码片段"
   },
   "forward": {
     "create": "新建配置",
@@ -1180,5 +1181,80 @@
     "noTools": "无工具",
     "noPolicies": "无策略组",
     "noPages": "无页面"
+  },
+  "snippet": {
+    "title": "代码片段",
+    "newButton": "新建片段",
+    "searchPlaceholder": "搜索名称 / 描述 / 内容",
+    "filterByCategory": "分类",
+    "filterByTag": "标签",
+    "allCategories": "全部分类",
+    "emptyState": "暂无片段，点击“新建片段”开始创建。",
+    "emptyStateFiltered": "没有符合当前筛选条件的片段。",
+    "readOnlyTooltip": "由扩展管理 — 请复制后再编辑",
+    "unknownCategory": "未知分类:{{name}}",
+    "unknownCategoryTooltip": "该片段的分类已不存在，提供此分类的扩展可能已被卸载。",
+    "orphanedSuffix": "（孤立）",
+    "columns": {
+      "category": "分类",
+      "name": "名称",
+      "updated": "更新时间",
+      "source": "来源",
+      "actions": "操作"
+    },
+    "form": {
+      "createTitle": "新建片段",
+      "editTitle": "编辑片段",
+      "labelCategory": "分类",
+      "labelName": "名称",
+      "labelDescription": "描述",
+      "labelContent": "内容",
+      "duplicateNameHint": "同分类下已有同名片段。"
+    },
+    "actions": {
+      "run": "运行",
+      "edit": "编辑",
+      "duplicate": "复制",
+      "delete": "删除",
+      "cancel": "取消",
+      "save": "保存",
+      "create": "创建"
+    },
+    "runDrawer": {
+      "title": "选择要运行的资产",
+      "description": "多选目标资产，运行片段到各资产的编辑器或终端",
+      "searchPlaceholder": "搜索资产…",
+      "noAssets": "没有可运行的资产"
+    },
+    "confirmDelete": {
+      "title": "删除片段？",
+      "message": "\"{{name}}\" 将被永久删除，此操作不可撤销。"
+    },
+    "toast": {
+      "created": "片段已创建",
+      "updated": "片段已更新",
+      "deleted": "片段已删除",
+      "duplicated": "片段已复制"
+    },
+    "categories": {
+      "shell": "Shell",
+      "sql": "SQL",
+      "redis": "Redis",
+      "mongo": "Mongo",
+      "prompt": "Prompt"
+    },
+    "popover": {
+      "searchPlaceholder": "搜索片段…",
+      "insert": "插入",
+      "sendWithEnter": "插入并回车",
+      "empty": "此场景暂无片段。",
+      "openManager": "到代码片段页创建",
+      "triggerButton": "插入代码片段"
+    },
+    "slash": {
+      "noMatch": "无匹配的片段",
+      "empty": "还没有 prompt 片段",
+      "openManager": "到代码片段页创建"
+    }
   }
 }
