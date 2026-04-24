@@ -1074,20 +1074,36 @@ func (a *App) OpenLogsDir() error {
 }
 
 // GetBugReportInfo 返回用于 Bug 反馈模板预填的系统信息。
-// OSLabel 需要与 .github/ISSUE_TEMPLATE/bug_report.yml 中 os 下拉选项保持一致。
 func (a *App) GetBugReportInfo() BugReportInfo {
+	osVer := detectOSVersion()
+	archSuffix := runtime.GOARCH
 	osLabel := ""
 	switch runtime.GOOS {
 	case "darwin":
 		if runtime.GOARCH == "arm64" {
-			osLabel = "macOS (Apple Silicon)"
+			archSuffix = "Apple Silicon"
 		} else {
-			osLabel = "macOS (Intel)"
+			archSuffix = "Intel"
+		}
+		if osVer != "" {
+			osLabel = fmt.Sprintf("macOS %s (%s)", osVer, archSuffix)
+		} else {
+			osLabel = fmt.Sprintf("macOS (%s)", archSuffix)
 		}
 	case "windows":
-		osLabel = "Windows"
+		if osVer != "" {
+			osLabel = fmt.Sprintf("Windows %s (%s)", osVer, archSuffix)
+		} else {
+			osLabel = fmt.Sprintf("Windows (%s)", archSuffix)
+		}
 	case "linux":
-		osLabel = "Linux"
+		if osVer != "" {
+			osLabel = fmt.Sprintf("%s (%s)", osVer, archSuffix)
+		} else {
+			osLabel = fmt.Sprintf("Linux (%s)", archSuffix)
+		}
+	default:
+		osLabel = fmt.Sprintf("%s (%s)", runtime.GOOS, archSuffix)
 	}
 	return BugReportInfo{
 		Version: configs.Version,
@@ -1096,6 +1112,42 @@ func (a *App) GetBugReportInfo() BugReportInfo {
 		Arch:    runtime.GOARCH,
 		OSLabel: osLabel,
 	}
+}
+
+// detectOSVersion 尝试获取当前操作系统版本号/发行版名称，失败返回空串。
+func detectOSVersion() string {
+	switch runtime.GOOS {
+	case "darwin":
+		out, err := exec.Command("sw_vers", "-productVersion").Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	case "linux":
+		data, err := os.ReadFile("/etc/os-release")
+		if err != nil {
+			return ""
+		}
+		for line := range strings.SplitSeq(string(data), "\n") {
+			if name, ok := strings.CutPrefix(line, "PRETTY_NAME="); ok {
+				return strings.Trim(strings.TrimSpace(name), `"`)
+			}
+		}
+		return ""
+	case "windows":
+		out, err := exec.Command("cmd", "/c", "ver").Output()
+		if err != nil {
+			return ""
+		}
+		s := strings.TrimSpace(string(out))
+		if i := strings.Index(s, "[Version "); i >= 0 {
+			if j := strings.Index(s[i:], "]"); j > 0 {
+				return strings.TrimPrefix(s[i:i+j], "[Version ")
+			}
+		}
+		return ""
+	}
+	return ""
 }
 
 // GetUpdateChannel 获取当前更新通道

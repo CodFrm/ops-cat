@@ -33,15 +33,11 @@ body:
     validations:
       required: false
 
-  - type: dropdown
+  - type: input
     id: os
     attributes:
       label: 操作系统 / OS
-      options:
-        - macOS (Apple Silicon)
-        - macOS (Intel)
-        - Windows
-        - Linux
+      placeholder: 例如 macOS 14.5 (arm64) / Windows 11 / Ubuntu 22.04
     validations:
       required: false
 

@@ -115,10 +115,6 @@ export function UpdateSection() {
       const version = info.version + (info.commit ? ` (${info.commit})` : "");
       if (version.trim()) params.set("version", version);
       if (info.osLabel) params.set("os", info.osLabel);
-      params.set(
-        "logs",
-        `OpsKat: ${version || "(unknown)"}\nOS: ${info.os}/${info.arch}`,
-      );
     } catch {
       // 取不到诊断信息时仍然打开模板，让用户手动填写
     }
