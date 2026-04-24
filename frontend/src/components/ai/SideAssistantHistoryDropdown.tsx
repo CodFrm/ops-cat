@@ -3,6 +3,7 @@ import { MessageSquare, Plus, Search, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger } from "@opskat/ui";
 import { useAIStore } from "@/stores/aiStore";
+import { useTabStore, type AITabMeta } from "@/stores/tabStore";
 
 function formatRelativeTime(timestamp: number, locale: string): string {
   const now = Date.now() / 1000;
@@ -32,10 +33,19 @@ export function SideAssistantHistoryDropdown({
   const { t, i18n } = useTranslation();
   const locale = i18n.language || "zh-CN";
   const { conversations, deleteConversation, sidebarTabs } = useAIStore();
-  const openInTabIds = useMemo(
-    () => new Set(sidebarTabs.map((tab) => tab.conversationId).filter((x): x is number => x != null)),
-    [sidebarTabs]
-  );
+  const workspaceTabs = useTabStore((s) => s.tabs);
+  const openInTabIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const tab of sidebarTabs) {
+      if (tab.conversationId != null) ids.add(tab.conversationId);
+    }
+    for (const tab of workspaceTabs) {
+      if (tab.type !== "ai") continue;
+      const convId = (tab.meta as AITabMeta).conversationId;
+      if (convId != null) ids.add(convId);
+    }
+    return ids;
+  }, [sidebarTabs, workspaceTabs]);
 
   const [query, setQuery] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);

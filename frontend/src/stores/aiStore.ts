@@ -599,7 +599,14 @@ function getConversationStatus(convId: number | null): SidebarTabStatus {
   const state = useAIStore.getState();
   const messages = state.conversationMessages[convId] || [];
   const streaming = state.conversationStreaming[convId] || { sending: false, pendingQueue: [] };
-  const lastAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant");
+  let lastAssistantMessage: (typeof messages)[number] | undefined;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role === "assistant") {
+      lastAssistantMessage = message;
+      break;
+    }
+  }
   if (!lastAssistantMessage && messages.length === 0) return null;
 
   if (visitBlockStatuses(lastAssistantMessage?.blocks, (status) => status === "pending_confirm")) {
@@ -1471,13 +1478,26 @@ export const useAIStore = create<AIState>((set, get) => {
           const activeSidebarTabIndex = state.sidebarTabs.findIndex((tab) => tab.id === state.activeSidebarTabId);
           const activeSidebarTabWasRemoved =
             activeSidebarTabIndex !== -1 && state.sidebarTabs[activeSidebarTabIndex]?.conversationId === id;
+          const findFallbackSidebarTabId = () => {
+            if (activeSidebarTabIndex === -1) {
+              return nextSidebarTabs[0]?.id ?? null;
+            }
+            // 以原数组里 active tab 的位置为基准，先向右再向左扫描第一个未被删除的 tab，
+            // 避免 filter 后用旧 index 去索引新数组带来的偏移错误。
+            for (let i = activeSidebarTabIndex + 1; i < state.sidebarTabs.length; i += 1) {
+              const candidate = state.sidebarTabs[i];
+              if (candidate && candidate.conversationId !== id) return candidate.id;
+            }
+            for (let i = activeSidebarTabIndex - 1; i >= 0; i -= 1) {
+              const candidate = state.sidebarTabs[i];
+              if (candidate && candidate.conversationId !== id) return candidate.id;
+            }
+            return null;
+          };
           const nextActiveSidebarTabId = nextSidebarTabs.some((tab) => tab.id === state.activeSidebarTabId)
             ? state.activeSidebarTabId
             : activeSidebarTabWasRemoved
-              ? (nextSidebarTabs[activeSidebarTabIndex]?.id ??
-                nextSidebarTabs[activeSidebarTabIndex - 1]?.id ??
-                nextSidebarTabs[0]?.id ??
-                null)
+              ? findFallbackSidebarTabId()
               : (nextSidebarTabs[0]?.id ?? null);
           const { [id]: _removedMessages, ...conversationMessages } = state.conversationMessages;
           const { [id]: _removedStreaming, ...conversationStreaming } = state.conversationStreaming;
@@ -2016,12 +2036,66 @@ export const useAIStore = create<AIState>((set, get) => {
   };
 });
 
+const SIDEBAR_PERSIST_DEBOUNCE_MS = 300;
+let sidebarPersistTimer: ReturnType<typeof setTimeout> | null = null;
+let sidebarPersistPending: { tabs: SidebarAITab[]; activeSidebarTabId: string | null } | null = null;
+
+function flushSidebarPersist() {
+  if (sidebarPersistTimer) {
+    clearTimeout(sidebarPersistTimer);
+    sidebarPersistTimer = null;
+  }
+  if (sidebarPersistPending) {
+    const { tabs, activeSidebarTabId } = sidebarPersistPending;
+    sidebarPersistPending = null;
+    persistSidebarTabs(tabs, activeSidebarTabId);
+  }
+}
+
+function scheduleSidebarPersist(tabs: SidebarAITab[], activeSidebarTabId: string | null) {
+  sidebarPersistPending = { tabs, activeSidebarTabId };
+  if (sidebarPersistTimer) return;
+  sidebarPersistTimer = setTimeout(() => {
+    sidebarPersistTimer = null;
+    flushSidebarPersist();
+  }, SIDEBAR_PERSIST_DEBOUNCE_MS);
+}
+
+function didSidebarStructureChange(next: SidebarAITab[], prev: SidebarAITab[]) {
+  if (next.length !== prev.length) return true;
+  for (let i = 0; i < next.length; i += 1) {
+    const a = next[i];
+    const b = prev[i];
+    if (a.id !== b.id || a.conversationId !== b.conversationId || a.title !== b.title) return true;
+  }
+  return false;
+}
+
 persistSidebarTabs(useAIStore.getState().sidebarTabs, useAIStore.getState().activeSidebarTabId);
 useAIStore.subscribe((state, prevState) => {
-  if (state.sidebarTabs !== prevState.sidebarTabs || state.activeSidebarTabId !== prevState.activeSidebarTabId) {
+  if (state.sidebarTabs === prevState.sidebarTabs && state.activeSidebarTabId === prevState.activeSidebarTabId) {
+    return;
+  }
+  // 结构性变更（增删 tab/切换激活）需要立刻落盘，避免刷新丢失；
+  // 仅 uiState 字段变化（滚动位置、输入草稿）走 debounce，避免高频 localStorage 写入阻塞主线程。
+  if (
+    state.activeSidebarTabId !== prevState.activeSidebarTabId ||
+    didSidebarStructureChange(state.sidebarTabs, prevState.sidebarTabs)
+  ) {
+    flushSidebarPersist();
     persistSidebarTabs(state.sidebarTabs, state.activeSidebarTabId);
+  } else {
+    scheduleSidebarPersist(state.sidebarTabs, state.activeSidebarTabId);
   }
 });
+
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", flushSidebarPersist);
+  window.addEventListener("pagehide", flushSidebarPersist);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushSidebarPersist();
+  });
+}
 
 // === Close Hook: clean up when tabStore closes an AI tab ===
 
