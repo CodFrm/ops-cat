@@ -12,6 +12,8 @@ import {
 import { BrowserOpenURL, EventsOn } from "../../wailsjs/runtime/runtime";
 
 describe("UpdateSection", () => {
+  const repositoryURL = "https://github.com/opskat/opskat";
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(EventsOn).mockReturnValue(vi.fn());
@@ -22,11 +24,13 @@ describe("UpdateSection", () => {
     vi.mocked(GetAvailableMirrors).mockResolvedValue([]);
   });
 
-  it("opens the project repository from settings", async () => {
+  it("shows and opens the project repository from settings", async () => {
     render(<UpdateSection />);
 
-    await userEvent.click(screen.getByRole("button", { name: "appUpdate.openRepository" }));
+    expect(screen.getByText(repositoryURL)).toBeInTheDocument();
 
-    expect(BrowserOpenURL).toHaveBeenCalledWith("https://github.com/opskat/opskat");
+    await userEvent.click(screen.getByRole("button", { name: repositoryURL }));
+
+    expect(BrowserOpenURL).toHaveBeenCalledWith(repositoryURL);
   });
 });

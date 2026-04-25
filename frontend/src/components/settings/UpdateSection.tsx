@@ -37,7 +37,7 @@ import {
   SetDebugMode,
   OpenLogsDir,
 } from "../../../wailsjs/go/app/App";
-import { Bug, Download, FolderOpen, Github, Loader2, ExternalLink, RefreshCw } from "lucide-react";
+import { Bug, Download, FolderOpen, Loader2, ExternalLink, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { BrowserOpenURL, Quit } from "../../../wailsjs/runtime/runtime";
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
@@ -224,6 +224,20 @@ export function UpdateSection() {
           <span className="font-mono text-xs">{currentVersion || "dev"}</span>
         </div>
 
+        <div className="flex justify-between items-center gap-3 text-sm">
+          <span className="text-muted-foreground">{t("appUpdate.openRepository")}</span>
+          <Button
+            onClick={handleOpenRepository}
+            size="sm"
+            variant="link"
+            className="h-auto min-w-0 p-0 text-right text-xs font-mono"
+            title={t("appUpdate.openRepositoryDesc")}
+          >
+            <span className="truncate">{REPOSITORY_URL}</span>
+            <ExternalLink className="ml-1 h-3 w-3 shrink-0" />
+          </Button>
+        </div>
+
         <div className="flex justify-between items-center text-sm">
           <span className="text-muted-foreground">{t("appUpdate.updateChannel")}</span>
           <Select value={channel} onValueChange={handleChannelChange}>
@@ -296,10 +310,6 @@ export function UpdateSection() {
           <Button onClick={handleReportBug} size="sm" variant="outline" title={t("appUpdate.reportBugDesc")}>
             <Bug className="h-3.5 w-3.5 mr-1.5" />
             {t("appUpdate.reportBug")}
-          </Button>
-          <Button onClick={handleOpenRepository} size="sm" variant="outline" title={t("appUpdate.openRepositoryDesc")}>
-            <Github className="h-3.5 w-3.5 mr-1.5" />
-            {t("appUpdate.openRepository")}
           </Button>
           <Button onClick={handleOpenLogsDir} size="sm" variant="outline">
             <FolderOpen className="h-3.5 w-3.5 mr-1.5" />
