@@ -180,6 +180,7 @@ func (r *ConversationRunner) run(ctx context.Context, messages []Message, onEven
 		onEvent(StreamEvent{
 			Type:    "retry",
 			Content: strconv.Itoa(attempt) + "/" + strconv.Itoa(MaxRetries),
+			Error:   err.Error(),
 		})
 
 		// 等待退避时间，支持取消

@@ -332,6 +332,15 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 	onEvent := func(event ai.StreamEvent) {
 		wailsRuntime.EventsEmit(a.ctx, eventName, event)
 
+		switch event.Type {
+		case "error":
+			logger.Default().Error("AI stream error", zap.Int64("conv_id", convID), zap.String("error", event.Error))
+		case "stopped":
+			logger.Default().Info("AI generation stopped", zap.Int64("conv_id", convID))
+		case "retry":
+			logger.Default().Warn("AI retrying", zap.Int64("conv_id", convID), zap.String("attempt", event.Content), zap.String("error", event.Error))
+		}
+
 		// done/stopped 时更新会话时间
 		if event.Type == "done" || event.Type == "stopped" {
 			if conv, err := conversation_svc.Conversation().Get(a.ctx, convID); err == nil {
