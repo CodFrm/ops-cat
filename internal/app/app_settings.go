@@ -492,7 +492,9 @@ func (a *App) OpenDirectory(path string) error {
 		args = []string{path}
 	}
 	c := exec.Command(cmd, args...) //nolint:gosec
-	executil.HideWindow(c)
+	if runtime.GOOS != "windows" {
+		executil.HideWindow(c)
+	}
 	return c.Start()
 }
 
