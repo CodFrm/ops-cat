@@ -802,6 +802,8 @@
     "checksumSkipCancel": "Cancel",
     "reportBug": "Report Bug",
     "reportBugDesc": "Open GitHub issue template with version & system info pre-filled",
+    "openRepository": "GitHub Repository",
+    "openRepositoryDesc": "Open the OpsKat GitHub repository",
     "debugMode": "Debug Logging",
     "debugModeDesc": "Lower log level to debug for troubleshooting. Turn off when done.",
     "debugModeOn": "Debug logging enabled",

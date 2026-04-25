@@ -802,6 +802,8 @@
     "checksumSkipCancel": "取消",
     "reportBug": "Bug 反馈",
     "reportBugDesc": "打开 GitHub 反馈模板，自动带上版本与系统信息",
+    "openRepository": "源码仓库",
+    "openRepositoryDesc": "打开 OpsKat GitHub 源码仓库",
     "debugMode": "Debug 日志",
     "debugModeDesc": "开启后日志级别降为 debug，便于问题排查；问题解决后建议关闭",
     "debugModeOn": "Debug 日志已开启",

@@ -37,12 +37,13 @@ import {
   SetDebugMode,
   OpenLogsDir,
 } from "../../../wailsjs/go/app/App";
-import { Bug, Download, FolderOpen, Loader2, ExternalLink, RefreshCw } from "lucide-react";
+import { Bug, Download, FolderOpen, Github, Loader2, ExternalLink, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { BrowserOpenURL, Quit } from "../../../wailsjs/runtime/runtime";
 import { EventsOn } from "../../../wailsjs/runtime/runtime";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const REPOSITORY_URL = "https://github.com/opskat/opskat";
 
 export function UpdateSection() {
   const { t } = useTranslation();
@@ -119,6 +120,10 @@ export function UpdateSection() {
       // 取不到诊断信息时仍然打开模板，让用户手动填写
     }
     BrowserOpenURL(`https://github.com/opskat/opskat/issues/new?${params.toString()}`);
+  };
+
+  const handleOpenRepository = () => {
+    BrowserOpenURL(REPOSITORY_URL);
   };
 
   const handleChannelChange = async (value: string) => {
@@ -291,6 +296,10 @@ export function UpdateSection() {
           <Button onClick={handleReportBug} size="sm" variant="outline" title={t("appUpdate.reportBugDesc")}>
             <Bug className="h-3.5 w-3.5 mr-1.5" />
             {t("appUpdate.reportBug")}
+          </Button>
+          <Button onClick={handleOpenRepository} size="sm" variant="outline" title={t("appUpdate.openRepositoryDesc")}>
+            <Github className="h-3.5 w-3.5 mr-1.5" />
+            {t("appUpdate.openRepository")}
           </Button>
           <Button onClick={handleOpenLogsDir} size="sm" variant="outline">
             <FolderOpen className="h-3.5 w-3.5 mr-1.5" />
