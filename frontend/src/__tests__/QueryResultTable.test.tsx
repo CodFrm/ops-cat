@@ -216,4 +216,102 @@ describe("QueryResultTable — cell context actions", () => {
 
     expect(onRefresh).toHaveBeenCalledOnce();
   });
+
+  it("filter by cell value invokes the filter callback with the current cell context", async () => {
+    const user = userEvent.setup();
+    const onFilterByCellValue = vi.fn();
+    openMenu({ onFilterByCellValue });
+
+    await user.click(screen.getByText("query.filterByCellValue"));
+
+    expect(onFilterByCellValue).toHaveBeenCalledWith({ rowIdx: 1, col: "name", value: "bob" });
+  });
+
+  it("sort context actions invoke the sort callback for the current column", async () => {
+    const user = userEvent.setup();
+    const onSortByColumn = vi.fn();
+    openMenu({ onSortByColumn });
+
+    await user.click(screen.getByText("query.sortAscending"));
+    expect(onSortByColumn).toHaveBeenCalledWith("name", "asc");
+
+    openMenu({ onSortByColumn });
+    await user.click(screen.getByText("query.sortDescending"));
+    expect(onSortByColumn).toHaveBeenCalledWith("name", "desc");
+  });
+
+  it("clear filter and sort invokes the clear callback", async () => {
+    const user = userEvent.setup();
+    const onClearFilterSort = vi.fn();
+    openMenu({ onClearFilterSort });
+
+    await user.click(screen.getByText("query.clearFilterSort"));
+
+    expect(onClearFilterSort).toHaveBeenCalledOnce();
+  });
+
+  it("delete record invokes the delete callback with the current row", async () => {
+    const user = userEvent.setup();
+    const onDeleteRow = vi.fn();
+    openMenu({ onDeleteRow });
+
+    await user.click(screen.getByText("query.deleteRecord"));
+
+    expect(onDeleteRow).toHaveBeenCalledWith(1);
+  });
+
+  it("generate UUID creates an edit for the current cell", async () => {
+    const user = userEvent.setup();
+    const onGenerateUuid = vi.fn();
+    const randomUUID = vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000000");
+    openMenu({ onGenerateUuid });
+
+    await user.click(screen.getByText("query.generateUuid"));
+
+    expect(onGenerateUuid).toHaveBeenCalledWith({
+      rowIdx: 1,
+      col: "name",
+      value: "00000000-0000-4000-8000-000000000000",
+    });
+    randomUUID.mockRestore();
+  });
+
+  it("copy as actions pass the current cell context and requested format", async () => {
+    const user = userEvent.setup();
+    const onCopyAs = vi.fn();
+    openMenu({ onCopyAs });
+
+    await user.click(screen.getByText("query.copyAsInsert"));
+    openMenu({ onCopyAs });
+    await user.click(screen.getByText("query.copyAsUpdate"));
+    openMenu({ onCopyAs });
+    await user.click(screen.getByText("query.copyAsTsvData"));
+    openMenu({ onCopyAs });
+    await user.click(screen.getByText("query.copyAsTsvFields"));
+    openMenu({ onCopyAs });
+    await user.click(screen.getByText("query.copyAsTsvFieldsAndData"));
+
+    expect(onCopyAs).toHaveBeenNthCalledWith(1, "insert", { rowIdx: 1, col: "name", value: "bob" });
+    expect(onCopyAs).toHaveBeenNthCalledWith(2, "update", { rowIdx: 1, col: "name", value: "bob" });
+    expect(onCopyAs).toHaveBeenNthCalledWith(3, "tsv-data", { rowIdx: 1, col: "name", value: "bob" });
+    expect(onCopyAs).toHaveBeenNthCalledWith(4, "tsv-fields", { rowIdx: 1, col: "name", value: "bob" });
+    expect(onCopyAs).toHaveBeenNthCalledWith(5, "tsv-fields-data", { rowIdx: 1, col: "name", value: "bob" });
+  });
+
+  it("renders only visible columns", () => {
+    render(<QueryResultTable columns={columns} rows={rows} visibleColumns={["name"]} />);
+
+    expect(screen.getByText("name")).toBeInTheDocument();
+    expect(screen.queryByText("id")).not.toBeInTheDocument();
+    expect(document.querySelector('[data-cell-key="0:id"]')).toBeNull();
+    expect(document.querySelector('[data-cell-key="0:name"]')).toBeInTheDocument();
+  });
+
+  it("applies row density classes", () => {
+    const { rerender } = render(<QueryResultTable columns={columns} rows={rows} rowDensity="compact" />);
+    expect(document.querySelector('[data-cell-key="0:name"]')).toHaveClass("py-0.5");
+
+    rerender(<QueryResultTable columns={columns} rows={rows} rowDensity="comfortable" />);
+    expect(document.querySelector('[data-cell-key="0:name"]')).toHaveClass("py-2");
+  });
 });
