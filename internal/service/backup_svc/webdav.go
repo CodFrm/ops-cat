@@ -222,9 +222,7 @@ func webDAVRequest(cfg WebDAVConfig, method, target string, body []byte, headers
 	if err != nil {
 		return 0, nil, fmt.Errorf("create WebDAV request: %w", err)
 	}
-	if cfg.Username != "" || cfg.Password != "" {
-		req.SetBasicAuth(cfg.Username, cfg.Password)
-	}
+	applyWebDAVAuth(req, cfg)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}

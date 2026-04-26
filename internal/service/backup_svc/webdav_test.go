@@ -84,6 +84,7 @@ func TestWebDAVBackups(t *testing.T) {
 
 		cfg := WebDAVConfig{
 			URL:      srv.URL + "/dav/opskat/",
+			AuthType: WebDAVAuthBasic,
 			Username: "dav-user",
 			Password: "dav-pass",
 		}
@@ -673,5 +674,44 @@ func TestApplyWebDAVAuth(t *testing.T) {
 			applyWebDAVAuth(req, WebDAVConfig{})
 			So(req.Header.Get("Authorization"), ShouldEqual, "")
 		})
+	})
+}
+
+func TestWebDAVRequestWritesBearerHeader(t *testing.T) {
+	Convey("webDAVRequest 写 bearer token 到 Authorization 头", t, func() {
+		var gotAuth string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotAuth = r.Header.Get("Authorization")
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
+		cfg := WebDAVConfig{
+			URL:      srv.URL + "/dav/opskat/",
+			AuthType: WebDAVAuthBearer,
+			Token:    "tok-xyz",
+		}
+		_, _, err := webDAVRequest(cfg, http.MethodGet, srv.URL+"/probe", nil, nil)
+		So(err, ShouldBeNil)
+		So(gotAuth, ShouldEqual, "Bearer tok-xyz")
+	})
+}
+
+func TestWebDAVRequestWritesNoAuthForNone(t *testing.T) {
+	Convey("webDAVRequest 在 AuthType=none 时不写 Authorization", t, func() {
+		var gotAuth string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotAuth = r.Header.Get("Authorization")
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
+		cfg := WebDAVConfig{
+			URL:      srv.URL + "/dav/opskat/",
+			AuthType: WebDAVAuthNone,
+		}
+		_, _, err := webDAVRequest(cfg, http.MethodGet, srv.URL+"/probe", nil, nil)
+		So(err, ShouldBeNil)
+		So(gotAuth, ShouldEqual, "")
 	})
 }
