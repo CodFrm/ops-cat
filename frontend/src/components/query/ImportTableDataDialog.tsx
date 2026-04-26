@@ -48,6 +48,7 @@ interface ImportTableDataDialogProps {
   columns: string[];
   primaryKeys?: string[];
   driver?: string;
+  columnTypes?: Record<string, string>;
   onSubmittingChange?: (submitting: boolean) => void;
   onSubmitStart?: () => number;
   isSubmitCancelled?: (requestId: number) => boolean;
@@ -144,6 +145,7 @@ export function ImportTableDataDialog({
   columns,
   primaryKeys: tablePrimaryKeys,
   driver,
+  columnTypes = {},
   onSubmittingChange,
   onSubmitStart,
   isSubmitCancelled,
@@ -753,7 +755,7 @@ export function ImportTableDataDialog({
                       <SelectItem value="__skip__">{t("query.importSkipColumn")}</SelectItem>
                       {columns.map((column) => (
                         <SelectItem key={column} value={column}>
-                          {column}
+                          {columnTypes[column] ? `${column} (${columnTypes[column]})` : column}
                         </SelectItem>
                       ))}
                     </SelectContent>
