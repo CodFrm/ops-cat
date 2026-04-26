@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo, useLayoutEffect } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import {
@@ -113,11 +113,6 @@ const CONTEXT_MENU_ITEM_CLASS =
 const CONTEXT_MENU_ITEM_GRID_CLASS =
   "relative grid w-full cursor-default grid-cols-[auto_1fr] items-center gap-x-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground";
 
-const CONTEXT_MENU_GAP = 2;
-const CONTEXT_MENU_VIEWPORT_MARGIN = 4;
-const COPY_AS_SUBMENU_MIN_WIDTH = 224;
-const FILTER_SUBMENU_MIN_WIDTH = 208;
-
 const CELL_FILTER_OPTIONS: { operator: CellValueFilterOperator; labelKey: string }[] = [
   { operator: "=", labelKey: "query.filterFieldEqualsValue" },
   { operator: "!=", labelKey: "query.filterFieldNotEqualsValue" },
@@ -163,43 +158,6 @@ type ColumnContextMenu = {
 };
 
 type ContextMenuState = CellContextMenu | RowContextMenu | ColumnContextMenu;
-
-type MenuLayout = {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  anchorX: number;
-  anchorY: number;
-};
-
-function getBoundedMenuPosition(anchor: { x: number; y: number }, size: { width: number; height: number }) {
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-
-  let left = anchor.x + CONTEXT_MENU_GAP;
-  let top = anchor.y + CONTEXT_MENU_GAP;
-
-  if (left + size.width > vw) {
-    left = anchor.x - size.width - CONTEXT_MENU_GAP;
-  }
-  if (top + size.height > vh) {
-    top = anchor.y - size.height - CONTEXT_MENU_GAP;
-  }
-
-  left = Math.max(CONTEXT_MENU_VIEWPORT_MARGIN, Math.min(left, vw - size.width - CONTEXT_MENU_VIEWPORT_MARGIN));
-  top = Math.max(CONTEXT_MENU_VIEWPORT_MARGIN, Math.min(top, vh - size.height - CONTEXT_MENU_VIEWPORT_MARGIN));
-
-  return { left, top };
-}
-
-function getSubmenuSide(menuLayout: MenuLayout | null, submenuWidth: number): "left" | "right" {
-  if (!menuLayout) return "right";
-
-  const spaceRight = window.innerWidth - (menuLayout.left + menuLayout.width);
-  const spaceLeft = menuLayout.left;
-  return spaceRight < submenuWidth + CONTEXT_MENU_GAP && spaceLeft > spaceRight ? "left" : "right";
-}
 
 function getColumnTypeIcon(type?: string) {
   const normalized = type?.toLowerCase() ?? "";
@@ -399,7 +357,6 @@ export function QueryResultTable({
 
   // Context menu state
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
-  const [ctxMenuLayout, setCtxMenuLayout] = useState<MenuLayout | null>(null);
   const [copyAsSubOpen, setCopyAsSubOpen] = useState(false);
   const [filterSubOpen, setFilterSubOpen] = useState(false);
   const [dateEditor, setDateEditor] = useState<{
@@ -538,24 +495,6 @@ export function QueryResultTable({
       inputRef.current.select();
     }
   }, [editingCell]);
-
-  useLayoutEffect(() => {
-    if (!ctxMenu || !ctxMenuRef.current) {
-      setCtxMenuLayout(null);
-      return;
-    }
-
-    const rect = ctxMenuRef.current.getBoundingClientRect();
-    const { left, top } = getBoundedMenuPosition(ctxMenu, rect);
-    setCtxMenuLayout({
-      left,
-      top,
-      width: rect.width,
-      height: rect.height,
-      anchorX: ctxMenu.x,
-      anchorY: ctxMenu.y,
-    });
-  }, [ctxMenu]);
 
   // Close context menu on outside click / escape
   useEffect(() => {
@@ -1194,11 +1133,6 @@ export function QueryResultTable({
     el?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [selectedCell]);
 
-  const positionedCtxMenu =
-    ctxMenu && ctxMenuLayout?.anchorX === ctxMenu.x && ctxMenuLayout.anchorY === ctxMenu.y ? ctxMenuLayout : null;
-  const copyAsSubmenuSide = getSubmenuSide(positionedCtxMenu, COPY_AS_SUBMENU_MIN_WIDTH);
-  const filterSubmenuSide = getSubmenuSide(positionedCtxMenu, FILTER_SUBMENU_MIN_WIDTH);
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8">
@@ -1498,14 +1432,7 @@ export function QueryResultTable({
           <div
             ref={ctxMenuRef}
             className="z-50 min-w-[8rem] overflow-visible rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
-            style={{
-              position: "fixed",
-              top: positionedCtxMenu?.top ?? ctxMenu.y + CONTEXT_MENU_GAP,
-              left: positionedCtxMenu?.left ?? ctxMenu.x + CONTEXT_MENU_GAP,
-              maxHeight: `${window.innerHeight - CONTEXT_MENU_VIEWPORT_MARGIN * 2}px`,
-              overflowY: "auto",
-              visibility: positionedCtxMenu ? "visible" : "hidden",
-            }}
+            style={{ position: "fixed", top: ctxMenu.y + 2, left: ctxMenu.x + 2 }}
             role="menu"
           >
             {ctxMenu.kind === "column" && ctxMenu.variant === "actions" ? (
@@ -1614,9 +1541,7 @@ export function QueryResultTable({
                       <ChevronRight className="h-3.5 w-3.5" />
                     </button>
                     <div
-                      className={`absolute top-0 z-50 min-w-[14rem] rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 ${
-                        copyAsSubmenuSide === "left" ? "right-full mr-1" : "left-full ml-1"
-                      } ${copyAsSubOpen ? "block" : "hidden"}`}
+                      className={`absolute left-full top-0 z-50 min-w-[14rem] rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 ${copyAsSubOpen ? "block" : "hidden"}`}
                     >
                       <button
                         type="button"
@@ -1792,9 +1717,7 @@ export function QueryResultTable({
                         <ChevronRight className="h-3.5 w-3.5" />
                       </button>
                       <div
-                        className={`absolute top-0 z-50 min-w-[13rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 ${
-                          filterSubmenuSide === "left" ? "right-full mr-1" : "left-full ml-1"
-                        } ${filterSubOpen ? "block" : "hidden"}`}
+                        className={`absolute left-full top-0 z-50 min-w-[13rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 ${filterSubOpen ? "block" : "hidden"}`}
                       >
                         {onFilterByCellValue &&
                           CELL_FILTER_OPTIONS.map((option) => (
