@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { toCsv, toInsertSql, toTsv, toTsvData, toTsvFields, toUpdateSql } from "@/lib/tableExport";
+import {
+  buildTableExportSelectSql,
+  toCsv,
+  toInsertSql,
+  toTsv,
+  toTsvData,
+  toTsvFields,
+  toUpdateSql,
+} from "@/lib/tableExport";
 
 const columns = ["id", "name", "note", "missing"];
 const rows = [
@@ -49,5 +57,44 @@ describe("table export helpers", () => {
     expect(toUpdateSql("appdb.users", ["id", "name"], rows[1], ["id"], "mysql")).toBe(
       "UPDATE `appdb`.`users` SET `id` = '2', `name` = 'O''Reilly' WHERE `id` = '2' LIMIT 1;"
     );
+  });
+
+  it("can omit column titles for delimited exports", () => {
+    expect(toCsv(["id", "name"], [rows[0]], { includeHeaders: false })).toBe("1,Alice");
+    expect(toTsv(["id", "name"], [rows[0]], { includeHeaders: false })).toBe("1\tAlice");
+  });
+
+  it("builds all-data export SQL without pagination while preserving filters and sorting", () => {
+    expect(
+      buildTableExportSelectSql({
+        database: "appdb",
+        table: "users",
+        driver: "mysql",
+        scope: "all",
+        whereClause: "amount > 10",
+        orderByClause: "created_at DESC",
+        sortColumn: null,
+        sortDir: null,
+        page: 2,
+        pageSize: 100,
+      })
+    ).toBe("SELECT * FROM `appdb`.`users` WHERE amount > 10 ORDER BY created_at DESC");
+  });
+
+  it("builds current-page export SQL with pagination and header-click sort precedence", () => {
+    expect(
+      buildTableExportSelectSql({
+        database: "appdb",
+        table: "users",
+        driver: "mysql",
+        scope: "page",
+        whereClause: "",
+        orderByClause: "created_at DESC",
+        sortColumn: "name",
+        sortDir: "asc",
+        page: 1,
+        pageSize: 50,
+      })
+    ).toBe("SELECT * FROM `appdb`.`users` ORDER BY `name` ASC LIMIT 50 OFFSET 50");
   });
 });

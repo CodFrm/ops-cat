@@ -42,6 +42,10 @@ export interface SelectedCellContext {
   col: string;
 }
 
+export interface FocusCellRequest extends SelectedCellContext {
+  nonce: number;
+}
+
 export type SortDir = "asc" | "desc" | null;
 export type CopyAsFormat = "insert" | "update" | "tsv-data" | "tsv-fields" | "tsv-fields-data";
 export type RowDensity = "compact" | "default" | "comfortable";
@@ -84,6 +88,7 @@ interface QueryResultTableProps {
   visibleColumns?: string[];
   columnTypes?: Record<string, string>;
   rowDensity?: RowDensity;
+  focusCellRequest?: FocusCellRequest | null;
   // Override the display-mode cell rendering. Does not affect edit-mode (input).
   // When provided, the returned node replaces the default NULL / String(value) span.
   renderCell?: (value: unknown, ctx: RenderCellContext) => React.ReactNode;
@@ -231,6 +236,7 @@ export function QueryResultTable({
   visibleColumns,
   columnTypes,
   rowDensity = "default",
+  focusCellRequest,
   renderCell,
 }: QueryResultTableProps) {
   const { t } = useTranslation();
@@ -347,6 +353,16 @@ export function QueryResultTable({
     onSelectedCellChange?.(null);
     setEditingCell(null);
   }, [rows, onSelectedCellChange]);
+
+  useEffect(() => {
+    if (!focusCellRequest) return;
+    if (!rows[focusCellRequest.rowIdx] || !displayColumns.includes(focusCellRequest.col)) return;
+    setSelectedCell({ origIdx: focusCellRequest.rowIdx, col: focusCellRequest.col });
+    setSelectedRowIdx(null);
+    setSelectedColumn(null);
+    setEditingCell(cellKey(focusCellRequest.rowIdx, focusCellRequest.col));
+    onSelectedCellChange?.({ rowIdx: focusCellRequest.rowIdx, col: focusCellRequest.col });
+  }, [displayColumns, focusCellRequest, onSelectedCellChange, rows]);
 
   // Sorted row indices (only for uncontrolled/local sort). Controlled sort is
   // server-side, so rows are already in the requested order. Always based on

@@ -17,14 +17,23 @@ import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { isMac, formatModKey } from "@/stores/shortcutStore";
 import { ExecuteSQL } from "../../../wailsjs/go/app/App";
-import { QueryResultTable, CellEdit, SortDir, type CopyAsFormat, type RowDensity } from "./QueryResultTable";
+import {
+  QueryResultTable,
+  CellEdit,
+  SortDir,
+  type CopyAsFormat,
+  type FocusCellRequest,
+  type RowDensity,
+} from "./QueryResultTable";
 import { SqlPreviewDialog } from "./SqlPreviewDialog";
-import { InsertRowDialog } from "./InsertRowDialog";
 import { ImportTableDataDialog } from "./ImportTableDataDialog";
+import { ExportTableDataDialog } from "./ExportTableDataDialog";
 import { TableDataStatusBar, TableEditorToolbar, type TableExportFormat } from "./TableEditorToolbar";
 import { toast } from "sonner";
-import { toCsv, toInsertSql, toTsv, toTsvData, toTsvFields, toUpdateSql } from "@/lib/tableExport";
+import { toInsertSql, toTsv, toTsvData, toTsvFields, toUpdateSql } from "@/lib/tableExport";
+import { buildInsertStatement, validateInsertRow, type TableColumnRule } from "@/lib/tableEdit";
 import { buildDeleteStatement, buildFilterByCellValueClause, quoteIdent, sqlQuote } from "@/lib/tableSql";
+import { cellValueToText } from "@/lib/cellValue";
 
 interface TableDataTabProps {
   tabId: string;
@@ -33,7 +42,6 @@ interface TableDataTabProps {
   table: string;
 }
 
-const PAGE_SIZES = [50, 100, 200, 500];
 const DEFAULT_PAGE_SIZE = 100;
 
 interface SQLResult {
@@ -44,22 +52,6 @@ interface SQLResult {
 }
 
 const REFRESH_SHORTCUT_LABEL = formatModKey("KeyR");
-
-function downloadTextFile(filename: string, content: string, mimeType: string) {
-  const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function safeFilenamePart(value: string) {
-  return value.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "") || "table";
-}
 
 // 字符串 props 稳定 —— memo 避免 DatabasePanel 的 innerTabs 结构变化传导
 export const TableDataTab = memo(function TableDataTab(props: TableDataTabProps) {
@@ -114,10 +106,12 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
 
   const [columns, setColumns] = useState<string[]>([]);
   const [columnTypes, setColumnTypes] = useState<Record<string, string>>({});
+  const [columnRules, setColumnRules] = useState<TableColumnRule[]>([]);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [newRows, setNewRows] = useState<Record<string, unknown>[]>([]);
   const [totalRows, setTotalRows] = useState<number | null>(null);
   const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const pageSize = DEFAULT_PAGE_SIZE;
   const [pageInput, setPageInput] = useState("1");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +121,6 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   // `confirm` = confirmation before submit (opened by the "Submit" button).
   const [dialogMode, setDialogMode] = useState<"preview" | "confirm" | null>(null);
   const [showDDLDialog, setShowDDLDialog] = useState(false);
-  const [showInsertDialog, setShowInsertDialog] = useState(false);
   const [ddlLoading, setDdlLoading] = useState(false);
   const [ddlSQL, setDdlSQL] = useState("");
   const [whereInput, setWhereInput] = useState("");
@@ -146,10 +139,12 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   const [deleting, setDeleting] = useState(false);
   const [selectedRowIdx, setSelectedRowIdx] = useState<number | null>(null);
   const [exportFormat, setExportFormat] = useState<TableExportFormat>("csv");
+  const [showExportDialog, setShowExportDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [importing, setImporting] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<string[]>([]);
   const [rowDensity, setRowDensity] = useState<RowDensity>("default");
+  const [focusCellRequest, setFocusCellRequest] = useState<FocusCellRequest | null>(null);
   const requestSeq = useRef(0);
   const latestDataRequest = useRef(0);
   const latestCountRequest = useRef(0);
@@ -196,7 +191,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
       if (driver === "postgresql") {
         const escapedTable = table.replace(/'/g, "''");
         sql =
-          `SELECT column_name, data_type, udt_name FROM information_schema.columns ` +
+          `SELECT column_name, data_type, udt_name, is_nullable, column_default FROM information_schema.columns ` +
           `WHERE table_schema = 'public' AND table_name = '${escapedTable}' ORDER BY ordinal_position`;
       } else {
         sql = `SHOW COLUMNS FROM ${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
@@ -204,14 +199,28 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
       const result = await ExecuteSQL(assetId, sql, database);
       const parsed: SQLResult = JSON.parse(result);
       const next: Record<string, string> = {};
+      const nextRules: TableColumnRule[] = [];
       for (const row of parsed.rows ?? []) {
         const name = String(row["column_name"] ?? row["Field"] ?? row["field"] ?? "");
         const type = String(row["data_type"] ?? row["Type"] ?? row["type"] ?? row["udt_name"] ?? "");
         if (name && type) next[name] = type;
+        if (name) {
+          const nullableRaw = String(row["is_nullable"] ?? row["Null"] ?? row["null"] ?? "").toUpperCase();
+          const defaultValue = row["column_default"] ?? row["Default"] ?? row["default"];
+          const extra = String(row["Extra"] ?? row["extra"] ?? "").toLowerCase();
+          nextRules.push({
+            name,
+            nullable: nullableRaw === "YES",
+            hasDefault: defaultValue != null,
+            autoIncrement: extra.includes("auto_increment"),
+          });
+        }
       }
       setColumnTypes(next);
+      setColumnRules(nextRules);
     } catch {
       setColumnTypes({});
+      setColumnRules([]);
     }
   }, [assetId, database, table, driver]);
 
@@ -220,6 +229,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     setPkLoaded(false);
     fetchPrimaryKeys();
     setColumnTypes({});
+    setColumnRules([]);
     fetchColumnTypes();
   }, [fetchPrimaryKeys, fetchColumnTypes]);
 
@@ -319,6 +329,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   // Clear edits when page changes
   useEffect(() => {
     setEdits(new Map());
+    setNewRows([]);
   }, [page, pageSize]);
 
   useEffect(() => {
@@ -339,7 +350,38 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
 
   const handleDiscard = useCallback(() => {
     setEdits(new Map());
+    setNewRows([]);
   }, []);
+
+  const handleAddInlineRow = useCallback(() => {
+    if (columns.length === 0) return;
+    const rowIdx = rows.length + newRows.length;
+    setNewRows((prev) => [...prev, {}]);
+    setSelectedRowIdx(rowIdx);
+    setFocusCellRequest({ rowIdx, col: columns[0], nonce: Date.now() });
+  }, [columns, newRows.length, rows.length]);
+
+  const removeNewRow = useCallback(
+    (rowIdx: number) => {
+      const newRowIdx = rowIdx - rows.length;
+      if (newRowIdx < 0 || newRowIdx >= newRows.length) return;
+      setNewRows((prev) => prev.filter((_, idx) => idx !== newRowIdx));
+      setEdits((prev) => {
+        const next = new Map<string, unknown>();
+        for (const [key, value] of prev) {
+          const sep = key.indexOf(":");
+          const currentRowIdx = Number(key.substring(0, sep));
+          const column = key.substring(sep + 1);
+          if (currentRowIdx === rowIdx) continue;
+          const shiftedRowIdx = currentRowIdx > rowIdx ? currentRowIdx - 1 : currentRowIdx;
+          next.set(`${shiftedRowIdx}:${column}`, value);
+        }
+        return next;
+      });
+      setSelectedRowIdx(null);
+    },
+    [newRows.length, rows.length]
+  );
 
   // Build SQL statements for preview
   const buildUpdateStatements = useCallback((): string[] => {
@@ -355,6 +397,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
 
     const statements: string[] = [];
     for (const [rowIdx, colEdits] of rowEdits) {
+      if (rowIdx >= rows.length) continue;
       const row = rows[rowIdx];
       if (!row) continue;
 
@@ -396,20 +439,75 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     return statements;
   }, [edits, rows, columns, driver, database, table, primaryKeys]);
 
+  const buildInsertStatements = useCallback((): { statements: string[]; missingFields: string[] } => {
+    const statements: string[] = [];
+    const missingFields = new Set<string>();
+
+    newRows.forEach((_, newRowIdx) => {
+      const rowIdx = rows.length + newRowIdx;
+      const values: Record<string, unknown> = {};
+      for (const column of columns) {
+        const key = `${rowIdx}:${column}`;
+        if (edits.has(key)) values[column] = edits.get(key);
+      }
+
+      for (const field of validateInsertRow(columnRules, values)) {
+        missingFields.add(field);
+      }
+      statements.push(buildInsertStatement({ database, table, driver, values }));
+    });
+
+    return { statements: missingFields.size > 0 ? [] : statements, missingFields: Array.from(missingFields) };
+  }, [columnRules, columns, database, driver, edits, newRows, rows.length, table]);
+
+  const buildChangeStatements = useCallback((): { statements: string[]; missingFields: string[] } => {
+    const insertResult = buildInsertStatements();
+    if (insertResult.missingFields.length > 0) return insertResult;
+    return { statements: [...insertResult.statements, ...buildUpdateStatements()], missingFields: [] };
+  }, [buildInsertStatements, buildUpdateStatements]);
+
+  const showInsertValidationError = useCallback(
+    (fields: string[]) => {
+      toast.error(t("query.insertRequiredFields", { fields: fields.join(", ") }));
+    },
+    [t]
+  );
+
+  const openSqlDialog = useCallback(
+    (mode: "preview" | "confirm") => {
+      const result = buildChangeStatements();
+      if (result.missingFields.length > 0) {
+        showInsertValidationError(result.missingFields);
+        return;
+      }
+      if (result.statements.length === 0) return;
+      setDialogMode(mode);
+    },
+    [buildChangeStatements, showInsertValidationError]
+  );
+
   const previewStatements = useMemo(() => {
     if (dialogMode === null) return [];
-    return buildUpdateStatements();
-  }, [dialogMode, buildUpdateStatements]);
+    return buildChangeStatements().statements;
+  }, [dialogMode, buildChangeStatements]);
 
   const pendingSqlSummary = useMemo(() => {
-    if (edits.size === 0) return "";
-    return buildUpdateStatements()[0] ?? "";
-  }, [buildUpdateStatements, edits.size]);
+    if (edits.size === 0 && newRows.length === 0) return "";
+    const result = buildChangeStatements();
+    return result.missingFields.length === 0 ? (result.statements[0] ?? "") : "";
+  }, [buildChangeStatements, edits.size, newRows.length]);
 
   const handleSubmit = useCallback(async () => {
-    if (edits.size === 0 || !assetId) return;
+    if ((edits.size === 0 && newRows.length === 0) || !assetId) return;
 
-    const statements = buildUpdateStatements();
+    const changeResult = buildChangeStatements();
+    if (changeResult.missingFields.length > 0) {
+      showInsertValidationError(changeResult.missingFields);
+      return;
+    }
+
+    const statements = changeResult.statements;
+    if (statements.length === 0) return;
     setSubmitting(true);
     let affectedTotal = 0;
     let zeroAffected = 0;
@@ -433,6 +531,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     if (affectedTotal > 0) {
       toast.success(t("query.updateSuccessAffected", { affected: affectedTotal }));
       setEdits(new Map());
+      setNewRows([]);
       fetchData(page);
       fetchCount();
     }
@@ -442,7 +541,18 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     if (errorMsg) {
       toast.error(errorMsg.trim());
     }
-  }, [edits, assetId, database, buildUpdateStatements, page, fetchData, fetchCount, t]);
+  }, [
+    edits.size,
+    newRows.length,
+    assetId,
+    database,
+    buildChangeStatements,
+    showInsertValidationError,
+    page,
+    fetchData,
+    fetchCount,
+    t,
+  ]);
 
   const handlePageInputConfirm = useCallback(() => {
     const num = parseInt(pageInput, 10);
@@ -492,6 +602,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     }
     setPage(0);
     setEdits(new Map());
+    setNewRows([]);
     setApplyVersion((v) => v + 1);
   }, [whereInput, orderByInput]);
 
@@ -504,6 +615,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     setOrderByClause("");
     setPage(0);
     setEdits(new Map());
+    setNewRows([]);
     setApplyVersion((v) => v + 1);
   }, []);
 
@@ -514,6 +626,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
       setWhereClause(clause);
       setPage(0);
       setEdits(new Map());
+      setNewRows([]);
       setApplyVersion((v) => v + 1);
     },
     [driver]
@@ -535,11 +648,16 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     setSortDir(null);
     setPage(0);
     setEdits(new Map());
+    setNewRows([]);
     setApplyVersion((v) => v + 1);
   }, []);
 
   const handleDeleteRow = useCallback(
     (rowIdx: number) => {
+      if (rowIdx >= rows.length) {
+        removeNewRow(rowIdx);
+        return;
+      }
       const row = rows[rowIdx];
       if (!row) return;
       const statement = buildDeleteStatement({
@@ -552,7 +670,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
       });
       setDeletePreview({ statement: statement.sql, usesPrimaryKey: statement.usesPrimaryKey });
     },
-    [columns, database, driver, primaryKeys, rows, table]
+    [columns, database, driver, primaryKeys, removeNewRow, rows, table]
   );
 
   const handleConfirmDelete = useCallback(async () => {
@@ -565,6 +683,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
       toast.success(t("query.deleteRecordSuccess", { affected }));
       setDeletePreview(null);
       setEdits(new Map());
+      setNewRows([]);
       await fetchData(page);
       await fetchCount();
     } catch (e) {
@@ -585,31 +704,8 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
 
   const handleExport = useCallback(() => {
     if (rows.length === 0 || columns.length === 0) return;
-
-    const baseName = `${safeFilenamePart(database)}_${safeFilenamePart(table)}`;
-    const tableName = driver === "postgresql" ? table : `${database}.${table}`;
-    const exportConfig = {
-      csv: {
-        content: toCsv(columns, rows),
-        filename: `${baseName}.csv`,
-        mimeType: "text/csv",
-      },
-      tsv: {
-        content: toTsv(columns, rows),
-        filename: `${baseName}.tsv`,
-        mimeType: "text/tab-separated-values",
-      },
-      sql: {
-        content: toInsertSql(tableName, columns, rows, driver),
-        filename: `${baseName}.sql`,
-        mimeType: "application/sql",
-      },
-    } satisfies Record<TableExportFormat, { content: string; filename: string; mimeType: string }>;
-
-    const selected = exportConfig[exportFormat];
-    downloadTextFile(selected.filename, selected.content, selected.mimeType);
-    toast.success(t("query.exportSuccess", { format: exportFormat.toUpperCase() }));
-  }, [columns, database, driver, exportFormat, rows, table, t]);
+    setShowExportDialog(true);
+  }, [columns.length, rows.length]);
 
   const handleCopyAs = useCallback(
     async (format: CopyAsFormat, ctx: { rowIdx: number }) => {
@@ -633,6 +729,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     setImporting(false);
     setPage(0);
     setEdits(new Map());
+    setNewRows([]);
     setApplyVersion((v) => v + 1);
     await fetchData(0);
     await fetchCount();
@@ -752,18 +849,12 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     toast.success(t("query.copied"));
   }, [ddlLoading, ddlSQL, t]);
 
-  const handleInsertSuccess = useCallback(async () => {
-    setPage(0);
-    setEdits(new Map());
-    setApplyVersion((v) => v + 1);
-    await fetchData(0);
-    await fetchCount();
-  }, [fetchData, fetchCount]);
-
   const hasNext = totalPages != null ? page < totalPages - 1 : rows.length === pageSize;
   const hasPrev = page > 0;
-  const hasEdits = edits.size > 0;
-  const hasSelectedRow = selectedRowIdx != null && rows[selectedRowIdx] != null;
+  const tableRows = useMemo(() => [...rows, ...newRows], [newRows, rows]);
+  const pendingEditCount = edits.size + newRows.length;
+  const hasEdits = pendingEditCount > 0;
+  const hasSelectedRow = selectedRowIdx != null && tableRows[selectedRowIdx] != null;
   const effectiveVisibleColumns = visibleColumns.length > 0 ? visibleColumns : columns;
 
   return (
@@ -822,15 +913,15 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
           onExportFormatChange={setExportFormat}
           onVisibleColumnToggle={handleVisibleColumnToggle}
           onRowDensityChange={setRowDensity}
-          onAddRow={() => setShowInsertDialog(true)}
+          onAddRow={handleAddInlineRow}
           onDeleteRow={handleDeleteSelectedRow}
-          onSubmit={() => setDialogMode("confirm")}
+          onSubmit={() => openSqlDialog("confirm")}
           onDiscard={handleDiscard}
           onRefresh={handleRefresh}
           onStopLoading={handleStopLoading}
           onImport={() => setShowImportDialog(true)}
           onExport={handleExport}
-          onPreviewSql={() => setDialogMode("preview")}
+          onPreviewSql={() => openSqlDialog("preview")}
         />
         {driver !== "postgresql" && pkLoaded && primaryKeys.length === 0 && columns.length > 0 && (
           <span
@@ -846,7 +937,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
       {/* Table content */}
       <QueryResultTable
         columns={columns}
-        rows={rows}
+        rows={tableRows}
         loading={loading || importing}
         error={error ?? undefined}
         editable
@@ -873,36 +964,44 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
         visibleColumns={effectiveVisibleColumns}
         columnTypes={columnTypes}
         rowDensity={rowDensity}
+        focusCellRequest={focusCellRequest}
+        renderCell={(value, ctx) => {
+          if (ctx.rowIdx >= rows.length && value == null) {
+            return <span className="text-muted-foreground/70 italic">(Default)</span>;
+          }
+          if (value == null) return <span className="text-muted-foreground italic">NULL</span>;
+          return <span className="truncate block">{cellValueToText(value)}</span>;
+        }}
       />
 
       {/* Footer bar */}
       <TableDataStatusBar
-        pendingEditCount={edits.size}
+        pendingEditCount={pendingEditCount}
         sqlSummary={pendingSqlSummary}
         totalRows={totalRows}
         page={page}
         totalPages={totalPages}
         pageInput={pageInput}
-        pageSize={pageSize}
-        pageSizes={PAGE_SIZES}
         hasPrev={hasPrev}
         hasNext={hasNext}
+        hasSelectedRow={hasSelectedRow}
+        submitting={submitting || deleting}
         loading={loading || importing}
         refreshTitle={`${t("query.refreshTable")} (${REFRESH_SHORTCUT_LABEL})`}
         onRefresh={handleRefresh}
         onStopLoading={handleStopLoading}
         onPageInputChange={setPageInput}
         onPageInputConfirm={handlePageInputConfirm}
-        onPageSizeChange={(value) => {
-          setPageSize(value);
-          setPage(0);
-        }}
         onFirstPage={() => setPage(0)}
         onPreviousPage={() => setPage((p) => p - 1)}
         onNextPage={() => setPage((p) => p + 1)}
         onLastPage={() => {
           if (totalPages != null) setPage(totalPages - 1);
         }}
+        onAddRow={handleAddInlineRow}
+        onDeleteRow={handleDeleteSelectedRow}
+        onApplyChanges={() => openSqlDialog("confirm")}
+        onDiscardChanges={handleDiscard}
       />
 
       {/* DDL dialog */}
@@ -935,17 +1034,6 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Insert row dialog */}
-      <InsertRowDialog
-        open={showInsertDialog}
-        onOpenChange={setShowInsertDialog}
-        assetId={assetId}
-        database={database}
-        table={table}
-        driver={driver}
-        onSuccess={handleInsertSuccess}
-      />
-
       <ImportTableDataDialog
         open={showImportDialog}
         onOpenChange={setShowImportDialog}
@@ -958,6 +1046,26 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
         onSubmitStart={handleImportSubmitStart}
         isSubmitCancelled={isImportSubmitCancelled}
         onSuccess={handleImportSuccess}
+      />
+
+      <ExportTableDataDialog
+        open={showExportDialog}
+        onOpenChange={setShowExportDialog}
+        assetId={assetId}
+        database={database}
+        table={table}
+        columns={columns}
+        rows={rows}
+        totalRows={totalRows}
+        page={page}
+        pageSize={pageSize}
+        whereClause={whereClause}
+        orderByClause={orderByClause}
+        sortColumn={sortColumn}
+        sortDir={sortDir}
+        driver={driver}
+        initialFormat={exportFormat}
+        onFormatChange={setExportFormat}
       />
 
       {/* SQL preview / submit confirmation */}

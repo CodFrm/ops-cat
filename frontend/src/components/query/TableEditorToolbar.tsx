@@ -1,4 +1,5 @@
 import {
+  Check,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
@@ -6,6 +7,7 @@ import {
   Download,
   Eye,
   Loader2,
+  Minus,
   Plus,
   RefreshCw,
   Save,
@@ -14,6 +16,7 @@ import {
   Trash2,
   Undo2,
   Upload,
+  X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -34,8 +37,9 @@ import {
   SelectValue,
 } from "@opskat/ui";
 import type { RowDensity } from "./QueryResultTable";
+import type { TableExportFormat } from "@/lib/tableExport";
 
-export type TableExportFormat = "csv" | "tsv" | "sql";
+export type { TableExportFormat };
 
 interface TableEditorToolbarProps {
   hasEdits: boolean;
@@ -210,21 +214,24 @@ interface TableDataStatusBarProps {
   page: number;
   totalPages: number | null;
   pageInput: string;
-  pageSize: number;
-  pageSizes: number[];
   hasPrev: boolean;
   hasNext: boolean;
+  hasSelectedRow: boolean;
+  submitting: boolean;
   loading: boolean;
   refreshTitle: string;
   onRefresh: () => void;
   onStopLoading: () => void;
   onPageInputChange: (value: string) => void;
   onPageInputConfirm: () => void;
-  onPageSizeChange: (value: number) => void;
   onFirstPage: () => void;
   onPreviousPage: () => void;
   onNextPage: () => void;
   onLastPage: () => void;
+  onAddRow: () => void;
+  onDeleteRow: () => void;
+  onApplyChanges: () => void;
+  onDiscardChanges: () => void;
 }
 
 export function TableDataStatusBar({
@@ -234,121 +241,145 @@ export function TableDataStatusBar({
   page,
   totalPages,
   pageInput,
-  pageSize,
-  pageSizes,
   hasPrev,
   hasNext,
+  hasSelectedRow,
+  submitting,
   loading,
   refreshTitle,
   onRefresh,
   onStopLoading,
   onPageInputChange,
   onPageInputConfirm,
-  onPageSizeChange,
   onFirstPage,
   onPreviousPage,
   onNextPage,
   onLastPage,
+  onAddRow,
+  onDeleteRow,
+  onApplyChanges,
+  onDiscardChanges,
 }: TableDataStatusBarProps) {
   const { t } = useTranslation();
+  const hasPendingEdits = pendingEditCount > 0;
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 border-t border-border bg-muted/30 shrink-0">
-      <span className="text-xs text-muted-foreground whitespace-nowrap">
-        {t("query.pendingEdits", { count: pendingEditCount })}
-      </span>
-      {sqlSummary && (
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground" title={sqlSummary}>
-          {sqlSummary}
-        </span>
-      )}
-      {!sqlSummary && totalRows != null && (
-        <span className="text-xs text-muted-foreground">{t("query.totalRows", { count: totalRows })}</span>
-      )}
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        onClick={onRefresh}
-        disabled={loading}
-        title={refreshTitle}
-        className="ml-auto"
-      >
-        <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-      </Button>
-      <Button variant="ghost" size="icon-xs" onClick={onStopLoading} disabled={!loading} title={t("query.stopLoading")}>
-        <Square className="h-3.5 w-3.5" />
-      </Button>
-      <Select value={String(pageSize)} onValueChange={(value) => onPageSizeChange(Number(value))}>
-        <SelectTrigger size="sm" className="h-6 w-[80px] text-xs">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {pageSizes.map((size) => (
-            <SelectItem key={size} value={String(size)} className="text-xs">
-              {t("query.perPage", { count: size })}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        disabled={!hasPrev || loading}
-        onClick={onFirstPage}
-        title={t("query.firstPage")}
-      >
-        <ChevronsLeft className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        disabled={!hasPrev || loading}
-        onClick={onPreviousPage}
-        title={t("query.prevPage")}
-      >
-        <ChevronLeft className="h-3.5 w-3.5" />
-      </Button>
-      <Input
-        className="h-6 w-[48px] text-xs text-center px-1"
-        value={pageInput}
-        onChange={(e) => onPageInputChange(e.target.value)}
-        onBlur={onPageInputConfirm}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") onPageInputConfirm();
-        }}
-        aria-label={t("query.pageNumber")}
-      />
-      {totalPages != null && <span className="text-xs text-muted-foreground whitespace-nowrap">/ {totalPages}</span>}
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        disabled={!hasNext || loading}
-        onClick={onNextPage}
-        title={t("query.nextPage")}
-      >
-        <ChevronRight className="h-3.5 w-3.5" />
-      </Button>
-      {totalPages != null && (
+    <div className="flex h-9 items-center gap-2 border-t border-border bg-muted/30 px-2 shrink-0">
+      <div className="flex items-center gap-0.5 shrink-0">
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          onClick={onAddRow}
+          disabled={loading || submitting}
+          title={t("query.addRow")}
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          onClick={onDeleteRow}
+          disabled={!hasSelectedRow || loading || submitting}
+          title={t("query.deleteRecord")}
+        >
+          <Minus className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          onClick={onApplyChanges}
+          disabled={!hasPendingEdits || loading || submitting}
+          title={t("query.applyChanges")}
+        >
+          <Check className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          onClick={onDiscardChanges}
+          disabled={!hasPendingEdits || loading || submitting}
+          title={t("query.discardChanges")}
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+        <Button variant="ghost" size="icon-xs" onClick={onRefresh} disabled={loading} title={refreshTitle}>
+          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          onClick={onStopLoading}
+          disabled={!loading}
+          title={t("query.stopLoading")}
+        >
+          <Square className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
+      <div className="min-w-0 flex-1 text-center">
+        {sqlSummary ? (
+          <span className="block truncate font-mono text-[11px] text-foreground" title={sqlSummary}>
+            {sqlSummary}
+          </span>
+        ) : totalRows != null ? (
+          <span className="text-xs text-muted-foreground">
+            {t("query.recordsInPage", { count: totalRows, page: page + 1 })}
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">{t("query.pageNumber", { page: page + 1 })}</span>
+        )}
+      </div>
+
+      <div className="flex items-center gap-0.5 shrink-0">
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          disabled={!hasPrev || loading}
+          onClick={onFirstPage}
+          title={t("query.firstPage")}
+        >
+          <ChevronsLeft className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          disabled={!hasPrev || loading}
+          onClick={onPreviousPage}
+          title={t("query.prevPage")}
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+        </Button>
+        <Input
+          className="h-6 w-[48px] text-xs text-center px-1"
+          value={pageInput}
+          onChange={(e) => onPageInputChange(e.target.value)}
+          onBlur={onPageInputConfirm}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onPageInputConfirm();
+          }}
+          aria-label={t("query.pageNumber")}
+        />
         <Button
           variant="ghost"
           size="icon-xs"
           disabled={!hasNext || loading}
-          onClick={onLastPage}
-          title={t("query.lastPage")}
+          onClick={onNextPage}
+          title={t("query.nextPage")}
         >
-          <ChevronsRight className="h-3.5 w-3.5" />
+          <ChevronRight className="h-3.5 w-3.5" />
         </Button>
-      )}
-      {totalRows != null && sqlSummary && (
-        <span className="text-xs text-muted-foreground whitespace-nowrap">
-          {t("query.totalRows", { count: totalRows })}
-        </span>
-      )}
-      {totalRows == null && !sqlSummary && (
-        <span className="text-xs text-muted-foreground whitespace-nowrap">
-          {t("query.pageNumber", { page: page + 1 })}
-        </span>
-      )}
+        {totalPages != null && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            disabled={!hasNext || loading}
+            onClick={onLastPage}
+            title={t("query.lastPage")}
+          >
+            <ChevronsRight className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

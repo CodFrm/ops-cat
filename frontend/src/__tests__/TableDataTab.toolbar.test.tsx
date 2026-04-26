@@ -77,6 +77,7 @@ describe("TableDataTab toolbar", () => {
   it("shows the bottom status summary and keeps refresh/stop controls near pagination", async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn();
+    const onAddRow = vi.fn();
 
     render(
       <TableDataStatusBar
@@ -86,32 +87,77 @@ describe("TableDataTab toolbar", () => {
         page={0}
         totalPages={3}
         pageInput="1"
-        pageSize={100}
-        pageSizes={[50, 100]}
         hasPrev={false}
         hasNext
+        hasSelectedRow={false}
+        submitting={false}
         loading={false}
         refreshTitle="query.refreshTable"
         onRefresh={onRefresh}
         onStopLoading={vi.fn()}
         onPageInputChange={vi.fn()}
         onPageInputConfirm={vi.fn()}
-        onPageSizeChange={vi.fn()}
         onFirstPage={vi.fn()}
         onPreviousPage={vi.fn()}
         onNextPage={vi.fn()}
         onLastPage={vi.fn()}
+        onAddRow={onAddRow}
+        onDeleteRow={vi.fn()}
+        onApplyChanges={vi.fn()}
+        onDiscardChanges={vi.fn()}
       />
     );
 
-    expect(screen.getByText("query.pendingEdits")).toBeInTheDocument();
     expect(
       screen.getByText("UPDATE `appdb`.`users` SET `name` = 'ally' WHERE `id` = '1' LIMIT 1;")
     ).toBeInTheDocument();
     expect(screen.getByTitle("query.stopLoading")).toBeDisabled();
 
+    await user.click(screen.getByTitle("query.addRow"));
     await user.click(screen.getByTitle("query.refreshTable"));
 
+    expect(onAddRow).toHaveBeenCalledOnce();
     expect(onRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("shows bottom apply and discard actions when edits are pending", async () => {
+    const user = userEvent.setup();
+    const onApplyChanges = vi.fn();
+    const onDiscardChanges = vi.fn();
+
+    render(
+      <TableDataStatusBar
+        pendingEditCount={1}
+        sqlSummary="UPDATE `users` SET `name` = 'ally' WHERE `id` = '1' LIMIT 1;"
+        totalRows={12}
+        page={0}
+        totalPages={3}
+        pageInput="1"
+        hasPrev={false}
+        hasNext
+        hasSelectedRow
+        submitting={false}
+        loading={false}
+        refreshTitle="query.refreshTable"
+        onRefresh={vi.fn()}
+        onStopLoading={vi.fn()}
+        onPageInputChange={vi.fn()}
+        onPageInputConfirm={vi.fn()}
+        onFirstPage={vi.fn()}
+        onPreviousPage={vi.fn()}
+        onNextPage={vi.fn()}
+        onLastPage={vi.fn()}
+        onAddRow={vi.fn()}
+        onDeleteRow={vi.fn()}
+        onApplyChanges={onApplyChanges}
+        onDiscardChanges={onDiscardChanges}
+      />
+    );
+
+    await user.click(screen.getByTitle("query.applyChanges"));
+    await user.click(screen.getByTitle("query.discardChanges"));
+
+    expect(onApplyChanges).toHaveBeenCalledOnce();
+    expect(onDiscardChanges).toHaveBeenCalledOnce();
   });
 });

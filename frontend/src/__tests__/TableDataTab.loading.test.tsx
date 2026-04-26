@@ -57,6 +57,7 @@ describe("TableDataTab loading cancellation", () => {
   it("does not let a stopped request overwrite the next refresh result", async () => {
     const user = userEvent.setup();
     const firstPk = deferred<string>();
+    const firstColumns = deferred<string>();
     const firstCount = deferred<string>();
     const firstRows = deferred<string>();
     const secondCount = deferred<string>();
@@ -64,6 +65,7 @@ describe("TableDataTab loading cancellation", () => {
 
     vi.mocked(ExecuteSQL)
       .mockReturnValueOnce(firstPk.promise)
+      .mockReturnValueOnce(firstColumns.promise)
       .mockReturnValueOnce(firstCount.promise)
       .mockReturnValueOnce(firstRows.promise)
       .mockReturnValueOnce(secondRows.promise)
@@ -73,6 +75,7 @@ describe("TableDataTab loading cancellation", () => {
 
     await user.click(screen.getAllByTitle("query.stopLoading")[0]);
     firstPk.resolve(JSON.stringify({ rows: [] }));
+    firstColumns.resolve(JSON.stringify({ rows: [] }));
     firstCount.resolve(JSON.stringify({ rows: [{ cnt: 1 }] }));
     firstRows.resolve(JSON.stringify({ columns: ["id", "name"], rows: [{ id: 1, name: "old" }] }));
 
