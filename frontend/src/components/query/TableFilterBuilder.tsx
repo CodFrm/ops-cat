@@ -14,7 +14,19 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Button, Input, Popover, PopoverContent, PopoverTrigger, ScrollArea } from "@opskat/ui";
+import {
+  Button,
+  Input,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  ScrollArea,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@opskat/ui";
 import { cellValueToText } from "@/lib/cellValue";
 import {
   addFilterCondition,
@@ -447,18 +459,24 @@ function SortCriterionChip({ columns, item, items, onChange }: SortCriterionChip
 
   return (
     <div className="flex h-9 items-center gap-2 rounded-md border border-primary bg-primary/5 px-2 text-primary">
-      <select
-        className="h-7 rounded border-0 bg-transparent px-1 text-sm font-medium outline-none"
+      <Select
         value={item.column}
-        onChange={(event) => onChange(updateSortCriterion(items, item.id, { column: event.target.value }))}
-        aria-label={t("query.sortColumnName")}
+        onValueChange={(value) => onChange(updateSortCriterion(items, item.id, { column: value }))}
       >
-        {columns.map((column) => (
-          <option key={column} value={column}>
-            {column}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger
+          size="sm"
+          className="h-7 min-w-20 gap-1 border-0 bg-transparent px-1.5 py-0 text-sm font-medium text-primary shadow-none hover:bg-accent focus-visible:ring-1 [&>svg]:opacity-60"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {columns.map((column) => (
+            <SelectItem key={column} value={column}>
+              {column}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <button
         type="button"
         className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-primary"
@@ -612,7 +630,30 @@ function FilterItems({
             </div>
             <div className="flex items-center gap-2 text-sm text-foreground">
               <span className="ml-5 font-mono">)</span>
-              {!(index === items.length - 1) && (
+              {index === items.length - 1 ? (
+                <>
+                  <Button
+                    variant="outline"
+                    size="icon-xs"
+                    className={FILTER_ACTION_BUTTON_CLASS}
+                    title={t("query.addFilter")}
+                    onClick={addSibling}
+                    disabled={columns.length === 0}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon-xs"
+                    className={FILTER_ACTION_BUTTON_CLASS}
+                    title={t("query.addFilterGroup")}
+                    onClick={addSiblingGroup}
+                    disabled={columns.length === 0}
+                  >
+                    ()+
+                  </Button>
+                </>
+              ) : (
                 <button
                   type="button"
                   className="text-sm text-muted-foreground hover:text-primary"
@@ -669,72 +710,85 @@ function FilterConditionRow({
   return (
     <div
       data-testid={`filter-item-${item.id}`}
-      className={`flex items-center gap-2 rounded-sm px-1 py-0.5 text-sm ${
-        selected ? "bg-primary/10" : ""
+      className={`flex items-center gap-1.5 rounded-sm border px-2 py-1 text-sm ${
+        selected ? "border-primary/40 bg-primary/10" : "border-transparent hover:border-border"
       } ${item.enabled ? "" : "opacity-50"}`}
       onClick={onSelect}
       onContextMenu={onContextMenu}
     >
       <input
         type="checkbox"
-        className="h-4 w-4 accent-primary"
+        className="h-4 w-4 shrink-0 accent-primary"
         checked={item.enabled}
         onChange={(event) => setItem({ enabled: event.target.checked })}
         aria-label={t("query.filterEnabled")}
       />
-      <select
-        value={item.column}
-        onChange={(event) => setItem({ column: event.target.value, value: undefined })}
-        className="h-7 min-w-20 appearance-none rounded-none border-0 bg-transparent px-1 text-sm font-medium text-primary shadow-none outline-none hover:bg-transparent focus:bg-transparent focus:ring-0"
-        aria-label={t("query.filterColumnName")}
-      >
-        {columns.map((column) => (
-          <option key={column} value={column}>
-            {column}
-          </option>
-        ))}
-      </select>
-      <select
+      <Select value={item.column} onValueChange={(value) => setItem({ column: value, value: undefined })}>
+        <SelectTrigger
+          size="sm"
+          className="h-7 min-w-20 gap-1 border-0 bg-transparent px-1.5 py-0 text-sm font-medium text-primary shadow-none hover:bg-accent focus-visible:ring-1 [&>svg]:opacity-60"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {columns.map((column) => (
+            <SelectItem key={column} value={column}>
+              {column}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
         value={operator}
-        onChange={(event) => {
-          const nextOperator = event.target.value as TableFilterOperator;
+        onValueChange={(value) => {
+          const nextOperator = value as TableFilterOperator;
           setItem({
             operator: nextOperator,
             value: nextOperator === "is_empty" || nextOperator === "is_not_empty" ? undefined : item.value,
           });
         }}
-        className="h-7 rounded-none border-0 bg-transparent px-1 text-sm font-medium text-muted-foreground shadow-none outline-none hover:bg-transparent focus:bg-transparent focus:ring-0"
-        aria-label={t("query.filterOperator")}
       >
-        {FILTER_OPERATORS.map((op) => (
-          <option key={op} value={op}>
-            {t(FILTER_OPERATOR_LABEL_KEYS[op])}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger
+          size="sm"
+          className="h-7 min-w-12 gap-1 border-0 bg-transparent px-1.5 py-0 text-sm font-medium text-muted-foreground shadow-none hover:bg-accent focus-visible:ring-1 [&>svg]:opacity-60"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {FILTER_OPERATORS.map((op) => (
+            <SelectItem key={op} value={op}>
+              {t(FILTER_OPERATOR_LABEL_KEYS[op])}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       {operatorNeedsValue && (
         <FilterValuePicker value={item.value} suggestions={suggestions} onChange={(value) => setItem({ value })} />
       )}
-      <Button
-        variant="outline"
-        size="icon-xs"
-        className={FILTER_ACTION_BUTTON_CLASS}
-        title={t("query.addFilter")}
-        onClick={onAddAfter}
-        disabled={columns.length === 0}
-      >
-        <Plus className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="outline"
-        size="icon-xs"
-        className={FILTER_ACTION_BUTTON_CLASS}
-        title={t("query.addFilterGroup")}
-        onClick={onAddGroupAfter}
-        disabled={columns.length === 0}
-      >
-        ()+
-      </Button>
+      {isLast && (
+        <>
+          <Button
+            variant="outline"
+            size="icon-xs"
+            className={FILTER_ACTION_BUTTON_CLASS}
+            title={t("query.addFilter")}
+            onClick={onAddAfter}
+            disabled={columns.length === 0}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon-xs"
+            className={FILTER_ACTION_BUTTON_CLASS}
+            title={t("query.addFilterGroup")}
+            onClick={onAddGroupAfter}
+            disabled={columns.length === 0}
+          >
+            ()+
+          </Button>
+        </>
+      )}
       {!isLast && (
         <button
           type="button"

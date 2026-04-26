@@ -106,8 +106,9 @@ async function writeTableExportFile(
   content: string,
   options: TableExportWriteOptions
 ): Promise<void> {
-  const wailsWrite = (window as unknown as { go?: { app?: { App?: { WriteTableExportFile?: WriteTableExportFileFn } } } }).go
-    ?.app?.App?.WriteTableExportFile;
+  const wailsWrite = (
+    window as unknown as { go?: { app?: { App?: { WriteTableExportFile?: WriteTableExportFileFn } } } }
+  ).go?.app?.App?.WriteTableExportFile;
   if (typeof wailsWrite === "function") {
     await wailsWrite(filePath, content, options);
     return;

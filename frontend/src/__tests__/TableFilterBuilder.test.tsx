@@ -73,7 +73,7 @@ describe("TableFilterBuilder", () => {
         onApply={vi.fn()}
       />
     );
-    await user.click(screen.getAllByTitle("query.addFilter")[1]);
+    await user.click(screen.getAllByTitle("query.addFilter")[0]);
 
     const latest = onChange.mock.calls.at(-1)?.[0] as TableFilterItem[];
     const group = latest[1];
