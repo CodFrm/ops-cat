@@ -20,10 +20,12 @@ import {
   CalendarClock,
   MoreHorizontal,
   Hash,
+  ChevronRight,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@opskat/ui";
 import { toast } from "sonner";
 import { cellValueToText } from "@/lib/cellValue";
+import type { CellValueFilterOperator } from "@/lib/tableSql";
 
 export interface CellEdit {
   rowIdx: number;
@@ -35,6 +37,9 @@ export interface CellActionContext {
   rowIdx: number;
   col: string;
   value: unknown;
+  operator?: CellValueFilterOperator;
+  selectedColumns?: string[];
+  selectedRowIndices?: number[];
 }
 
 export interface SelectedCellContext {
@@ -71,6 +76,8 @@ interface QueryResultTableProps {
   onSortByColumn?: (col: string, dir: Exclude<SortDir, null>) => void;
   onClearFilterSort?: () => void;
   onAddColumnFilter?: (col: string) => void;
+  onRemoveColumnFilter?: (col: string) => void;
+  onRemoveAllFilters?: () => void;
   onDeleteRow?: (rowIdx: number) => void;
   onHideColumn?: (col: string) => void;
   onVisibleColumnToggle?: (col: string) => void;
@@ -102,6 +109,15 @@ const NULL_KEY = "__opskat_null_sentinel__";
 
 const CONTEXT_MENU_ITEM_CLASS =
   "relative flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground";
+
+const CELL_FILTER_OPTIONS: { operator: CellValueFilterOperator; labelKey: string }[] = [
+  { operator: "=", labelKey: "query.filterFieldEqualsValue" },
+  { operator: "!=", labelKey: "query.filterFieldNotEqualsValue" },
+  { operator: "like", labelKey: "query.filterFieldLikeValue" },
+  { operator: "not_like", labelKey: "query.filterFieldNotLikeValue" },
+  { operator: "<", labelKey: "query.filterFieldLessThanValue" },
+  { operator: ">", labelKey: "query.filterFieldGreaterThanValue" },
+];
 
 function valueKey(v: unknown): string {
   if (v == null) return NULL_KEY;
@@ -225,6 +241,8 @@ export function QueryResultTable({
   onSortByColumn,
   onClearFilterSort,
   onAddColumnFilter,
+  onRemoveColumnFilter,
+  onRemoveAllFilters,
   onDeleteRow,
   onHideColumn,
   onVisibleColumnToggle,
@@ -336,6 +354,8 @@ export function QueryResultTable({
 
   // Context menu state
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
+  const [copyAsSubOpen, setCopyAsSubOpen] = useState(false);
+  const [filterSubOpen, setFilterSubOpen] = useState(false);
   const [dateEditor, setDateEditor] = useState<{
     rowIdx: number;
     col: string;
@@ -461,7 +481,11 @@ export function QueryResultTable({
   // Close context menu on outside click / escape
   useEffect(() => {
     if (!ctxMenu) return;
-    const close = () => setCtxMenu(null);
+    const close = () => {
+      setCtxMenu(null);
+      setCopyAsSubOpen(false);
+      setFilterSubOpen(false);
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
     };
@@ -652,7 +676,9 @@ export function QueryResultTable({
     (format: CopyAsFormat) => {
       if (!ctxMenu) return;
       const fallbackRowIdx = sortedIndices[0] ?? 0;
-      onCopyAs?.(format, {
+      const selColOrder = displayColumns.filter((c) => selectedColumns.has(c));
+      const selRowOrder = sortedIndices.filter((i) => selectedRowIdxs.has(i));
+      const ctx: CellActionContext = {
         rowIdx: ctxMenu.kind === "cell" || ctxMenu.kind === "row" ? ctxMenu.rowIdx : fallbackRowIdx,
         col: ctxMenu.kind === "cell" || ctxMenu.kind === "column" ? ctxMenu.col : (displayColumns[0] ?? ""),
         value:
@@ -661,10 +687,19 @@ export function QueryResultTable({
             : ctxMenu.kind === "column"
               ? rows[fallbackRowIdx]?.[ctxMenu.col]
               : rows[ctxMenu.rowIdx],
-      });
+      };
+      if (ctxMenu.kind === "column" && selectedColumns.has(ctxMenu.col) && selColOrder.length > 0) {
+        ctx.selectedColumns = selColOrder;
+        ctx.selectedRowIndices = sortedIndices;
+      } else if (ctxMenu.kind === "row" && selectedRowIdxs.has(ctxMenu.rowIdx) && selRowOrder.length > 0) {
+        ctx.selectedRowIndices = selRowOrder;
+      }
+      onCopyAs?.(format, ctx);
       setCtxMenu(null);
+      setCopyAsSubOpen(false);
+      setFilterSubOpen(false);
     },
-    [ctxMenu, displayColumns, onCopyAs, rows, sortedIndices]
+    [ctxMenu, displayColumns, onCopyAs, rows, selectedColumns, selectedRowIdxs, sortedIndices]
   );
 
   const handleOpenDateEditor = useCallback(() => {
@@ -709,11 +744,15 @@ export function QueryResultTable({
     setCtxMenu(null);
   }, [onRefresh]);
 
-  const handleFilterByCellValue = useCallback(() => {
-    if (!ctxMenu || ctxMenu.kind !== "cell") return;
-    onFilterByCellValue?.({ rowIdx: ctxMenu.rowIdx, col: ctxMenu.col, value: ctxMenu.value });
-    setCtxMenu(null);
-  }, [ctxMenu, onFilterByCellValue]);
+  const handleFilterByCellValue = useCallback(
+    (operator: CellValueFilterOperator = "=") => {
+      if (!ctxMenu || ctxMenu.kind !== "cell") return;
+      onFilterByCellValue?.({ rowIdx: ctxMenu.rowIdx, col: ctxMenu.col, value: ctxMenu.value, operator });
+      setCtxMenu(null);
+      setFilterSubOpen(false);
+    },
+    [ctxMenu, onFilterByCellValue]
+  );
 
   const handleSortByColumn = useCallback(
     (dir: Exclude<SortDir, null>) => {
@@ -734,7 +773,21 @@ export function QueryResultTable({
     if (!menuColumn) return;
     onAddColumnFilter?.(menuColumn);
     setCtxMenu(null);
+    setFilterSubOpen(false);
   }, [menuColumn, onAddColumnFilter]);
+
+  const handleRemoveColumnFilter = useCallback(() => {
+    if (!menuColumn) return;
+    onRemoveColumnFilter?.(menuColumn);
+    setCtxMenu(null);
+    setFilterSubOpen(false);
+  }, [menuColumn, onRemoveColumnFilter]);
+
+  const handleRemoveAllFilters = useCallback(() => {
+    onRemoveAllFilters?.();
+    setCtxMenu(null);
+    setFilterSubOpen(false);
+  }, [onRemoveAllFilters]);
 
   const handleHideColumn = useCallback(() => {
     if (!menuColumn) return;
@@ -749,6 +802,7 @@ export function QueryResultTable({
       setLocalSortDir(null);
     }
     setCtxMenu(null);
+    setFilterSubOpen(false);
   }, [onClearFilterSort]);
 
   const handleDeleteRow = useCallback(() => {
@@ -762,8 +816,6 @@ export function QueryResultTable({
       setSelectedCell({ origIdx, col });
       setSelectedRowIdxs(new Set());
       rowSelectionAnchorRef.current = null;
-      setSelectedColumns(new Set());
-      columnSelectionAnchorRef.current = null;
       onSelectedCellChange?.({ rowIdx: origIdx, col });
       onSelectedRowsChange?.([]);
       containerRef.current?.focus();
@@ -1414,54 +1466,71 @@ export function QueryResultTable({
                   {t("query.copyValue")}
                 </button>
                 {onCopyAs && (
-                  <>
-                    <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">{t("query.copyAs")}</div>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={CONTEXT_MENU_ITEM_CLASS}
-                      onClick={() => handleCopyAs("insert")}
-                    >
-                      <ClipboardList className="h-3.5 w-3.5" />
-                      {t("query.copyAsInsert")}
+                  <div
+                    className="group/submenu relative"
+                    onPointerEnter={() => {
+                      setCopyAsSubOpen(true);
+                      setFilterSubOpen(false);
+                    }}
+                    onPointerLeave={() => setCopyAsSubOpen(false)}
+                  >
+                    <button type="button" role="menuitem" className={`${CONTEXT_MENU_ITEM_CLASS} justify-between`}>
+                      <span className="flex items-center gap-2">
+                        <ClipboardList className="h-3.5 w-3.5" />
+                        {t("query.copyAs")}
+                      </span>
+                      <ChevronRight className="h-3.5 w-3.5" />
                     </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={CONTEXT_MENU_ITEM_CLASS}
-                      onClick={() => handleCopyAs("update")}
+                    <div
+                      className={`absolute left-full top-0 z-50 min-w-[10rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 ${copyAsSubOpen ? "block" : "hidden"}`}
                     >
-                      <ClipboardList className="h-3.5 w-3.5" />
-                      {t("query.copyAsUpdate")}
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={CONTEXT_MENU_ITEM_CLASS}
-                      onClick={() => handleCopyAs("tsv-data")}
-                    >
-                      <ClipboardList className="h-3.5 w-3.5" />
-                      {t("query.copyAsTsvData")}
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={CONTEXT_MENU_ITEM_CLASS}
-                      onClick={() => handleCopyAs("tsv-fields")}
-                    >
-                      <ClipboardList className="h-3.5 w-3.5" />
-                      {t("query.copyAsTsvFields")}
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={CONTEXT_MENU_ITEM_CLASS}
-                      onClick={() => handleCopyAs("tsv-fields-data")}
-                    >
-                      <ClipboardList className="h-3.5 w-3.5" />
-                      {t("query.copyAsTsvFieldsAndData")}
-                    </button>
-                  </>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={CONTEXT_MENU_ITEM_CLASS}
+                        onClick={() => handleCopyAs("insert")}
+                      >
+                        <ClipboardList className="h-3.5 w-3.5" />
+                        {t("query.copyAsInsert")}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={CONTEXT_MENU_ITEM_CLASS}
+                        onClick={() => handleCopyAs("update")}
+                      >
+                        <ClipboardList className="h-3.5 w-3.5" />
+                        {t("query.copyAsUpdate")}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={CONTEXT_MENU_ITEM_CLASS}
+                        onClick={() => handleCopyAs("tsv-data")}
+                      >
+                        <ClipboardList className="h-3.5 w-3.5" />
+                        {t("query.copyAsTsvData")}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={CONTEXT_MENU_ITEM_CLASS}
+                        onClick={() => handleCopyAs("tsv-fields")}
+                      >
+                        <ClipboardList className="h-3.5 w-3.5" />
+                        {t("query.copyAsTsvFields")}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={CONTEXT_MENU_ITEM_CLASS}
+                        onClick={() => handleCopyAs("tsv-fields-data")}
+                      >
+                        <ClipboardList className="h-3.5 w-3.5" />
+                        {t("query.copyAsTsvFieldsAndData")}
+                      </button>
+                    </div>
+                  </div>
                 )}
                 {(ctxMenu.kind === "cell" || ctxMenu.kind === "column") && (
                   <button
@@ -1571,17 +1640,79 @@ export function QueryResultTable({
                     </button>
                   </>
                 )}
-                {ctxMenu.kind === "cell" && onFilterByCellValue && (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={CONTEXT_MENU_ITEM_CLASS}
-                    onClick={handleFilterByCellValue}
-                  >
-                    <Filter className="h-3.5 w-3.5" />
-                    {t("query.filterByCellValue")}
-                  </button>
-                )}
+                {ctxMenu.kind === "cell" &&
+                  (onFilterByCellValue || onAddColumnFilter || onRemoveColumnFilter || onRemoveAllFilters) && (
+                    <div
+                      className="group/submenu relative"
+                      onPointerEnter={() => {
+                        setFilterSubOpen(true);
+                        setCopyAsSubOpen(false);
+                      }}
+                      onPointerLeave={() => setFilterSubOpen(false)}
+                    >
+                      <button type="button" role="menuitem" className={`${CONTEXT_MENU_ITEM_CLASS} justify-between`}>
+                        <span className="flex items-center gap-2">
+                          <Filter className="h-3.5 w-3.5" />
+                          {t("query.filter")}
+                        </span>
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+                      <div
+                        className={`absolute left-full top-0 z-50 min-w-[13rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 ${filterSubOpen ? "block" : "hidden"}`}
+                      >
+                        {onFilterByCellValue &&
+                          CELL_FILTER_OPTIONS.map((option) => (
+                            <button
+                              key={option.operator}
+                              type="button"
+                              role="menuitem"
+                              className={CONTEXT_MENU_ITEM_CLASS}
+                              onClick={() => handleFilterByCellValue(option.operator)}
+                            >
+                              {t(option.labelKey)}
+                            </button>
+                          ))}
+                        {onAddColumnFilter && (
+                          <>
+                            <div className="my-1 h-px bg-border" />
+                            <button
+                              type="button"
+                              role="menuitem"
+                              className={CONTEXT_MENU_ITEM_CLASS}
+                              onClick={handleAddColumnFilter}
+                            >
+                              {t("query.customFilter")}
+                            </button>
+                          </>
+                        )}
+                        {(onRemoveColumnFilter || onRemoveAllFilters) && (
+                          <>
+                            <div className="my-1 h-px bg-border" />
+                            {onRemoveColumnFilter && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className={CONTEXT_MENU_ITEM_CLASS}
+                                onClick={handleRemoveColumnFilter}
+                              >
+                                {t("query.removeFilter")}
+                              </button>
+                            )}
+                            {onRemoveAllFilters && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className={CONTEXT_MENU_ITEM_CLASS}
+                                onClick={handleRemoveAllFilters}
+                              >
+                                {t("query.removeAllFilters")}
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 {ctxMenu.kind === "cell" && onSortByColumn && (
                   <>
                     <button

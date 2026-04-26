@@ -7,6 +7,7 @@ import {
   buildSortOrderByClause,
   createFilterCondition,
   createSortCriterion,
+  removeFilterItemsByColumn,
   toggleFilterNegator,
   toggleFilterJoin,
   toggleSortDirection,
@@ -39,6 +40,39 @@ describe("table filter helpers", () => {
     group.items = [createFilterCondition("id", "id", { value: 2 })];
 
     expect(buildFilterWhereClause(items, "mysql")).toBe("`email` = '11223' OR (`id` = '2')");
+  });
+
+  it("builds SQL for LIKE and NOT LIKE criteria", () => {
+    const items: TableFilterItem[] = [
+      createFilterCondition("name-like", "name", { operator: "like", value: "bob" }),
+      createFilterCondition("email-not-like", "email", { operator: "not_like", value: "@test.com" }),
+    ];
+
+    expect(buildFilterWhereClause(items, "mysql")).toBe("`name` LIKE '%bob%' AND `email` NOT LIKE '%@test.com%'");
+  });
+
+  it("removes filters for a column from nested groups", () => {
+    const items: TableFilterItem[] = [
+      createFilterCondition("name", "name", { value: "A" }),
+      {
+        kind: "group",
+        id: "group-1",
+        join: "and",
+        items: [
+          createFilterCondition("name-nested", "name", { value: "B" }),
+          createFilterCondition("email-nested", "email", { value: "a@example.com" }),
+        ],
+      },
+    ];
+
+    expect(removeFilterItemsByColumn(items, "name")).toEqual([
+      {
+        kind: "group",
+        id: "group-1",
+        join: "and",
+        items: [createFilterCondition("email-nested", "email", { value: "a@example.com" })],
+      },
+    ]);
   });
 
   it("builds disabled, negated, empty, and comparison criteria inside bracket groups", () => {

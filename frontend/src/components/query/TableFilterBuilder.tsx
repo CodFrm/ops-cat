@@ -50,6 +50,8 @@ const FILTER_MENU_ITEM_CLASS =
 const FILTER_OPERATOR_LABEL_KEYS: Record<TableFilterOperator, string> = {
   "=": "query.filterOperatorIs",
   "!=": "query.filterOperatorIsNot",
+  like: "query.filterOperatorLike",
+  not_like: "query.filterOperatorNotLike",
   ">": "query.filterOperatorGreaterThan",
   ">=": "query.filterOperatorGreaterThanOrEqual",
   "<": "query.filterOperatorLessThan",

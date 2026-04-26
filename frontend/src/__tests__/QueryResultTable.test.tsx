@@ -282,12 +282,19 @@ describe("QueryResultTable — cell context actions", () => {
   it("keeps copy and copy as next to each other in the context menu", () => {
     openMenu({ onCopyAs: vi.fn(), onPasteCell: vi.fn() });
 
-    const labels = Array.from(screen.getByRole("menu").children)
-      .map((child) => child.textContent?.trim())
+    const menu = screen.getByRole("menu");
+    const directItems = Array.from(menu.children);
+    const labels = directItems
+      .map((child) => {
+        // Submenu containers flatten all nested text — extract just the trigger label
+        const btn = child.querySelector(":scope > button");
+        if (btn) return btn.textContent?.trim();
+        return child.textContent?.trim();
+      })
       .filter(Boolean);
 
     const copyIndex = labels.indexOf("query.copyValue");
-    expect(labels.slice(copyIndex, copyIndex + 2)).toEqual(["query.copyValue", "query.copyAs"]);
+    expect(labels[copyIndex + 1]).toBe("query.copyAs");
   });
 
   it("right-clicking a row number selects the full row and shows row actions only", () => {
@@ -485,14 +492,32 @@ describe("QueryResultTable — cell context actions", () => {
     expect(onRefresh).toHaveBeenCalledOnce();
   });
 
-  it("filter by cell value invokes the filter callback with the current cell context", async () => {
+  it("filter submenu invokes the filter callback with the selected operator", async () => {
     const user = userEvent.setup();
     const onFilterByCellValue = vi.fn();
-    openMenu({ onFilterByCellValue });
+    openMenu({ onFilterByCellValue, onClearFilterSort: vi.fn(), onAddColumnFilter: vi.fn() });
 
-    await user.click(screen.getByText("query.filterByCellValue"));
+    const filterTrigger = screen.getByText("query.filter");
+    await user.hover(filterTrigger);
+    await user.click(screen.getByText("query.filterFieldNotEqualsValue"));
 
-    expect(onFilterByCellValue).toHaveBeenCalledWith({ rowIdx: 1, col: "name", value: "bob" });
+    expect(onFilterByCellValue).toHaveBeenCalledWith({ rowIdx: 1, col: "name", value: "bob", operator: "!=" });
+  });
+
+  it("filter submenu invokes custom and remove filter callbacks for the current field", async () => {
+    const user = userEvent.setup();
+    const onAddColumnFilter = vi.fn();
+    const onRemoveColumnFilter = vi.fn();
+    openMenu({ onFilterByCellValue: vi.fn(), onAddColumnFilter, onRemoveColumnFilter, onClearFilterSort: vi.fn() });
+
+    await user.hover(screen.getByText("query.filter"));
+    await user.click(screen.getByText("query.customFilter"));
+    expect(onAddColumnFilter).toHaveBeenCalledWith("name");
+
+    openMenu({ onFilterByCellValue: vi.fn(), onAddColumnFilter, onRemoveColumnFilter, onClearFilterSort: vi.fn() });
+    await user.hover(screen.getByText("query.filter"));
+    await user.click(screen.getByText("query.removeFilter"));
+    expect(onRemoveColumnFilter).toHaveBeenCalledWith("name");
   });
 
   it("sort context actions invoke the sort callback for the current column", async () => {

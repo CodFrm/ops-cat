@@ -32,11 +32,18 @@ import { TableDataStatusBar, TableEditorToolbar, type TableExportFormat } from "
 import { toast } from "sonner";
 import { toInsertSql, toTsv, toTsvData, toTsvFields, toUpdateSql } from "@/lib/tableExport";
 import { buildInsertStatement, validateInsertRow, type TableColumnRule } from "@/lib/tableEdit";
-import { buildDeleteStatement, buildFilterByCellValueClause, quoteIdent, sqlQuote } from "@/lib/tableSql";
+import {
+  buildDeleteStatement,
+  buildFilterByCellValueClause,
+  quoteIdent,
+  sqlQuote,
+  type CellValueFilterOperator,
+} from "@/lib/tableSql";
 import {
   buildFilterWhereClause,
   buildSortOrderByClause,
   createFilterCondition,
+  removeFilterItemsByColumn,
   type TableFilterItem,
   type TableSortItem,
 } from "@/lib/tableFilter";
@@ -636,9 +643,9 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   }, []);
 
   const handleFilterByCellValue = useCallback(
-    ({ col, value }: { col: string; value: unknown }) => {
-      const clause = buildFilterByCellValueClause(col, value, driver);
-      setFilters([createFilterCondition(`cell-${col}`, col, { value })]);
+    ({ col, value, operator = "=" }: { col: string; value: unknown; operator?: CellValueFilterOperator }) => {
+      const clause = buildFilterByCellValueClause(col, value, driver, operator);
+      setFilters([createFilterCondition(`cell-${col}`, col, { value, operator })]);
       setShowFilterSort(true);
       setWhereClause(clause);
       setPage(0);
@@ -648,6 +655,30 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     },
     [driver]
   );
+
+  const handleRemoveColumnFilter = useCallback(
+    (column: string) => {
+      setFilters((prev) => {
+        const next = removeFilterItemsByColumn(prev, column);
+        setWhereClause(buildFilterWhereClause(next, driver));
+        return next;
+      });
+      setPage(0);
+      setEdits(new Map());
+      setNewRows([]);
+      setApplyVersion((v) => v + 1);
+    },
+    [driver]
+  );
+
+  const handleRemoveAllFilters = useCallback(() => {
+    setFilters([]);
+    setWhereClause("");
+    setPage(0);
+    setEdits(new Map());
+    setNewRows([]);
+    setApplyVersion((v) => v + 1);
+  }, []);
 
   const handleSortByColumn = useCallback(
     (col: string, dir: Exclude<SortDir, null>) => {
@@ -725,16 +756,22 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   }, [columns.length, rows.length]);
 
   const handleCopyAs = useCallback(
-    async (format: CopyAsFormat, ctx: { rowIdx: number }) => {
-      const row = rows[ctx.rowIdx];
-      if (!row) return;
+    async (
+      format: CopyAsFormat,
+      ctx: { rowIdx: number; selectedColumns?: string[]; selectedRowIndices?: number[] }
+    ) => {
+      const activeColumns = ctx.selectedColumns?.length ? ctx.selectedColumns : columns;
+      const activeRows = ctx.selectedRowIndices?.length
+        ? ctx.selectedRowIndices.map((i) => rows[i]).filter(Boolean)
+        : [rows[ctx.rowIdx]];
+      if (activeRows.length === 0) return;
       const tableName = driver === "postgresql" ? table : `${database}.${table}`;
       const contentByFormat: Record<CopyAsFormat, string> = {
-        insert: toInsertSql(tableName, columns, [row], driver),
-        update: toUpdateSql(tableName, columns, row, primaryKeys, driver),
-        "tsv-data": toTsvData(columns, [row]),
-        "tsv-fields": toTsvFields(columns),
-        "tsv-fields-data": toTsv(columns, [row]),
+        insert: toInsertSql(tableName, activeColumns, activeRows, driver),
+        update: toUpdateSql(tableName, activeColumns, activeRows[0], primaryKeys, driver),
+        "tsv-data": toTsvData(activeColumns, activeRows),
+        "tsv-fields": toTsvFields(activeColumns),
+        "tsv-fields-data": toTsv(activeColumns, activeRows),
       };
       await navigator.clipboard.writeText(contentByFormat[format]);
       toast.success(t("query.copied"));
@@ -943,6 +980,8 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
         onSortByColumn={handleSortByColumn}
         onClearFilterSort={handleClearFilterSort}
         onAddColumnFilter={handleAddColumnFilter}
+        onRemoveColumnFilter={handleRemoveColumnFilter}
+        onRemoveAllFilters={handleRemoveAllFilters}
         onDeleteRow={handleDeleteRow}
         onHideColumn={handleHideColumn}
         onVisibleColumnToggle={handleVisibleColumnToggle}

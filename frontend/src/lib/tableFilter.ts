@@ -1,7 +1,17 @@
 import { quoteIdent, sqlQuote } from "./tableSql";
 
 export type TableFilterJoin = "and" | "or";
-export type TableFilterOperator = "=" | "!=" | ">" | ">=" | "<" | "<=" | "is_empty" | "is_not_empty";
+export type TableFilterOperator =
+  | "="
+  | "!="
+  | "like"
+  | "not_like"
+  | ">"
+  | ">="
+  | "<"
+  | "<="
+  | "is_empty"
+  | "is_not_empty";
 export type TableSortDir = "asc" | "desc";
 
 export interface TableFilterCondition {
@@ -125,6 +135,9 @@ function conditionSql(condition: TableFilterCondition, driver?: string): string 
     return "";
   }
 
+  if (operator === "like") return `${column} LIKE ${sqlQuote(`%${String(condition.value)}%`)}`;
+  if (operator === "not_like") return `${column} NOT LIKE ${sqlQuote(`%${String(condition.value)}%`)}`;
+
   const sqlOperator = operator === "!=" ? "<>" : operator;
   return `${column} ${sqlOperator} ${sqlQuote(condition.value)}`;
 }
@@ -180,6 +193,8 @@ export function updateFilterGroup(
 const NEGATED_OPERATOR: Record<TableFilterOperator, TableFilterOperator> = {
   "=": "!=",
   "!=": "=",
+  like: "not_like",
+  not_like: "like",
   ">": "<=",
   ">=": "<",
   "<": ">=",
@@ -223,6 +238,12 @@ export function removeFilterItem(items: TableFilterItem[], id: string): TableFil
   return items
     .filter((item) => item.id !== id)
     .map((item) => (item.kind === "group" ? { ...item, items: removeFilterItem(item.items, id) } : item));
+}
+
+export function removeFilterItemsByColumn(items: TableFilterItem[], column: string): TableFilterItem[] {
+  return items
+    .filter((item) => item.kind !== "condition" || item.column !== column)
+    .map((item) => (item.kind === "group" ? { ...item, items: removeFilterItemsByColumn(item.items, column) } : item));
 }
 
 export function unwrapFilterGroup(items: TableFilterItem[], id: string): TableFilterItem[] {

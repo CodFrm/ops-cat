@@ -10,10 +10,23 @@ export function quoteIdent(name: string, driver?: string): string {
   return `\`${name}\``;
 }
 
-export function buildFilterByCellValueClause(col: string, value: unknown, driver?: string): string {
+export type CellValueFilterOperator = "=" | "!=" | "like" | "not_like" | "<" | ">";
+
+export function buildFilterByCellValueClause(
+  col: string,
+  value: unknown,
+  driver?: string,
+  operator: CellValueFilterOperator = "="
+): string {
   const quotedCol = quoteIdent(col, driver);
-  if (value == null) return `${quotedCol} IS NULL`;
-  return `${quotedCol} = ${sqlQuote(value)}`;
+  if (value == null) {
+    if (operator === "!=") return `${quotedCol} IS NOT NULL`;
+    if (operator === "=") return `${quotedCol} IS NULL`;
+    return "";
+  }
+  if (operator === "like") return `${quotedCol} LIKE ${sqlQuote(`%${String(value)}%`)}`;
+  if (operator === "not_like") return `${quotedCol} NOT LIKE ${sqlQuote(`%${String(value)}%`)}`;
+  return `${quotedCol} ${operator === "!=" ? "<>" : operator} ${sqlQuote(value)}`;
 }
 
 export interface BuildDeleteStatementArgs {
