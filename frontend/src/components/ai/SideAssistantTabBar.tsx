@@ -36,7 +36,12 @@ export function SideAssistantTabBar({
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex h-full flex-col" role="tablist" aria-orientation="vertical" aria-label="ai-sessions">
+      <div
+        className="flex h-full flex-col"
+        role="tablist"
+        aria-orientation="vertical"
+        aria-label={t("ai.sidebar.title")}
+      >
         {/* 顶部按钮组：⇄ + ＋ */}
         <div
           className={cn(
@@ -81,7 +86,7 @@ export function SideAssistantTabBar({
             const titleText = tab.title || t("ai.newConversation");
             const isBlank = tab.conversationId == null;
             const letter = isBlank ? "?" : getSessionIconLetter(titleText);
-            const color = isBlank ? { bg: "transparent", fg: "currentColor" } : getSessionIconColor(titleText);
+            const color = isBlank ? null : getSessionIconColor(titleText);
             const statusSuffix = status ? ` · ${t(`ai.sidebar.statusSuffix.${status}`)}` : "";
 
             const handleAuxClick = (e: React.MouseEvent) => {
@@ -108,7 +113,7 @@ export function SideAssistantTabBar({
                           isActive && "ring-2 ring-primary ring-offset-1 ring-offset-sidebar",
                           isBlank && "border border-dashed border-muted-foreground/40 text-muted-foreground/70"
                         )}
-                        style={isBlank ? undefined : { background: color.bg, color: color.fg }}
+                        style={color ? { background: color.bg, color: color.fg } : undefined}
                       >
                         {letter}
                         {status && (
@@ -172,7 +177,7 @@ export function SideAssistantTabBar({
                       "relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs font-bold",
                       isBlank && "border border-dashed border-muted-foreground/40 text-muted-foreground/70"
                     )}
-                    style={isBlank ? undefined : { background: color.bg, color: color.fg }}
+                    style={color ? { background: color.bg, color: color.fg } : undefined}
                   >
                     {letter}
                     {status === "running" ? (
