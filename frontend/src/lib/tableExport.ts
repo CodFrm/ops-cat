@@ -4,9 +4,27 @@ type TableRow = Record<string, unknown>;
 export type TableExportFormat = "csv" | "tsv" | "sql";
 export type TableExportScope = "page" | "all";
 export type TableExportSortDir = "asc" | "desc" | null;
+export type TableExportRecordDelimiter = "lf" | "crlf";
+export type TableExportFieldDelimiter = "comma" | "tab" | "semicolon" | "pipe";
+export type TableExportTextQualifier = "double" | "single" | "none";
+export type TableExportDateOrder = "ymd" | "dmy" | "mdy";
+export type TableExportBinaryEncoding = "base64" | "hex";
 
-interface DelimitedExportOptions {
+export interface TableExportOptions {
   includeHeaders?: boolean;
+  append?: boolean;
+  continueOnError?: boolean;
+  recordDelimiter?: TableExportRecordDelimiter;
+  fieldDelimiter?: TableExportFieldDelimiter;
+  textQualifier?: TableExportTextQualifier;
+  blankIfZero?: boolean;
+  zeroPaddingDate?: boolean;
+  dateOrder?: TableExportDateOrder;
+  dateDelimiter?: string;
+  timeDelimiter?: string;
+  decimalSymbol?: "." | ",";
+  binaryDataEncoding?: TableExportBinaryEncoding;
+  nullValue?: string;
 }
 
 interface BuildTableExportSelectSqlInput {
@@ -29,33 +47,124 @@ interface BuildTableExportContentInput {
   tableName: string;
   driver?: string;
   includeHeaders?: boolean;
+  options?: TableExportOptions;
 }
 
-function cellText(value: unknown): string {
-  if (value == null) return "";
+interface DateParts {
+  year: number;
+  month: number;
+  day: number;
+  hour?: number;
+  minute?: number;
+  second?: number;
+}
+
+function fieldDelimiterValue(kind: TableExportFieldDelimiter | undefined, fallback: string): string {
+  if (kind === "tab") return "\t";
+  if (kind === "semicolon") return ";";
+  if (kind === "pipe") return "|";
+  if (kind === "comma") return ",";
+  return fallback;
+}
+
+function recordDelimiterValue(kind: TableExportRecordDelimiter | undefined): string {
+  return kind === "crlf" ? "\r\n" : "\n";
+}
+
+function textQualifierValue(kind: TableExportTextQualifier | undefined): string {
+  if (kind === "single") return "'";
+  if (kind === "none") return "";
+  return '"';
+}
+
+function encodeBinary(value: ArrayBufferView, encoding: TableExportBinaryEncoding | undefined): string {
+  const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  if (encoding === "hex") return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function parseDateParts(value: unknown): DateParts | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return {
+      year: value.getFullYear(),
+      month: value.getMonth() + 1,
+      day: value.getDate(),
+      hour: value.getHours(),
+      minute: value.getMinutes(),
+      second: value.getSeconds(),
+    };
+  }
+  if (typeof value !== "string") return null;
+  const match = value.trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (!match) return null;
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+    hour: match[4] == null ? undefined : Number(match[4]),
+    minute: match[5] == null ? undefined : Number(match[5]),
+    second: match[6] == null ? undefined : Number(match[6]),
+  };
+}
+
+function formatDateParts(parts: DateParts, options: TableExportOptions): string {
+  const pad = options.zeroPaddingDate ?? true;
+  const dateDelimiter = options.dateDelimiter ?? "-";
+  const timeDelimiter = options.timeDelimiter ?? ":";
+  const value = (n: number) => (pad ? String(n).padStart(2, "0") : String(n));
+  const dateParts = {
+    y: String(parts.year),
+    m: value(parts.month),
+    d: value(parts.day),
+  };
+  const order = options.dateOrder ?? "ymd";
+  const date =
+    order === "dmy"
+      ? [dateParts.d, dateParts.m, dateParts.y].join(dateDelimiter)
+      : order === "mdy"
+        ? [dateParts.m, dateParts.d, dateParts.y].join(dateDelimiter)
+        : [dateParts.y, dateParts.m, dateParts.d].join(dateDelimiter);
+  if (parts.hour == null || parts.minute == null) return date;
+  const time = [value(parts.hour), value(parts.minute), value(parts.second ?? 0)].join(timeDelimiter);
+  return `${date} ${time}`;
+}
+
+function cellText(value: unknown, options: TableExportOptions = {}): string {
+  if (value == null) return options.nullValue ?? "";
+  if (ArrayBuffer.isView(value)) return encodeBinary(value, options.binaryDataEncoding);
+  if (typeof value === "number") {
+    if (options.blankIfZero && Object.is(value, 0)) return "";
+    const text = String(value);
+    return options.decimalSymbol === "," ? text.replace(".", ",") : text;
+  }
+  const dateParts = parseDateParts(value);
+  if (dateParts) return formatDateParts(dateParts, options);
   return String(value);
 }
 
-function escapeDelimited(value: unknown, delimiter: string): string {
-  const text = cellText(value);
-  if (!text.includes(delimiter) && !text.includes('"') && !text.includes("\n") && !text.includes("\r")) {
+function escapeDelimited(value: unknown, delimiter: string, options: TableExportOptions = {}): string {
+  const text = cellText(value, options);
+  const qualifier = textQualifierValue(options.textQualifier);
+  if (!qualifier) return text;
+  if (!text.includes(delimiter) && !text.includes(qualifier) && !text.includes("\n") && !text.includes("\r")) {
     return text;
   }
-  return `"${text.replace(/"/g, '""')}"`;
+  return `${qualifier}${text.split(qualifier).join(qualifier + qualifier)}${qualifier}`;
 }
 
-function toDelimited(
-  columns: string[],
-  rows: TableRow[],
-  delimiter: string,
-  options: DelimitedExportOptions = {}
-): string {
+function toDelimited(columns: string[], rows: TableRow[], delimiter: string, options: TableExportOptions = {}): string {
   const includeHeaders = options.includeHeaders ?? true;
-  const lines = includeHeaders ? [columns.map((col) => escapeDelimited(col, delimiter)).join(delimiter)] : [];
+  const actualDelimiter = fieldDelimiterValue(options.fieldDelimiter, delimiter);
+  const recordDelimiter = recordDelimiterValue(options.recordDelimiter);
+  const lines = includeHeaders
+    ? [columns.map((col) => escapeDelimited(col, actualDelimiter, options)).join(actualDelimiter)]
+    : [];
   for (const row of rows) {
-    lines.push(columns.map((col) => escapeDelimited(row[col], delimiter)).join(delimiter));
+    lines.push(columns.map((col) => escapeDelimited(row[col], actualDelimiter, options)).join(actualDelimiter));
   }
-  return lines.join("\n");
+  return lines.join(recordDelimiter);
 }
 
 function toDelimitedData(columns: string[], rows: TableRow[], delimiter: string): string {
@@ -70,11 +179,11 @@ function quoteTableName(tableName: string, driver?: string): string {
     .join(".");
 }
 
-export function toTsv(columns: string[], rows: TableRow[], options?: DelimitedExportOptions): string {
+export function toTsv(columns: string[], rows: TableRow[], options?: TableExportOptions): string {
   return toDelimited(columns, rows, "\t", options);
 }
 
-export function toCsv(columns: string[], rows: TableRow[], options?: DelimitedExportOptions): string {
+export function toCsv(columns: string[], rows: TableRow[], options?: TableExportOptions): string {
   return toDelimited(columns, rows, ",", options);
 }
 
@@ -126,9 +235,11 @@ export function buildTableExportContent({
   tableName,
   driver,
   includeHeaders = true,
+  options = {},
 }: BuildTableExportContentInput): string {
-  if (format === "csv") return toCsv(columns, rows, { includeHeaders });
-  if (format === "tsv") return toTsv(columns, rows, { includeHeaders });
+  const mergedOptions = { ...options, includeHeaders };
+  if (format === "csv") return toCsv(columns, rows, mergedOptions);
+  if (format === "tsv") return toTsv(columns, rows, mergedOptions);
   return toInsertSql(tableName, columns, rows, driver);
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildTableExportContent,
   buildTableExportSelectSql,
   toCsv,
   toInsertSql,
@@ -62,6 +63,50 @@ describe("table export helpers", () => {
   it("can omit column titles for delimited exports", () => {
     expect(toCsv(["id", "name"], [rows[0]], { includeHeaders: false })).toBe("1,Alice");
     expect(toTsv(["id", "name"], [rows[0]], { includeHeaders: false })).toBe("1\tAlice");
+  });
+
+  it("exports delimited text with custom delimiters and text qualifiers", () => {
+    expect(
+      buildTableExportContent({
+        format: "csv",
+        columns: ["id", "name", "note"],
+        rows: [{ id: 1, name: "Alice", note: "left;right" }],
+        tableName: "appdb.users",
+        includeHeaders: true,
+        options: {
+          fieldDelimiter: "semicolon",
+          recordDelimiter: "crlf",
+          textQualifier: "single",
+        },
+      })
+    ).toBe("id;name;note\r\n1;Alice;'left;right'");
+  });
+
+  it("applies data formatting options for zero, date, decimal, and binary values", () => {
+    expect(
+      buildTableExportContent({
+        format: "csv",
+        columns: ["amount", "created_at", "ratio", "payload"],
+        rows: [
+          {
+            amount: 0,
+            created_at: "2026-04-03 05:06:07",
+            ratio: 12.5,
+            payload: new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
+          },
+        ],
+        tableName: "appdb.users",
+        includeHeaders: false,
+        options: {
+          blankIfZero: true,
+          dateOrder: "dmy",
+          dateDelimiter: "/",
+          timeDelimiter: ".",
+          decimalSymbol: ",",
+          binaryDataEncoding: "hex",
+        },
+      })
+    ).toBe(',03/04/2026 05.06.07,"12,5",deadbeef');
   });
 
   it("builds all-data export SQL without pagination while preserving filters and sorting", () => {
