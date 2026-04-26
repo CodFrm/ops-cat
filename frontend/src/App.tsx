@@ -21,38 +21,14 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useQueryStore } from "@/stores/queryStore";
-import { getAssetType, normalizeAssetSection } from "@/lib/assetTypes";
-import { useTabStore, type InfoTabMeta, type PageTabMeta, type QueryTabMeta, type Tab } from "@/stores/tabStore";
+import { getAssetType, type HomeSection } from "@/lib/assetTypes";
+import { tabBelongsToSection } from "@/lib/tabSection";
+import { useTabStore, type PageTabMeta } from "@/stores/tabStore";
 import { useExtensionStore } from "@/extension";
 import { bootstrapExtensions } from "@/extension/init";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { asset_entity, group_entity } from "../wailsjs/go/models";
 import { EventsOn, WindowToggleMaximise } from "../wailsjs/runtime/runtime";
-
-type HomeSection = "home" | "database" | "ssh" | "redis" | "mongodb";
-
-function tabBelongsToSection(tab: Tab, section: HomeSection): boolean {
-  if (section === "home") return true;
-
-  if (tab.type === "terminal") {
-    return section === "ssh";
-  }
-
-  if (tab.type === "query") {
-    const assetType = normalizeAssetSection((tab.meta as QueryTabMeta).assetType);
-    return assetType === section;
-  }
-
-  if (tab.type === "info") {
-    const meta = tab.meta as InfoTabMeta;
-    if (meta.targetType !== "asset") return false;
-    const asset = useAssetStore.getState().assets.find((a) => a.ID === meta.targetId);
-    if (!asset) return false;
-    return normalizeAssetSection(asset.Type) === section;
-  }
-
-  return false;
-}
 
 function App() {
   const { t } = useTranslation();
@@ -150,6 +126,7 @@ function App() {
   const [assetTreeResizing, setAssetTreeResizing] = useState(false);
   const assetTreeWidthRef = useRef(assetTreeWidth);
   const [homeSection, setHomeSection] = useState<HomeSection>("home");
+  const assets = useAssetStore((s) => s.assets);
 
   const toggleAIPanel = useCallback(() => {
     setAiPanelCollapsed((prev) => {
@@ -374,7 +351,7 @@ function App() {
         const candidateTabs = tabStore.tabs.filter(
           (t) => t.type === "terminal" || t.type === "query" || t.type === "info"
         );
-        const target = candidateTabs.find((t) => tabBelongsToSection(t, section));
+        const target = candidateTabs.find((t) => tabBelongsToSection(t, section, assets));
         if (target) {
           tabStore.activateTab(target.id);
         } else if (section === "home") {
@@ -396,7 +373,7 @@ function App() {
       }
       hideAssetListAfterConnect();
     },
-    [homeSection, hideAssetListAfterConnect]
+    [homeSection, hideAssetListAfterConnect, assets]
   );
 
   const tabBarLayout = useLayoutStore((s) => s.tabBarLayout);

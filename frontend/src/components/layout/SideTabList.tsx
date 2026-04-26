@@ -2,41 +2,30 @@ import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Search, Server, Folder, MessageSquare } from "lucide-react";
 import { cn } from "@opskat/ui";
-import { useTabStore, type Tab, type InfoTabMeta, type QueryTabMeta } from "@/stores/tabStore";
+import { useTabStore, type Tab, type InfoTabMeta } from "@/stores/tabStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useAssetStore } from "@/stores/assetStore";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
 import { filterMatches, highlightMatch } from "@/lib/highlightMatch";
-import { normalizeAssetSection } from "@/lib/assetTypes";
+import { type HomeSection } from "@/lib/assetTypes";
+import { tabBelongsToSection } from "@/lib/tabSection";
 import { useLayoutStore, isCollapsed } from "@/stores/layoutStore";
 import { SideTabItem, SideTabDragContext } from "./SideTabItem";
 import { TabFilterInput } from "./TabFilterInput";
 import { TabPanelMenu } from "./TabPanelMenu";
 import { getBuiltinPageMeta, resolveTabLabel } from "./pageTabMeta";
 
-type HomeSection = "home" | "database" | "ssh" | "redis" | "mongodb";
-
-function matchHomeSection(tab: Tab, section: HomeSection) {
-  if (section === "home") return true;
-  if (tab.type === "terminal") return section === "ssh";
-  if (tab.type === "query") return normalizeAssetSection((tab.meta as QueryTabMeta).assetType) === section;
-  if (tab.type === "info") {
-    const meta = tab.meta as InfoTabMeta;
-    if (meta.targetType !== "asset") return false;
-    const asset = useAssetStore.getState().assets.find((a) => a.ID === meta.targetId);
-    if (!asset) return false;
-    return normalizeAssetSection(asset.Type) === section;
-  }
-  return false;
-}
-
 export function SideTabList({ homeSection = "home" }: { homeSection?: HomeSection }) {
   const { t } = useTranslation();
   const isFullscreen = useFullscreen();
   const tabs = useTabStore((s) => s.tabs);
   const activeTabId = useTabStore((s) => s.activeTabId);
-  const visibleTabs = useMemo(() => tabs.filter((tab) => matchHomeSection(tab, homeSection)), [tabs, homeSection]);
+  const assets = useAssetStore((s) => s.assets);
+  const visibleTabs = useMemo(
+    () => tabs.filter((tab) => tabBelongsToSection(tab, homeSection, assets)),
+    [tabs, homeSection, assets]
+  );
   const activateTab = useTabStore((s) => s.activateTab);
   const closeTab = useTabStore((s) => s.closeTab);
   const reorderTab = useTabStore((s) => s.reorderTab);
@@ -61,9 +50,10 @@ export function SideTabList({ homeSection = "home" }: { homeSection?: HomeSectio
   );
 
   // 稳定 Context value —— 否则每次父组件 render 都会强制所有 SideTabItem 消费者重渲
+  // 必须使用完整 tabs：SideTabItem 的 globalIndex/total 与 moveTabTo/closeLeftTabs 需要相对全量列表的索引
   const dragContextValue = useMemo(
-    () => ({ dragKeyRef, reorder: reorderTab, moveTo: moveTabTo, tabs: visibleTabs }),
-    [reorderTab, moveTabTo, visibleTabs]
+    () => ({ dragKeyRef, reorder: reorderTab, moveTo: moveTabTo, tabs }),
+    [reorderTab, moveTabTo, tabs]
   );
 
   const resolveMeta = (

@@ -41,14 +41,12 @@ import {
 } from "@opskat/ui";
 import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
 import { filterAssets } from "@/lib/assetSearch";
-import { getAssetType, normalizeAssetSection } from "@/lib/assetTypes";
+import { getAssetType, normalizeAssetSection, type HomeSection } from "@/lib/assetTypes";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useActiveAssetIds } from "@/hooks/useActiveAssetIds";
 import { MoveAsset, MoveGroup } from "../../../wailsjs/go/app/App";
 import { asset_entity, group_entity } from "../../../wailsjs/go/models";
-
-type HomeSection = "home" | "database" | "ssh" | "redis" | "mongodb";
 
 interface AssetTreeProps {
   collapsed: boolean;

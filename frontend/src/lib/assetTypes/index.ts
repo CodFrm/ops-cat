@@ -14,6 +14,8 @@ export function getBuiltinTypes(): AssetTypeDefinition[] {
   return [...registry.values()];
 }
 
+export type HomeSection = "home" | "database" | "ssh" | "redis" | "mongodb";
+
 export function normalizeAssetSection(type: string): "database" | "ssh" | "redis" | "mongodb" | undefined {
   const normalized = type.trim().toLowerCase();
   if (!normalized) return undefined;
