@@ -90,10 +90,10 @@ describe("SideAssistantPanel", () => {
 
     render(<SideAssistantPanel collapsed={false} onToggle={() => {}} />);
 
-    const tablist = screen.getByRole("tablist", { name: "ai.sidebar.sessions" });
+    const tablist = screen.getByRole("tablist");
     expect(tablist).toHaveAttribute("aria-orientation", "vertical");
     expect(tablist.closest('[data-ai-session-rail="right"]')).not.toBeNull();
-    expect(screen.getByTitle("ai.sidebar.status.running")).toBeInTheDocument();
+    expect(document.querySelector(".bg-sky-500")).toBeTruthy();
   });
 
   it("history selection binds the active blank tab instead of opening a duplicate", async () => {

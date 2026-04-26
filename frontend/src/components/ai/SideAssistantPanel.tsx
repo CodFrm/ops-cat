@@ -191,9 +191,12 @@ export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelPr
                 tabs={sidebarTabs}
                 activeTabId={activeSidebarTabId}
                 getStatus={getSidebarTabStatus}
-                compact={isCompactSessionRail}
+                collapsed={true}
+                width={36}
                 onActivate={activateSidebarTab}
                 onClose={closeSidebarTab}
+                onNewChat={handleNewChat}
+                onToggleCollapsed={() => {}}
               />
             </aside>
           )}
