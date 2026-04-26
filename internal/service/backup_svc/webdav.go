@@ -43,6 +43,33 @@ func ValidateWebDAVURL(raw string) error {
 	return err
 }
 
+// ValidateWebDAVConfig 校验 URL 与 AuthType 必填字段。
+// app 层在 Save / Test 入口处调用，避免发出无意义请求。
+func ValidateWebDAVConfig(cfg WebDAVConfig) error {
+	if err := ValidateWebDAVURL(cfg.URL); err != nil {
+		return err
+	}
+	switch cfg.AuthType {
+	case WebDAVAuthNone, "":
+		return nil
+	case WebDAVAuthBasic:
+		if strings.TrimSpace(cfg.Username) == "" {
+			return fmt.Errorf("WebDAV username is required for basic auth")
+		}
+		if cfg.Password == "" {
+			return fmt.Errorf("WebDAV password is required for basic auth")
+		}
+		return nil
+	case WebDAVAuthBearer:
+		if strings.TrimSpace(cfg.Token) == "" {
+			return fmt.Errorf("WebDAV token is required for bearer auth")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported WebDAV auth type %q", cfg.AuthType)
+	}
+}
+
 // WebDAVConfig contains the connection details used for WebDAV backup transport.
 type WebDAVConfig struct {
 	URL      string         `json:"url"`

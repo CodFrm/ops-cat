@@ -555,6 +555,77 @@ func TestParseWebDAVBackupListSkipsBadEntries(t *testing.T) {
 	})
 }
 
+func TestValidateWebDAVConfig(t *testing.T) {
+	Convey("ValidateWebDAVConfig", t, func() {
+		base := WebDAVConfig{URL: "https://example.com/dav/"}
+
+		Convey("none 仅校验 URL", func() {
+			cfg := base
+			cfg.AuthType = WebDAVAuthNone
+			So(ValidateWebDAVConfig(cfg), ShouldBeNil)
+		})
+
+		Convey("basic 缺 username 报错", func() {
+			cfg := base
+			cfg.AuthType = WebDAVAuthBasic
+			cfg.Password = "s3cret"
+			err := ValidateWebDAVConfig(cfg)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "username")
+		})
+
+		Convey("basic 缺 password 报错", func() {
+			cfg := base
+			cfg.AuthType = WebDAVAuthBasic
+			cfg.Username = "alice"
+			err := ValidateWebDAVConfig(cfg)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "password")
+		})
+
+		Convey("basic 用户名+密码齐全通过", func() {
+			cfg := base
+			cfg.AuthType = WebDAVAuthBasic
+			cfg.Username = "alice"
+			cfg.Password = "s3cret"
+			So(ValidateWebDAVConfig(cfg), ShouldBeNil)
+		})
+
+		Convey("bearer 缺 token 报错", func() {
+			cfg := base
+			cfg.AuthType = WebDAVAuthBearer
+			err := ValidateWebDAVConfig(cfg)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "token")
+		})
+
+		Convey("bearer 有 token 通过", func() {
+			cfg := base
+			cfg.AuthType = WebDAVAuthBearer
+			cfg.Token = "abc"
+			So(ValidateWebDAVConfig(cfg), ShouldBeNil)
+		})
+
+		Convey("未知 AuthType 报错", func() {
+			cfg := base
+			cfg.AuthType = WebDAVAuthType("digest")
+			err := ValidateWebDAVConfig(cfg)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "auth type")
+		})
+
+		Convey("URL 含 user:pass@ 沿用 ValidateWebDAVURL 行为报错", func() {
+			cfg := WebDAVConfig{
+				URL:      "https://user:pass@example.com/dav/",
+				AuthType: WebDAVAuthNone,
+			}
+			err := ValidateWebDAVConfig(cfg)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "credentials")
+		})
+	})
+}
+
 func TestApplyWebDAVAuth(t *testing.T) {
 	Convey("applyWebDAVAuth", t, func() {
 		makeReq := func() *http.Request {
