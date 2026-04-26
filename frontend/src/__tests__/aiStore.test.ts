@@ -1029,3 +1029,138 @@ describe("sidebar and main tab multi-host behavior", () => {
     expect(vi.mocked(SendAIMessage)).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("DeepSeek-v4 多轮 tool 调用历史展开", () => {
+  const buildHistory = () => [
+    { role: "user" as const, content: "查 SSH 服务器", blocks: [], streaming: false },
+    {
+      role: "assistant" as const,
+      content: "找到 2 台",
+      streaming: false,
+      blocks: [
+        { type: "thinking" as const, content: "我先查一下" },
+        {
+          type: "tool" as const,
+          content: '[{"id":1}]',
+          toolName: "list_assets",
+          toolInput: '{"asset_type":"ssh"}',
+          toolCallId: "call_001",
+          status: "completed" as const,
+        },
+        { type: "thinking" as const, content: "再过滤一下" },
+        { type: "text" as const, content: "找到 2 台" },
+      ],
+    },
+    { role: "user" as const, content: "再看 redis", blocks: [], streaming: false },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    vi.mocked(EventsOn).mockReturnValue(() => {});
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+  });
+
+  it("DeepSeek-v4 模型：assistant blocks 展开为 assistant(tool_calls)+tool+assistant(text) 多条标准消息", async () => {
+    useAIStore.setState({
+      modelName: "deepseek-v4-pro",
+      sidebarConversationId: 100,
+      conversationMessages: { 100: buildHistory() },
+      conversationStreaming: { 100: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendFromSidebar(100, "再看 redis");
+
+    const args = vi.mocked(SendAIMessage).mock.calls.at(-1)!;
+    const apiMsgs = args[1] as any[];
+
+    // user / assistant(thinking+tool_calls) / tool / assistant(final text) / user / user
+    // 注意 sendFromSidebar 会再追加一条 user 消息
+    const roles = apiMsgs.map((m) => m.role);
+    expect(roles).toEqual(["user", "assistant", "tool", "assistant", "user", "user"]);
+
+    const toolCallAssistant = apiMsgs[1];
+    expect(toolCallAssistant.thinking).toBe("我先查一下");
+    expect(toolCallAssistant.reasoning_content).toBe("我先查一下");
+    expect(toolCallAssistant.tool_calls).toHaveLength(1);
+    expect(toolCallAssistant.tool_calls[0].id).toBe("call_001");
+    expect(toolCallAssistant.tool_calls[0].function.name).toBe("list_assets");
+
+    const toolMsg = apiMsgs[2];
+    expect(toolMsg.tool_call_id).toBe("call_001");
+    expect(toolMsg.content).toBe('[{"id":1}]');
+
+    const finalAssistant = apiMsgs[3];
+    expect(finalAssistant.thinking).toBe("再过滤一下");
+    expect(finalAssistant.reasoning_content).toBe("再过滤一下");
+    expect(finalAssistant.content).toBe("找到 2 台");
+    expect(finalAssistant.tool_calls).toBeUndefined();
+  });
+
+  it("非 DeepSeek-v4 模型：保持原有塌缩行为，不展开 tool_calls，不带 reasoning_content", async () => {
+    useAIStore.setState({
+      modelName: "deepseek-chat",
+      sidebarConversationId: 101,
+      conversationMessages: { 101: buildHistory() },
+      conversationStreaming: { 101: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendFromSidebar(101, "再看 redis");
+
+    const args = vi.mocked(SendAIMessage).mock.calls.at(-1)!;
+    const apiMsgs = args[1] as any[];
+
+    // 只有 user / assistant / user / user（assistant 是塌缩后单条，不展开）
+    const roles = apiMsgs.map((m) => m.role);
+    expect(roles).toEqual(["user", "assistant", "user", "user"]);
+
+    const assistantMsg = apiMsgs[1];
+    expect(assistantMsg.content).toBe("找到 2 台");
+    expect(assistantMsg.tool_calls).toBeUndefined();
+    expect(assistantMsg.reasoning_content).toBeUndefined();
+    expect(assistantMsg.thinking).toBeUndefined();
+  });
+
+  it("DeepSeek-v4 模型 + 老数据（tool block 缺 toolCallId）：兜底为塌缩消息，不抛错", async () => {
+    const legacyHistory = [
+      { role: "user" as const, content: "old turn", blocks: [], streaming: false },
+      {
+        role: "assistant" as const,
+        content: "done",
+        streaming: false,
+        blocks: [
+          { type: "thinking" as const, content: "thoughts" },
+          // 缺 toolCallId 的旧持久化数据
+          {
+            type: "tool" as const,
+            content: "result",
+            toolName: "list_assets",
+            toolInput: "{}",
+            status: "completed" as const,
+          },
+          { type: "text" as const, content: "done" },
+        ],
+      },
+      { role: "user" as const, content: "next", blocks: [], streaming: false },
+    ];
+
+    useAIStore.setState({
+      modelName: "deepseek-v4-pro",
+      sidebarConversationId: 102,
+      conversationMessages: { 102: legacyHistory },
+      conversationStreaming: { 102: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendFromSidebar(102, "next");
+
+    const args = vi.mocked(SendAIMessage).mock.calls.at(-1)!;
+    const apiMsgs = args[1] as any[];
+
+    // 老数据回退到塌缩：user / assistant(单条，含 reasoning_content) / user / user
+    expect(apiMsgs.map((m) => m.role)).toEqual(["user", "assistant", "user", "user"]);
+    expect(apiMsgs[1].content).toBe("done");
+    expect(apiMsgs[1].reasoning_content).toBe("thoughts");
+    expect(apiMsgs[1].tool_calls).toBeUndefined();
+  });
+});

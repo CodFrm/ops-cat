@@ -1,6 +1,11 @@
 build/bin
 node_modules
 frontend/dist
+
+# Node
+frontend/wailsjs/
+frontend/package.json.md5
+
 temp
 
 .claude
@@ -9,6 +14,8 @@ frontend/.claude
 CLAUDE.md
 
 *.db
+
+*.tsbuildinfo
 
 opskat
 
@@ -22,6 +29,7 @@ coverage.out
 coverage.html
 
 superpowers
+!docs/superpowers
 .omc
 
 coverage_new.out
@@ -32,3 +40,5 @@ coverage_new.out
 
 # e2e WASM fixture 本地产物（源码在 pkg/extension/testdata/tcp_e2e_fixture/ 下，编译物 gitignore）
 /pkg/extension/testdata/tcp_e2e_fixture.wasm
+
+.idea

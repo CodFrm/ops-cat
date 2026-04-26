@@ -33,6 +33,7 @@ export interface ContentBlock {
   content: string;
   toolName?: string;
   toolInput?: string;
+  toolCallId?: string; // 跨 turn 还原 tool_calls 历史；老数据无此字段，发送时退化为塌缩消息
   status?: "running" | "completed" | "error" | "pending_confirm" | "cancelled";
   confirmId?: string;
   // agent 块专用
@@ -81,6 +82,7 @@ interface StreamEventData {
   content?: string;
   tool_name?: string;
   tool_input?: string;
+  tool_call_id?: string;
   confirm_id?: string;
   error?: string;
   agent_role?: string;
@@ -906,6 +908,7 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
           content: "",
           toolName: event.tool_name || "Tool",
           toolInput: event.tool_input || "",
+          toolCallId: event.tool_call_id,
           status: "running" as const,
         };
 
@@ -946,28 +949,27 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
             break;
           }
         }
+        // 匹配优先级：toolCallId 精确匹配 > toolName + running > 任意 running
+        const findToolMatch = (arr: ContentBlock[]): number => {
+          if (event.tool_call_id) {
+            for (let i = arr.length - 1; i >= 0; i--) {
+              if (arr[i].type === "tool" && arr[i].toolCallId === event.tool_call_id) return i;
+            }
+          }
+          for (let i = arr.length - 1; i >= 0; i--) {
+            const b = arr[i];
+            if (b.type === "tool" && b.status === "running" && b.toolName === event.tool_name) return i;
+          }
+          for (let i = arr.length - 1; i >= 0; i--) {
+            if (arr[i].type === "tool" && arr[i].status === "running") return i;
+          }
+          return -1;
+        };
+
         if (agentIdx !== -1 && newBlocks[agentIdx].childBlocks) {
           const agentBlock = { ...newBlocks[agentIdx] };
           const children = [...(agentBlock.childBlocks || [])];
-          let matchIdx = -1;
-          for (let i = children.length - 1; i >= 0; i--) {
-            if (
-              children[i].type === "tool" &&
-              children[i].status === "running" &&
-              children[i].toolName === event.tool_name
-            ) {
-              matchIdx = i;
-              break;
-            }
-          }
-          if (matchIdx === -1) {
-            for (let i = children.length - 1; i >= 0; i--) {
-              if (children[i].type === "tool" && children[i].status === "running") {
-                matchIdx = i;
-                break;
-              }
-            }
-          }
+          const matchIdx = findToolMatch(children);
           if (matchIdx !== -1) {
             children[matchIdx] = { ...children[matchIdx], content: event.content || "", status: "completed" };
             agentBlock.childBlocks = children;
@@ -977,23 +979,7 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
         }
 
         // 顶层工具块匹配
-        let matchIdx = -1;
-        for (let i = newBlocks.length - 1; i >= 0; i--) {
-          const b = newBlocks[i];
-          if (b.type === "tool" && b.status === "running" && b.toolName === event.tool_name) {
-            matchIdx = i;
-            break;
-          }
-        }
-        if (matchIdx === -1) {
-          for (let i = newBlocks.length - 1; i >= 0; i--) {
-            const b = newBlocks[i];
-            if (b.type === "tool" && b.status === "running") {
-              matchIdx = i;
-              break;
-            }
-          }
-        }
+        const matchIdx = findToolMatch(newBlocks);
         if (matchIdx !== -1) {
           newBlocks[matchIdx] = { ...newBlocks[matchIdx], content: event.content || "", status: "completed" };
         }
@@ -1144,9 +1130,10 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
     }
 
     case "retry": {
+      const reason = event.error ? `: ${event.error}` : "";
       const updated = updateLastAssistant(msgs, (msg) => ({
         ...msg,
-        blocks: appendText(msg.blocks, `\n\n*${i18n.t("ai.retrying", "重试中")} (${event.content})...*`),
+        blocks: appendText(msg.blocks, `\n\n*${i18n.t("ai.retrying", "重试中")} (${event.content})${reason}*`),
       }));
       if (updated) updateConversation(convId, { messages: updated });
       break;
@@ -1254,6 +1241,91 @@ function resolveMentionedAssets(mentions: MentionRef[] | undefined): ai.Mentione
   return out;
 }
 
+// 把前端塌缩的 ChatMessage 还原成 OpenAI/Anthropic 标准的多条 LLM 消息：
+//   - 一次 user turn 对应一条 ChatMessage(assistant)，blocks 顺序为
+//     thinking_n -> tool_n(含 input/result) -> ... -> text(最终回复)
+//   - 展开后变成：assistant(thinking + tool_calls) + tool(result) + ... + assistant(text)
+//   - 前置约束：tool block 必须带 toolCallId 才能展开；缺失的（旧数据）直接忽略 tool 块，回退到塌缩
+//
+// 这样跨 turn 时 DeepSeek/OpenAI 能看到上一 turn 的中间 tool_calls 与结果，
+// 同时也满足 DeepSeek thinking 模式"带 tool_calls 的 assistant 必须回传 reasoning_content"的强制要求。
+function expandToAPIMessages(messages: ChatMessage[]): ai.Message[] {
+  const out: ai.Message[] = [];
+  for (const m of messages) {
+    if (m.role !== "assistant") {
+      out.push(new ai.Message({ role: m.role, content: m.content }));
+      continue;
+    }
+
+    // assistant 累加器：在遇到 tool block 时刷出当前 assistant + 跟一条 tool 消息
+    let thinking = "";
+    let text = "";
+    const pendingToolCalls: { id: string; type: string; function: { name: string; arguments: string } }[] = [];
+
+    const flushAssistant = () => {
+      if (!thinking && !text && pendingToolCalls.length === 0) return;
+      const payload: Record<string, unknown> = { role: "assistant", content: text };
+      if (thinking) {
+        payload.thinking = thinking;
+        payload.reasoning_content = thinking;
+      }
+      if (pendingToolCalls.length > 0) payload.tool_calls = pendingToolCalls.slice();
+      out.push(new ai.Message(payload));
+      thinking = "";
+      text = "";
+      pendingToolCalls.length = 0;
+    };
+
+    let canExpand = true; // 老数据若有 tool block 缺 toolCallId，全消息回退到塌缩
+    for (const b of m.blocks) {
+      if (b.type === "tool" && !b.toolCallId) {
+        canExpand = false;
+        break;
+      }
+    }
+
+    if (!canExpand) {
+      // 兼容旧数据：仅发最终 content + thinking 拼接（thinking 拼接也无害）
+      const allThinking = m.blocks
+        .filter((b) => b.type === "thinking")
+        .map((b) => b.content)
+        .join("");
+      const payload: Record<string, unknown> = { role: "assistant", content: m.content };
+      if (allThinking) {
+        payload.thinking = allThinking;
+        payload.reasoning_content = allThinking;
+      }
+      out.push(new ai.Message(payload));
+      continue;
+    }
+
+    for (const b of m.blocks) {
+      if (b.type === "thinking") {
+        thinking += b.content;
+      } else if (b.type === "text") {
+        text += b.content;
+      } else if (b.type === "tool" && b.toolCallId) {
+        pendingToolCalls.push({
+          id: b.toolCallId,
+          type: "function",
+          function: { name: b.toolName || "", arguments: b.toolInput || "{}" },
+        });
+        flushAssistant();
+        out.push(
+          new ai.Message({
+            role: "tool",
+            content: b.content,
+            tool_call_id: b.toolCallId,
+          })
+        );
+      }
+      // approval / agent 块不参与 LLM 历史还原，跳过
+    }
+    flushAssistant();
+  }
+  return out;
+}
+
 // 核心发送：完全基于 convId，共享给 sendToTab / sendFromSidebar / regenerate
 async function _sendForConversation(convId: number, content: string, mentions?: MentionRef[]) {
   conversationStopRequests.delete(convId);
@@ -1318,12 +1390,14 @@ async function _sendForConversation(convId: number, content: string, mentions?: 
     handleStreamEvent(convId, event);
   });
 
-  const apiMessages = newMessages.map((m) => {
-    return new ai.Message({
-      role: m.role,
-      content: m.content,
-    });
-  });
+  // 仅 DeepSeek-v4 thinking 模式强制要求"带 tool_calls 的 assistant 必须回传 reasoning_content"，
+  // 且需要历史中间 tool_calls 可见才能跨 turn 继续推理；其他 provider（Anthropic / OpenAI / Kimi 等）
+  // 保持原有塌缩行为，避免引入不必要的回归。
+  const modelName = useAIStore.getState().modelName;
+  const needExpand = modelName.startsWith("deepseek-v4");
+  const apiMessages = needExpand
+    ? expandToAPIMessages(newMessages)
+    : newMessages.map((m) => new ai.Message({ role: m.role, content: m.content }));
 
   // 收集当前 Tab 上下文
   const allTabs = useTabStore.getState().tabs;

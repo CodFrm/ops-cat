@@ -179,6 +179,30 @@ function defaultMongoState(): MongoDBTabState {
   };
 }
 
+export interface RedisStreamEntry {
+  id: string;
+  fields: Record<string, string>;
+}
+
+function parseStreamEntries(raw: unknown): RedisStreamEntry[] {
+  const entries: RedisStreamEntry[] = [];
+  if (!Array.isArray(raw)) return entries;
+  for (const item of raw) {
+    if (Array.isArray(item) && item.length >= 2) {
+      const id = String(item[0]);
+      const fields: Record<string, string> = {};
+      const fieldArr = item[1] as string[];
+      if (Array.isArray(fieldArr)) {
+        for (let i = 0; i < fieldArr.length; i += 2) {
+          fields[fieldArr[i]] = fieldArr[i + 1] || "";
+        }
+      }
+      entries.push({ id, fields });
+    }
+  }
+  return entries;
+}
+
 interface SQLResult {
   columns?: string[];
   rows?: Record<string, unknown>[];
@@ -707,6 +731,19 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           hasMoreValues = valueOffset < total;
           break;
         }
+        case "stream": {
+          const [countR, rangeR] = await Promise.all([
+            ExecuteRedisArgs(tab.assetId, ["XLEN", key], db),
+            ExecuteRedisArgs(tab.assetId, ["XRANGE", key, "-", "+", "COUNT", String(REDIS_PAGE_SIZE)], db),
+          ]);
+          total = Number(JSON.parse(countR).value) || 0;
+          const entries = parseStreamEntries(JSON.parse(rangeR).value);
+          value = entries;
+          valueCursor = entries.length > 0 ? entries[entries.length - 1].id : "";
+          valueOffset = entries.length;
+          hasMoreValues = valueOffset < total;
+          break;
+        }
       }
 
       set((s) => ({
@@ -816,6 +853,22 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           }
           newValue = [...(info.value as [string, string][]), ...pairs];
           newOffset = (newValue as [string, string][]).length;
+          newHasMore = newOffset < info.total;
+          break;
+        }
+        case "stream": {
+          const lastId = info.valueCursor || (info.value as RedisStreamEntry[]).slice(-1)[0]?.id || "0";
+          const r = await ExecuteRedisArgs(
+            tab.assetId,
+            ["XRANGE", key, lastId, "+", "COUNT", String(REDIS_PAGE_SIZE)],
+            db
+          );
+          const newEntries = parseStreamEntries(JSON.parse(r).value);
+          // XRANGE 起始 ID 为闭区间，翻页时只会重复返回首个 lastId 条目，跳过即可
+          const pageEntries = newEntries.length > 0 && newEntries[0].id === lastId ? newEntries.slice(1) : newEntries;
+          newValue = [...(info.value as RedisStreamEntry[]), ...pageEntries];
+          newOffset = (newValue as RedisStreamEntry[]).length;
+          newCursor = pageEntries.length > 0 ? pageEntries[pageEntries.length - 1].id : lastId;
           newHasMore = newOffset < info.total;
           break;
         }

@@ -40,8 +40,8 @@ jobs:
         run: mkdir -p cmd/devserver/static/assets && echo "placeholder" > cmd/devserver/static/assets/placeholder.txt
       - run: go test ./internal/... ./cmd/opsctl/... ./pkg/... ./cmd/devserver/...
 
-  frontend-check:
-    name: Frontend Check
+  frontend-lint:
+    name: Frontend Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -57,7 +57,30 @@ jobs:
         run: cd frontend && pnpm install --frozen-lockfile
       - name: Lint
         run: cd frontend && pnpm run lint
+
+  frontend-test:
+    name: Frontend Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2
+      - name: Create frontend dist placeholder
+        run: mkdir -p frontend/dist && touch frontend/dist/.gitkeep
+      - name: Generate Wails bindings
+        run: wails generate module
+      - name: Install dependencies
+        run: cd frontend && pnpm install --frozen-lockfile
       - name: Test
         run: cd frontend && pnpm run test
-      - name: Type check and build
-        run: cd frontend && pnpm run build

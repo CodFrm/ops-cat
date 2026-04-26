@@ -37,6 +37,8 @@ func NewOpenAIProvider(name, apiBase, apiKey, model string, maxOutputTokens int)
 
 func (p *OpenAIProvider) Name() string { return p.name }
 
+func (p *OpenAIProvider) Model() string { return p.model }
+
 // openAIRequest OpenAI API 请求体
 type openAIRequest struct {
 	Model         string               `json:"model"`
