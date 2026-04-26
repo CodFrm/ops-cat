@@ -37,12 +37,7 @@ export function SideAssistantTabBar({
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div
-        className="flex h-full flex-col"
-        role="tablist"
-        aria-orientation="vertical"
-        aria-label="ai-sessions"
-      >
+      <div className="flex h-full flex-col" role="tablist" aria-orientation="vertical" aria-label="ai-sessions">
         {/* 顶部按钮组：⇄ + ＋ */}
         <div
           className={cn(
@@ -153,7 +148,9 @@ export function SideAssistantTabBar({
                 key={tab.id}
                 className={cn(
                   "group relative min-w-0 overflow-hidden rounded-lg text-xs transition-colors",
-                  isActive ? "bg-background/95 text-foreground" : "bg-transparent text-muted-foreground hover:bg-background/45"
+                  isActive
+                    ? "bg-background/95 text-foreground"
+                    : "bg-transparent text-muted-foreground hover:bg-background/45"
                 )}
               >
                 <span
