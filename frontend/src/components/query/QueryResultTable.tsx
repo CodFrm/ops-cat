@@ -167,10 +167,9 @@ function padDatePart(value: string | number): string {
   return String(value).padStart(2, "0");
 }
 
-function formatDateToInputValue(value: unknown, mode: DateEditMode): string {
+function formatDateToInputValue(value: unknown, _mode: DateEditMode): string {
   const fromDate = (date: Date) => {
     const datePart = `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
-    if (mode === "date") return datePart;
     return `${datePart}T${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}:${padDatePart(date.getSeconds())}`;
   };
 
@@ -182,7 +181,6 @@ function formatDateToInputValue(value: unknown, mode: DateEditMode): string {
     if (match) {
       const [, y, m, d, hh = "0", mm = "0", ss = "0"] = match;
       const datePart = `${y}-${padDatePart(m)}-${padDatePart(d)}`;
-      if (mode === "date") return datePart;
       return `${datePart}T${padDatePart(hh)}:${padDatePart(mm)}:${padDatePart(ss)}`;
     }
   }
@@ -190,8 +188,7 @@ function formatDateToInputValue(value: unknown, mode: DateEditMode): string {
   return fromDate(new Date());
 }
 
-function formatDateInputValue(value: string, mode: DateEditMode): string {
-  if (mode === "date") return value;
+function formatDateInputValue(value: string, _mode: DateEditMode): string {
   const [datePart, timePart = "00:00:00"] = value.split("T");
   const [hh = "00", mm = "00", ss = "00"] = timePart.split(":");
   return `${datePart} ${padDatePart(hh)}:${padDatePart(mm)}:${padDatePart(ss)}`;
@@ -361,7 +358,22 @@ export function QueryResultTable({
     col: string;
     mode: DateEditMode;
     value: string;
+    x: number;
+    y: number;
   } | null>(null);
+  const dateEditorRef = useRef<HTMLDivElement>(null);
+
+  // Close date editor on outside click
+  useEffect(() => {
+    if (!dateEditor) return;
+    const handler = (e: MouseEvent) => {
+      if (dateEditorRef.current && !dateEditorRef.current.contains(e.target as Node)) {
+        setDateEditor(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [dateEditor]);
   const ctxMenuRef = useRef<HTMLDivElement>(null);
 
   // Reset local sort and column widths when columns change
@@ -599,7 +611,9 @@ export function QueryResultTable({
       const selectedRowOrder = sortedIndices.filter((rowIdx) => selectedRowIdxs.has(rowIdx));
       const selectedColumnOrder = displayColumns.filter((col) => selectedColumns.has(col));
       const rowCopyIndices =
-        ctxMenu.kind === "row" && selectedRowIdxs.has(ctxMenu.rowIdx) && selectedRowOrder.length > 0
+        (ctxMenu.kind === "row" || ctxMenu.kind === "cell") &&
+        selectedRowIdxs.has(ctxMenu.rowIdx) &&
+        selectedRowOrder.length > 0
           ? selectedRowOrder
           : [ctxMenu.kind === "row" ? ctxMenu.rowIdx : -1];
       const columnCopyColumns =
@@ -607,7 +621,7 @@ export function QueryResultTable({
           ? selectedColumnOrder
           : [ctxMenu.kind === "column" ? ctxMenu.col : ""];
       const text =
-        ctxMenu.kind === "row"
+        ctxMenu.kind === "row" || (ctxMenu.kind === "cell" && rowCopyIndices.length > 0 && rowCopyIndices[0] !== -1)
           ? rowCopyIndices
               .map((rowIdx) => displayColumns.map((col) => cellValueToText(rows[rowIdx]?.[col])).join("\t"))
               .join("\n")
@@ -631,7 +645,9 @@ export function QueryResultTable({
     try {
       const selectedColumnOrder = displayColumns.filter((column) => selectedColumns.has(column));
       const text =
-        ctxMenu?.kind === "column" && selectedColumns.has(col) && selectedColumnOrder.length > 0
+        (ctxMenu?.kind === "cell" || ctxMenu?.kind === "column") &&
+        selectedColumns.has(col) &&
+        selectedColumnOrder.length > 0
           ? selectedColumnOrder.join("\t")
           : col;
       await navigator.clipboard.writeText(text);
@@ -711,19 +727,24 @@ export function QueryResultTable({
       col: ctxMenu.col,
       mode,
       value: formatDateToInputValue(ctxMenu.value, mode),
+      x: ctxMenu.x,
+      y: ctxMenu.y,
     });
     setCtxMenu(null);
   }, [columnTypes, ctxMenu]);
 
   const handleOpenDateEditorForCell = useCallback(
-    (rowIdx: number, col: string, value: unknown) => {
+    (rowIdx: number, col: string, value: unknown, event: React.MouseEvent) => {
       const mode = getDateEditMode(col, columnTypes?.[col], value);
       if (!mode) return;
+      const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
       setDateEditor({
         rowIdx,
         col,
         mode,
         value: formatDateToInputValue(value, mode),
+        x: rect.left,
+        y: rect.bottom + 4,
       });
     },
     [columnTypes]
@@ -912,10 +933,25 @@ export function QueryResultTable({
     (e: React.MouseEvent, origIdx: number, col: string, value: unknown) => {
       e.preventDefault();
       e.stopPropagation();
-      selectCell(origIdx, col);
+      if (selectedRowIdxs.has(origIdx) || selectedColumns.has(col)) {
+        setSelectedCell({ origIdx, col });
+        if (!selectedRowIdxs.has(origIdx)) {
+          setSelectedRowIdxs(new Set());
+          rowSelectionAnchorRef.current = null;
+          onSelectedRowsChange?.([]);
+        }
+        if (!selectedColumns.has(col)) {
+          setSelectedColumns(new Set());
+          columnSelectionAnchorRef.current = null;
+        }
+        onSelectedCellChange?.({ rowIdx: origIdx, col });
+        containerRef.current?.focus();
+      } else {
+        selectCell(origIdx, col);
+      }
       setCtxMenu({ kind: "cell", x: e.clientX, y: e.clientY, rowIdx: origIdx, col, value });
     },
-    [selectCell]
+    [onSelectedCellChange, onSelectedRowsChange, selectCell, selectedRowIdxs, selectedColumns]
   );
 
   const handleRowContextMenu = useCallback(
@@ -1358,7 +1394,7 @@ export function QueryResultTable({
                                 title={t("query.openDateTimePicker")}
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  handleOpenDateEditorForCell(origIdx, col, displayValue);
+                                  handleOpenDateEditorForCell(origIdx, col, displayValue, event);
                                 }}
                               >
                                 <MoreHorizontal className="h-4 w-4" />
@@ -1823,8 +1859,12 @@ export function QueryResultTable({
       {dateEditor &&
         createPortal(
           <div
+            ref={dateEditorRef}
             className="fixed z-50 w-72 rounded-md border bg-popover p-3 text-popover-foreground shadow-lg"
-            style={{ top: "50%", left: "50%", transform: "translate(-50%, -50%)" }}
+            style={{
+              top: `${Math.min(dateEditor.y, window.innerHeight - 280)}px`,
+              left: `${Math.min(dateEditor.x, window.innerWidth - 288)}px`,
+            }}
             role="dialog"
             aria-label={t("query.dateTimeDialogTitle")}
           >
@@ -1833,8 +1873,8 @@ export function QueryResultTable({
               <span className="sr-only">{t("query.dateTimeValue")}</span>
               <input
                 aria-label={t("query.dateTimeValue")}
-                type={dateEditor.mode === "date" ? "date" : "datetime-local"}
-                step={dateEditor.mode === "date" ? undefined : 1}
+                type="datetime-local"
+                step={1}
                 className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-ring"
                 value={dateEditor.value}
                 onChange={(e) => setDateEditor((prev) => (prev ? { ...prev, value: e.target.value } : prev))}
