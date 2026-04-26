@@ -297,6 +297,12 @@ describe("QueryResultTable — cell context actions", () => {
     expect(labels[copyIndex + 1]).toBe("query.copyAs");
   });
 
+  it("does not clip the copy as submenu outside the context menu", () => {
+    openMenu({ onCopyAs: vi.fn() });
+
+    expect(screen.getByRole("menu")).not.toHaveClass("overflow-hidden");
+  });
+
   it("right-clicking a row number selects the full row and shows row actions only", () => {
     openRowMenu({ onDeleteRow: vi.fn(), onCopyAs: vi.fn(), onFilterByCellValue: vi.fn(), onSortByColumn: vi.fn() });
 

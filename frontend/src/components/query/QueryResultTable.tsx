@@ -1109,7 +1109,7 @@ export function QueryResultTable({
         onKeyDown={handleKeyDown}
         className="flex-1 overflow-auto min-h-0 query-table-scroll outline-none"
       >
-        <table className="border-collapse text-xs font-mono">
+        <table className="border-separate border-spacing-0 text-xs font-mono">
           <thead className="bg-muted sticky top-0">
             <tr>
               {showRowNumber && (
@@ -1137,8 +1137,10 @@ export function QueryResultTable({
                     className={`group relative border border-border px-2 ${headerPaddingClass} text-left font-semibold whitespace-nowrap select-none ${
                       isColumnSelected
                         ? "bg-primary/25 text-foreground ring-2 ring-inset ring-primary/50"
-                        : "text-muted-foreground"
-                    } ${isFrozen ? "sticky z-30 bg-muted" : ""}`}
+                        : isFrozen
+                          ? "text-muted-foreground bg-muted"
+                          : "text-muted-foreground"
+                    } ${isFrozen ? "sticky z-30" : ""}`}
                     style={{
                       ...(width ? { width: `${width}px`, minWidth: `${width}px` } : {}),
                       ...(isFrozen ? { left: `${frozenLeft}px` } : {}),
@@ -1260,8 +1262,10 @@ export function QueryResultTable({
                       className={`border border-border px-2 py-1 text-center text-muted-foreground whitespace-nowrap w-[50px] cursor-default select-none ${
                         isRowSelected
                           ? "bg-primary/15 text-foreground ring-2 ring-inset ring-primary/50 relative z-10"
-                          : ""
-                      } ${frozenColumnCount > 0 ? "sticky left-0 z-20 bg-inherit" : ""}`}
+                          : frozenColumnCount > 0
+                            ? "bg-background"
+                            : ""
+                      } ${frozenColumnCount > 0 ? "sticky left-0 z-20" : ""}`}
                       onMouseDown={(e) => handleRowMouseDown(e, origIdx)}
                       onMouseEnter={() => handleRowMouseEnter(origIdx)}
                       onContextMenu={(e) => handleRowContextMenu(e, origIdx)}
@@ -1295,9 +1299,14 @@ export function QueryResultTable({
                         data-row-selected={isRowSelected ? "true" : undefined}
                         data-column-selected={selectedColumns.has(col) ? col : undefined}
                         className={`border border-border px-2 ${cellPaddingClass} whitespace-nowrap cursor-default ${
-                          isEdited ? "bg-yellow-100 dark:bg-yellow-900/30" : ""
-                        } ${isRowSelected || selectedColumns.has(col) ? "bg-primary/15" : ""} ${
-                          isFrozen ? "sticky z-10 bg-inherit" : ""
+                          isEdited
+                            ? "bg-yellow-100 dark:bg-yellow-900/30"
+                            : isRowSelected || selectedColumns.has(col)
+                              ? "bg-primary/15"
+                              : isFrozen
+                                ? "bg-background"
+                                : ""
+                        } ${isFrozen ? "sticky z-10" : ""}
                         } ${focusClass}`}
                         style={{
                           ...(width
@@ -1372,7 +1381,7 @@ export function QueryResultTable({
         createPortal(
           <div
             ref={ctxMenuRef}
-            className="z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
+            className="z-50 min-w-[8rem] overflow-visible rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
             style={{ position: "fixed", top: ctxMenu.y + 2, left: ctxMenu.x + 2 }}
             role="menu"
           >
