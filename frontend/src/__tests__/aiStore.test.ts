@@ -377,6 +377,19 @@ describe("sidebar state", () => {
     expect(localStorage.getItem("ai_sidebar_active_tab_id")).toBe(tabId);
   });
 
+  it("openNewSidebarTab focuses the existing blank tab instead of creating a duplicate", () => {
+    useAIStore.setState({
+      sidebarTabs: [buildSidebarTab("sidebar-blank", null), buildSidebarTab("sidebar-42", 42, "Conv 42")],
+      activeSidebarTabId: "sidebar-42",
+    });
+
+    const tabId = useAIStore.getState().openNewSidebarTab();
+
+    expect(tabId).toBe("sidebar-blank");
+    expect(useAIStore.getState().sidebarTabs).toHaveLength(2);
+    expect(useAIStore.getState().activeSidebarTabId).toBe("sidebar-blank");
+  });
+
   it("openSidebarConversationInSidebar loads messages and reuses an existing host", async () => {
     useAIStore.setState({
       conversations: [{ ID: 42, Title: "Conv 42", Updatetime: 0 } as any],

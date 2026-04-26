@@ -1653,6 +1653,14 @@ export const useAIStore = create<AIState>((set, get) => {
     },
 
     openNewSidebarTab: (options) => {
+      // 已经存在空白会话宿主时直接跳转，避免重复创建未使用的新会话 tab。
+      const blankTab = get().sidebarTabs.find((tab) => tab.conversationId == null);
+      if (blankTab) {
+        if (options?.activate !== false || !get().activeSidebarTabId) {
+          get().activateSidebarTab(blankTab.id);
+        }
+        return blankTab.id;
+      }
       const nextTab = createSidebarTab();
       set((state) => ({
         sidebarTabs: [...state.sidebarTabs, nextTab],

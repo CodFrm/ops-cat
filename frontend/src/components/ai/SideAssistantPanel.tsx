@@ -124,7 +124,8 @@ export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelPr
   };
 
   const handleHistoryOpenInTab = (convId: number) => {
-    openSidebarConversationInSidebar(convId, { activate: false, reuseIfOpen: false });
+    // 已经在侧边打开同会话时直接跳转，避免重复创建宿主。
+    openSidebarConversationInSidebar(convId);
     setHistoryOpen(false);
   };
 

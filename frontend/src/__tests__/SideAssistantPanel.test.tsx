@@ -116,7 +116,7 @@ describe("SideAssistantPanel", () => {
     expect(useAIStore.getState().activeSidebarTabId).toBe("sidebar-blank");
   });
 
-  it("history open-in-tab adds a background sidebar tab without stealing focus", async () => {
+  it("history open-in-tab opens a new sidebar tab and jumps to it when the conversation is not yet open", async () => {
     useAIStore.setState({
       sidebarTabs: [buildSidebarTab("sidebar-1", 1, "Conv A")],
       activeSidebarTabId: "sidebar-1",
@@ -134,15 +134,16 @@ describe("SideAssistantPanel", () => {
     const openButtons = await screen.findAllByTitle("action.openInTab");
     fireEvent.click(openButtons[1]);
 
-    expect(useAIStore.getState().activeSidebarTabId).toBe("sidebar-1");
     expect(useAIStore.getState().sidebarTabs).toHaveLength(2);
-    expect(useAIStore.getState().sidebarTabs.some((tab) => tab.conversationId === 2)).toBe(true);
+    const newTab = useAIStore.getState().sidebarTabs.find((tab) => tab.conversationId === 2);
+    expect(newTab).toBeDefined();
+    expect(useAIStore.getState().activeSidebarTabId).toBe(newTab!.id);
   });
 
-  it("history open-in-tab creates a second host even when the conversation is already open", async () => {
+  it("history open-in-tab focuses the existing sidebar host when the conversation is already open", async () => {
     useAIStore.setState({
-      sidebarTabs: [buildSidebarTab("sidebar-1", 1, "Conv A")],
-      activeSidebarTabId: "sidebar-1",
+      sidebarTabs: [buildSidebarTab("sidebar-1", 1, "Conv A"), buildSidebarTab("sidebar-blank", null)],
+      activeSidebarTabId: "sidebar-blank",
       conversations: [{ ID: 1, Title: "Conv A", Updatetime: Math.floor(Date.now() / 1000) } as any],
       conversationMessages: { 1: [] },
       conversationStreaming: { 1: { sending: false, pendingQueue: [] } },
@@ -153,8 +154,8 @@ describe("SideAssistantPanel", () => {
     fireEvent.click(screen.getByTitle("ai.sidebar.history"));
     fireEvent.click((await screen.findAllByTitle("action.openInTab"))[0]);
 
+    expect(useAIStore.getState().sidebarTabs.filter((tab) => tab.conversationId === 1)).toHaveLength(1);
     expect(useAIStore.getState().activeSidebarTabId).toBe("sidebar-1");
-    expect(useAIStore.getState().sidebarTabs.filter((tab) => tab.conversationId === 1)).toHaveLength(2);
   });
 
   it("closing an inactive sidebar tab keeps the current active tab", async () => {
