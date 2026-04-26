@@ -21,9 +21,38 @@ body:
     id: description
     attributes:
       label: 问题描述 / Description
-      description: 简述遇到的问题、复现步骤、预期结果。 / Describe the issue, steps to reproduce, and expected behavior.
+      description: 简述遇到的问题。 / Briefly describe the issue.
+      placeholder: 例如：连接 SSH 服务器后，终端输入无响应。 / e.g. Terminal becomes unresponsive after connecting to SSH server.
     validations:
       required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤 / Steps to Reproduce
+      description: 请按顺序列出可复现该问题的步骤。 / List the steps that reliably reproduce the issue.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果 / Expected Behavior
+      description: 你期望发生什么？ / What did you expect to happen?
+    validations:
+      required: false
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果 / Actual Behavior
+      description: 实际发生了什么？ / What actually happened?
+    validations:
+      required: false
 
   - type: input
     id: version
