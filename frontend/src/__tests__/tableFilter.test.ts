@@ -7,6 +7,7 @@ import {
   buildSortOrderByClause,
   createFilterCondition,
   createSortCriterion,
+  toggleFilterNegator,
   toggleFilterJoin,
   toggleSortDirection,
   type TableFilterItem,
@@ -38,6 +39,43 @@ describe("table filter helpers", () => {
     group.items = [createFilterCondition("id", "id", { value: 2 })];
 
     expect(buildFilterWhereClause(items, "mysql")).toBe("`email` = '11223' OR (`id` = '2')");
+  });
+
+  it("builds disabled, negated, empty, and comparison criteria inside bracket groups", () => {
+    const items: TableFilterItem[] = [
+      createFilterCondition("name", "name", { value: "A", join: "and" }),
+      {
+        kind: "group",
+        id: "names-or-amount",
+        join: "and",
+        enabled: true,
+        negated: true,
+        items: [
+          createFilterCondition("name-b", "name", { value: "B", join: "or" }),
+          createFilterCondition("amount", "amount", { operator: ">", value: 100, join: "and" }),
+          createFilterCondition("ignored", "deleted_at", { enabled: false, value: null }),
+        ],
+      },
+      createFilterCondition("empty", "memo", { operator: "is_empty" }),
+    ];
+
+    expect(buildFilterWhereClause(items, "mysql")).toBe(
+      "`name` = 'A' AND NOT (`name` = 'B' OR `amount` > '100') AND (`memo` IS NULL OR `memo` = '')"
+    );
+  });
+
+  it("toggles filter negators for conditions and groups", () => {
+    const items: TableFilterItem[] = [
+      createFilterCondition("name", "name", { value: "A" }),
+      { kind: "group", id: "group-1", join: "and", items: [] },
+    ];
+
+    const negatedCondition = toggleFilterNegator(items, "name");
+    expect(negatedCondition[0]).toMatchObject({ operator: "!=" });
+    expect(buildFilterWhereClause(negatedCondition, "mysql")).toBe("`name` <> 'A'");
+
+    const negatedGroup = toggleFilterNegator(items, "group-1")[1];
+    expect(negatedGroup).toMatchObject({ kind: "group", negated: true });
   });
 
   it("adds sort criteria by unused field order and toggles direction", () => {

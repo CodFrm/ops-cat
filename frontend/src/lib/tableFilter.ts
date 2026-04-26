@@ -1,7 +1,7 @@
 import { quoteIdent, sqlQuote } from "./tableSql";
 
 export type TableFilterJoin = "and" | "or";
-export type TableFilterOperator = "=";
+export type TableFilterOperator = "=" | "!=" | ">" | ">=" | "<" | "<=" | "is_empty" | "is_not_empty";
 export type TableSortDir = "asc" | "desc";
 
 export interface TableFilterCondition {
@@ -19,6 +19,8 @@ export interface TableFilterGroup {
   id: string;
   items: TableFilterItem[];
   join: TableFilterJoin;
+  enabled?: boolean;
+  negated?: boolean;
 }
 
 export type TableFilterItem = TableFilterCondition | TableFilterGroup;
@@ -33,6 +35,7 @@ interface CreateFilterConditionOptions {
   value?: unknown;
   enabled?: boolean;
   join?: TableFilterJoin;
+  operator?: TableFilterOperator;
 }
 
 let filterIdSeq = 0;
@@ -51,7 +54,7 @@ export function createFilterCondition(
     kind: "condition",
     id,
     column,
-    operator: "=",
+    operator: options.operator ?? "=",
     value: options.value,
     enabled: options.enabled ?? true,
     join: options.join ?? "and",
@@ -90,7 +93,7 @@ export function addFilterGroup(
   _driver?: string,
   id = nextFilterId("group")
 ): TableFilterItem[] {
-  return [...items, { kind: "group", id, items: [], join: "and" }];
+  return [...items, { kind: "group", id, items: [], join: "and", enabled: true }];
 }
 
 export function toggleFilterJoin(items: TableFilterItem[], id: string): TableFilterItem[] {
@@ -108,17 +111,36 @@ function hasValue(value: unknown): boolean {
 }
 
 function conditionSql(condition: TableFilterCondition, driver?: string): string {
-  if (!condition.enabled || !hasValue(condition.value)) return "";
-  if (condition.value == null) return `${quoteIdent(condition.column, driver)} IS NULL`;
-  return `${quoteIdent(condition.column, driver)} ${condition.operator} ${sqlQuote(condition.value)}`;
+  if (!condition.enabled) return "";
+  const column = quoteIdent(condition.column, driver);
+  const operator = condition.operator ?? "=";
+
+  if (operator === "is_empty") return `(${column} IS NULL OR ${column} = '')`;
+  if (operator === "is_not_empty") return `(${column} IS NOT NULL AND ${column} <> '')`;
+
+  if (!hasValue(condition.value)) return "";
+  if (condition.value == null) {
+    if (operator === "!=") return `${column} IS NOT NULL`;
+    if (operator === "=") return `${column} IS NULL`;
+    return "";
+  }
+
+  const sqlOperator = operator === "!=" ? "<>" : operator;
+  return `${column} ${sqlOperator} ${sqlQuote(condition.value)}`;
 }
 
 function buildItemsWhere(items: TableFilterItem[], driver?: string): string {
   const parts: { sql: string; join: TableFilterJoin }[] = [];
   for (const item of items) {
-    const sql = item.kind === "condition" ? conditionSql(item, driver) : buildItemsWhere(item.items, driver);
+    const sql =
+      item.kind === "condition"
+        ? conditionSql(item, driver)
+        : item.enabled === false
+          ? ""
+          : buildItemsWhere(item.items, driver);
     if (!sql) continue;
-    parts.push({ sql: item.kind === "group" ? `(${sql})` : sql, join: item.join });
+    const groupedSql = item.kind === "group" ? `${item.negated ? "NOT " : ""}(${sql})` : sql;
+    parts.push({ sql: groupedSql, join: item.join });
   }
 
   return parts.reduce((acc, part, index) => {
@@ -139,6 +161,48 @@ export function updateFilterItem(
   return items.map((item) => {
     if (item.kind === "condition" && item.id === id) return { ...item, ...patch };
     if (item.kind === "group") return { ...item, items: updateFilterItem(item.items, id, patch) };
+    return item;
+  });
+}
+
+export function updateFilterGroup(
+  items: TableFilterItem[],
+  id: string,
+  patch: Partial<TableFilterGroup>
+): TableFilterItem[] {
+  return items.map((item) => {
+    if (item.kind === "group" && item.id === id) return { ...item, ...patch };
+    if (item.kind === "group") return { ...item, items: updateFilterGroup(item.items, id, patch) };
+    return item;
+  });
+}
+
+const NEGATED_OPERATOR: Record<TableFilterOperator, TableFilterOperator> = {
+  "=": "!=",
+  "!=": "=",
+  ">": "<=",
+  ">=": "<",
+  "<": ">=",
+  "<=": ">",
+  is_empty: "is_not_empty",
+  is_not_empty: "is_empty",
+};
+
+export function toggleFilterNegator(items: TableFilterItem[], id: string): TableFilterItem[] {
+  return items.map((item) => {
+    if (item.id === id) {
+      if (item.kind === "condition") return { ...item, operator: NEGATED_OPERATOR[item.operator ?? "="] };
+      return { ...item, negated: !item.negated };
+    }
+    if (item.kind === "group") return { ...item, items: toggleFilterNegator(item.items, id) };
+    return item;
+  });
+}
+
+export function toggleFilterItemEnabled(items: TableFilterItem[], id: string): TableFilterItem[] {
+  return items.map((item) => {
+    if (item.id === id) return { ...item, enabled: item.kind === "group" ? item.enabled === false : !item.enabled };
+    if (item.kind === "group") return { ...item, items: toggleFilterItemEnabled(item.items, id) };
     return item;
   });
 }
@@ -175,7 +239,42 @@ export function unwrapFilterGroup(items: TableFilterItem[], id: string): TableFi
 
 export function setAllFilterItemsEnabled(items: TableFilterItem[], enabled: boolean): TableFilterItem[] {
   return items.map((item) =>
-    item.kind === "group" ? { ...item, items: setAllFilterItemsEnabled(item.items, enabled) } : { ...item, enabled }
+    item.kind === "group"
+      ? { ...item, enabled, items: setAllFilterItemsEnabled(item.items, enabled) }
+      : { ...item, enabled }
+  );
+}
+
+export function findFilterItem(items: TableFilterItem[], id: string): TableFilterItem | null {
+  for (const item of items) {
+    if (item.id === id) return item;
+    if (item.kind === "group") {
+      const child = findFilterItem(item.items, id);
+      if (child) return child;
+    }
+  }
+  return null;
+}
+
+export function cloneFilterItem(item: TableFilterItem): TableFilterItem {
+  if (item.kind === "condition") return { ...item, id: nextFilterId() };
+  return { ...item, id: nextFilterId("group"), items: item.items.map(cloneFilterItem) };
+}
+
+export function insertFilterItemAfter(
+  items: TableFilterItem[],
+  id: string,
+  itemToInsert: TableFilterItem
+): TableFilterItem[] {
+  const index = items.findIndex((item) => item.id === id);
+  if (index !== -1) {
+    const next = [...items];
+    next.splice(index + 1, 0, itemToInsert);
+    return next;
+  }
+
+  return items.map((item) =>
+    item.kind === "group" ? { ...item, items: insertFilterItemAfter(item.items, id, itemToInsert) } : item
   );
 }
 

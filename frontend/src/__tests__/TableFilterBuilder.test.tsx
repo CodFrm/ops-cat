@@ -106,6 +106,113 @@ describe("TableFilterBuilder", () => {
     expect(onChange).toHaveBeenCalledWith([expect.objectContaining({ id: "f-email" })]);
   });
 
+  it("uses context menu actions to disable and negate a condition", async () => {
+    const user = userEvent.setup();
+    const filters: TableFilterItem[] = [createFilterCondition("f-name", "name", { value: "alice" })];
+    const onChange = vi.fn();
+
+    render(
+      <TableFilterBuilder
+        columns={["id", "name"]}
+        rows={[]}
+        filters={filters}
+        sorts={[]}
+        driver="mysql"
+        onChange={onChange}
+        onSortsChange={vi.fn()}
+        onApply={vi.fn()}
+      />
+    );
+
+    fireEvent.contextMenu(screen.getByTestId("filter-item-f-name"), { clientX: 20, clientY: 30 });
+    await user.click(screen.getByText("query.disableFilterItem"));
+    expect(onChange).toHaveBeenLastCalledWith([expect.objectContaining({ id: "f-name", enabled: false })]);
+
+    fireEvent.contextMenu(screen.getByTestId("filter-item-f-name"), { clientX: 20, clientY: 30 });
+    await user.click(screen.getByText("query.toggleFilterNegator"));
+    expect(onChange).toHaveBeenLastCalledWith([expect.objectContaining({ id: "f-name", operator: "!=" })]);
+  });
+
+  it("offers separate delete choices for brackets", async () => {
+    const user = userEvent.setup();
+    const child = createFilterCondition("f-email", "email");
+    const filters: TableFilterItem[] = [
+      { kind: "group", id: "g-1", join: "and", enabled: true, items: [child] },
+      createFilterCondition("f-id", "id"),
+    ];
+    const onChange = vi.fn();
+
+    render(
+      <TableFilterBuilder
+        columns={["id", "email", "name"]}
+        rows={[]}
+        filters={filters}
+        sorts={[]}
+        driver="mysql"
+        onChange={onChange}
+        onSortsChange={vi.fn()}
+        onApply={vi.fn()}
+      />
+    );
+
+    fireEvent.contextMenu(screen.getByTestId("filter-item-g-1"), { clientX: 20, clientY: 30 });
+    await user.click(screen.getByText("query.deleteFilterGroupOnly"));
+    expect(onChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({ id: "f-email" }),
+      expect.objectContaining({ id: "f-id" }),
+    ]);
+
+    fireEvent.contextMenu(screen.getByTestId("filter-item-g-1"), { clientX: 20, clientY: 30 });
+    await user.click(screen.getByText("query.deleteFilterGroupWithChildren"));
+    expect(onChange).toHaveBeenLastCalledWith([expect.objectContaining({ id: "f-id" })]);
+  });
+
+  it("copies and pastes filter criteria from the context menu", async () => {
+    const user = userEvent.setup();
+    let filters: TableFilterItem[] = [
+      createFilterCondition("f-name", "name", { value: "alice" }),
+      createFilterCondition("f-email", "email"),
+    ];
+    const onChange = vi.fn((next: TableFilterItem[]) => {
+      filters = next;
+    });
+    const view = render(
+      <TableFilterBuilder
+        columns={["id", "email", "name"]}
+        rows={[]}
+        filters={filters}
+        sorts={[]}
+        driver="mysql"
+        onChange={onChange}
+        onSortsChange={vi.fn()}
+        onApply={vi.fn()}
+      />
+    );
+
+    fireEvent.contextMenu(screen.getByTestId("filter-item-f-name"), { clientX: 20, clientY: 30 });
+    await user.click(screen.getByText("query.copyFilterItem"));
+
+    view.rerender(
+      <TableFilterBuilder
+        columns={["id", "email", "name"]}
+        rows={[]}
+        filters={filters}
+        sorts={[]}
+        driver="mysql"
+        onChange={onChange}
+        onSortsChange={vi.fn()}
+        onApply={vi.fn()}
+      />
+    );
+    fireEvent.contextMenu(screen.getByTestId("filter-item-f-email"), { clientX: 20, clientY: 30 });
+    await user.click(screen.getByText("query.pasteFilterItem"));
+
+    const latest = onChange.mock.calls.at(-1)?.[0] as TableFilterItem[];
+    expect(latest).toHaveLength(3);
+    expect(latest[2]).toMatchObject({ kind: "condition", column: "name", value: "alice" });
+    expect(latest[2].id).not.toBe("f-name");
+  });
+
   it("adds sort criteria and toggles sort direction from the field suffix control", async () => {
     const user = userEvent.setup();
     let sorts: TableSortItem[] = [];

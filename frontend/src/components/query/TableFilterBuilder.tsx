@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDown, ArrowDownNarrowWide, ArrowUp, ArrowUpNarrowWide, Check, Plus, Search, Trash2 } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowDownNarrowWide,
+  ArrowUp,
+  ArrowUpNarrowWide,
+  Ban,
+  Check,
+  ClipboardPaste,
+  Copy,
+  Plus,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Popover, PopoverContent, PopoverTrigger, ScrollArea } from "@opskat/ui";
 import { cellValueToText } from "@/lib/cellValue";
@@ -8,19 +20,26 @@ import {
   addFilterCondition,
   addFilterGroup,
   addSortCriterion,
+  cloneFilterItem,
   createFilterCondition,
+  findFilterItem,
+  insertFilterItemAfter,
   moveFilterItem,
   pickNextFilterColumn,
   removeFilterItem,
   setAllFilterItemsEnabled,
+  toggleFilterItemEnabled,
   toggleFilterJoin,
+  toggleFilterNegator,
   toggleSortDirection,
   unwrapFilterGroup,
+  updateFilterGroup,
   updateFilterGroupItems,
   updateFilterItem,
   updateSortCriterion,
   type TableFilterCondition,
   type TableFilterItem,
+  type TableFilterOperator,
   type TableSortItem,
 } from "@/lib/tableFilter";
 
@@ -28,6 +47,17 @@ const FILTER_ACTION_BUTTON_CLASS =
   "border-primary/70 text-primary hover:bg-primary/10 disabled:border-border disabled:text-muted-foreground disabled:opacity-40";
 const FILTER_MENU_ITEM_CLASS =
   "flex w-full cursor-default items-center gap-2 rounded-sm px-3 py-1.5 text-left text-sm outline-hidden hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40";
+const FILTER_OPERATOR_LABEL_KEYS: Record<TableFilterOperator, string> = {
+  "=": "query.filterOperatorIs",
+  "!=": "query.filterOperatorIsNot",
+  ">": "query.filterOperatorGreaterThan",
+  ">=": "query.filterOperatorGreaterThanOrEqual",
+  "<": "query.filterOperatorLessThan",
+  "<=": "query.filterOperatorLessThanOrEqual",
+  is_empty: "query.filterOperatorIsEmpty",
+  is_not_empty: "query.filterOperatorIsNotEmpty",
+};
+const FILTER_OPERATORS = Object.keys(FILTER_OPERATOR_LABEL_KEYS) as TableFilterOperator[];
 
 type FilterContextTarget = {
   id: string;
@@ -92,6 +122,7 @@ export function TableFilterBuilder({
   const { t } = useTranslation();
   const [selectedFilterId, setSelectedFilterId] = useState<string | null>(null);
   const [ctxTarget, setCtxTarget] = useState<FilterContextTarget | null>(null);
+  const [copiedFilterItems, setCopiedFilterItems] = useState<TableFilterItem[]>([]);
   const ctxMenuRef = useRef<HTMLDivElement>(null);
 
   const addCondition = useCallback(() => {
@@ -152,6 +183,45 @@ export function TableFilterBuilder({
     },
     [ctxTarget, filters, onChange]
   );
+
+  const targetItem = useMemo(() => (ctxTarget ? findFilterItem(filters, ctxTarget.id) : null), [ctxTarget, filters]);
+  const targetEnabled = targetItem?.kind === "condition" ? targetItem.enabled : targetItem?.enabled !== false;
+
+  const handleToggleFilterItemEnabled = useCallback(() => {
+    if (!ctxTarget) return;
+    onChange(toggleFilterItemEnabled(filters, ctxTarget.id));
+    setCtxTarget(null);
+  }, [ctxTarget, filters, onChange]);
+
+  const handleToggleNegator = useCallback(() => {
+    if (!ctxTarget) return;
+    onChange(toggleFilterNegator(filters, ctxTarget.id));
+    setCtxTarget(null);
+  }, [ctxTarget, filters, onChange]);
+
+  const handleCopyFilterItem = useCallback(() => {
+    if (!targetItem) return;
+    setCopiedFilterItems([targetItem]);
+    setCtxTarget(null);
+  }, [targetItem]);
+
+  const handleCopyAllFilters = useCallback(() => {
+    setCopiedFilterItems(filters);
+    setCtxTarget(null);
+  }, [filters]);
+
+  const handlePasteFilterItem = useCallback(() => {
+    if (!ctxTarget || copiedFilterItems.length === 0) return;
+    let nextItems = filters;
+    let afterId = ctxTarget.id;
+    for (const copiedItem of copiedFilterItems) {
+      const cloned = cloneFilterItem(copiedItem);
+      nextItems = insertFilterItemAfter(nextItems, afterId, cloned);
+      afterId = cloned.id;
+    }
+    onChange(nextItems);
+    setCtxTarget(null);
+  }, [copiedFilterItems, ctxTarget, filters, onChange]);
 
   return (
     <div className="shrink-0 border-b border-border bg-background">
@@ -249,9 +319,22 @@ export function TableFilterBuilder({
               {t("query.addFilterGroup")}
             </button>
             <div className="my-1 h-px bg-border" />
+            <button
+              type="button"
+              role="menuitem"
+              className={FILTER_MENU_ITEM_CLASS}
+              onClick={handleToggleFilterItemEnabled}
+            >
+              <Ban className="h-3.5 w-3.5" />
+              {targetEnabled ? t("query.disableFilterItem") : t("query.enableFilterItem")}
+            </button>
+            <button type="button" role="menuitem" className={FILTER_MENU_ITEM_CLASS} onClick={handleToggleNegator}>
+              {t("query.toggleFilterNegator")}
+            </button>
+            <div className="my-1 h-px bg-border" />
             <button type="button" role="menuitem" className={FILTER_MENU_ITEM_CLASS} onClick={handleDeleteFilterItem}>
               <Trash2 className="h-3.5 w-3.5" />
-              {t("query.deleteFilterItem")}
+              {ctxTarget.kind === "group" ? t("query.deleteFilterGroupWithChildren") : t("query.deleteFilterItem")}
             </button>
             {ctxTarget.kind === "group" && (
               <button type="button" role="menuitem" className={FILTER_MENU_ITEM_CLASS} onClick={handleUnwrapGroup}>
@@ -322,6 +405,25 @@ export function TableFilterBuilder({
               }}
             >
               {t("query.disableAllFilters")}
+            </button>
+            <div className="my-1 h-px bg-border" />
+            <button type="button" role="menuitem" className={FILTER_MENU_ITEM_CLASS} onClick={handleCopyFilterItem}>
+              <Copy className="h-3.5 w-3.5" />
+              {t("query.copyFilterItem")}
+            </button>
+            <button type="button" role="menuitem" className={FILTER_MENU_ITEM_CLASS} onClick={handleCopyAllFilters}>
+              <Copy className="h-3.5 w-3.5" />
+              {t("query.copyAllFilters")}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={FILTER_MENU_ITEM_CLASS}
+              onClick={handlePasteFilterItem}
+              disabled={copiedFilterItems.length === 0}
+            >
+              <ClipboardPaste className="h-3.5 w-3.5" />
+              {t("query.pasteFilterItem")}
             </button>
           </div>,
           document.body
@@ -470,7 +572,9 @@ function FilterItems({
           <div
             key={item.id}
             data-testid={`filter-item-${item.id}`}
-            className={`space-y-1 rounded-sm px-1 py-0.5 ${selectedId === item.id ? "bg-primary/10" : ""}`}
+            className={`space-y-1 rounded-sm px-1 py-0.5 ${
+              selectedId === item.id ? "bg-primary/10" : ""
+            } ${item.enabled === false ? "opacity-50" : ""}`}
             onClick={() => onSelect(item.id)}
             onContextMenu={(event) => {
               event.preventDefault();
@@ -481,13 +585,16 @@ function FilterItems({
               <input
                 type="checkbox"
                 className="h-4 w-4 accent-primary"
-                checked
-                readOnly
+                checked={item.enabled !== false}
+                onChange={(event) => onChange(updateFilterGroup(rootItems, item.id, { enabled: event.target.checked }))}
                 aria-label={t("query.filterEnabled")}
               />
+              {item.negated && (
+                <span className="rounded bg-destructive/10 px-1 text-xs font-medium text-destructive">not</span>
+              )}
               <span className="font-mono">(</span>
             </div>
-            <div className="ml-5">
+            <div className="ml-5 border-l border-primary/30 pl-3">
               <FilterItems
                 columns={columns}
                 rows={rows}
@@ -502,7 +609,7 @@ function FilterItems({
               />
             </div>
             <div className="flex items-center gap-2 text-sm text-foreground">
-              <span className="font-mono">)</span>
+              <span className="ml-5 font-mono">)</span>
               {!(index === items.length - 1) && (
                 <button
                   type="button"
@@ -554,11 +661,15 @@ function FilterConditionRow({
     (patch: Partial<TableFilterCondition>) => onChange(updateFilterItem(rootItems, item.id, patch)),
     [item.id, onChange, rootItems]
   );
+  const operator = item.operator ?? "=";
+  const operatorNeedsValue = operator !== "is_empty" && operator !== "is_not_empty";
 
   return (
     <div
       data-testid={`filter-item-${item.id}`}
-      className={`flex items-center gap-2 rounded-sm px-1 py-0.5 text-sm ${selected ? "bg-primary/10" : ""}`}
+      className={`flex items-center gap-2 rounded-sm px-1 py-0.5 text-sm ${
+        selected ? "bg-primary/10" : ""
+      } ${item.enabled ? "" : "opacity-50"}`}
       onClick={onSelect}
       onContextMenu={onContextMenu}
     >
@@ -581,8 +692,27 @@ function FilterConditionRow({
           </option>
         ))}
       </select>
-      <span className="text-muted-foreground">=</span>
-      <FilterValuePicker value={item.value} suggestions={suggestions} onChange={(value) => setItem({ value })} />
+      <select
+        value={operator}
+        onChange={(event) => {
+          const nextOperator = event.target.value as TableFilterOperator;
+          setItem({
+            operator: nextOperator,
+            value: nextOperator === "is_empty" || nextOperator === "is_not_empty" ? undefined : item.value,
+          });
+        }}
+        className="h-7 rounded-none border-0 bg-transparent px-1 text-sm font-medium text-muted-foreground shadow-none outline-none hover:bg-transparent focus:bg-transparent focus:ring-0"
+        aria-label={t("query.filterOperator")}
+      >
+        {FILTER_OPERATORS.map((op) => (
+          <option key={op} value={op}>
+            {t(FILTER_OPERATOR_LABEL_KEYS[op])}
+          </option>
+        ))}
+      </select>
+      {operatorNeedsValue && (
+        <FilterValuePicker value={item.value} suggestions={suggestions} onChange={(value) => setItem({ value })} />
+      )}
       <Button
         variant="outline"
         size="icon-xs"
