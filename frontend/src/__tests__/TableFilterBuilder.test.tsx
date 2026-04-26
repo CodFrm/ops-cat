@@ -167,6 +167,42 @@ describe("TableFilterBuilder", () => {
     expect(onChange).toHaveBeenLastCalledWith([expect.objectContaining({ id: "f-id" })]);
   });
 
+  it("keeps grouped filter body separate from the clickable bracket rows", () => {
+    const filters: TableFilterItem[] = [{ kind: "group", id: "g-1", join: "and", enabled: true, items: [] }];
+
+    render(
+      <TableFilterBuilder
+        columns={["id", "email", "name"]}
+        rows={[]}
+        filters={filters}
+        sorts={[]}
+        driver="mysql"
+        onChange={vi.fn()}
+        onSortsChange={vi.fn()}
+        onApply={vi.fn()}
+      />
+    );
+
+    const groupOpen = screen.getByTestId("filter-group-g-1-open");
+    const groupBody = screen.getByTestId("filter-group-g-1-body");
+    const groupClose = screen.getByTestId("filter-group-g-1-close");
+
+    fireEvent.click(groupBody);
+
+    expect(groupOpen).not.toHaveClass("bg-primary/10");
+    expect(groupBody).not.toHaveClass("bg-primary/10");
+    expect(groupClose).not.toHaveClass("bg-primary/10");
+
+    fireEvent.contextMenu(groupBody, { clientX: 20, clientY: 30 });
+    expect(screen.queryByText("query.deleteFilterGroupWithChildren")).not.toBeInTheDocument();
+
+    fireEvent.click(groupOpen);
+
+    expect(groupOpen).toHaveClass("bg-primary/10");
+    expect(groupBody).not.toHaveClass("bg-primary/10");
+    expect(groupClose).toHaveClass("bg-primary/10");
+  });
+
   it("copies and pastes filter criteria from the context menu", async () => {
     const user = userEvent.setup();
     let filters: TableFilterItem[] = [

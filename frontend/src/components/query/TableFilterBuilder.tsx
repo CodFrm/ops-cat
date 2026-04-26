@@ -589,19 +589,18 @@ function FilterItems({
             }}
           />
         ) : (
-          <div
-            key={item.id}
-            data-testid={`filter-item-${item.id}`}
-            className={`space-y-1 rounded-sm px-1 py-0.5 ${
-              selectedId === item.id ? "bg-primary/10" : ""
-            } ${item.enabled === false ? "opacity-50" : ""}`}
-            onClick={() => onSelect(item.id)}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              onContextMenu({ id: item.id, kind: "group", x: event.clientX, y: event.clientY });
-            }}
-          >
-            <div className="flex items-center gap-2 text-sm text-foreground">
+          <div key={item.id} className={`space-y-1 ${item.enabled === false ? "opacity-50" : ""}`}>
+            <div
+              data-testid={`filter-group-${item.id}-open`}
+              className={`flex min-h-8 items-center gap-2 rounded-sm px-2 py-1 text-sm text-foreground ${
+                selectedId === item.id ? "bg-primary/10" : "hover:bg-accent/50"
+              }`}
+              onClick={() => onSelect(item.id)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                onContextMenu({ id: item.id, kind: "group", x: event.clientX, y: event.clientY });
+              }}
+            >
               <input
                 type="checkbox"
                 className="h-4 w-4 accent-primary"
@@ -612,23 +611,37 @@ function FilterItems({
               {item.negated && (
                 <span className="rounded bg-destructive/10 px-1 text-xs font-medium text-destructive">not</span>
               )}
-              <span className="font-mono">(</span>
+              <span data-testid={`filter-item-${item.id}`} className="font-mono">
+                (
+              </span>
             </div>
-            <div className="ml-5 border-l border-primary/30 pl-3">
-              <FilterItems
-                columns={columns}
-                rows={rows}
-                items={item.items}
-                rootItems={rootItems}
-                driver={driver}
-                groupId={item.id}
-                onChange={onChange}
-                selectedId={selectedId}
-                onSelect={onSelect}
-                onContextMenu={onContextMenu}
-              />
+            <div data-testid={`filter-group-${item.id}-body`} className="rounded-sm py-0.5">
+              <div className="ml-5 border-l border-primary/30 pl-3">
+                <FilterItems
+                  columns={columns}
+                  rows={rows}
+                  items={item.items}
+                  rootItems={rootItems}
+                  driver={driver}
+                  groupId={item.id}
+                  onChange={onChange}
+                  selectedId={selectedId}
+                  onSelect={onSelect}
+                  onContextMenu={onContextMenu}
+                />
+              </div>
             </div>
-            <div className="flex items-center gap-2 text-sm text-foreground">
+            <div
+              data-testid={`filter-group-${item.id}-close`}
+              className={`flex min-h-8 items-center gap-2 rounded-sm px-2 py-1 text-sm text-foreground ${
+                selectedId === item.id ? "bg-primary/10" : "hover:bg-accent/50"
+              }`}
+              onClick={() => onSelect(item.id)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                onContextMenu({ id: item.id, kind: "group", x: event.clientX, y: event.clientY });
+              }}
+            >
               <span className="ml-5 font-mono">)</span>
               {index === items.length - 1 ? (
                 <>
