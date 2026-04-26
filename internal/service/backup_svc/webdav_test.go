@@ -372,5 +372,185 @@ func TestTestWebDAVConnectionVerifiesWriteCapability(t *testing.T) {
 			So(err, ShouldNotBeNil)
 			So(err.Error(), ShouldContainSubstring, "create directory failed")
 		})
+
+		Convey("reports failure when DELETE cleanup fails after a successful PUT", func() {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case "MKCOL":
+					w.WriteHeader(http.StatusCreated)
+				case "PUT":
+					w.WriteHeader(http.StatusCreated)
+				case "DELETE":
+					// 服务器允许写但拒绝删除（罕见但可能：例如无 unlink 权限）。
+					w.WriteHeader(http.StatusForbidden)
+				default:
+					w.WriteHeader(http.StatusMethodNotAllowed)
+				}
+			}))
+			defer srv.Close()
+
+			cfg := WebDAVConfig{URL: srv.URL + "/dav/opskat/"}
+			err := TestWebDAVConnection(cfg)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "cleanup failed")
+		})
+	})
+}
+
+func TestListWebDAVBackupsHandlesNotFound(t *testing.T) {
+	Convey("ListWebDAVBackups returns an empty list when the directory does not exist (HTTP 404)", t, func() {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		backups, err := ListWebDAVBackups(WebDAVConfig{URL: srv.URL + "/dav/opskat/"})
+		So(err, ShouldBeNil)
+		So(backups, ShouldBeEmpty)
+	})
+
+	Convey("ListWebDAVBackups surfaces unexpected errors (HTTP 500)", t, func() {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer srv.Close()
+
+		_, err := ListWebDAVBackups(WebDAVConfig{URL: srv.URL + "/dav/opskat/"})
+		So(err, ShouldNotBeNil)
+		So(err.Error(), ShouldContainSubstring, "list failed")
+	})
+}
+
+func TestCreateOrUpdateWebDAVBackupReportsUploadFailure(t *testing.T) {
+	Convey("CreateOrUpdateWebDAVBackup surfaces a non-success PUT status", t, func() {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case "MKCOL":
+				w.WriteHeader(http.StatusCreated)
+			case "PUT":
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte("forbidden"))
+			default:
+				w.WriteHeader(http.StatusMethodNotAllowed)
+			}
+		}))
+		defer srv.Close()
+
+		_, err := CreateOrUpdateWebDAVBackup(WebDAVConfig{URL: srv.URL + "/dav/opskat/"}, []byte("payload"))
+		So(err, ShouldNotBeNil)
+		So(err.Error(), ShouldContainSubstring, "upload failed")
+	})
+}
+
+func TestGetWebDAVBackupContentReportsDownloadFailure(t *testing.T) {
+	Convey("GetWebDAVBackupContent surfaces a non-success GET status", t, func() {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		_, err := GetWebDAVBackupContent(WebDAVConfig{URL: srv.URL + "/dav/opskat/"}, "opskat-backup.encrypted.json")
+		So(err, ShouldNotBeNil)
+		So(err.Error(), ShouldContainSubstring, "download failed")
+	})
+}
+
+func TestWebDAVRequestHandlesRedirectWithoutLocation(t *testing.T) {
+	Convey("webDAVRequest reports a generic redirect error when Location header is missing", t, func() {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// 故意不写 Location，验证另一个错误路径。
+			w.WriteHeader(http.StatusMovedPermanently)
+		}))
+		defer srv.Close()
+
+		_, _, err := webDAVRequest(WebDAVConfig{URL: srv.URL}, http.MethodGet, srv.URL+"/probe", nil, nil)
+		So(err, ShouldNotBeNil)
+		So(err.Error(), ShouldContainSubstring, "redirect")
+	})
+}
+
+func TestWebDAVFileURLDefaultsToCanonicalName(t *testing.T) {
+	Convey("webDAVFileURL substitutes the canonical encrypted backup filename when name is empty", t, func() {
+		out, err := webDAVFileURL("https://example.com/dav/", "")
+		So(err, ShouldBeNil)
+		So(out, ShouldEndWith, "/opskat/"+webDAVBackupFilename)
+	})
+}
+
+func TestWebDAVStoragePathDefaultsToOpskatAtRoot(t *testing.T) {
+	Convey("webDAVStoragePath returns /opskat/ when the base URL has no path", t, func() {
+		So(webDAVStoragePath(""), ShouldEqual, "/opskat/")
+	})
+	Convey("webDAVStoragePath keeps the configured directory if it already ends in /opskat", t, func() {
+		So(webDAVStoragePath("/dav/opskat"), ShouldEqual, "/dav/opskat/")
+	})
+	Convey("webDAVStoragePath appends /opskat/ to a custom base path", t, func() {
+		So(webDAVStoragePath("/dav"), ShouldEqual, "/dav/opskat/")
+	})
+}
+
+func TestGetWebDAVBackupContentRejectsInvalidName(t *testing.T) {
+	Convey("GetWebDAVBackupContent refuses names that contain path separators", t, func() {
+		_, err := GetWebDAVBackupContent(WebDAVConfig{URL: "https://example.com/dav/"}, "../etc/passwd")
+		So(err, ShouldNotBeNil)
+		So(err.Error(), ShouldContainSubstring, "invalid")
+	})
+}
+
+func TestBestPropFallback(t *testing.T) {
+	Convey("bestProp returns the first propstat when none reports 200", t, func() {
+		body := []byte(`<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/opskat/opskat-backup.encrypted.json</d:href>
+    <d:propstat>
+      <d:prop><d:getcontentlength>9</d:getcontentlength></d:prop>
+      <d:status>HTTP/1.1 404 Not Found</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>`)
+		// 解析后 backups 会被 isOpsKatBackupName 接受，但 bestProp 走 fallback 返回第一个 propstat。
+		backups, err := parseWebDAVBackupList(body)
+		So(err, ShouldBeNil)
+		So(backups, ShouldHaveLength, 1)
+		So(backups[0].Size, ShouldEqual, int64(9))
+	})
+}
+
+func TestParseWebDAVBackupListSkipsBadEntries(t *testing.T) {
+	Convey("parseWebDAVBackupList tolerates entries with empty href and non-200 propstat", t, func() {
+		body := []byte(`<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href></d:href>
+    <d:propstat>
+      <d:prop><d:getcontentlength>9</d:getcontentlength></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/opskat/opskat-backup.encrypted.json</d:href>
+    <d:propstat>
+      <d:prop><d:getcontentlength>0</d:getcontentlength></d:prop>
+      <d:status>HTTP/1.1 404 Not Found</d:status>
+    </d:propstat>
+    <d:propstat>
+      <d:prop>
+        <d:getcontentlength>21</d:getcontentlength>
+        <d:getlastmodified>Sun, 26 Apr 2026 10:00:00 GMT</d:getlastmodified>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>`)
+		backups, err := parseWebDAVBackupList(body)
+		So(err, ShouldBeNil)
+		So(backups, ShouldHaveLength, 1)
+		So(backups[0].Size, ShouldEqual, int64(21)) // bestProp 选中 200 OK 的 propstat
+	})
+
+	Convey("parseWebDAVBackupList errors on invalid XML", t, func() {
+		_, err := parseWebDAVBackupList([]byte("not xml"))
+		So(err, ShouldNotBeNil)
 	})
 }
