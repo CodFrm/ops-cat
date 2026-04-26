@@ -39,8 +39,7 @@ import {
 } from "../../../wailsjs/go/app/App";
 import { Bug, Download, FolderOpen, Loader2, ExternalLink, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { BrowserOpenURL, Quit } from "../../../wailsjs/runtime/runtime";
-import { EventsOn } from "../../../wailsjs/runtime/runtime";
+import { BrowserOpenURL, EventsOn, Quit } from "../../../wailsjs/runtime/runtime";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const REPOSITORY_URL = "https://github.com/opskat/opskat";
@@ -119,11 +118,7 @@ export function UpdateSection() {
     } catch {
       // 取不到诊断信息时仍然打开模板，让用户手动填写
     }
-    BrowserOpenURL(`https://github.com/opskat/opskat/issues/new?${params.toString()}`);
-  };
-
-  const handleOpenRepository = () => {
-    BrowserOpenURL(REPOSITORY_URL);
+    BrowserOpenURL(`${REPOSITORY_URL}/issues/new?${params.toString()}`);
   };
 
   const handleChannelChange = async (value: string) => {
@@ -227,7 +222,7 @@ export function UpdateSection() {
         <div className="flex justify-between items-center gap-3 text-sm">
           <span className="text-muted-foreground">{t("appUpdate.openRepository")}</span>
           <Button
-            onClick={handleOpenRepository}
+            onClick={() => BrowserOpenURL(REPOSITORY_URL)}
             size="sm"
             variant="link"
             className="h-auto min-w-0 p-0 text-right text-xs font-mono"
