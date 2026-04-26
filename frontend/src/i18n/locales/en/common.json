@@ -620,7 +620,6 @@
     "newConversation": "New conversation",
     "sidebar": {
       "title": "AI Assistant",
-      "sessions": "Sessions",
       "newChat": "New chat",
       "history": "History",
       "historySearchPlaceholder": "Search history…",
@@ -629,10 +628,18 @@
       "promoteToTab": "Open in main tab",
       "promoteHint": "Opened in tab",
       "collapse": "Collapse",
+      "expandRail": "Expand session rail",
+      "collapseRail": "Collapse session rail",
       "emptyGuide": "Click + to start a new chat, or pick one from <history/> History",
       "noConversation": "No conversation selected",
       "attachedAssets": "Attached assets",
       "status": {
+        "waiting_approval": "Waiting approval",
+        "running": "Running",
+        "done": "Done",
+        "error": "Error"
+      },
+      "statusSuffix": {
         "waiting_approval": "Waiting approval",
         "running": "Running",
         "done": "Done",
