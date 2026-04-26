@@ -13,9 +13,17 @@ import (
 type mockProvider struct {
 	responses [][]StreamEvent // 每轮对话的响应事件序列
 	round     int
+	model     string // 可选：测试模型相关分支时设置
 }
 
 func (m *mockProvider) Name() string { return "mock" }
+
+func (m *mockProvider) Model() string {
+	if m.model != "" {
+		return m.model
+	}
+	return "mock-model"
+}
 
 func (m *mockProvider) Chat(_ context.Context, _ []Message, _ []Tool) (<-chan StreamEvent, error) {
 	ch := make(chan StreamEvent, 32)
@@ -180,6 +188,8 @@ type captureMockProvider struct {
 
 func (c *captureMockProvider) Name() string { return "capture_mock" }
 
+func (c *captureMockProvider) Model() string { return c.inner.Model() }
+
 func (c *captureMockProvider) Chat(ctx context.Context, msgs []Message, tools []Tool) (<-chan StreamEvent, error) {
 	// 第二轮调用时捕获完整 messages
 	if c.inner.round > 0 {
@@ -188,38 +198,74 @@ func (c *captureMockProvider) Chat(ctx context.Context, msgs []Message, tools []
 	return c.inner.Chat(ctx, msgs, tools)
 }
 
-func TestAgent_ToolCallMessageCarriesReasoningContent(t *testing.T) {
-	convey.Convey("Agent tool 调用后构造的 assistant 消息同时携带 thinking 与 reasoning_content（修复 DeepSeek thinking 多轮 400）", t, func() {
-		var capturedMessages []Message
+func TestAgent_ToolStartAndResultCarryToolCallID(t *testing.T) {
+	convey.Convey("tool_start 与 tool_result 事件都带上 ToolCallID（前端用以跨 turn 还原 tool_calls）", t, func() {
 		provider := &mockProvider{
 			responses: [][]StreamEvent{
-				// 第一轮：LLM 输出 thinking + tool_call（DeepSeek thinking 模式典型形态）
 				{
-					{Type: "thinking", Content: "先看一下"},
-					{Type: "thinking", Content: "有哪些资产"},
-					{Type: "thinking_done"},
 					{Type: "tool_call", ToolCalls: []ToolCall{
-						{ID: "call_1", Type: "function", Function: struct {
+						{ID: "call_xyz", Type: "function", Function: struct {
 							Name      string `json:"name"`
 							Arguments string `json:"arguments"`
 						}{Name: "list_assets", Arguments: `{}`}},
 					}},
 					{Type: "done"},
 				},
-				// 第二轮：LLM 返回最终回复
-				{
-					{Type: "content", Content: "完成"},
-					{Type: "done"},
-				},
+				{{Type: "content", Content: "ok"}, {Type: "done"}},
 			},
 		}
+		executor := &mockExecutor{results: map[string]string{"list_assets": `[]`}}
+		agent := NewAgent(provider, func() ToolExecutor { return executor }, nil, NewDefaultConfig())
+
+		var events []StreamEvent
+		err := agent.Chat(context.Background(), []Message{
+			{Role: RoleUser, Content: "list"},
+		}, func(e StreamEvent) { events = append(events, e) }, nil)
+		assert.NoError(t, err)
+
+		var startEvent, resultEvent *StreamEvent
+		for i := range events {
+			if events[i].Type == "tool_start" {
+				startEvent = &events[i]
+			} else if events[i].Type == "tool_result" {
+				resultEvent = &events[i]
+			}
+		}
+		assert.NotNil(t, startEvent)
+		assert.NotNil(t, resultEvent)
+		assert.Equal(t, "call_xyz", startEvent.ToolCallID)
+		assert.Equal(t, "call_xyz", resultEvent.ToolCallID)
+	})
+}
+
+func TestAgent_ToolCallMessageCarriesReasoningContent(t *testing.T) {
+	buildResponses := func() [][]StreamEvent {
+		return [][]StreamEvent{
+			{
+				{Type: "thinking", Content: "先看一下"},
+				{Type: "thinking", Content: "有哪些资产"},
+				{Type: "thinking_done"},
+				{Type: "tool_call", ToolCalls: []ToolCall{
+					{ID: "call_1", Type: "function", Function: struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					}{Name: "list_assets", Arguments: `{}`}},
+				}},
+				{Type: "done"},
+			},
+			{{Type: "content", Content: "完成"}, {Type: "done"}},
+		}
+	}
+
+	convey.Convey("DeepSeek-v4 模型：tool 调用轮 assistant 消息同时携带 Thinking 与 ReasoningContent", t, func() {
+		var capturedMessages []Message
+		provider := &mockProvider{responses: buildResponses(), model: "deepseek-v4-pro"}
 		captureProvider := &captureMockProvider{inner: provider, captured: &capturedMessages}
 		executor := &mockExecutor{results: map[string]string{"list_assets": `[]`}}
 		agent := NewAgent(captureProvider, func() ToolExecutor { return executor }, nil, NewDefaultConfig())
 
-		err := agent.Chat(context.Background(), []Message{
-			{Role: RoleUser, Content: "列出资产"},
-		}, func(e StreamEvent) {}, nil)
+		err := agent.Chat(context.Background(), []Message{{Role: RoleUser, Content: "列出资产"}},
+			func(e StreamEvent) {}, nil)
 		assert.NoError(t, err)
 
 		var assistantMsg *Message
@@ -229,10 +275,33 @@ func TestAgent_ToolCallMessageCarriesReasoningContent(t *testing.T) {
 				break
 			}
 		}
-		assert.NotNil(t, assistantMsg, "第二轮应包含上一轮 assistant 消息")
+		assert.NotNil(t, assistantMsg)
 		expected := "先看一下有哪些资产"
-		assert.Equal(t, expected, assistantMsg.Thinking, "Thinking 字段累积全部 thinking 片段")
-		assert.Equal(t, expected, assistantMsg.ReasoningContent, "ReasoningContent 必须与 Thinking 同步——DeepSeek 多轮要求原样回传")
+		assert.Equal(t, expected, assistantMsg.Thinking)
+		assert.Equal(t, expected, assistantMsg.ReasoningContent, "DeepSeek-v4 多轮要求原样回传 reasoning_content")
+	})
+
+	convey.Convey("非 DeepSeek-v4 模型：仅写 Thinking，不写 ReasoningContent，避免对 OpenAI/Anthropic 等 provider 引入未知字段", t, func() {
+		var capturedMessages []Message
+		provider := &mockProvider{responses: buildResponses(), model: "gpt-4o"}
+		captureProvider := &captureMockProvider{inner: provider, captured: &capturedMessages}
+		executor := &mockExecutor{results: map[string]string{"list_assets": `[]`}}
+		agent := NewAgent(captureProvider, func() ToolExecutor { return executor }, nil, NewDefaultConfig())
+
+		err := agent.Chat(context.Background(), []Message{{Role: RoleUser, Content: "列出资产"}},
+			func(e StreamEvent) {}, nil)
+		assert.NoError(t, err)
+
+		var assistantMsg *Message
+		for i := range capturedMessages {
+			if capturedMessages[i].Role == RoleAssistant {
+				assistantMsg = &capturedMessages[i]
+				break
+			}
+		}
+		assert.NotNil(t, assistantMsg)
+		assert.Equal(t, "先看一下有哪些资产", assistantMsg.Thinking)
+		assert.Empty(t, assistantMsg.ReasoningContent, "非 DeepSeek-v4 不应写 ReasoningContent")
 	})
 }
 
