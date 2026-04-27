@@ -143,9 +143,10 @@ export function BackupSection() {
   // WebDAV
   const [webdavConfigured, setWebDAVConfigured] = useState(false);
   const [webdavURL, setWebDAVURL] = useState("");
+  const [webdavAuthType, setWebDAVAuthType] = useState<"none" | "basic" | "bearer">("basic");
   const [webdavUsername, setWebDAVUsername] = useState("");
   const [webdavPassword, setWebDAVPassword] = useState("");
-  const [webdavPasswordSet, setWebDAVPasswordSet] = useState(false);
+  const [webdavToken, setWebDAVToken] = useState("");
   const [webdavBackups, setWebDAVBackups] = useState<backup_svc.WebDAVBackupInfo[]>([]);
   const [selectedWebDAVBackup, setSelectedWebDAVBackup] = useState("");
   const [webdavSaving, setWebDAVSaving] = useState(false);
@@ -201,8 +202,10 @@ export function BackupSection() {
         const cfg = await GetWebDAVConfig();
         if (!cfg) return;
         setWebDAVURL(cfg.url || "");
+        setWebDAVAuthType((cfg.authType as "none" | "basic" | "bearer") || "basic");
         setWebDAVUsername(cfg.username || "");
-        setWebDAVPasswordSet(!!cfg.passwordSet);
+        setWebDAVPassword(cfg.password || "");
+        setWebDAVToken(cfg.token || "");
         setWebDAVConfigured(!!cfg.configured);
       } catch {
         /* not configured */
@@ -382,6 +385,14 @@ export function BackupSection() {
   };
 
   // --- WebDAV ---
+  const buildWebDAVInput = () => ({
+    url: webdavURL.trim(),
+    authType: webdavAuthType,
+    username: webdavUsername.trim(),
+    password: webdavPassword,
+    token: webdavToken.trim(),
+  });
+
   const handleWebDAVSave = async () => {
     if (!webdavURL.trim()) {
       toast.error(t("backup.webdavURLRequired"));
@@ -389,10 +400,8 @@ export function BackupSection() {
     }
     setWebDAVSaving(true);
     try {
-      await SaveWebDAVConfig(webdavURL.trim(), webdavUsername.trim(), webdavPassword);
+      await SaveWebDAVConfig(buildWebDAVInput());
       setWebDAVConfigured(true);
-      setWebDAVPasswordSet(webdavPasswordSet || !!webdavPassword);
-      setWebDAVPassword("");
       toast.success(t("backup.webdavSaved"));
     } catch (e: unknown) {
       toast.error(errMsg(e));
@@ -408,7 +417,7 @@ export function BackupSection() {
     }
     setWebDAVTesting(true);
     try {
-      await TestWebDAVConfig(webdavURL.trim(), webdavUsername.trim(), webdavPassword);
+      await TestWebDAVConfig(buildWebDAVInput());
       toast.success(t("backup.webdavTestSuccess"));
     } catch (e: unknown) {
       toast.error(errMsg(e));
@@ -422,9 +431,10 @@ export function BackupSection() {
       await ClearWebDAVConfig();
       setWebDAVConfigured(false);
       setWebDAVURL("");
+      setWebDAVAuthType("basic");
       setWebDAVUsername("");
       setWebDAVPassword("");
-      setWebDAVPasswordSet(false);
+      setWebDAVToken("");
       setWebDAVBackups([]);
       setSelectedWebDAVBackup("");
       toast.success(t("backup.webdavCleared"));
@@ -594,24 +604,41 @@ export function BackupSection() {
               />
               <p className="text-xs text-muted-foreground">{t("backup.webdavDefaultDirectory", { dir: "opskat" })}</p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="grid gap-1.5">
-                <Label>{t("backup.webdavUsername")}</Label>
-                <Input
-                  value={webdavUsername}
-                  onChange={(e) => setWebDAVUsername(e.target.value)}
-                  placeholder={t("backup.webdavUsernamePlaceholder")}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label>{t("backup.webdavPassword")}</Label>
-                <PasswordInput
-                  value={webdavPassword}
-                  onChange={(e) => setWebDAVPassword(e.target.value)}
-                  placeholder={webdavPasswordSet ? t("backup.webdavPasswordPlaceholder") : t("backup.webdavPassword")}
-                />
-              </div>
+            <div className="grid gap-1.5">
+              <Label>{t("backup.webdavAuthType")}</Label>
+              <Select value={webdavAuthType} onValueChange={(v) => setWebDAVAuthType(v as "none" | "basic" | "bearer")}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">{t("backup.webdavAuthNone")}</SelectItem>
+                  <SelectItem value="basic">{t("backup.webdavAuthBasic")}</SelectItem>
+                  <SelectItem value="bearer">{t("backup.webdavAuthBearer")}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+            {webdavAuthType === "basic" && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-1.5">
+                  <Label>{t("backup.webdavUsername")}</Label>
+                  <Input
+                    value={webdavUsername}
+                    onChange={(e) => setWebDAVUsername(e.target.value)}
+                    placeholder={t("backup.webdavUsernamePlaceholder")}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>{t("backup.webdavPassword")}</Label>
+                  <PasswordInput value={webdavPassword} onChange={(e) => setWebDAVPassword(e.target.value)} />
+                </div>
+              </div>
+            )}
+            {webdavAuthType === "bearer" && (
+              <div className="grid gap-1.5">
+                <Label>{t("backup.webdavToken")}</Label>
+                <PasswordInput value={webdavToken} onChange={(e) => setWebDAVToken(e.target.value)} />
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               <Button onClick={handleWebDAVSave} disabled={webdavSaving} variant="outline" className="gap-1">
                 {webdavSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
