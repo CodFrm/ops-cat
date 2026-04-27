@@ -313,6 +313,7 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 	chatCtx := ai.WithAuditSource(a.ctx, "ai")
 	chatCtx = ai.WithConversationID(chatCtx, convID)
 	chatCtx = ai.WithSessionID(chatCtx, fmt.Sprintf("conv_%d", convID))
+	chatCtx = logger.WithContextField(chatCtx, zap.Int64("conv_id", convID))
 	if a.sshPool != nil {
 		chatCtx = ai.WithSSHPool(chatCtx, a.sshPool)
 	}

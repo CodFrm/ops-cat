@@ -39,10 +39,10 @@ import {
 } from "../../../wailsjs/go/app/App";
 import { Bug, Download, FolderOpen, Loader2, ExternalLink, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { BrowserOpenURL, Quit } from "../../../wailsjs/runtime/runtime";
-import { EventsOn } from "../../../wailsjs/runtime/runtime";
+import { BrowserOpenURL, EventsOn, Quit } from "../../../wailsjs/runtime/runtime";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const REPOSITORY_URL = "https://github.com/opskat/opskat";
 
 export function UpdateSection() {
   const { t } = useTranslation();
@@ -118,7 +118,7 @@ export function UpdateSection() {
     } catch {
       // 取不到诊断信息时仍然打开模板，让用户手动填写
     }
-    BrowserOpenURL(`https://github.com/opskat/opskat/issues/new?${params.toString()}`);
+    BrowserOpenURL(`${REPOSITORY_URL}/issues/new?${params.toString()}`);
   };
 
   const handleChannelChange = async (value: string) => {
@@ -217,6 +217,20 @@ export function UpdateSection() {
         <div className="flex justify-between items-center text-sm">
           <span className="text-muted-foreground">{t("appUpdate.currentVersion")}</span>
           <span className="font-mono text-xs">{currentVersion || "dev"}</span>
+        </div>
+
+        <div className="flex justify-between items-center gap-3 text-sm">
+          <span className="text-muted-foreground">{t("appUpdate.openRepository")}</span>
+          <Button
+            onClick={() => BrowserOpenURL(REPOSITORY_URL)}
+            size="sm"
+            variant="link"
+            className="h-auto min-w-0 p-0 text-right text-xs font-mono"
+            title={t("appUpdate.openRepositoryDesc")}
+          >
+            <span className="truncate">{REPOSITORY_URL}</span>
+            <ExternalLink className="ml-1 h-3 w-3 shrink-0" />
+          </Button>
         </div>
 
         <div className="flex justify-between items-center text-sm">

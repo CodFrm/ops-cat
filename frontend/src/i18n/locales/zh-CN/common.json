@@ -658,9 +658,23 @@
       "promoteToTab": "转为主面板 Tab",
       "promoteHint": "已在 Tab 中打开",
       "collapse": "折叠",
+      "expandRail": "展开会话栏",
+      "collapseRail": "收起会话栏",
       "emptyGuide": "点击 + 新建对话，或从 <history/> 历史中继续",
       "noConversation": "未选择对话",
-      "attachedAssets": "关联资产"
+      "attachedAssets": "关联资产",
+      "status": {
+        "waiting_approval": "待审批",
+        "running": "运行中",
+        "done": "已完成",
+        "error": "错误"
+      },
+      "statusSuffix": {
+        "waiting_approval": "待审批",
+        "running": "运行中",
+        "done": "已完成",
+        "error": "出错"
+      }
     }
   },
   "shortcut": {
@@ -832,6 +846,8 @@
     "checksumSkipCancel": "取消",
     "reportBug": "Bug 反馈",
     "reportBugDesc": "打开 GitHub 反馈模板，自动带上版本与系统信息",
+    "openRepository": "仓库地址",
+    "openRepositoryDesc": "打开 OpsKat GitHub 源码仓库",
     "debugMode": "Debug 日志",
     "debugModeDesc": "开启后日志级别降为 debug，便于问题排查；问题解决后建议关闭",
     "debugModeOn": "Debug 日志已开启",

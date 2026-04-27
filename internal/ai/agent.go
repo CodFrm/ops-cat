@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +15,12 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
+
+// needsReasoningContent 判断当前模型是否要求多轮 tool 调用 assistant 消息回传 reasoning_content。
+// 目前只有 DeepSeek-v4 thinking 模式有此强制要求；其他 provider 保持原状以减少回归面。
+func needsReasoningContent(model string) bool {
+	return strings.HasPrefix(strings.ToLower(model), "deepseek-v4")
+}
 
 // ToolExecutor 执行 tool 调用的接口
 type ToolExecutor interface {
@@ -128,12 +135,17 @@ func (a *Agent) Chat(ctx context.Context, messages []Message, onEvent func(Strea
 			return nil
 		}
 
-		// 将 assistant 的回复（含 thinking + tool_calls）加入消息
+		// 将 assistant 的回复（含 thinking + tool_calls）加入消息。
+		// reasoning_content 仅 DeepSeek-v4 thinking 模式强制要求回传（否则多轮 400），
+		// 其他 provider 保持原有行为，避免引入未知字段触发严格 OpenAI-compat 后端报错。
 		assistantMsg := Message{
 			Role:      RoleAssistant,
 			Content:   contentBuf,
 			Thinking:  thinkingBuf,
 			ToolCalls: toolCalls,
+		}
+		if needsReasoningContent(a.provider.Model()) {
+			assistantMsg.ReasoningContent = thinkingBuf
 		}
 		messages = append(messages, assistantMsg)
 
@@ -148,11 +160,12 @@ func (a *Agent) Chat(ctx context.Context, messages []Message, onEvent func(Strea
 
 		for i, tc := range toolCalls {
 			g.Go(func() error {
-				// 通知前端工具开始执行
+				// 通知前端工具开始执行；ToolCallID 用于前端跨 turn 还原 tool_calls 历史
 				onEvent(StreamEvent{
-					Type:      "tool_start",
-					ToolName:  tc.Function.Name,
-					ToolInput: tc.Function.Arguments,
+					Type:       "tool_start",
+					ToolName:   tc.Function.Name,
+					ToolInput:  tc.Function.Arguments,
+					ToolCallID: tc.ID,
 				})
 
 				result, execErr := executor.Execute(gCtx, tc.Function.Name, tc.Function.Arguments)
@@ -167,9 +180,10 @@ func (a *Agent) Chat(ctx context.Context, messages []Message, onEvent func(Strea
 
 				// 通知前端工具执行完成
 				onEvent(StreamEvent{
-					Type:     "tool_result",
-					ToolName: tc.Function.Name,
-					Content:  result,
+					Type:       "tool_result",
+					ToolName:   tc.Function.Name,
+					Content:    result,
+					ToolCallID: tc.ID,
 				})
 
 				mu.Lock()

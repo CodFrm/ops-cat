@@ -17,6 +17,7 @@ const defaultAIActions = {
   editAndResendConversation: useAIStore.getState().editAndResendConversation,
   stopGeneration: useAIStore.getState().stopGeneration,
   regenerate: useAIStore.getState().regenerate,
+  regenerateConversation: useAIStore.getState().regenerateConversation,
   removeFromQueue: useAIStore.getState().removeFromQueue,
   clearQueue: useAIStore.getState().clearQueue,
 };
@@ -30,9 +31,11 @@ vi.mock("@/components/ai/AIChatInput", () => ({
     {
       onSubmit,
       onEmptyChange,
+      onDraftChange,
     }: {
       onSubmit: (text: string, mentions: MentionRef[]) => void;
       onEmptyChange?: (empty: boolean) => void;
+      onDraftChange?: (draft: { content: string; mentions?: MentionRef[] }) => void;
     },
     ref
   ) {
@@ -41,7 +44,8 @@ vi.mock("@/components/ai/AIChatInput", () => ({
 
     useEffect(() => {
       onEmptyChange?.(value.trim().length === 0 && mentions.length === 0);
-    }, [mentions, onEmptyChange, value]);
+      onDraftChange?.({ content: value, mentions });
+    }, [mentions, onDraftChange, onEmptyChange, value]);
 
     useImperativeHandle(
       ref,
@@ -97,6 +101,7 @@ describe("AIChatContent", () => {
       editAndResendConversation: defaultAIActions.editAndResendConversation,
       stopGeneration: defaultAIActions.stopGeneration,
       regenerate: defaultAIActions.regenerate,
+      regenerateConversation: defaultAIActions.regenerateConversation,
       removeFromQueue: defaultAIActions.removeFromQueue,
       clearQueue: defaultAIActions.clearQueue,
     });
@@ -115,7 +120,7 @@ describe("AIChatContent", () => {
       conversationStreaming: {
         5: { sending: false, pendingQueue: [] },
       },
-      tabStates: { [tabId]: {} },
+      tabStates: { [tabId]: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null } },
     });
 
     render(<AIChatContent tabId={tabId} />);
@@ -154,7 +159,7 @@ describe("AIChatContent", () => {
       activeTabId: tabId,
     });
     useAIStore.setState({
-      tabStates: { [tabId]: {} },
+      tabStates: { [tabId]: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null } },
       conversationMessages: {
         5: [{ role: "user", content: "check @prod-db", mentions, blocks: [] }],
       },
@@ -223,7 +228,7 @@ describe("AIChatContent", () => {
 
     rerender(<AIChatContent conversationId={12} />);
 
-    await waitFor(() => expect(mockInputSpies.clear).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockInputSpies.clear).toHaveBeenCalled());
     expect(screen.queryByText(editingBannerName)).not.toBeInTheDocument();
   });
 
@@ -245,5 +250,27 @@ describe("AIChatContent", () => {
 
     await waitFor(() => expect(onSendOverride).toHaveBeenCalledWith("sidebar send", undefined));
     expect(editAndResendConversation).not.toHaveBeenCalled();
+  });
+
+  it("conversationId regenerate routes through direct mode", async () => {
+    const user = userEvent.setup();
+    const regenerateConversation = vi.fn().mockResolvedValue(undefined);
+
+    useAIStore.setState({
+      conversationMessages: {
+        31: [{ role: "assistant", content: "ready", blocks: [] }],
+      },
+      conversationStreaming: {
+        31: { sending: false, pendingQueue: [] },
+      },
+      regenerateConversation,
+    } as Partial<ReturnType<typeof useAIStore.getState>>);
+
+    render(<AIChatContent conversationId={31} compact />);
+
+    await user.click(screen.getByRole("button", { name: /ai\.regenerate|重新生成|Regenerate/i }));
+    await user.click(await screen.findByRole("button", { name: /common\.confirm|确定|Confirm/i }));
+
+    await waitFor(() => expect(regenerateConversation).toHaveBeenCalledWith(31, 0));
   });
 });

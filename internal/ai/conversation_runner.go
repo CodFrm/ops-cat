@@ -7,6 +7,9 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 )
 
 // RunnerState 表示 ConversationRunner 的当前状态
@@ -155,6 +158,7 @@ func (r *ConversationRunner) run(ctx context.Context, messages []Message, onEven
 
 		// 用户停止
 		if ctx.Err() != nil {
+			logger.Ctx(ctx).Info("AI generation stopped")
 			onEvent(StreamEvent{Type: "stopped"})
 			return
 		}
@@ -165,6 +169,7 @@ func (r *ConversationRunner) run(ctx context.Context, messages []Message, onEven
 		attempt := r.retry
 		if attempt > MaxRetries {
 			r.mu.Unlock()
+			logger.Ctx(ctx).Error("AI stream failed", zap.Int("attempts", attempt-1), zap.Error(err))
 			onEvent(StreamEvent{
 				Type:  "error",
 				Error: err.Error(),
@@ -175,11 +180,17 @@ func (r *ConversationRunner) run(ctx context.Context, messages []Message, onEven
 		r.mu.Unlock()
 
 		delay := calcRetryDelay(attempt, err)
+		logger.Ctx(ctx).Warn("AI retrying",
+			zap.Int("attempt", attempt),
+			zap.Int("max", MaxRetries),
+			zap.Duration("delay", delay),
+			zap.Error(err))
 
 		// 通知前端重试状态
 		onEvent(StreamEvent{
 			Type:    "retry",
 			Content: strconv.Itoa(attempt) + "/" + strconv.Itoa(MaxRetries),
+			Error:   err.Error(),
 		})
 
 		// 等待退避时间，支持取消
@@ -190,6 +201,7 @@ func (r *ConversationRunner) run(ctx context.Context, messages []Message, onEven
 			r.mu.Unlock()
 			continue
 		case <-ctx.Done():
+			logger.Ctx(ctx).Info("AI generation stopped during retry backoff")
 			onEvent(StreamEvent{Type: "stopped"})
 			return
 		}
