@@ -268,6 +268,77 @@ describe("QueryResultTable — cell context actions", () => {
     expect(header.style.width).toBe("220px");
   });
 
+  it("uses stable default column widths when freezing columns", async () => {
+    const user = userEvent.setup();
+    render(<QueryResultTable columns={columns} rows={rows} editable showRowNumber />);
+    fireEvent.contextMenu(document.querySelector('[data-column-header-key="id"]') as HTMLElement, {
+      clientX: 40,
+      clientY: 20,
+    });
+
+    await user.click(screen.getByText("query.freezeColumn"));
+
+    const idHeader = document.querySelector('[data-column-header-key="id"]') as HTMLElement;
+    const nameHeader = document.querySelector('[data-column-header-key="name"]') as HTMLElement;
+    const idCell = document.querySelector('[data-cell-key="0:id"]') as HTMLElement;
+
+    expect(idCell).toHaveClass("sticky");
+    expect(idHeader.style.width).toBe("160px");
+    expect(idHeader.style.minWidth).toBe("160px");
+    expect(idHeader.style.maxWidth).toBe("160px");
+    expect(idCell.style.width).toBe("160px");
+    expect(idCell.style.minWidth).toBe("160px");
+    expect(idCell.style.maxWidth).toBe("160px");
+    expect(idCell.style.left).toBe("50px");
+    expect(idHeader.style.left).toBe("50px");
+    expect(nameHeader).not.toHaveClass("sticky");
+    expect(nameHeader.style.left).toBe("");
+  });
+
+  it("keeps frozen record cells sticky when selected", async () => {
+    const user = userEvent.setup();
+    render(<QueryResultTable columns={columns} rows={rows} editable showRowNumber />);
+    fireEvent.contextMenu(document.querySelector('[data-column-header-key="id"]') as HTMLElement, {
+      clientX: 40,
+      clientY: 20,
+    });
+
+    await user.click(screen.getByText("query.freezeColumn"));
+    const idCell = document.querySelector('[data-cell-key="0:id"]') as HTMLElement;
+    await user.click(idCell);
+
+    expect(idCell).toHaveClass("sticky");
+    expect(idCell).not.toHaveClass("relative");
+    expect(idCell.style.left).toBe("50px");
+  });
+
+  it("can freeze another column after freezing the first without freezing columns between them", async () => {
+    const user = userEvent.setup();
+    render(<QueryResultTable columns={["a", "b", "c"]} rows={[{ a: 1, b: 2, c: 3 }]} editable showRowNumber />);
+
+    fireEvent.contextMenu(document.querySelector('[data-column-header-key="a"]') as HTMLElement, {
+      clientX: 40,
+      clientY: 20,
+    });
+    await user.click(screen.getByText("query.freezeColumn"));
+    fireEvent.contextMenu(document.querySelector('[data-column-header-key="c"]') as HTMLElement, {
+      clientX: 120,
+      clientY: 20,
+    });
+    await user.click(screen.getByText("query.freezeColumn"));
+
+    const aCell = document.querySelector('[data-cell-key="0:a"]') as HTMLElement;
+    const bCell = document.querySelector('[data-cell-key="0:b"]') as HTMLElement;
+    const cCell = document.querySelector('[data-cell-key="0:c"]') as HTMLElement;
+
+    expect(aCell).toHaveClass("sticky");
+    expect(aCell.style.left).toBe("50px");
+    expect(bCell).not.toHaveClass("sticky");
+    expect(bCell.style.left).toBe("");
+    expect(cCell).toHaveClass("sticky");
+    expect(cCell.style.left).toBe("210px");
+  });
+
   it("shows the table cell context actions", () => {
     openMenu({ onSetCellValue: vi.fn(), onPasteCell: vi.fn(), onRefresh: vi.fn() });
 
@@ -310,7 +381,7 @@ describe("QueryResultTable — cell context actions", () => {
     await user.hover(screen.getByText("query.filter"));
 
     expect(screen.getByRole("menu")).not.toHaveClass("overflow-hidden");
-    expect(screen.getByText("query.filterFieldNotEqualsValue")).toBeVisible();
+    expect(screen.getByText("query.filterOperatorIsNot")).toBeVisible();
   });
 
   it("right-clicking a row number selects the full row and shows row actions only", () => {
@@ -519,20 +590,53 @@ describe("QueryResultTable — cell context actions", () => {
 
     const filterTrigger = screen.getByText("query.filter");
     await user.hover(filterTrigger);
-    await user.click(screen.getByText("query.filterFieldNotEqualsValue"));
+    await user.click(screen.getByText("query.filterOperatorIsNot"));
 
     expect(onFilterByCellValue).toHaveBeenCalledWith({ rowIdx: 1, col: "name", value: "bob", operator: "!=" });
   });
 
-  it("filter submenu invokes custom and remove filter callbacks for the current field", async () => {
+  it("filter submenu shows the full operator list without custom filter", async () => {
+    const user = userEvent.setup();
+    openMenu({ onFilterByCellValue: vi.fn(), onAddColumnFilter: vi.fn(), onClearFilterSort: vi.fn() });
+
+    await user.hover(screen.getByText("query.filter"));
+
+    [
+      "query.filterOperatorIs",
+      "query.filterOperatorIsNot",
+      "query.filterOperatorLessThan",
+      "query.filterOperatorLessThanOrEqual",
+      "query.filterOperatorGreaterThan",
+      "query.filterOperatorGreaterThanOrEqual",
+      "query.filterOperatorContains",
+      "query.filterOperatorDoesNotContain",
+      "query.filterOperatorBeginsWith",
+      "query.filterOperatorDoesNotBeginWith",
+      "query.filterOperatorEndsWith",
+      "query.filterOperatorDoesNotEndWith",
+      "query.filterOperatorIsNull",
+      "query.filterOperatorIsNotNull",
+      "query.filterOperatorIsEmpty",
+      "query.filterOperatorIsNotEmpty",
+      "query.filterOperatorIsBetween",
+      "query.filterOperatorIsNotBetween",
+      "query.filterOperatorIsInList",
+      "query.filterOperatorIsNotInList",
+    ].forEach((labelKey) => {
+      expect(screen.getByText(labelKey)).toBeInTheDocument();
+    });
+    expect(screen.queryByText("query.customFilter")).not.toBeInTheDocument();
+  });
+
+  it("filter submenu invokes remove filter callbacks for the current field", async () => {
     const user = userEvent.setup();
     const onAddColumnFilter = vi.fn();
     const onRemoveColumnFilter = vi.fn();
     openMenu({ onFilterByCellValue: vi.fn(), onAddColumnFilter, onRemoveColumnFilter, onClearFilterSort: vi.fn() });
 
     await user.hover(screen.getByText("query.filter"));
-    await user.click(screen.getByText("query.customFilter"));
-    expect(onAddColumnFilter).toHaveBeenCalledWith("name");
+    expect(screen.queryByText("query.customFilter")).not.toBeInTheDocument();
+    expect(onAddColumnFilter).not.toHaveBeenCalled();
 
     openMenu({ onFilterByCellValue: vi.fn(), onAddColumnFilter, onRemoveColumnFilter, onClearFilterSort: vi.fn() });
     await user.hover(screen.getByText("query.filter"));

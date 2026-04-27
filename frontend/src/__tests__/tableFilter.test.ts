@@ -51,6 +51,20 @@ describe("table filter helpers", () => {
     expect(buildFilterWhereClause(items, "mysql")).toBe("`name` LIKE '%bob%' AND `email` NOT LIKE '%@test.com%'");
   });
 
+  it("builds SQL for text, null, range, and list operators", () => {
+    const items: TableFilterItem[] = [
+      createFilterCondition("begins", "name", { operator: "begins_with", value: "Al" }),
+      createFilterCondition("not-ends", "email", { operator: "not_ends_with", value: "@old.com" }),
+      createFilterCondition("null", "deleted_at", { operator: "is_null" }),
+      createFilterCondition("range", "age", { operator: "between", value: [18, 30] }),
+      createFilterCondition("list", "status", { operator: "in_list", value: ["active", "pending"] }),
+    ];
+
+    expect(buildFilterWhereClause(items, "mysql")).toBe(
+      "`name` LIKE 'Al%' AND `email` NOT LIKE '%@old.com' AND `deleted_at` IS NULL AND `age` BETWEEN '18' AND '30' AND `status` IN ('active', 'pending')"
+    );
+  });
+
   it("removes filters for a column from nested groups", () => {
     const items: TableFilterItem[] = [
       createFilterCondition("name", "name", { value: "A" }),

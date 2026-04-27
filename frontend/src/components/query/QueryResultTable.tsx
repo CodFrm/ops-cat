@@ -26,6 +26,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@opskat/ui";
 import { toast } from "sonner";
 import { cellValueToText } from "@/lib/cellValue";
 import type { CellValueFilterOperator } from "@/lib/tableSql";
+import { TABLE_FILTER_OPERATOR_LABEL_KEYS, TABLE_FILTER_OPERATOR_OPTIONS } from "@/lib/tableFilterOperators";
 
 export interface CellEdit {
   rowIdx: number;
@@ -106,6 +107,8 @@ interface QueryResultTableProps {
 // Sentinel key used to represent NULL / undefined values in the column-filter
 // Set so they don't collide with the literal string "null" etc.
 const NULL_KEY = "__opskat_null_sentinel__";
+const DEFAULT_COLUMN_WIDTH = 160;
+const ROW_NUMBER_COLUMN_WIDTH = 50;
 
 const CONTEXT_MENU_ITEM_CLASS =
   "relative flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground";
@@ -113,14 +116,8 @@ const CONTEXT_MENU_ITEM_CLASS =
 const CONTEXT_MENU_ITEM_GRID_CLASS =
   "relative grid w-full cursor-default grid-cols-[auto_1fr] items-center gap-x-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground";
 
-const CELL_FILTER_OPTIONS: { operator: CellValueFilterOperator; labelKey: string }[] = [
-  { operator: "=", labelKey: "query.filterFieldEqualsValue" },
-  { operator: "!=", labelKey: "query.filterFieldNotEqualsValue" },
-  { operator: "like", labelKey: "query.filterFieldLikeValue" },
-  { operator: "not_like", labelKey: "query.filterFieldNotLikeValue" },
-  { operator: "<", labelKey: "query.filterFieldLessThanValue" },
-  { operator: ">", labelKey: "query.filterFieldGreaterThanValue" },
-];
+const CELL_FILTER_OPTIONS: { operator: CellValueFilterOperator; labelKey: string }[] =
+  TABLE_FILTER_OPERATOR_OPTIONS.map((operator) => ({ operator, labelKey: TABLE_FILTER_OPERATOR_LABEL_KEYS[operator] }));
 
 function valueKey(v: unknown): string {
   if (v == null) return NULL_KEY;
@@ -353,7 +350,7 @@ export function QueryResultTable({
   const [showColumnChooser, setShowColumnChooser] = useState(false);
   const [showFieldTypes, setShowFieldTypes] = useState(true);
   const [showColumnComments, setShowColumnComments] = useState(false);
-  const [frozenColumnCount, setFrozenColumnCount] = useState(0);
+  const [frozenColumns, setFrozenColumns] = useState<Set<string>>(() => new Set());
 
   // Context menu state
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
@@ -435,13 +432,15 @@ export function QueryResultTable({
 
   const frozenColumnOffsets = useMemo(() => {
     const offsets: Record<string, number> = {};
-    let left = showRowNumber ? 50 : 0;
-    for (const col of displayColumns.slice(0, frozenColumnCount)) {
+    let left = showRowNumber ? ROW_NUMBER_COLUMN_WIDTH : 0;
+    for (const col of displayColumns) {
+      if (!frozenColumns.has(col)) continue;
       offsets[col] = left;
-      left += colWidths[col] ?? 160;
+      left += colWidths[col] ?? DEFAULT_COLUMN_WIDTH;
     }
     return offsets;
-  }, [colWidths, displayColumns, frozenColumnCount, showRowNumber]);
+  }, [colWidths, displayColumns, frozenColumns, showRowNumber]);
+  const hasFrozenColumns = Object.keys(frozenColumnOffsets).length > 0;
 
   // Sorting is enabled whenever we have an onSortChange callback (server-side)
   // or when we're in read-only mode (local client-side sort on the current page).
@@ -569,9 +568,13 @@ export function QueryResultTable({
 
   const handleFreezeColumn = useCallback(() => {
     if (!menuColumn) return;
-    const columnIndex = displayColumns.indexOf(menuColumn);
-    if (columnIndex === -1) return;
-    setFrozenColumnCount((prev) => (prev === columnIndex + 1 ? 0 : columnIndex + 1));
+    if (!displayColumns.includes(menuColumn)) return;
+    setFrozenColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(menuColumn)) next.delete(menuColumn);
+      else next.add(menuColumn);
+      return next;
+    });
     setCtxMenu(null);
   }, [displayColumns, menuColumn]);
 
@@ -1165,7 +1168,7 @@ export function QueryResultTable({
               {showRowNumber && (
                 <th
                   className={`border border-border px-2 py-1.5 text-center font-semibold text-muted-foreground whitespace-nowrap w-[50px] ${
-                    frozenColumnCount > 0 ? "sticky left-0 z-40 bg-muted" : ""
+                    hasFrozenColumns ? "sticky left-0 z-40 bg-muted" : ""
                   }`}
                 >
                   #
@@ -1173,7 +1176,7 @@ export function QueryResultTable({
               )}
               {displayColumns.map((col) => {
                 const isSorted = sortCol === col;
-                const width = colWidths[col];
+                const width = colWidths[col] ?? DEFAULT_COLUMN_WIDTH;
                 const isColumnSelected = selectedColumns.has(col);
                 const frozenLeft = frozenColumnOffsets[col];
                 const isFrozen = frozenLeft != null;
@@ -1192,7 +1195,9 @@ export function QueryResultTable({
                           : "text-muted-foreground"
                     } ${isFrozen ? "sticky z-30" : ""}`}
                     style={{
-                      ...(width ? { width: `${width}px`, minWidth: `${width}px` } : {}),
+                      width: `${width}px`,
+                      minWidth: `${width}px`,
+                      maxWidth: `${width}px`,
                       ...(isFrozen ? { left: `${frozenLeft}px` } : {}),
                     }}
                     title={col}
@@ -1312,10 +1317,10 @@ export function QueryResultTable({
                       className={`border border-border px-2 py-1 text-center text-muted-foreground whitespace-nowrap w-[50px] cursor-default select-none ${
                         isRowSelected
                           ? "bg-primary/15 text-foreground ring-2 ring-inset ring-primary/50 relative z-10"
-                          : frozenColumnCount > 0
+                          : hasFrozenColumns
                             ? "bg-background"
                             : ""
-                      } ${frozenColumnCount > 0 ? "sticky left-0 z-20" : ""}`}
+                      } ${hasFrozenColumns ? "sticky left-0 z-20" : ""}`}
                       onMouseDown={(e) => handleRowMouseDown(e, origIdx)}
                       onMouseEnter={() => handleRowMouseEnter(origIdx)}
                       onContextMenu={(e) => handleRowContextMenu(e, origIdx)}
@@ -1329,17 +1334,18 @@ export function QueryResultTable({
                     const displayValue = isEdited ? edits!.get(ck) : row[col];
                     const isEditing = editingCell === ck;
                     const isSelected = selectedCell?.origIdx === origIdx && selectedCell?.col === col;
-                    const width = colWidths[col];
+                    const width = colWidths[col] ?? DEFAULT_COLUMN_WIDTH;
                     const frozenLeft = frozenColumnOffsets[col];
                     const isFrozen = frozenLeft != null;
                     const dateModeForCell = getDateEditMode(col, columnTypes?.[col], displayValue);
                     const showDateAction =
                       editable && isSelected && !isEditing && !!dateModeForCell && !!setCellValueHandler;
 
+                    const focusPositionClass = isFrozen ? "z-20" : "relative z-10";
                     const focusClass = isEditing
-                      ? "ring-2 ring-inset ring-primary bg-primary/5 relative z-10"
+                      ? `ring-2 ring-inset ring-primary bg-primary/5 ${focusPositionClass}`
                       : isSelected
-                        ? "ring-2 ring-inset ring-primary/60 relative z-10"
+                        ? `ring-2 ring-inset ring-primary/60 ${focusPositionClass}`
                         : "";
 
                     return (
@@ -1359,9 +1365,9 @@ export function QueryResultTable({
                         } ${isFrozen ? "sticky z-10" : ""}
                         } ${focusClass}`}
                         style={{
-                          ...(width
-                            ? { width: `${width}px`, minWidth: `${width}px`, maxWidth: `${width}px` }
-                            : { maxWidth: "400px" }),
+                          width: `${width}px`,
+                          minWidth: `${width}px`,
+                          maxWidth: `${width}px`,
                           ...(isFrozen ? { left: `${frozenLeft}px` } : {}),
                         }}
                         title={displayValue == null ? "NULL" : cellValueToText(displayValue)}
@@ -1647,7 +1653,9 @@ export function QueryResultTable({
                       className={CONTEXT_MENU_ITEM_CLASS}
                       onClick={handleFreezeColumn}
                     >
-                      <span className="w-3.5 text-center">{frozenColumnCount > 0 ? "✓" : ""}</span>
+                      <span className="w-3.5 text-center">
+                        {menuColumn && frozenColumns.has(menuColumn) ? "✓" : ""}
+                      </span>
                       {t("query.freezeColumn")}
                     </button>
                     <div className="my-1 h-px bg-border" />
@@ -1731,19 +1739,6 @@ export function QueryResultTable({
                               {t(option.labelKey)}
                             </button>
                           ))}
-                        {onAddColumnFilter && (
-                          <>
-                            <div className="my-1 h-px bg-border" />
-                            <button
-                              type="button"
-                              role="menuitem"
-                              className={CONTEXT_MENU_ITEM_CLASS}
-                              onClick={handleAddColumnFilter}
-                            >
-                              {t("query.customFilter")}
-                            </button>
-                          </>
-                        )}
                         {(onRemoveColumnFilter || onRemoveAllFilters) && (
                           <>
                             <div className="my-1 h-px bg-border" />

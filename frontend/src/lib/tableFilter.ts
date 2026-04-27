@@ -1,17 +1,8 @@
 import { quoteIdent, sqlQuote } from "./tableSql";
+import type { TableFilterOperator } from "./tableFilterOperators";
+export type { TableFilterOperator } from "./tableFilterOperators";
 
 export type TableFilterJoin = "and" | "or";
-export type TableFilterOperator =
-  | "="
-  | "!="
-  | "like"
-  | "not_like"
-  | ">"
-  | ">="
-  | "<"
-  | "<="
-  | "is_empty"
-  | "is_not_empty";
 export type TableSortDir = "asc" | "desc";
 
 export interface TableFilterCondition {
@@ -120,11 +111,30 @@ function hasValue(value: unknown): boolean {
   return value !== undefined;
 }
 
+function toRangeValues(value: unknown): [unknown, unknown] | null {
+  if (!Array.isArray(value) || value.length < 2) return null;
+  if (!hasValue(value[0]) || !hasValue(value[1])) return null;
+  return [value[0], value[1]];
+}
+
+function toListValues(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value.filter(hasValue);
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+  }
+  return hasValue(value) ? [value] : [];
+}
+
 function conditionSql(condition: TableFilterCondition, driver?: string): string {
   if (!condition.enabled) return "";
   const column = quoteIdent(condition.column, driver);
   const operator = condition.operator ?? "=";
 
+  if (operator === "is_null") return `${column} IS NULL`;
+  if (operator === "is_not_null") return `${column} IS NOT NULL`;
   if (operator === "is_empty") return `(${column} IS NULL OR ${column} = '')`;
   if (operator === "is_not_empty") return `(${column} IS NOT NULL AND ${column} <> '')`;
 
@@ -135,8 +145,26 @@ function conditionSql(condition: TableFilterCondition, driver?: string): string 
     return "";
   }
 
-  if (operator === "like") return `${column} LIKE ${sqlQuote(`%${String(condition.value)}%`)}`;
-  if (operator === "not_like") return `${column} NOT LIKE ${sqlQuote(`%${String(condition.value)}%`)}`;
+  if (operator === "contains" || operator === "like") {
+    return `${column} LIKE ${sqlQuote(`%${String(condition.value)}%`)}`;
+  }
+  if (operator === "not_contains" || operator === "not_like") {
+    return `${column} NOT LIKE ${sqlQuote(`%${String(condition.value)}%`)}`;
+  }
+  if (operator === "begins_with") return `${column} LIKE ${sqlQuote(`${String(condition.value)}%`)}`;
+  if (operator === "not_begins_with") return `${column} NOT LIKE ${sqlQuote(`${String(condition.value)}%`)}`;
+  if (operator === "ends_with") return `${column} LIKE ${sqlQuote(`%${String(condition.value)}`)}`;
+  if (operator === "not_ends_with") return `${column} NOT LIKE ${sqlQuote(`%${String(condition.value)}`)}`;
+  if (operator === "between" || operator === "not_between") {
+    const rangeValues = toRangeValues(condition.value);
+    if (!rangeValues) return "";
+    return `${column} ${operator === "not_between" ? "NOT " : ""}BETWEEN ${sqlQuote(rangeValues[0])} AND ${sqlQuote(rangeValues[1])}`;
+  }
+  if (operator === "in_list" || operator === "not_in_list") {
+    const listValues = toListValues(condition.value);
+    if (listValues.length === 0) return "";
+    return `${column} ${operator === "not_in_list" ? "NOT " : ""}IN (${listValues.map(sqlQuote).join(", ")})`;
+  }
 
   const sqlOperator = operator === "!=" ? "<>" : operator;
   return `${column} ${sqlOperator} ${sqlQuote(condition.value)}`;
@@ -193,14 +221,26 @@ export function updateFilterGroup(
 const NEGATED_OPERATOR: Record<TableFilterOperator, TableFilterOperator> = {
   "=": "!=",
   "!=": "=",
-  like: "not_like",
-  not_like: "like",
-  ">": "<=",
-  ">=": "<",
   "<": ">=",
   "<=": ">",
+  ">": "<=",
+  ">=": "<",
+  contains: "not_contains",
+  not_contains: "contains",
+  begins_with: "not_begins_with",
+  not_begins_with: "begins_with",
+  ends_with: "not_ends_with",
+  not_ends_with: "ends_with",
+  is_null: "is_not_null",
+  is_not_null: "is_null",
   is_empty: "is_not_empty",
   is_not_empty: "is_empty",
+  between: "not_between",
+  not_between: "between",
+  in_list: "not_in_list",
+  not_in_list: "in_list",
+  like: "not_like",
+  not_like: "like",
 };
 
 export function toggleFilterNegator(items: TableFilterItem[], id: string): TableFilterItem[] {

@@ -9,6 +9,12 @@ describe("table SQL helpers", () => {
     expect(buildFilterByCellValueClause("name", "bob", "mysql", "!=")).toBe("`name` <> 'bob'");
     expect(buildFilterByCellValueClause("name", "bob", "mysql", "like")).toBe("`name` LIKE '%bob%'");
     expect(buildFilterByCellValueClause("name", "bob", "mysql", "not_like")).toBe("`name` NOT LIKE '%bob%'");
+    expect(buildFilterByCellValueClause("name", "Al", "mysql", "begins_with")).toBe("`name` LIKE 'Al%'");
+    expect(buildFilterByCellValueClause("name", "ce", "mysql", "not_ends_with")).toBe("`name` NOT LIKE '%ce'");
+    expect(buildFilterByCellValueClause("deleted_at", "ignored", "mysql", "is_null")).toBe("`deleted_at` IS NULL");
+    expect(buildFilterByCellValueClause("deleted_at", "ignored", "mysql", "is_not_null")).toBe(
+      "`deleted_at` IS NOT NULL"
+    );
   });
 
   it("builds DELETE SQL using primary keys when available", () => {

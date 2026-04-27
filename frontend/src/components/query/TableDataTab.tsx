@@ -47,6 +47,7 @@ import {
   type TableFilterItem,
   type TableSortItem,
 } from "@/lib/tableFilter";
+import { filterOperatorNeedsRange } from "@/lib/tableFilterOperators";
 import { cellValueToText } from "@/lib/cellValue";
 
 interface TableDataTabProps {
@@ -644,8 +645,9 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
 
   const handleFilterByCellValue = useCallback(
     ({ col, value, operator = "=" }: { col: string; value: unknown; operator?: CellValueFilterOperator }) => {
-      const clause = buildFilterByCellValueClause(col, value, driver, operator);
-      setFilters([createFilterCondition(`cell-${col}`, col, { value, operator })]);
+      const filterValue = filterOperatorNeedsRange(operator) ? [value, value] : value;
+      const clause = buildFilterByCellValueClause(col, filterValue, driver, operator);
+      setFilters([createFilterCondition(`cell-${col}`, col, { value: filterValue, operator })]);
       setShowFilterSort(true);
       setWhereClause(clause);
       setPage(0);

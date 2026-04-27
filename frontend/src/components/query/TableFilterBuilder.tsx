@@ -54,25 +54,17 @@ import {
   type TableFilterOperator,
   type TableSortItem,
 } from "@/lib/tableFilter";
+import {
+  filterOperatorNeedsRange,
+  filterOperatorNeedsValue,
+  TABLE_FILTER_OPERATOR_LABEL_KEYS,
+  TABLE_FILTER_OPERATOR_OPTIONS,
+} from "@/lib/tableFilterOperators";
 
 const FILTER_ACTION_BUTTON_CLASS =
   "border-primary/70 text-primary hover:bg-primary/10 disabled:border-border disabled:text-muted-foreground disabled:opacity-40";
 const FILTER_MENU_ITEM_CLASS =
   "flex w-full cursor-default items-center gap-2 rounded-sm px-3 py-1.5 text-left text-sm outline-hidden hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40";
-const FILTER_OPERATOR_LABEL_KEYS: Record<TableFilterOperator, string> = {
-  "=": "query.filterOperatorIs",
-  "!=": "query.filterOperatorIsNot",
-  like: "query.filterOperatorLike",
-  not_like: "query.filterOperatorNotLike",
-  ">": "query.filterOperatorGreaterThan",
-  ">=": "query.filterOperatorGreaterThanOrEqual",
-  "<": "query.filterOperatorLessThan",
-  "<=": "query.filterOperatorLessThanOrEqual",
-  is_empty: "query.filterOperatorIsEmpty",
-  is_not_empty: "query.filterOperatorIsNotEmpty",
-};
-const FILTER_OPERATORS = Object.keys(FILTER_OPERATOR_LABEL_KEYS) as TableFilterOperator[];
-
 type FilterContextTarget = {
   id: string;
   kind: "condition" | "group";
@@ -198,6 +190,14 @@ export function TableFilterBuilder({
     [ctxTarget, filters, onChange]
   );
 
+  const handleMoveSelectedFilterItem = useCallback(
+    (direction: "up" | "down") => {
+      if (!selectedFilterId) return;
+      onChange(moveFilterItem(filters, selectedFilterId, direction));
+    },
+    [filters, onChange, selectedFilterId]
+  );
+
   const targetItem = useMemo(() => (ctxTarget ? findFilterItem(filters, ctxTarget.id) : null), [ctxTarget, filters]);
   const targetEnabled = targetItem?.kind === "condition" ? targetItem.enabled : targetItem?.enabled !== false;
 
@@ -242,8 +242,26 @@ export function TableFilterBuilder({
       <div className="px-3 pt-2 pb-1">
         <div className="mb-1.5 flex items-center gap-3">
           <span className="text-sm font-semibold text-foreground">{t("query.filterBuilderTitle")}</span>
-          <ArrowUp className="h-4 w-4 text-muted-foreground" />
-          <ArrowDown className="h-4 w-4 text-muted-foreground" />
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              title={t("query.moveFilterUp")}
+              onClick={() => handleMoveSelectedFilterItem("up")}
+              disabled={!selectedFilterId}
+            >
+              <ArrowUp className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              title={t("query.moveFilterDown")}
+              onClick={() => handleMoveSelectedFilterItem("down")}
+              disabled={!selectedFilterId}
+            >
+              <ArrowDown className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
         <div className="min-h-[132px] space-y-1">
           {filters.length === 0 ? (
@@ -718,7 +736,8 @@ function FilterConditionRow({
     [item.id, onChange, rootItems]
   );
   const operator = item.operator ?? "=";
-  const operatorNeedsValue = operator !== "is_empty" && operator !== "is_not_empty";
+  const operatorNeedsValue = filterOperatorNeedsValue(operator);
+  const operatorNeedsRange = filterOperatorNeedsRange(operator);
 
   return (
     <div
@@ -757,7 +776,7 @@ function FilterConditionRow({
           const nextOperator = value as TableFilterOperator;
           setItem({
             operator: nextOperator,
-            value: nextOperator === "is_empty" || nextOperator === "is_not_empty" ? undefined : item.value,
+            value: filterOperatorNeedsValue(nextOperator) ? item.value : undefined,
           });
         }}
       >
@@ -768,16 +787,18 @@ function FilterConditionRow({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {FILTER_OPERATORS.map((op) => (
+          {TABLE_FILTER_OPERATOR_OPTIONS.map((op) => (
             <SelectItem key={op} value={op}>
-              {t(FILTER_OPERATOR_LABEL_KEYS[op])}
+              {t(TABLE_FILTER_OPERATOR_LABEL_KEYS[op])}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-      {operatorNeedsValue && (
+      {operatorNeedsRange ? (
+        <FilterRangePicker value={item.value} onChange={(value) => setItem({ value })} />
+      ) : operatorNeedsValue ? (
         <FilterValuePicker value={item.value} suggestions={suggestions} onChange={(value) => setItem({ value })} />
-      )}
+      ) : null}
       {isLast && (
         <>
           <Button
@@ -819,6 +840,41 @@ interface FilterValuePickerProps {
   value: unknown;
   suggestions: DistinctValue[];
   onChange: (value: unknown) => void;
+}
+
+interface FilterRangePickerProps {
+  value: unknown;
+  onChange: (value: unknown[]) => void;
+}
+
+function rangePart(value: unknown, index: number): string {
+  if (!Array.isArray(value)) return "";
+  const part = value[index];
+  return part == null ? "" : cellValueToText(part);
+}
+
+function FilterRangePicker({ value, onChange }: FilterRangePickerProps) {
+  const { t } = useTranslation();
+  const start = rangePart(value, 0);
+  const end = rangePart(value, 1);
+
+  return (
+    <div className="flex items-center gap-1">
+      <Input
+        value={start}
+        onChange={(event) => onChange([event.target.value, end])}
+        placeholder={t("query.filterRangeStart")}
+        className="h-7 w-24 px-2 py-0 text-xs"
+      />
+      <span className="text-xs text-muted-foreground">-</span>
+      <Input
+        value={end}
+        onChange={(event) => onChange([start, event.target.value])}
+        placeholder={t("query.filterRangeEnd")}
+        className="h-7 w-24 px-2 py-0 text-xs"
+      />
+    </div>
+  );
 }
 
 function FilterValuePicker({ value, suggestions, onChange }: FilterValuePickerProps) {
