@@ -16,8 +16,6 @@ export interface AssetTypeOption {
   labelIsI18nKey: boolean;
   /** Icon component for direct render. */
   icon: ComponentType<{ className?: string; style?: React.CSSProperties }>;
-  /** For extension entries: the manifest icon name (resolved via getIconComponent). */
-  iconName?: string;
   group: "builtin" | "extension";
 }
 
@@ -72,7 +70,6 @@ export function getAssetTypeOptions(extensions: Record<string, ExtensionEntryLik
         label: at.i18n?.name ?? at.type,
         labelIsI18nKey: false,
         icon: m.icon ? getIconComponent(m.icon) : Server,
-        iconName: m.icon,
         group: "extension",
       });
     }

@@ -33,7 +33,6 @@ describe("getAssetTypeOptions", () => {
     expect(ext).toBeTruthy();
     expect(ext!.group).toBe("extension");
     expect(ext!.label).toBe("Kubernetes");
-    expect(ext!.iconName).toBe("Server");
   });
 
   it("ignores extensions without assetTypes", () => {
