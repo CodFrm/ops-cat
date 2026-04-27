@@ -1,4 +1,12 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import {
@@ -20,16 +28,7 @@ import {
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
-import {
-  Button,
-  Input,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  ConfirmDialog,
-} from "@opskat/ui";
+import { Button, Input, ConfirmDialog } from "@opskat/ui";
 import { useQueryStore } from "@/stores/queryStore";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { RedisDeleteKeys } from "../../../wailsjs/go/app/App";
@@ -41,6 +40,7 @@ interface RedisKeyBrowserProps {
 
 const KEY_ROW_HEIGHT = 28;
 const DEFAULT_SEPARATOR = ":";
+const MAX_TREE_PREFETCH_KEYS = 20_000;
 
 // --- Tree logic ---
 
@@ -130,6 +130,170 @@ function flattenTree(root: TreeNode, expandedSet: Set<string>, separator: string
   return result;
 }
 
+interface RedisDbSelectorProps {
+  currentDb: number;
+  dbOptions: number[];
+  dbKeyCounts: Record<number, number>;
+  disabled?: boolean;
+  onChange: (db: number) => void;
+}
+
+function RedisDbSelector({ currentDb, dbOptions, dbKeyCounts, disabled, onChange }: RedisDbSelectorProps) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const optionRefs = useRef<Record<number, HTMLButtonElement | null>>({});
+  const [open, setOpen] = useState(false);
+  const [activeDb, setActiveDb] = useState(currentDb);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
+
+  const currentCount = dbKeyCounts[currentDb];
+
+  const updateMenuPosition = useCallback(() => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const estimatedHeight = Math.min(dbOptions.length, 10) * 32 + 8;
+    setMenuStyle({
+      left: rect.left,
+      top: Math.max(8, rect.top - estimatedHeight - 4),
+      width: rect.width,
+    });
+  }, [dbOptions.length]);
+
+  const openMenu = useCallback(() => {
+    if (disabled) return;
+    setActiveDb(currentDb);
+    updateMenuPosition();
+    setOpen(true);
+  }, [currentDb, disabled, updateMenuPosition]);
+
+  const selectDb = useCallback(
+    (db: number) => {
+      setOpen(false);
+      if (db !== currentDb) {
+        onChange(db);
+      }
+    },
+    [currentDb, onChange]
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const onResize = () => updateMenuPosition();
+    document.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [open, updateMenuPosition]);
+
+  useEffect(() => {
+    if (!open) return;
+    optionRefs.current[activeDb]?.scrollIntoView?.({ block: "nearest" });
+  }, [activeDb, open]);
+
+  const moveActive = (step: number) => {
+    const index = Math.max(0, dbOptions.indexOf(activeDb));
+    const nextIndex = Math.min(dbOptions.length - 1, Math.max(0, index + step));
+    setActiveDb(dbOptions[nextIndex]);
+  };
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="flex h-7 min-w-0 flex-1 items-center justify-between gap-2 rounded-md border border-input bg-transparent px-2 text-left text-xs shadow-xs outline-none transition-[color,box-shadow] hover:bg-accent focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={disabled}
+        onClick={() => {
+          if (open) {
+            setOpen(false);
+          } else {
+            openMenu();
+          }
+        }}
+        onKeyDown={(event: ReactKeyboardEvent<HTMLButtonElement>) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            if (!open) {
+              openMenu();
+              return;
+            }
+            moveActive(event.key === "ArrowDown" ? 1 : -1);
+          } else if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            if (open) {
+              selectDb(activeDb);
+            } else {
+              openMenu();
+            }
+          } else if (event.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+      >
+        <span className="min-w-0 truncate">
+          db{currentDb}
+          {currentCount !== undefined && currentCount > 0 ? (
+            <span className="ml-1 text-muted-foreground">({currentCount})</span>
+          ) : null}
+        </span>
+        <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+      </button>
+
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            data-testid="redis-db-menu"
+            role="listbox"
+            className="z-50 overflow-y-auto rounded-md border bg-popover p-1 text-xs text-popover-foreground shadow-md"
+            style={{ position: "fixed", maxHeight: "320px", ...menuStyle }}
+          >
+            {dbOptions.map((db) => {
+              const count = dbKeyCounts[db];
+              const selected = db === currentDb;
+              const active = db === activeDb;
+              return (
+                <button
+                  key={db}
+                  ref={(node) => {
+                    optionRefs.current[db] = node;
+                  }}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  className={`flex h-8 w-full items-center justify-between gap-2 rounded-sm px-2 text-left font-mono outline-none ${
+                    selected
+                      ? "bg-primary text-primary-foreground"
+                      : active
+                        ? "bg-accent text-accent-foreground"
+                        : "hover:bg-accent hover:text-accent-foreground"
+                  }`}
+                  onMouseEnter={() => setActiveDb(db)}
+                  onClick={() => selectDb(db)}
+                >
+                  <span>db{db}</span>
+                  {count !== undefined && count > 0 ? (
+                    <span className={selected ? "text-primary-foreground/80" : "text-muted-foreground"}>{count}</span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+
 // --- Component ---
 
 export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
@@ -176,11 +340,38 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
     estimateSize: () => KEY_ROW_HEIGHT,
     overscan: 20,
   });
+  const currentDbTotal = state ? state.dbKeyCounts[state.currentDb] : undefined;
+  const keyFilterIsDefault = !state || state.keyFilter.trim() === "" || state.keyFilter === "*";
+  const treeCountsIncomplete = Boolean(
+    state &&
+      (state.hasMore || (keyFilterIsDefault && currentDbTotal !== undefined && currentDbTotal > state.keys.length))
+  );
 
   useEffect(() => {
     scanKeys(tabId, true);
     loadDbKeyCounts(tabId);
   }, [tabId, scanKeys, loadDbKeyCounts]);
+
+  useEffect(() => {
+    if (!state || viewMode !== "tree" || !keyFilterIsDefault || state.loadingKeys || !state.hasMore) return;
+    if (currentDbTotal === undefined || currentDbTotal > MAX_TREE_PREFETCH_KEYS || state.keys.length >= currentDbTotal) return;
+    const timer = window.setTimeout(() => {
+      scanKeys(tabId, false);
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [
+    currentDbTotal,
+    keyFilterIsDefault,
+    scanKeys,
+    state?.currentDb,
+    state?.hasMore,
+    state?.keys.length,
+    state?.keyFilter,
+    state?.loadingKeys,
+    state?.scanCursor,
+    tabId,
+    viewMode,
+  ]);
 
   // Reset tree expansion when DB changes
   useEffect(() => {
@@ -191,7 +382,7 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
   useEffect(() => {
     if (!ctxMenu) return;
     const close = () => setCtxMenu(null);
-    const onKey = (e: KeyboardEvent) => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") close();
     };
     const onPointer = (e: PointerEvent) => {
@@ -210,8 +401,8 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
   }, [ctxMenu]);
 
   const handleDbChange = useCallback(
-    (value: string) => {
-      selectRedisDb(tabId, Number(value));
+    (db: number) => {
+      selectRedisDb(tabId, db);
     },
     [tabId, selectRedisDb]
   );
@@ -347,7 +538,13 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
       )}
 
       {/* Virtualized key list / tree */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto" onScroll={handleScroll}>
+      <div
+        ref={scrollRef}
+        data-testid="redis-key-tree"
+        data-counts-incomplete={treeCountsIncomplete ? "true" : "false"}
+        className="flex-1 overflow-y-auto"
+        onScroll={handleScroll}
+      >
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
             if (viewMode === "tree") {
@@ -398,7 +595,10 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
                   )}
                   <span className="truncate font-mono">{row.name}</span>
                   {!isLeaf && (
-                    <span className="ml-auto shrink-0 text-muted-foreground text-[10px]">{row.keyCount}</span>
+                    <span className="ml-auto shrink-0 text-muted-foreground text-[10px]">
+                      {row.keyCount}
+                      {treeCountsIncomplete ? "+" : ""}
+                    </span>
                   )}
                 </button>
               );
@@ -440,24 +640,12 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
       {/* DB selector */}
       <div data-testid="redis-db-footer" className="flex items-center gap-1 border-t px-2 py-1.5">
         <Database className="size-3.5 shrink-0 text-muted-foreground" />
-        <Select value={String(state.currentDb)} onValueChange={handleDbChange}>
-          <SelectTrigger size="sm" className="h-7 flex-1 text-xs">
-            <SelectValue placeholder={t("query.selectDb")} />
-          </SelectTrigger>
-          <SelectContent>
-            {dbOptions.map((db) => {
-              const count = state.dbKeyCounts[db];
-              return (
-                <SelectItem key={db} value={String(db)}>
-                  <span className="flex items-center gap-1.5">
-                    <span>db{db}</span>
-                    {count !== undefined && count > 0 && <span className="text-muted-foreground">({count})</span>}
-                  </span>
-                </SelectItem>
-              );
-            })}
-          </SelectContent>
-        </Select>
+        <RedisDbSelector
+          currentDb={state.currentDb}
+          dbOptions={dbOptions}
+          dbKeyCounts={state.dbKeyCounts}
+          onChange={handleDbChange}
+        />
       </div>
 
       {tabMeta && (

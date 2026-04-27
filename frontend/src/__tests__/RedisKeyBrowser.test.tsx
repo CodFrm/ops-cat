@@ -52,6 +52,7 @@ describe("RedisKeyBrowser", () => {
     expect(screen.getByTitle("query.listView")).toBeInTheDocument();
     expect(screen.getByTitle("query.createRedisKey")).toBeInTheDocument();
     expect(screen.queryByText("query.loadMore")).not.toBeInTheDocument();
+    expect(screen.getByTestId("redis-key-tree")).toHaveAttribute("data-counts-incomplete", "true");
     expect(screen.getByTestId("redis-db-footer")).toHaveTextContent("db0");
   });
 
@@ -78,5 +79,28 @@ describe("RedisKeyBrowser", () => {
         format: "raw",
       });
     });
+  });
+
+  it("opens a lightweight database menu and selects a db", async () => {
+    render(<RedisKeyBrowser tabId="query-10" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /db0/ }));
+
+    const menu = screen.getByTestId("redis-db-menu");
+    expect(menu).toHaveClass("overflow-y-auto");
+    expect(menu).toHaveStyle({ maxHeight: "320px" });
+
+    fireEvent.click(screen.getByRole("option", { name: /^db1\b/ }));
+
+    await waitFor(() => {
+      expect(RedisScanKeys).toHaveBeenCalledWith(
+        expect.objectContaining({
+          assetId: 10,
+          db: 1,
+          cursor: "0",
+        })
+      );
+    });
+    expect(screen.queryByTestId("redis-db-menu")).not.toBeInTheDocument();
   });
 });

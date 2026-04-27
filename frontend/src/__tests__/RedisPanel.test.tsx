@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { RedisPanel } from "../components/query/RedisPanel";
 import { useQueryStore } from "../stores/queryStore";
@@ -54,6 +54,8 @@ describe("RedisPanel", () => {
 
     expect(screen.getByRole("tab", { name: "query.redisOverview" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByText("query.noKeySelected")).not.toBeInTheDocument();
-    expect(await screen.findByText("7.2.4")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText("7.2.4").length).toBeGreaterThan(0);
+    });
   });
 });

@@ -184,6 +184,13 @@ function defaultMongoState(): MongoDBTabState {
   };
 }
 
+function toRedisMatchPattern(pattern: string): string {
+  const trimmed = pattern.trim();
+  if (!trimmed) return "*";
+  if (/[\\*?\[]/.test(trimmed)) return trimmed;
+  return `*${trimmed}*`;
+}
+
 export interface RedisStreamEntry {
   id: string;
   fields: Record<string, string>;
@@ -609,6 +616,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     const tab = getQueryTabFromTabStore(tabId);
     const state = get().redisStates[tabId];
     if (!tab || !state) return;
+    if (!reset && state.loadingKeys) return;
 
     const cursor = reset ? "0" : state.scanCursor;
     if (!reset && cursor === "0" && state.keys.length > 0) return;
@@ -625,7 +633,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
         assetId: tab.assetId,
         db: state.currentDb,
         cursor,
-        match: state.keyFilter || "*",
+        match: toRedisMatchPattern(state.keyFilter || "*"),
         type: "",
         count: tab.redisScanPageSize || 200,
         exact: false,

@@ -72,6 +72,27 @@ func TestScanKeys(t *testing.T) {
 		assert.Equal(t, []string{"session:1"}, got.Keys)
 		assert.False(t, got.HasMore)
 	})
+
+	t.Run("continues sparse match until it returns keys", func(t *testing.T) {
+		exec := &fakeRedisExecutor{results: []any{
+			[]any{"42", []any{}},
+			[]any{"0", []any{"common:event:2fe43136-1b38-43c3-b4bf-82b19c66c7bf"}},
+		}}
+
+		got, err := scanKeys(context.Background(), exec, RedisScanRequest{
+			Cursor: "0",
+			Match:  "*2fe43136-1b38-43c3-b4bf-82b19c66c7bf*",
+			Count:  100,
+		})
+
+		require.NoError(t, err)
+		require.Len(t, exec.calls, 2)
+		assert.Equal(t, []any{"SCAN", "0", "MATCH", "*2fe43136-1b38-43c3-b4bf-82b19c66c7bf*", "COUNT", int64(100)}, exec.calls[0])
+		assert.Equal(t, []any{"SCAN", "42", "MATCH", "*2fe43136-1b38-43c3-b4bf-82b19c66c7bf*", "COUNT", int64(100)}, exec.calls[1])
+		assert.Equal(t, "0", got.Cursor)
+		assert.Equal(t, []string{"common:event:2fe43136-1b38-43c3-b4bf-82b19c66c7bf"}, got.Keys)
+		assert.False(t, got.HasMore)
+	})
 }
 
 func TestGetKeyDetail(t *testing.T) {

@@ -192,6 +192,28 @@ describe("queryStore redis actions", () => {
     expect(state.hasMore).toBe(true);
   });
 
+  it("uses contains matching for plain redis key search", async () => {
+    vi.mocked(RedisScanKeys).mockResolvedValue({ cursor: "0", keys: [], hasMore: false });
+
+    useQueryStore.getState().setKeyFilter("query-10", "2fe43136-1b38-43c3-b4bf-82b19c66c7bf");
+    await useQueryStore.getState().scanKeys("query-10", true);
+
+    expect(RedisScanKeys).toHaveBeenCalledWith(
+      expect.objectContaining({
+        match: "*2fe43136-1b38-43c3-b4bf-82b19c66c7bf*",
+      })
+    );
+  });
+
+  it("preserves explicit redis match patterns", async () => {
+    vi.mocked(RedisScanKeys).mockResolvedValue({ cursor: "0", keys: [], hasMore: false });
+
+    useQueryStore.getState().setKeyFilter("query-10", "common:*");
+    await useQueryStore.getState().scanKeys("query-10", true);
+
+    expect(RedisScanKeys).toHaveBeenCalledWith(expect.objectContaining({ match: "common:*" }));
+  });
+
   it("loads selected key detail through typed binding", async () => {
     vi.mocked(RedisGetKeyDetail).mockResolvedValue({
       key: "user:1",

@@ -253,17 +253,31 @@ func scanKeys(ctx context.Context, exec redisExecutor, req RedisScanRequest) (Re
 	if req.Exact && req.Match != "*" {
 		return scanExactKey(ctx, exec, req)
 	}
-	args := []any{"SCAN", req.Cursor, "MATCH", req.Match, "COUNT", req.Count}
-	if req.Type != "" {
-		args = append(args, "TYPE", req.Type)
+
+	cursor := req.Cursor
+	keys := make([]string, 0)
+	maxBatches := 1
+	if req.Match != "*" || req.Type != "" {
+		maxBatches = maxRedisScanBatches
 	}
-	result, err := exec.Do(ctx, args...)
-	if err != nil {
-		return RedisScanResponse{}, fmt.Errorf("scan Redis keys: %w", err)
-	}
-	cursor, keys, err := parseScanResult(result)
-	if err != nil {
-		return RedisScanResponse{}, err
+	for batch := 0; batch < maxBatches; batch++ {
+		args := []any{"SCAN", cursor, "MATCH", req.Match, "COUNT", req.Count}
+		if req.Type != "" {
+			args = append(args, "TYPE", req.Type)
+		}
+		result, err := exec.Do(ctx, args...)
+		if err != nil {
+			return RedisScanResponse{}, fmt.Errorf("scan Redis keys: %w", err)
+		}
+		nextCursor, nextKeys, err := parseScanResult(result)
+		if err != nil {
+			return RedisScanResponse{}, err
+		}
+		cursor = nextCursor
+		keys = append(keys, nextKeys...)
+		if cursor == "0" || len(keys) > 0 {
+			break
+		}
 	}
 	return RedisScanResponse{Cursor: cursor, Keys: keys, HasMore: cursor != "0"}, nil
 }
