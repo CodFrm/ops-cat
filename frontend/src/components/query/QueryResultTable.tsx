@@ -283,10 +283,15 @@ export function QueryResultTable({
   // key (see valueKey) is in the Set pass through. A column without an entry is
   // treated as "no filter" (all rows pass).
   const [columnFilters, setColumnFilters] = useState<Map<string, Set<string>>>(new Map());
-  const displayColumns = useMemo(
-    () => (visibleColumns ? columns.filter((col) => visibleColumns.includes(col)) : columns),
-    [columns, visibleColumns]
-  );
+  const [frozenColumns, setFrozenColumns] = useState<Set<string>>(() => new Set());
+  const displayColumns = useMemo(() => {
+    const base = visibleColumns ? columns.filter((col) => visibleColumns.includes(col)) : columns;
+    // Put frozen columns first so they appear at the left edge,
+    // keeping original relative order within each group.
+    const frozenOrder = base.filter((col) => frozenColumns.has(col));
+    const rest = base.filter((col) => !frozenColumns.has(col));
+    return [...frozenOrder, ...rest];
+  }, [columns, visibleColumns, frozenColumns]);
   const headerPaddingClass = rowDensity === "compact" ? "py-1" : rowDensity === "comfortable" ? "py-2" : "py-1.5";
   const cellPaddingClass = rowDensity === "compact" ? "py-0.5" : rowDensity === "comfortable" ? "py-2" : "py-1";
 
@@ -350,7 +355,6 @@ export function QueryResultTable({
   const [showColumnChooser, setShowColumnChooser] = useState(false);
   const [showFieldTypes, setShowFieldTypes] = useState(true);
   const [showColumnComments, setShowColumnComments] = useState(false);
-  const [frozenColumns, setFrozenColumns] = useState<Set<string>>(() => new Set());
 
   // Context menu state
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
@@ -434,7 +438,7 @@ export function QueryResultTable({
     const offsets: Record<string, number> = {};
     let left = showRowNumber ? ROW_NUMBER_COLUMN_WIDTH : 0;
     for (const col of displayColumns) {
-      if (!frozenColumns.has(col)) continue;
+      if (!frozenColumns.has(col)) break;
       offsets[col] = left;
       left += colWidths[col] ?? DEFAULT_COLUMN_WIDTH;
     }

@@ -341,6 +341,45 @@ describe("QueryResultTable — cell context actions", () => {
     expect(cCell.style.left).toBe("210px");
   });
 
+  it("freezes the second column only without freezing the first", async () => {
+    const user = userEvent.setup();
+    render(
+      <QueryResultTable
+        columns={["id", "name", "sex"]}
+        rows={[{ id: 1, name: "alice", sex: "F" }]}
+        editable
+        showRowNumber
+      />
+    );
+
+    fireEvent.contextMenu(document.querySelector('[data-column-header-key="name"]') as HTMLElement, {
+      clientX: 180,
+      clientY: 20,
+    });
+    await user.click(screen.getByText("query.freezeColumn"));
+
+    const idCell = document.querySelector('[data-cell-key="0:id"]') as HTMLElement;
+    const nameHeader = document.querySelector('[data-column-header-key="name"]') as HTMLElement;
+    const nameCell = document.querySelector('[data-cell-key="0:name"]') as HTMLElement;
+    const sexCell = document.querySelector('[data-cell-key="0:sex"]') as HTMLElement;
+
+    // id is NOT frozen (first column, not in frozen set)
+    expect(idCell).not.toHaveClass("sticky");
+
+    // name IS frozen (second column)
+    expect(nameHeader).toHaveClass("sticky");
+    expect(nameCell).toHaveClass("sticky");
+    // name should stick right after the row number column (50px)
+    expect(nameCell.style.left).toBe("50px");
+
+    // sex is NOT frozen
+    expect(sexCell).not.toHaveClass("sticky");
+
+    // row number should be sticky when any column is frozen
+    const rowNum = document.querySelector('td[data-row-header-key="0"]') as HTMLElement;
+    expect(rowNum).toHaveClass("sticky");
+  });
+
   it("shows the table cell context actions", () => {
     openMenu({ onSetCellValue: vi.fn(), onPasteCell: vi.fn(), onRefresh: vi.fn() });
 
