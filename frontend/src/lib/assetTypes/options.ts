@@ -60,9 +60,7 @@ const BUILTIN_OPTIONS: AssetTypeOption[] = [
   },
 ];
 
-export function getAssetTypeOptions(
-  extensions: Record<string, ExtensionEntryLike>,
-): AssetTypeOption[] {
+export function getAssetTypeOptions(extensions: Record<string, ExtensionEntryLike>): AssetTypeOption[] {
   const out: AssetTypeOption[] = [...BUILTIN_OPTIONS];
   for (const entry of Object.values(extensions)) {
     const m = entry.manifest;
@@ -85,7 +83,7 @@ export function getAssetTypeOptions(
 export function matchSelectedTypes(
   assets: asset_entity.Asset[],
   selectedTypes: string[] | "all",
-  options: AssetTypeOption[],
+  options: AssetTypeOption[]
 ): asset_entity.Asset[] {
   if (selectedTypes === "all" || selectedTypes.length === 0) return assets;
   const aliasSet = new Set<string>();
