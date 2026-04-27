@@ -1,14 +1,16 @@
 import { forwardRef, useImperativeHandle, useMemo, useState, useEffect } from "react";
 import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { Server, Database, HardDrive, Leaf } from "lucide-react";
+import { Server } from "lucide-react";
 import { useAssetStore } from "@/stores/assetStore";
 import { filterAssets } from "@/lib/assetSearch";
+import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
 
 export interface MentionItem {
   id: number;
   label: string;
   type: string;
+  icon: string;
   groupPath: string;
 }
 
@@ -23,22 +25,6 @@ export interface MentionListRef {
 
 const MAX_ITEMS = 8;
 
-function iconForType(type: string) {
-  switch (type) {
-    case "mysql":
-    case "postgresql":
-    case "mongo":
-    case "mongodb":
-      return <Database className="h-3.5 w-3.5 text-muted-foreground" />;
-    case "redis":
-      return <HardDrive className="h-3.5 w-3.5 text-muted-foreground" />;
-    case "ssh":
-      return <Server className="h-3.5 w-3.5 text-muted-foreground" />;
-    default:
-      return <Leaf className="h-3.5 w-3.5 text-muted-foreground" />;
-  }
-}
-
 export const MentionList = forwardRef<MentionListRef, MentionListProps>(function MentionList({ query, command }, ref) {
   const { t } = useTranslation();
   const { assets, groups } = useAssetStore();
@@ -50,6 +36,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(function
       id: asset.ID,
       label: asset.Name,
       type: asset.Type,
+      icon: asset.Icon,
       groupPath,
     }));
   }, [assets, groups, query]);
@@ -90,24 +77,30 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(function
       role="listbox"
       className="bg-popover text-popover-foreground rounded-md border shadow-md overflow-hidden min-w-[240px] max-w-[360px]"
     >
-      {items.map((item, idx) => (
-        <button
-          role="option"
-          aria-selected={idx === selectedIndex}
-          key={item.id}
-          onClick={() => command(item)}
-          className={
-            "flex items-center gap-2 w-full px-2.5 py-1.5 text-xs text-left " +
-            (idx === selectedIndex ? "bg-accent" : "hover:bg-accent/60")
-          }
-        >
-          {iconForType(item.type)}
-          <span className="flex-1 min-w-0 truncate">
-            {item.groupPath && <span className="text-muted-foreground">{item.groupPath}/</span>}
-            <span className="text-foreground">{item.label}</span>
-          </span>
-        </button>
-      ))}
+      {items.map((item, idx) => {
+        const Icon = item.icon ? getIconComponent(item.icon) : Server;
+        return (
+          <button
+            role="option"
+            aria-selected={idx === selectedIndex}
+            key={item.id}
+            onClick={() => command(item)}
+            className={
+              "flex items-center gap-2 w-full px-2.5 py-1.5 text-xs text-left " +
+              (idx === selectedIndex ? "bg-accent" : "hover:bg-accent/60")
+            }
+          >
+            <Icon
+              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+              style={item.icon ? { color: getIconColor(item.icon) } : undefined}
+            />
+            <span className="flex-1 min-w-0 truncate">
+              {item.groupPath && <span className="text-muted-foreground">{item.groupPath}/</span>}
+              <span className="text-foreground">{item.label}</span>
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 });

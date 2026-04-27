@@ -55,10 +55,6 @@ export function SettingsPage() {
               <Palette className="h-3.5 w-3.5" />
               {t("nav.appearance")}
             </TabsTrigger>
-            <TabsTrigger value="about" className="gap-1">
-              <Info className="h-3.5 w-3.5" />
-              {t("appUpdate.title")}
-            </TabsTrigger>
             <TabsTrigger value="status" className="gap-1">
               <Activity className="h-3.5 w-3.5" />
               {t("systemStatus.title")}
@@ -66,6 +62,10 @@ export function SettingsPage() {
             <TabsTrigger value="extensions" className="gap-1">
               <Puzzle className="h-3.5 w-3.5" />
               {t("extension.title")}
+            </TabsTrigger>
+            <TabsTrigger value="about" className="gap-1">
+              <Info className="h-3.5 w-3.5" />
+              {t("appUpdate.title")}
             </TabsTrigger>
           </TabsList>
 

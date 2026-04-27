@@ -22,12 +22,17 @@
   },
   "nav": {
     "home": "首页",
+    "database": "数据库",
+    "ssh": "SSH",
+    "redis": "Redis",
+    "mongodb": "MongoDB",
     "sshKeys": "密钥管理",
     "settings": "设置",
     "appearance": "外观",
     "ai": "AI 助手",
     "audit": "审计日志",
-    "forward": "端口转发"
+    "forward": "端口转发",
+    "snippets": "代码片段"
   },
   "forward": {
     "create": "新建配置",
@@ -64,6 +69,7 @@
     "close": "关闭",
     "submit": "提交",
     "openInTab": "在新标签打开",
+    "editPermission": "编辑权限",
     "open": "打开"
   },
   "tab": {
@@ -493,6 +499,36 @@
     "gistPullSuccess": "恢复成功",
     "gistNoBackup": "未找到备份",
     "gistSelect": "选择备份",
+    "webdav": "WebDAV",
+    "webdavDesc": "加密备份到 WebDAV 目录",
+    "webdavURL": "WebDAV 地址",
+    "webdavURLRequired": "请填写 WebDAV 地址",
+    "webdavURLPlaceholder": "https://example.com/dav/",
+    "webdavDefaultDirectory": "默认存放目录：{{dir}}",
+    "webdavUsername": "用户名",
+    "webdavUsernamePlaceholder": "可选",
+    "webdavPassword": "密码",
+    "webdavAuthType": "鉴权方式",
+    "webdavAuthNone": "无",
+    "webdavAuthBasic": "Basic（账号密码）",
+    "webdavAuthBearer": "Bearer Token",
+    "webdavToken": "Token",
+    "webdavSave": "保存 WebDAV",
+    "webdavSaved": "WebDAV 配置已保存",
+    "webdavTest": "测试",
+    "webdavTestSuccess": "WebDAV 连接成功",
+    "webdavClear": "清除",
+    "webdavCleared": "WebDAV 配置已清除",
+    "webdavNotConfigured": "请先配置 WebDAV",
+    "webdavSelect": "选择备份",
+    "webdavPush": "备份到 WebDAV",
+    "webdavPull": "从 WebDAV 恢复",
+    "webdavPushing": "上传中...",
+    "webdavPulling": "下载中...",
+    "webdavPushSuccess": "备份成功",
+    "webdavPullSuccess": "恢复成功",
+    "webdavNoBackup": "未找到 WebDAV 备份",
+    "webdavBackupItem": "{{name}}（{{size}} 字节）",
     "deviceFlow": "GitHub 授权",
     "deviceFlowDesc": "请在浏览器中打开以下链接并输入授权码",
     "deviceFlowCode": "授权码",
@@ -629,9 +665,23 @@
       "promoteToTab": "转为主面板 Tab",
       "promoteHint": "已在 Tab 中打开",
       "collapse": "折叠",
+      "expandRail": "展开会话栏",
+      "collapseRail": "收起会话栏",
       "emptyGuide": "点击 + 新建对话，或从 <history/> 历史中继续",
       "noConversation": "未选择对话",
-      "attachedAssets": "关联资产"
+      "attachedAssets": "关联资产",
+      "status": {
+        "waiting_approval": "待审批",
+        "running": "运行中",
+        "done": "已完成",
+        "error": "错误"
+      },
+      "statusSuffix": {
+        "waiting_approval": "待审批",
+        "running": "运行中",
+        "done": "已完成",
+        "error": "出错"
+      }
     }
   },
   "shortcut": {
@@ -800,7 +850,16 @@
     "checksumFetchFailed": "无法从 GitHub 获取校验文件 (SHA256SUMS.txt)，下载的文件将无法验证完整性。",
     "checksumSkipConfirm": "是否跳过校验继续下载？",
     "checksumSkipAction": "跳过校验并继续",
-    "checksumSkipCancel": "取消"
+    "checksumSkipCancel": "取消",
+    "reportBug": "Bug 反馈",
+    "reportBugDesc": "打开 GitHub 反馈模板，自动带上版本与系统信息",
+    "openRepository": "仓库地址",
+    "openRepositoryDesc": "打开 OpsKat GitHub 源码仓库",
+    "debugMode": "Debug 日志",
+    "debugModeDesc": "开启后日志级别降为 debug，便于问题排查；问题解决后建议关闭",
+    "debugModeOn": "Debug 日志已开启",
+    "debugModeOff": "Debug 日志已关闭",
+    "openLogsDir": "打开日志目录"
   },
   "opsctlApproval": {
     "title": "CLI 操作审批",
@@ -1121,6 +1180,9 @@
     "newValue": "值",
     "newScore": "分数",
     "newMember": "成员",
+    "id": "ID",
+    "fields": "字段",
+    "entryDetail": "条目详情",
     "dbKeyCount": "{{count}} keys",
     "copyKeyName": "复制 Key 名",
     "refreshKey": "刷新",
@@ -1182,5 +1244,80 @@
     "noTools": "无工具",
     "noPolicies": "无策略组",
     "noPages": "无页面"
+  },
+  "snippet": {
+    "title": "代码片段",
+    "newButton": "新建片段",
+    "searchPlaceholder": "搜索名称 / 描述 / 内容",
+    "filterByCategory": "分类",
+    "filterByTag": "标签",
+    "allCategories": "全部分类",
+    "emptyState": "暂无片段，点击“新建片段”开始创建。",
+    "emptyStateFiltered": "没有符合当前筛选条件的片段。",
+    "readOnlyTooltip": "由扩展管理 — 请复制后再编辑",
+    "unknownCategory": "未知分类:{{name}}",
+    "unknownCategoryTooltip": "该片段的分类已不存在，提供此分类的扩展可能已被卸载。",
+    "orphanedSuffix": "（孤立）",
+    "columns": {
+      "category": "分类",
+      "name": "名称",
+      "updated": "更新时间",
+      "source": "来源",
+      "actions": "操作"
+    },
+    "form": {
+      "createTitle": "新建片段",
+      "editTitle": "编辑片段",
+      "labelCategory": "分类",
+      "labelName": "名称",
+      "labelDescription": "描述",
+      "labelContent": "内容",
+      "duplicateNameHint": "同分类下已有同名片段。"
+    },
+    "actions": {
+      "run": "运行",
+      "edit": "编辑",
+      "duplicate": "复制",
+      "delete": "删除",
+      "cancel": "取消",
+      "save": "保存",
+      "create": "创建"
+    },
+    "runDrawer": {
+      "title": "选择要运行的资产",
+      "description": "多选目标资产，运行片段到各资产的编辑器或终端",
+      "searchPlaceholder": "搜索资产…",
+      "noAssets": "没有可运行的资产"
+    },
+    "confirmDelete": {
+      "title": "删除片段？",
+      "message": "\"{{name}}\" 将被永久删除，此操作不可撤销。"
+    },
+    "toast": {
+      "created": "片段已创建",
+      "updated": "片段已更新",
+      "deleted": "片段已删除",
+      "duplicated": "片段已复制"
+    },
+    "categories": {
+      "shell": "Shell",
+      "sql": "SQL",
+      "redis": "Redis",
+      "mongo": "Mongo",
+      "prompt": "Prompt"
+    },
+    "popover": {
+      "searchPlaceholder": "搜索片段…",
+      "insert": "插入",
+      "sendWithEnter": "插入并回车",
+      "empty": "此场景暂无片段。",
+      "openManager": "到代码片段页创建",
+      "triggerButton": "插入代码片段"
+    },
+    "slash": {
+      "noMatch": "无匹配的片段",
+      "empty": "还没有 prompt 片段",
+      "openManager": "到代码片段页创建"
+    }
   }
 }

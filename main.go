@@ -12,7 +12,6 @@ import (
 	"github.com/opskat/opskat/internal/bootstrap"
 	skillplugin "github.com/opskat/opskat/plugin"
 
-	"github.com/cago-frame/cago/pkg/logger"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -37,17 +36,10 @@ func main() {
 		log.Printf("加载配置失败: %v", err)
 	}
 
-	// 初始化日志（桌面应用需要文件日志）
-	logsDir := filepath.Join(dataDir, "logs")
-	zapLogger, err := logger.New(
-		logger.Level("info"),
-		logger.AppendCore(logger.NewFileCore(logger.ToLevel("info"), filepath.Join(logsDir, "opskat.log"))),
-		logger.AppendCore(logger.NewFileCore(logger.ToLevel("error"), filepath.Join(logsDir, "error.log"))),
-	)
-	if err != nil {
+	// 初始化日志（读取 DebugMode 配置决定 level；桌面应用需要文件日志）
+	if err := bootstrap.InitLogger(); err != nil {
 		log.Fatalf("初始化日志失败: %v", err)
 	}
-	logger.SetLogger(zapLogger)
 
 	// 创建 Wails App
 	a := app.NewApp(app.SkillContent{
@@ -59,7 +51,7 @@ func main() {
 		PluginMarketplaceJSON: skillplugin.PluginMarketplaceJSON,
 	})
 
-	err = wails.Run(&options.App{
+	err := wails.Run(&options.App{
 		Title:     "OpsKat",
 		Width:     1280,
 		Height:    800,

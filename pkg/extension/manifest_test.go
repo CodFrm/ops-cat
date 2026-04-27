@@ -180,6 +180,159 @@ func TestParseManifest(t *testing.T) {
 			So(err, ShouldNotBeNil)
 			So(err.Error(), ShouldContainSubstring, "credentials")
 		})
+
+		Convey("should accept manifest without snippets block", func() {
+			data := []byte(`{
+				"name": "x", "version": "1.0.0", "hostABI": "1.0"
+			}`)
+			m, err := ParseManifest(data)
+			So(err, ShouldBeNil)
+			So(len(m.Snippets.Categories), ShouldEqual, 0)
+			So(len(m.Snippets.Seed), ShouldEqual, 0)
+		})
+
+		Convey("should accept valid snippets block", func() {
+			data := []byte(`{
+				"name": "kafka-ext", "version": "1.0.0", "hostABI": "1.0",
+				"assetTypes": [{"type": "kafka", "i18n": {"name": "Kafka"}}],
+				"snippets": {
+					"categories": [{"id": "kafka", "assetType": "kafka", "i18n": {"name": "category.kafka"}}],
+					"seed": [
+						{"key": "list-topics", "name": "List topics", "category": "kafka",
+						 "content": "kafka-topics --list",
+						 "tags": ["kafka", "list"]},
+						{"key": "ls", "name": "ls", "category": "shell", "content": "ls -al"}
+					]
+				}
+			}`)
+			m, err := ParseManifest(data)
+			So(err, ShouldBeNil)
+			So(len(m.Snippets.Categories), ShouldEqual, 1)
+			So(m.Snippets.Categories[0].ID, ShouldEqual, "kafka")
+			So(len(m.Snippets.Seed), ShouldEqual, 2)
+		})
+
+		Convey("should reject snippet category id collision with builtin", func() {
+			data := []byte(`{
+				"name": "x", "version": "1.0.0", "hostABI": "1.0",
+				"assetTypes": [{"type": "ssh", "i18n": {"name": "n"}}],
+				"snippets": {
+					"categories": [{"id": "shell", "assetType": "ssh", "i18n": {"name": "n"}}]
+				}
+			}`)
+			_, err := ParseManifest(data)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "builtin")
+		})
+
+		Convey("should reject duplicate snippet category id within manifest", func() {
+			data := []byte(`{
+				"name": "x", "version": "1.0.0", "hostABI": "1.0",
+				"assetTypes": [{"type": "kafka", "i18n": {"name": "n"}}],
+				"snippets": {
+					"categories": [
+						{"id": "kafka", "assetType": "kafka", "i18n": {"name": "n"}},
+						{"id": "kafka", "assetType": "kafka", "i18n": {"name": "n2"}}
+					]
+				}
+			}`)
+			_, err := ParseManifest(data)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "duplicate")
+		})
+
+		Convey("should reject snippet category with invalid id format", func() {
+			data := []byte(`{
+				"name": "x", "version": "1.0.0", "hostABI": "1.0",
+				"assetTypes": [{"type": "kafka", "i18n": {"name": "n"}}],
+				"snippets": {
+					"categories": [{"id": "Kafka_1", "assetType": "kafka", "i18n": {"name": "n"}}]
+				}
+			}`)
+			_, err := ParseManifest(data)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "must match")
+		})
+
+		Convey("should reject snippet category with empty assetType", func() {
+			data := []byte(`{
+				"name": "x", "version": "1.0.0", "hostABI": "1.0",
+				"snippets": {
+					"categories": [{"id": "kafka", "assetType": "", "i18n": {"name": "n"}}]
+				}
+			}`)
+			_, err := ParseManifest(data)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "assetType")
+		})
+
+		Convey("should reject snippet category whose assetType is not declared", func() {
+			data := []byte(`{
+				"name": "x", "version": "1.0.0", "hostABI": "1.0",
+				"assetTypes": [{"type": "kafka", "i18n": {"name": "n"}}],
+				"snippets": {
+					"categories": [{"id": "missing", "assetType": "other", "i18n": {"name": "n"}}]
+				}
+			}`)
+			_, err := ParseManifest(data)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "assetTypes")
+		})
+
+		Convey("should reject seed snippet referencing unknown category", func() {
+			data := []byte(`{
+				"name": "x", "version": "1.0.0", "hostABI": "1.0",
+				"assetTypes": [{"type": "kafka", "i18n": {"name": "n"}}],
+				"snippets": {
+					"categories": [{"id": "kafka", "assetType": "kafka", "i18n": {"name": "n"}}],
+					"seed": [
+						{"key": "x", "name": "x", "category": "nope", "content": "echo"}
+					]
+				}
+			}`)
+			_, err := ParseManifest(data)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "neither builtin nor declared")
+		})
+
+		Convey("should reject duplicate seed snippet keys", func() {
+			data := []byte(`{
+				"name": "x", "version": "1.0.0", "hostABI": "1.0",
+				"snippets": {
+					"seed": [
+						{"key": "k1", "name": "a", "category": "shell", "content": "x"},
+						{"key": "k1", "name": "b", "category": "shell", "content": "y"}
+					]
+				}
+			}`)
+			_, err := ParseManifest(data)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "duplicate")
+		})
+
+		Convey("should reject seed snippet with invalid key format", func() {
+			data := []byte(`{
+				"name": "x", "version": "1.0.0", "hostABI": "1.0",
+				"snippets": {
+					"seed": [{"key": "BadKey!", "name": "a", "category": "shell", "content": "x"}]
+				}
+			}`)
+			_, err := ParseManifest(data)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "must match")
+		})
+
+		Convey("should reject seed snippet with empty content", func() {
+			data := []byte(`{
+				"name": "x", "version": "1.0.0", "hostABI": "1.0",
+				"snippets": {
+					"seed": [{"key": "k1", "name": "a", "category": "shell", "content": "   "}]
+				}
+			}`)
+			_, err := ParseManifest(data)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "content")
+		})
 	})
 }
 

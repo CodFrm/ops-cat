@@ -399,6 +399,41 @@ func (a *App) GetGitHubUser(token string) (*backup_svc.GitHubUser, error) {
 	return backup_svc.GetGitHubUser(token)
 }
 
+// WebDAVStoredConfig 是前端可读取的 WebDAV 配置；password / token 解密后明文回填，
+// 便于设置页编辑时直接显示已有值（数据未离开本地进程，加密存储已在落盘层做）。
+type WebDAVStoredConfig struct {
+	URL        string `json:"url"`
+	AuthType   string `json:"authType"`
+	Username   string `json:"username,omitempty"`
+	Password   string `json:"password,omitempty"`
+	Token      string `json:"token,omitempty"`
+	Configured bool   `json:"configured"`
+}
+
+// WebDAVSaveInput 是 SaveWebDAVConfig / TestWebDAVConfig 的入参，把鉴权方式与凭据收成一个 struct。
+type WebDAVSaveInput struct {
+	URL      string `json:"url"`
+	AuthType string `json:"authType"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Token    string `json:"token"`
+}
+
+// toServiceConfig 将入参转换为 backup_svc.WebDAVConfig，并在 AuthType 为空时兜底为 WebDAVAuthNone。
+func (in WebDAVSaveInput) toServiceConfig() backup_svc.WebDAVConfig {
+	cfg := backup_svc.WebDAVConfig{
+		URL:      strings.TrimSpace(in.URL),
+		AuthType: backup_svc.WebDAVAuthType(in.AuthType),
+		Username: strings.TrimSpace(in.Username),
+		Password: in.Password,
+		Token:    strings.TrimSpace(in.Token),
+	}
+	if cfg.AuthType == "" {
+		cfg.AuthType = backup_svc.WebDAVAuthNone
+	}
+	return cfg
+}
+
 // --- Gist 备份 ---
 
 // ExportToGist 加密并上传备份到 Gist
@@ -471,6 +506,202 @@ func (a *App) ImportFromGist(gistID, password, token string, opts backup_svc.Imp
 	return backup_svc.Import(a.langCtx(), &data, &opts, credential_svc.Default())
 }
 
+// --- WebDAV 备份 ---
+
+// SaveWebDAVConfig 保存 WebDAV 备份配置。按 AuthType 持久化对应字段，并清空其他类型字段以避免历史秘密残留。
+func (a *App) SaveWebDAVConfig(in WebDAVSaveInput) error {
+	cfg := bootstrap.GetConfig()
+	if cfg == nil {
+		return fmt.Errorf("config not loaded")
+	}
+	svcCfg := in.toServiceConfig()
+	if err := backup_svc.ValidateWebDAVConfig(svcCfg); err != nil {
+		return err
+	}
+
+	cfg.WebDAVURL = svcCfg.URL
+	cfg.WebDAVAuthType = string(svcCfg.AuthType)
+
+	// 清空所有 type 字段，再按当前 type 写回。避免切换鉴权方式后旧凭据仍留在 config.json。
+	cfg.WebDAVUsername = ""
+	cfg.WebDAVPassword = ""
+	cfg.WebDAVToken = ""
+
+	switch svcCfg.AuthType {
+	case backup_svc.WebDAVAuthBasic:
+		cfg.WebDAVUsername = svcCfg.Username
+		encrypted, err := credential_svc.Default().Encrypt(svcCfg.Password)
+		if err != nil {
+			return fmt.Errorf("加密 WebDAV 密码失败: %w", err)
+		}
+		cfg.WebDAVPassword = encrypted
+	case backup_svc.WebDAVAuthBearer:
+		encrypted, err := credential_svc.Default().Encrypt(svcCfg.Token)
+		if err != nil {
+			return fmt.Errorf("加密 WebDAV token 失败: %w", err)
+		}
+		cfg.WebDAVToken = encrypted
+	}
+	return bootstrap.SaveConfig(cfg)
+}
+
+// GetWebDAVConfig 读取已保存的 WebDAV 配置，password / token 解密后明文回填。
+func (a *App) GetWebDAVConfig() (*WebDAVStoredConfig, error) {
+	cfg := bootstrap.GetConfig()
+	if cfg == nil {
+		return &WebDAVStoredConfig{}, nil
+	}
+
+	authType := cfg.WebDAVAuthType
+	if authType == "" && strings.TrimSpace(cfg.WebDAVURL) != "" {
+		authType = string(backup_svc.WebDAVAuthNone)
+	}
+
+	out := &WebDAVStoredConfig{
+		URL:        cfg.WebDAVURL,
+		AuthType:   authType,
+		Username:   cfg.WebDAVUsername,
+		Configured: strings.TrimSpace(cfg.WebDAVURL) != "",
+	}
+	if cfg.WebDAVPassword != "" {
+		decrypted, err := credential_svc.Default().Decrypt(cfg.WebDAVPassword)
+		if err != nil {
+			return nil, fmt.Errorf("解密 WebDAV 密码失败: %w", err)
+		}
+		out.Password = decrypted
+	}
+	if cfg.WebDAVToken != "" {
+		decrypted, err := credential_svc.Default().Decrypt(cfg.WebDAVToken)
+		if err != nil {
+			return nil, fmt.Errorf("解密 WebDAV token 失败: %w", err)
+		}
+		out.Token = decrypted
+	}
+	return out, nil
+}
+
+// ClearWebDAVConfig 清除 WebDAV 备份配置。
+func (a *App) ClearWebDAVConfig() error {
+	cfg := bootstrap.GetConfig()
+	if cfg == nil {
+		return fmt.Errorf("config not loaded")
+	}
+	cfg.WebDAVURL = ""
+	cfg.WebDAVAuthType = ""
+	cfg.WebDAVUsername = ""
+	cfg.WebDAVPassword = ""
+	cfg.WebDAVToken = ""
+	return bootstrap.SaveConfig(cfg)
+}
+
+// TestWebDAVConfig 用入参里的字段测试 WebDAV 目录连通性与写权限。
+// 完全使用入参字段，不再回退到已存配置——前端已回填明文凭据。
+func (a *App) TestWebDAVConfig(in WebDAVSaveInput) error {
+	svcCfg := in.toServiceConfig()
+	if err := backup_svc.ValidateWebDAVConfig(svcCfg); err != nil {
+		return err
+	}
+	return backup_svc.TestWebDAVConnection(svcCfg)
+}
+
+// ListWebDAVBackups 列出 WebDAV 目录中的 OpsKat 备份。
+func (a *App) ListWebDAVBackups() ([]*backup_svc.WebDAVBackupInfo, error) {
+	cfg, err := a.webDAVConfigFromStorage()
+	if err != nil {
+		return nil, err
+	}
+	return backup_svc.ListWebDAVBackups(cfg)
+}
+
+// ExportToWebDAV 加密并上传备份到 WebDAV。
+func (a *App) ExportToWebDAV(password string, opts backup_svc.ExportOptions) (*backup_svc.WebDAVBackupInfo, error) {
+	if password == "" {
+		return nil, fmt.Errorf("WebDAV 备份必须设置备份密码")
+	}
+	cfg, err := a.webDAVConfigFromStorage()
+	if err != nil {
+		return nil, err
+	}
+
+	var crypto backup_svc.CredentialCrypto
+	if opts.IncludeCredentials {
+		crypto = credential_svc.Default()
+	}
+
+	data, err := backup_svc.Export(a.langCtx(), &opts, crypto)
+	if err != nil {
+		return nil, err
+	}
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+
+	encrypted, err := backup_svc.EncryptBackup(jsonData, password)
+	if err != nil {
+		return nil, err
+	}
+
+	return backup_svc.CreateOrUpdateWebDAVBackup(cfg, encrypted)
+}
+
+// ImportFromWebDAV 从 WebDAV 导入备份。
+func (a *App) ImportFromWebDAV(name, password string, opts backup_svc.ImportOptions) (*backup_svc.ImportResult, error) {
+	cfg, err := a.webDAVConfigFromStorage()
+	if err != nil {
+		return nil, err
+	}
+	content, err := backup_svc.GetWebDAVBackupContent(cfg, name)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonData, err := backup_svc.DecryptBackup(content, password)
+	if err != nil {
+		return nil, err
+	}
+
+	var data backup_svc.BackupData
+	if err := json.Unmarshal(jsonData, &data); err != nil {
+		return nil, fmt.Errorf("解析备份数据失败: %w", err)
+	}
+
+	return backup_svc.Import(a.langCtx(), &data, &opts, credential_svc.Default())
+}
+
+func (a *App) webDAVConfigFromStorage() (backup_svc.WebDAVConfig, error) {
+	cfg := bootstrap.GetConfig()
+	if cfg == nil || strings.TrimSpace(cfg.WebDAVURL) == "" {
+		return backup_svc.WebDAVConfig{}, fmt.Errorf("WebDAV 未配置")
+	}
+
+	authType := backup_svc.WebDAVAuthType(cfg.WebDAVAuthType)
+	if authType == "" {
+		authType = backup_svc.WebDAVAuthNone
+	}
+
+	out := backup_svc.WebDAVConfig{
+		URL:      cfg.WebDAVURL,
+		AuthType: authType,
+		Username: cfg.WebDAVUsername,
+	}
+	if cfg.WebDAVPassword != "" {
+		decrypted, err := credential_svc.Default().Decrypt(cfg.WebDAVPassword)
+		if err != nil {
+			return backup_svc.WebDAVConfig{}, fmt.Errorf("解密 WebDAV 密码失败: %w", err)
+		}
+		out.Password = decrypted
+	}
+	if cfg.WebDAVToken != "" {
+		decrypted, err := credential_svc.Default().Decrypt(cfg.WebDAVToken)
+		if err != nil {
+			return backup_svc.WebDAVConfig{}, fmt.Errorf("解密 WebDAV token 失败: %w", err)
+		}
+		out.Token = decrypted
+	}
+	return out, nil
+}
+
 // GetDataDir 返回应用数据目录
 func (a *App) GetDataDir() string {
 	return bootstrap.AppDataDir()
@@ -492,7 +723,6 @@ func (a *App) OpenDirectory(path string) error {
 		args = []string{path}
 	}
 	c := exec.Command(cmd, args...) //nolint:gosec
-	executil.HideWindow(c)
 	return c.Start()
 }
 
@@ -1031,6 +1261,123 @@ func (a *App) GetAppVersion() string {
 		v += " (" + c + ")"
 	}
 	return v
+}
+
+// BugReportInfo 用于前端拼接 GitHub Issue 预填 URL 的诊断信息。
+type BugReportInfo struct {
+	Version string `json:"version"`
+	Commit  string `json:"commit"`
+	OS      string `json:"os"`
+	Arch    string `json:"arch"`
+	OSLabel string `json:"osLabel"`
+}
+
+// GetDebugMode 返回当前是否开启 debug 日志
+func (a *App) GetDebugMode() bool {
+	cfg := bootstrap.GetConfig()
+	if cfg == nil {
+		return false
+	}
+	return cfg.DebugMode
+}
+
+// SetDebugMode 开启/关闭 debug 日志，写入配置并重建全局 logger
+func (a *App) SetDebugMode(enabled bool) error {
+	cfg := bootstrap.GetConfig()
+	if cfg == nil {
+		return fmt.Errorf("config not loaded")
+	}
+	cfg.DebugMode = enabled
+	if err := bootstrap.SaveConfig(cfg); err != nil {
+		return err
+	}
+	return bootstrap.InitLogger()
+}
+
+// OpenLogsDir 在系统文件管理器中打开日志目录
+func (a *App) OpenLogsDir() error {
+	dir := bootstrap.GetLogsDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return a.OpenDirectory(dir)
+}
+
+// GetBugReportInfo 返回用于 Bug 反馈模板预填的系统信息。
+func (a *App) GetBugReportInfo() BugReportInfo {
+	osVer := detectOSVersion()
+	archSuffix := runtime.GOARCH
+	osLabel := ""
+	switch runtime.GOOS {
+	case "darwin":
+		if runtime.GOARCH == "arm64" {
+			archSuffix = "Apple Silicon"
+		} else {
+			archSuffix = "Intel"
+		}
+		if osVer != "" {
+			osLabel = fmt.Sprintf("macOS %s (%s)", osVer, archSuffix)
+		} else {
+			osLabel = fmt.Sprintf("macOS (%s)", archSuffix)
+		}
+	case "windows":
+		if osVer != "" {
+			osLabel = fmt.Sprintf("Windows %s (%s)", osVer, archSuffix)
+		} else {
+			osLabel = fmt.Sprintf("Windows (%s)", archSuffix)
+		}
+	case "linux":
+		if osVer != "" {
+			osLabel = fmt.Sprintf("%s (%s)", osVer, archSuffix)
+		} else {
+			osLabel = fmt.Sprintf("Linux (%s)", archSuffix)
+		}
+	default:
+		osLabel = fmt.Sprintf("%s (%s)", runtime.GOOS, archSuffix)
+	}
+	return BugReportInfo{
+		Version: configs.Version,
+		Commit:  buildinfo.ShortCommitID(),
+		OS:      runtime.GOOS,
+		Arch:    runtime.GOARCH,
+		OSLabel: osLabel,
+	}
+}
+
+// detectOSVersion 尝试获取当前操作系统版本号/发行版名称，失败返回空串。
+func detectOSVersion() string {
+	switch runtime.GOOS {
+	case "darwin":
+		out, err := exec.Command("sw_vers", "-productVersion").Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	case "linux":
+		data, err := os.ReadFile("/etc/os-release")
+		if err != nil {
+			return ""
+		}
+		for line := range strings.SplitSeq(string(data), "\n") {
+			if name, ok := strings.CutPrefix(line, "PRETTY_NAME="); ok {
+				return strings.Trim(strings.TrimSpace(name), `"`)
+			}
+		}
+		return ""
+	case "windows":
+		out, err := exec.Command("cmd", "/c", "ver").Output()
+		if err != nil {
+			return ""
+		}
+		s := strings.TrimSpace(string(out))
+		if i := strings.Index(s, "[Version "); i >= 0 {
+			if j := strings.Index(s[i:], "]"); j > 0 {
+				return strings.TrimPrefix(s[i:i+j], "[Version ")
+			}
+		}
+		return ""
+	}
+	return ""
 }
 
 // GetUpdateChannel 获取当前更新通道

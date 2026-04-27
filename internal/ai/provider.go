@@ -14,11 +14,12 @@ const (
 
 // Message 对话消息
 type Message struct {
-	Role       Role       `json:"role"`
-	Content    string     `json:"content"`
-	Thinking   string     `json:"thinking,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"` // role=tool 时标识调用
+	Role             Role       `json:"role"`
+	Content          string     `json:"content"`
+	Thinking         string     `json:"thinking,omitempty"`          // Anthropic 格式
+	ReasoningContent string     `json:"reasoning_content,omitempty"` // DeepSeek/OpenAI 格式
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string     `json:"tool_call_id,omitempty"` // role=tool 时标识调用
 }
 
 // ToolCall AI 发起的工具调用
@@ -56,15 +57,16 @@ type Usage struct {
 
 // StreamEvent 流式响应事件
 type StreamEvent struct {
-	Type      string     `json:"type"`                 // "content" | "tool_start" | "tool_result" | "tool_call" | "approval_request" | "approval_result" | "agent_start" | "agent_end" | "done" | "error" | "thinking" | "thinking_done" | "stopped" | "retry" | "usage"
-	Content   string     `json:"content,omitempty"`    // type=content/tool_result/approval_result/agent_end 时的文本
-	ToolName  string     `json:"tool_name,omitempty"`  // type=tool_start/tool_result 时的工具名
-	ToolInput string     `json:"tool_input,omitempty"` // type=tool_start 时的输入摘要
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"` // type=tool_call 时的工具调用 (OpenAI)
-	ConfirmID string     `json:"confirm_id,omitempty"` // type=approval_request/approval_result 时的确认请求 ID
-	Error     string     `json:"error,omitempty"`      // type=error 时的错误信息
-	AgentRole string     `json:"agent_role,omitempty"` // type=agent_start/approval_request 时的角色描述
-	AgentTask string     `json:"agent_task,omitempty"` // type=agent_start 时的任务描述
+	Type       string     `json:"type"`                   // "content" | "tool_start" | "tool_result" | "tool_call" | "approval_request" | "approval_result" | "agent_start" | "agent_end" | "done" | "error" | "thinking" | "thinking_done" | "stopped" | "retry" | "usage"
+	Content    string     `json:"content,omitempty"`      // type=content/tool_result/approval_result/agent_end 时的文本
+	ToolName   string     `json:"tool_name,omitempty"`    // type=tool_start/tool_result 时的工具名
+	ToolInput  string     `json:"tool_input,omitempty"`   // type=tool_start 时的输入摘要
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // type=tool_call 时的工具调用 (OpenAI)
+	ToolCallID string     `json:"tool_call_id,omitempty"` // type=tool_start/tool_result 时的工具调用 ID，前端用于跨 turn 还原 tool_calls 历史
+	ConfirmID  string     `json:"confirm_id,omitempty"`   // type=approval_request/approval_result 时的确认请求 ID
+	Error      string     `json:"error,omitempty"`        // type=error 时的错误信息
+	AgentRole  string     `json:"agent_role,omitempty"`   // type=agent_start/approval_request 时的角色描述
+	AgentTask  string     `json:"agent_task,omitempty"`   // type=agent_start 时的任务描述
 	// approval_request 专用字段
 	Kind        string         `json:"kind,omitempty"`        // "single" | "batch" | "grant"
 	Items       []ApprovalItem `json:"items,omitempty"`       // 审批项列表
@@ -101,4 +103,6 @@ type Provider interface {
 	Chat(ctx context.Context, messages []Message, tools []Tool) (<-chan StreamEvent, error)
 	// Name 返回 provider 名称
 	Name() string
+	// Model 返回当前使用的模型 ID（用于 agent 层根据模型类型决定是否需要回传 reasoning_content 等）
+	Model() string
 }

@@ -128,4 +128,7 @@ install-skill:
 
 # 清理构建产物
 clean:
-	rm -rf build/bin frontend/dist internal/embedded/opsctl_bin coverage.out coverage.html
+	rm -rf build/bin frontend/dist internal/embedded/opsctl_bin \
+		coverage.out coverage.html coverage_new.out \
+		opskat opsctl devserver \
+		frontend/package.json.md5

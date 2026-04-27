@@ -8,6 +8,7 @@ import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { ExecuteRedis, ExecuteRedisArgs } from "../../../wailsjs/go/app/App";
 import { RedisStringEditor } from "@/components/query/RedisStringEditor";
 import { RedisCollectionTable } from "@/components/query/RedisCollectionTable";
+import { RedisStreamViewer } from "@/components/query/RedisStreamViewer";
 
 interface RedisKeyDetailProps {
   tabId: string;
@@ -41,6 +42,7 @@ const TYPE_COLORS: Record<string, string> = {
   list: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
   set: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
   zset: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+  stream: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400",
 };
 
 function formatResult(parsed: RedisResult): string {
@@ -196,7 +198,7 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
   const keyInfo = state.keyInfo;
   const type = keyInfo?.type;
   const ttl = keyInfo?.ttl ?? -1;
-  const isCollection = type === "hash" || type === "list" || type === "set" || type === "zset";
+  const isCollection = type === "hash" || type === "list" || type === "set" || type === "zset" || type === "stream";
 
   const ttlDisplay = ttl === -1 ? t("query.ttlPersist") : formatTtl(ttl);
 
@@ -285,7 +287,11 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
             </div>
 
             {/* Value display */}
-            {isCollection ? (
+            {type === "stream" ? (
+              <div className="min-h-0 flex-1">
+                <RedisStreamViewer info={keyInfo} tabId={tabId} t={t} />
+              </div>
+            ) : isCollection ? (
               <div className="min-h-0 flex-1">
                 <RedisCollectionTable info={keyInfo} tabId={tabId} t={t} />
               </div>

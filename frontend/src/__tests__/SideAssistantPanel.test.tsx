@@ -4,15 +4,21 @@ import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/re
 import { useAIStore } from "../stores/aiStore";
 import { useTabStore } from "../stores/tabStore";
 import { SideAssistantPanel } from "../components/ai/SideAssistantPanel";
-import {
-  CreateConversation,
-  ListConversations,
-  LoadConversationMessages,
-  DeleteConversation,
-} from "../../wailsjs/go/app/App";
+import { ListConversations, LoadConversationMessages, DeleteConversation } from "../../wailsjs/go/app/App";
 
-// Note: setup.ts mocks react-i18next so `t(key)` returns the raw key.
-// So button titles become the i18n keys themselves (e.g. "ai.sidebar.newChat").
+function buildSidebarTab(id: string, conversationId: number | null, title = "New conversation") {
+  return {
+    id,
+    conversationId,
+    title,
+    createdAt: 1,
+    uiState: {
+      inputDraft: { content: "", mentions: [] },
+      scrollTop: 0,
+      editTarget: null,
+    },
+  };
+}
 
 const defaultAIActions = {
   renameConversation: useAIStore.getState().renameConversation,
@@ -28,152 +34,252 @@ describe("SideAssistantPanel", () => {
       conversations: [],
       conversationMessages: {},
       conversationStreaming: {},
-      renameConversation: defaultAIActions.renameConversation,
-      sidebarConversationId: null,
-      sidebarUIState: { inputDraft: "", scrollTop: 0 },
+      sidebarTabs: [],
+      activeSidebarTabId: null,
       tabStates: {},
     });
-    // Prevent fetchConversations (called on mount) from clobbering our seeded conversations.
     vi.mocked(ListConversations).mockImplementation(async () => {
       return useAIStore.getState().conversations as any;
     });
+    vi.mocked(LoadConversationMessages).mockResolvedValue([] as any);
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  it("collapsed state renders nothing (triggered from left Sidebar / shortcut instead)", () => {
+  it("collapsed state collapses outer width to 0 (panel stays in DOM for width animation)", () => {
     const { container } = render(<SideAssistantPanel collapsed={true} onToggle={() => {}} />);
-    expect(container).toBeEmptyDOMElement();
-    expect(screen.queryByText("ai.sidebar.title")).not.toBeInTheDocument();
-    expect(screen.queryByText("ai.sidebar.emptyGuide")).not.toBeInTheDocument();
+    // Outer wrapper animates via width; collapsed means width: 0.
+    const outer = container.firstChild as HTMLElement;
+    expect(outer).toBeTruthy();
+    expect(outer.style.width).toBe("0px");
   });
 
-  it("expanded with no conversation shows empty guide", () => {
+  it("expanded with no sidebar tabs shows the empty guide", () => {
     render(<SideAssistantPanel collapsed={false} onToggle={() => {}} />);
-    // With the mocked t() returning keys, the empty guide renders the raw key "ai.sidebar.emptyGuide".
     expect(screen.getByText("ai.sidebar.emptyGuide")).toBeInTheDocument();
   });
 
-  it("clicking + new chat creates a conversation and binds sidebar", async () => {
-    vi.mocked(CreateConversation).mockResolvedValue({ ID: 123, Title: "", Updatetime: 0 } as any);
+  it("clicking new chat creates a new blank sidebar tab", async () => {
     render(<SideAssistantPanel collapsed={false} onToggle={() => {}} />);
 
-    const newBtn = screen.getByTitle("ai.sidebar.newChat");
-    fireEvent.click(newBtn);
+    fireEvent.click(screen.getByTitle("ai.sidebar.newChat"));
 
     await waitFor(() => {
-      expect(useAIStore.getState().sidebarConversationId).toBe(123);
+      expect(useAIStore.getState().sidebarTabs).toHaveLength(1);
     });
+    expect(useAIStore.getState().activeSidebarTabId).toBe(useAIStore.getState().sidebarTabs[0].id);
+    expect(useAIStore.getState().sidebarTabs[0].conversationId).toBeNull();
+    expect(screen.queryByText("ai.sidebar.emptyGuide")).not.toBeInTheDocument();
   });
 
-  it("history button opens dropdown and selecting binds sidebar", async () => {
+  it("renders the session selector as a right-side vertical rail", () => {
     useAIStore.setState({
+      sidebarTabs: [buildSidebarTab("sidebar-1", 1, "Conv A"), buildSidebarTab("sidebar-2", 2, "Conv B")],
+      activeSidebarTabId: "sidebar-1",
+      conversations: [
+        { ID: 1, Title: "Conv A", Updatetime: Math.floor(Date.now() / 1000) } as any,
+        { ID: 2, Title: "Conv B", Updatetime: Math.floor(Date.now() / 1000) } as any,
+      ],
+      conversationMessages: {
+        1: [{ role: "user", content: "hello", blocks: [], streaming: false } as any],
+        2: [],
+      },
+      conversationStreaming: {
+        1: { sending: true, pendingQueue: [] },
+        2: { sending: false, pendingQueue: [] },
+      },
+    });
+
+    render(<SideAssistantPanel collapsed={false} onToggle={() => {}} />);
+
+    const tablist = screen.getByRole("tablist");
+    expect(tablist).toHaveAttribute("aria-orientation", "vertical");
+    expect(tablist.closest('[data-ai-session-rail="right"]')).not.toBeNull();
+    expect(document.querySelector(".bg-sky-500")).toBeTruthy();
+  });
+
+  it("history selection binds the active blank tab instead of opening a duplicate", async () => {
+    useAIStore.setState({
+      sidebarTabs: [buildSidebarTab("sidebar-blank", null)],
+      activeSidebarTabId: "sidebar-blank",
       conversations: [
         { ID: 1, Title: "Conv A", Updatetime: Math.floor(Date.now() / 1000) } as any,
         { ID: 2, Title: "Conv B", Updatetime: Math.floor(Date.now() / 1000) } as any,
       ],
     });
+
     render(<SideAssistantPanel collapsed={false} onToggle={() => {}} />);
 
     fireEvent.click(screen.getByTitle("ai.sidebar.history"));
-    expect(await screen.findByText("Conv A")).toBeInTheDocument();
+    fireEvent.click(await screen.findByText("Conv A"));
 
-    fireEvent.click(screen.getByText("Conv A"));
-    expect(useAIStore.getState().sidebarConversationId).toBe(1);
+    expect(useAIStore.getState().sidebarTabs).toHaveLength(1);
+    expect(useAIStore.getState().sidebarTabs[0].conversationId).toBe(1);
+    expect(useAIStore.getState().activeSidebarTabId).toBe("sidebar-blank");
   });
 
-  it("clicking outside the history popup closes it (within panel)", async () => {
+  it("history open-in-tab opens a new sidebar tab and jumps to it when the conversation is not yet open", async () => {
     useAIStore.setState({
-      conversations: [{ ID: 1, Title: "Conv A", Updatetime: Math.floor(Date.now() / 1000) } as any],
-      sidebarConversationId: null,
+      sidebarTabs: [buildSidebarTab("sidebar-1", 1, "Conv A")],
+      activeSidebarTabId: "sidebar-1",
+      conversations: [
+        { ID: 1, Title: "Conv A", Updatetime: Math.floor(Date.now() / 1000) } as any,
+        { ID: 2, Title: "Conv B", Updatetime: Math.floor(Date.now() / 1000) } as any,
+      ],
+      conversationMessages: { 1: [] },
+      conversationStreaming: { 1: { sending: false, pendingQueue: [] } },
     });
+
     render(<SideAssistantPanel collapsed={false} onToggle={() => {}} />);
 
     fireEvent.click(screen.getByTitle("ai.sidebar.history"));
-    expect(await screen.findByText("Conv A")).toBeInTheDocument();
+    const openButtons = await screen.findAllByTitle("action.openInTab");
+    fireEvent.click(openButtons[1]);
 
-    // Click somewhere inside the panel but outside the dropdown popup.
-    fireEvent.mouseDown(screen.getByText("ai.sidebar.emptyGuide"));
+    expect(useAIStore.getState().sidebarTabs).toHaveLength(2);
+    const newTab = useAIStore.getState().sidebarTabs.find((tab) => tab.conversationId === 2);
+    expect(newTab).toBeDefined();
+    expect(useAIStore.getState().activeSidebarTabId).toBe(newTab!.id);
+  });
+
+  it("history open-in-tab focuses the existing sidebar host when the conversation is already open", async () => {
+    useAIStore.setState({
+      sidebarTabs: [buildSidebarTab("sidebar-1", 1, "Conv A"), buildSidebarTab("sidebar-blank", null)],
+      activeSidebarTabId: "sidebar-blank",
+      conversations: [{ ID: 1, Title: "Conv A", Updatetime: Math.floor(Date.now() / 1000) } as any],
+      conversationMessages: { 1: [] },
+      conversationStreaming: { 1: { sending: false, pendingQueue: [] } },
+    });
+
+    render(<SideAssistantPanel collapsed={false} onToggle={() => {}} />);
+
+    fireEvent.click(screen.getByTitle("ai.sidebar.history"));
+    fireEvent.click((await screen.findAllByTitle("action.openInTab"))[0]);
+
+    expect(useAIStore.getState().sidebarTabs.filter((tab) => tab.conversationId === 1)).toHaveLength(1);
+    expect(useAIStore.getState().activeSidebarTabId).toBe("sidebar-1");
+  });
+
+  it("closing an inactive sidebar tab keeps the current active tab", async () => {
+    useAIStore.setState({
+      sidebarTabs: [buildSidebarTab("sidebar-1", 1, "Conv A"), buildSidebarTab("sidebar-2", 2, "Conv B")],
+      activeSidebarTabId: "sidebar-2",
+      conversations: [
+        { ID: 1, Title: "Conv A", Updatetime: Math.floor(Date.now() / 1000) } as any,
+        { ID: 2, Title: "Conv B", Updatetime: Math.floor(Date.now() / 1000) } as any,
+      ],
+      conversationMessages: { 1: [], 2: [] },
+      conversationStreaming: {
+        1: { sending: false, pendingQueue: [] },
+        2: { sending: false, pendingQueue: [] },
+      },
+    });
+
+    render(<SideAssistantPanel collapsed={false} onToggle={() => {}} />);
+
+    fireEvent.click(screen.getAllByLabelText("tab.close")[0]);
 
     await waitFor(() => {
-      expect(screen.queryByText("Conv A")).not.toBeInTheDocument();
+      expect(useAIStore.getState().sidebarTabs.map((tab) => tab.id)).toEqual(["sidebar-2"]);
     });
+    expect(useAIStore.getState().activeSidebarTabId).toBe("sidebar-2");
   });
 
-  it("clicking outside the history popup closes it (outside panel)", async () => {
+  it("closing the active sidebar tab activates the right neighbor first", async () => {
     useAIStore.setState({
-      conversations: [{ ID: 1, Title: "Conv A", Updatetime: Math.floor(Date.now() / 1000) } as any],
+      sidebarTabs: [
+        buildSidebarTab("sidebar-1", 1, "Conv A"),
+        buildSidebarTab("sidebar-2", 2, "Conv B"),
+        buildSidebarTab("sidebar-3", 3, "Conv C"),
+      ],
+      activeSidebarTabId: "sidebar-2",
+      conversations: [
+        { ID: 1, Title: "Conv A", Updatetime: Math.floor(Date.now() / 1000) } as any,
+        { ID: 2, Title: "Conv B", Updatetime: Math.floor(Date.now() / 1000) } as any,
+        { ID: 3, Title: "Conv C", Updatetime: Math.floor(Date.now() / 1000) } as any,
+      ],
+      conversationMessages: { 1: [], 2: [], 3: [] },
+      conversationStreaming: {
+        1: { sending: false, pendingQueue: [] },
+        2: { sending: false, pendingQueue: [] },
+        3: { sending: false, pendingQueue: [] },
+      },
     });
-    render(
-      <div>
-        <button data-testid="outside">outside</button>
-        <SideAssistantPanel collapsed={false} onToggle={() => {}} />
-      </div>
-    );
 
-    fireEvent.click(screen.getByTitle("ai.sidebar.history"));
-    expect(await screen.findByText("Conv A")).toBeInTheDocument();
-
-    fireEvent.mouseDown(screen.getByTestId("outside"));
-
-    await waitFor(() => {
-      expect(screen.queryByText("Conv A")).not.toBeInTheDocument();
-    });
-  });
-
-  it("clicking inside the history popup keeps it open", async () => {
-    useAIStore.setState({
-      conversations: [{ ID: 1, Title: "Conv A", Updatetime: Math.floor(Date.now() / 1000) } as any],
-    });
     render(<SideAssistantPanel collapsed={false} onToggle={() => {}} />);
 
-    fireEvent.click(screen.getByTitle("ai.sidebar.history"));
-    const item = await screen.findByText("Conv A");
+    fireEvent.click(screen.getAllByLabelText("tab.close")[1]);
 
-    // mousedown inside the popup must not close it (the search input/list area).
-    fireEvent.mouseDown(item);
-    expect(screen.getByText("Conv A")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(useAIStore.getState().sidebarTabs.map((tab) => tab.id)).toEqual(["sidebar-1", "sidebar-3"]);
+    });
+    expect(useAIStore.getState().activeSidebarTabId).toBe("sidebar-3");
   });
 
-  it("confirming delete in the history popup triggers DeleteConversation (dropdown close must not preempt portal click)", async () => {
+  it("closing the last sidebar tab falls back to the empty guide", async () => {
+    useAIStore.setState({
+      sidebarTabs: [buildSidebarTab("sidebar-1", 1, "Conv A")],
+      activeSidebarTabId: "sidebar-1",
+      conversations: [{ ID: 1, Title: "Conv A", Updatetime: Math.floor(Date.now() / 1000) } as any],
+      conversationMessages: { 1: [] },
+      conversationStreaming: { 1: { sending: false, pendingQueue: [] } },
+    });
+
+    render(<SideAssistantPanel collapsed={false} onToggle={() => {}} />);
+
+    fireEvent.click(screen.getByLabelText("tab.close"));
+
+    await waitFor(() => {
+      expect(useAIStore.getState().sidebarTabs).toHaveLength(0);
+    });
+    expect(useAIStore.getState().activeSidebarTabId).toBeNull();
+    expect(screen.getByText("ai.sidebar.emptyGuide")).toBeInTheDocument();
+  });
+
+  it("confirming delete in history triggers DeleteConversation", async () => {
     vi.mocked(DeleteConversation).mockResolvedValue(undefined);
     useAIStore.setState({
       conversations: [{ ID: 1, Title: "Conv A", Updatetime: Math.floor(Date.now() / 1000) } as any],
     });
+
     render(<SideAssistantPanel collapsed={false} onToggle={() => {}} />);
 
     fireEvent.click(screen.getByTitle("ai.sidebar.history"));
-    await screen.findByText("Conv A");
-    fireEvent.click(screen.getByTitle("action.delete"));
+    const item = await screen.findByText("Conv A");
+    const row = item.closest("div")!.parentElement!;
+    const trashBtn = row.querySelector('button[aria-label="action.openInTab"]')
+      ? row.querySelectorAll("button")[1]
+      : row.querySelector("button");
+    fireEvent.click(trashBtn as Element);
 
-    // Delete confirmation is a Popover portaled to body. mousedown on the Confirm
-    // button must not cause the panel's click-outside handler to unmount the dropdown
-    // (and with it, the popover) before click fires.
-    const confirmBtn = await screen.findByText("action.delete");
-    fireEvent.click(confirmBtn);
+    fireEvent.click(await screen.findByText("action.delete"));
 
     await waitFor(() => {
       expect(DeleteConversation).toHaveBeenCalledWith(1);
     });
   });
 
-  it("clicking promote button promotes sidebar conversation and clears sidebar binding", async () => {
-    vi.mocked(LoadConversationMessages).mockResolvedValue([] as any);
+  it("promote keeps the sidebar tab and opens a main workspace AI tab", async () => {
     useAIStore.setState({
-      sidebarConversationId: 5,
+      sidebarTabs: [buildSidebarTab("sidebar-5", 5, "Conv")],
+      activeSidebarTabId: "sidebar-5",
       conversations: [{ ID: 5, Title: "Conv", Updatetime: 0 } as any],
       conversationMessages: { 5: [] },
       conversationStreaming: { 5: { sending: false, pendingQueue: [] } },
     });
+
     render(<SideAssistantPanel collapsed={false} onToggle={() => {}} />);
 
     fireEvent.click(screen.getByTitle("ai.sidebar.promoteToTab"));
 
     await waitFor(() => {
-      expect(useAIStore.getState().sidebarConversationId).toBeNull();
+      expect(
+        useTabStore.getState().tabs.some((tab) => tab.type === "ai" && (tab.meta as any).conversationId === 5)
+      ).toBe(true);
     });
+    expect(useAIStore.getState().sidebarTabs[0].conversationId).toBe(5);
   });
 
   it("current conversation can be renamed from the context bar", async () => {

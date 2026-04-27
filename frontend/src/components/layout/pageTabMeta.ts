@@ -1,4 +1,4 @@
-import { Settings, KeyRound, ScrollText, ArrowRightLeft } from "lucide-react";
+import { Settings, KeyRound, ScrollText, ArrowRightLeft, FileCode } from "lucide-react";
 import type { TFunction } from "i18next";
 import type { Tab, PageTabMeta } from "@/stores/tabStore";
 
@@ -12,6 +12,7 @@ export const builtinPageTabMeta: Record<string, BuiltinPageMeta> = {
   forward: { icon: ArrowRightLeft, labelKey: "nav.forward" },
   sshkeys: { icon: KeyRound, labelKey: "nav.sshKeys" },
   audit: { icon: ScrollText, labelKey: "nav.audit" },
+  snippets: { icon: FileCode, labelKey: "nav.snippets" },
 };
 
 export function getBuiltinPageMeta(tab: Tab): BuiltinPageMeta | undefined {

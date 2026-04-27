@@ -20,7 +20,9 @@ import (
 	"github.com/opskat/opskat/internal/repository/group_repo"
 	"github.com/opskat/opskat/internal/repository/host_key_repo"
 	"github.com/opskat/opskat/internal/repository/policy_group_repo"
+	"github.com/opskat/opskat/internal/repository/snippet_repo"
 	"github.com/opskat/opskat/internal/service/credential_svc"
+	"github.com/opskat/opskat/internal/service/snippet_svc"
 	"github.com/opskat/opskat/migrations"
 
 	"github.com/cago-frame/cago"
@@ -102,6 +104,8 @@ func Init(ctx context.Context, opts Options) error {
 		return err
 	}
 
+	snippet_svc.Register(snippet_svc.NewSnippetSvc(snippet_svc.NewCategoryRegistry()))
+
 	return nil
 }
 
@@ -119,6 +123,7 @@ func registerRepositories() {
 	ai_provider_repo.RegisterAIProvider(ai_provider_repo.NewAIProvider())
 	extension_data_repo.RegisterExtensionData(extension_data_repo.NewExtensionData())
 	extension_state_repo.RegisterExtensionState(extension_state_repo.NewExtensionState())
+	snippet_repo.RegisterSnippet(snippet_repo.NewSnippet())
 }
 
 // resolveKDFSalt 从 config.json 获取 salt，不存在则生成并持久化

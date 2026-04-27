@@ -20,11 +20,30 @@ const HostABIVersion = "1.0"
 var SupportedHostABIs = []string{"1.0"}
 
 var (
-	semverRe     = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
-	nameRe       = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
-	policyIDRe   = regexp.MustCompile(`^ext:[a-z0-9][a-z0-9_-]{0,63}(:[a-z0-9][a-z0-9_-]{0,63})*$`)
-	credentialRe = regexp.MustCompile(`^(|read)$`) // "" or "read"
+	semverRe         = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+	nameRe           = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+	policyIDRe       = regexp.MustCompile(`^ext:[a-z0-9][a-z0-9_-]{0,63}(:[a-z0-9][a-z0-9_-]{0,63})*$`)
+	credentialRe     = regexp.MustCompile(`^(|read)$`) // "" or "read"
+	snippetCatIDRe   = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+	snippetSeedKeyRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 )
+
+// builtinSnippetCategoryIDs is the immutable set of category ids owned by the app core.
+// Extensions may not re-declare these — they are reserved.
+// Kept unexported so callers can't mutate it; use IsBuiltinSnippetCategoryID to query.
+var builtinSnippetCategoryIDs = map[string]struct{}{
+	"shell":  {},
+	"sql":    {},
+	"redis":  {},
+	"mongo":  {},
+	"prompt": {},
+}
+
+// IsBuiltinSnippetCategoryID reports whether id is reserved by the app core.
+func IsBuiltinSnippetCategoryID(id string) bool {
+	_, ok := builtinSnippetCategoryIDs[id]
+	return ok
+}
 
 // CredentialAccessNone means the extension receives only opaque credential handles (default).
 // CredentialAccessRead means the extension may request plaintext credentials (discouraged).
@@ -46,6 +65,41 @@ type Manifest struct {
 	Tools         []ToolDef       `json:"tools"`
 	Policies      PoliciesDef     `json:"policies"`
 	Frontend      FrontendDef     `json:"frontend"`
+	Snippets      SnippetsDef     `json:"snippets"`
+}
+
+// SnippetsDef declares snippet categories and seed snippets contributed by this extension.
+// All fields are optional; an empty block is a no-op.
+type SnippetsDef struct {
+	Categories []SnippetCategoryDef `json:"categories"`
+	Seed       []SeedSnippetDef     `json:"seed"`
+}
+
+// SnippetCategoryDef declares a new snippet category id that this extension owns.
+//
+// Validation rules:
+//   - ID must match ^[a-z][a-z0-9-]{0,31}$ (lowercase kebab, <=32 chars).
+//   - ID must NOT collide with any builtin category (see IsBuiltinSnippetCategoryID).
+//   - ID must be unique within this manifest.
+//   - AssetType must be non-empty and must match a type declared in assetTypes[].
+type SnippetCategoryDef struct {
+	ID        string   `json:"id"`
+	AssetType string   `json:"assetType"`
+	I18n      I18nName `json:"i18n"`
+}
+
+// SeedSnippetDef is a read-only snippet shipped with the extension.
+//
+// Validation rules:
+//   - Key must match ^[a-z0-9][a-z0-9-]{0,63}$ and be unique within this manifest.
+//   - Name and Content must be non-empty after trimming.
+//   - Category must be either a builtin category id or a category declared in THIS manifest.
+type SeedSnippetDef struct {
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	Content     string `json:"content"`
+	Description string `json:"description"`
 }
 
 // Capabilities declares what host resources an extension is permitted to access.
@@ -192,6 +246,14 @@ func (m *Manifest) Localized(tr func(key string) string) *Manifest {
 		}
 	}
 
+	if len(m.Snippets.Categories) > 0 {
+		out.Snippets.Categories = make([]SnippetCategoryDef, len(m.Snippets.Categories))
+		for i, c := range m.Snippets.Categories {
+			c.I18n = I18nName{Name: tr(c.I18n.Name)}
+			out.Snippets.Categories[i] = c
+		}
+	}
+
 	return &out
 }
 
@@ -256,6 +318,75 @@ func (m *Manifest) validate() error {
 		}
 		if !policyIDRe.MatchString(g.ID) {
 			return fmt.Errorf("manifest: policy group ID has invalid characters (got %q)", g.ID)
+		}
+	}
+	if err := m.validateSnippets(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateSnippets validates the snippets.categories and snippets.seed blocks.
+// Both are optional; an empty block passes.
+func (m *Manifest) validateSnippets() error {
+	// assetTypes declared by this manifest; used to validate category.assetType.
+	assetTypeSet := make(map[string]struct{}, len(m.AssetTypes))
+	for _, at := range m.AssetTypes {
+		if at.Type != "" {
+			assetTypeSet[at.Type] = struct{}{}
+		}
+	}
+
+	// Validate categories.
+	catIDs := make(map[string]struct{}, len(m.Snippets.Categories))
+	for _, c := range m.Snippets.Categories {
+		if c.ID == "" {
+			return fmt.Errorf("manifest: snippets.categories[].id is required")
+		}
+		if !snippetCatIDRe.MatchString(c.ID) {
+			return fmt.Errorf("manifest: snippets.categories[].id must match %s (got %q)", snippetCatIDRe.String(), c.ID)
+		}
+		if IsBuiltinSnippetCategoryID(c.ID) {
+			return fmt.Errorf("manifest: snippets.categories[].id %q collides with a builtin category", c.ID)
+		}
+		if _, dup := catIDs[c.ID]; dup {
+			return fmt.Errorf("manifest: duplicate snippets.categories[].id %q", c.ID)
+		}
+		catIDs[c.ID] = struct{}{}
+		if c.AssetType == "" {
+			return fmt.Errorf("manifest: snippets.categories[%q].assetType is required", c.ID)
+		}
+		if _, ok := assetTypeSet[c.AssetType]; !ok {
+			return fmt.Errorf("manifest: snippets.categories[%q].assetType %q must be declared in assetTypes[]", c.ID, c.AssetType)
+		}
+	}
+
+	// Validate seed snippets.
+	seedKeys := make(map[string]struct{}, len(m.Snippets.Seed))
+	for _, s := range m.Snippets.Seed {
+		if s.Key == "" {
+			return fmt.Errorf("manifest: snippets.seed[].key is required")
+		}
+		if !snippetSeedKeyRe.MatchString(s.Key) {
+			return fmt.Errorf("manifest: snippets.seed[].key must match %s (got %q)", snippetSeedKeyRe.String(), s.Key)
+		}
+		if _, dup := seedKeys[s.Key]; dup {
+			return fmt.Errorf("manifest: duplicate snippets.seed[].key %q", s.Key)
+		}
+		seedKeys[s.Key] = struct{}{}
+		if strings.TrimSpace(s.Name) == "" {
+			return fmt.Errorf("manifest: snippets.seed[%q].name is required", s.Key)
+		}
+		if strings.TrimSpace(s.Content) == "" {
+			return fmt.Errorf("manifest: snippets.seed[%q].content is required", s.Key)
+		}
+		if s.Category == "" {
+			return fmt.Errorf("manifest: snippets.seed[%q].category is required", s.Key)
+		}
+		isBuiltin := IsBuiltinSnippetCategoryID(s.Category)
+		_, isLocal := catIDs[s.Category]
+		if !isBuiltin && !isLocal {
+			return fmt.Errorf("manifest: snippets.seed[%q].category %q is neither builtin nor declared in this manifest", s.Key, s.Category)
 		}
 	}
 	return nil

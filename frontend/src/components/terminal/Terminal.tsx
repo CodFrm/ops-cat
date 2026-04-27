@@ -23,19 +23,7 @@ import {
 import { TerminalSearchBar } from "./TerminalSearchBar";
 import { useSFTPStore } from "@/stores/sftpStore";
 import { useTabStore } from "@/stores/tabStore";
-
-// Chunked binary -> base64 to avoid stack overflow on large pastes (>64KB).
-// String.fromCharCode(...largeArray) uses function-argument spread which hits V8's
-// ~65535 args limit and throws RangeError.
-function bytesToBase64(bytes: Uint8Array): string {
-  const CHUNK = 0x8000; // 32 KiB — safely under V8 args limit
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    const slice = bytes.subarray(i, i + CHUNK);
-    binary += String.fromCharCode.apply(null, slice as unknown as number[]);
-  }
-  return btoa(binary);
-}
+import { bytesToBase64 } from "@/lib/terminalEncode";
 
 export interface TerminalHandle {
   toggleSearch: () => void;

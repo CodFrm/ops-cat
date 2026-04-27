@@ -22,12 +22,17 @@
   },
   "nav": {
     "home": "Home",
+    "database": "Database",
+    "ssh": "SSH",
+    "redis": "Redis",
+    "mongodb": "MongoDB",
     "sshKeys": "Credentials",
     "settings": "Settings",
     "appearance": "Appearance",
     "ai": "AI Assistant",
     "audit": "Audit Log",
-    "forward": "Port Forward"
+    "forward": "Port Forward",
+    "snippets": "Snippets"
   },
   "forward": {
     "create": "New Config",
@@ -64,6 +69,7 @@
     "close": "Close",
     "submit": "Submit",
     "openInTab": "Open in New Tab",
+    "editPermission": "Edit Permission",
     "open": "Open"
   },
   "tab": {
@@ -493,6 +499,36 @@
     "gistPullSuccess": "Restore successful",
     "gistNoBackup": "No backup found",
     "gistSelect": "Select backup",
+    "webdav": "WebDAV",
+    "webdavDesc": "Encrypted backup to a WebDAV directory",
+    "webdavURL": "WebDAV URL",
+    "webdavURLRequired": "WebDAV URL is required",
+    "webdavURLPlaceholder": "https://example.com/dav/",
+    "webdavDefaultDirectory": "Default storage directory: {{dir}}",
+    "webdavUsername": "Username",
+    "webdavUsernamePlaceholder": "Optional",
+    "webdavPassword": "Password",
+    "webdavAuthType": "Auth type",
+    "webdavAuthNone": "None",
+    "webdavAuthBasic": "Basic (username + password)",
+    "webdavAuthBearer": "Bearer Token",
+    "webdavToken": "Token",
+    "webdavSave": "Save WebDAV",
+    "webdavSaved": "WebDAV settings saved",
+    "webdavTest": "Test",
+    "webdavTestSuccess": "WebDAV connection successful",
+    "webdavClear": "Clear",
+    "webdavCleared": "WebDAV settings cleared",
+    "webdavNotConfigured": "Configure WebDAV before syncing",
+    "webdavSelect": "Select backup",
+    "webdavPush": "Backup to WebDAV",
+    "webdavPull": "Restore from WebDAV",
+    "webdavPushing": "Uploading...",
+    "webdavPulling": "Downloading...",
+    "webdavPushSuccess": "Backup successful",
+    "webdavPullSuccess": "Restore successful",
+    "webdavNoBackup": "No WebDAV backup found",
+    "webdavBackupItem": "{{name}} ({{size}} bytes)",
     "deviceFlow": "GitHub Authorization",
     "deviceFlowDesc": "Open the link below in your browser and enter the code",
     "deviceFlowCode": "Authorization Code",
@@ -629,9 +665,23 @@
       "promoteToTab": "Open in main tab",
       "promoteHint": "Opened in tab",
       "collapse": "Collapse",
+      "expandRail": "Expand session rail",
+      "collapseRail": "Collapse session rail",
       "emptyGuide": "Click + to start a new chat, or pick one from <history/> History",
       "noConversation": "No conversation selected",
-      "attachedAssets": "Attached assets"
+      "attachedAssets": "Attached assets",
+      "status": {
+        "waiting_approval": "Waiting approval",
+        "running": "Running",
+        "done": "Done",
+        "error": "Error"
+      },
+      "statusSuffix": {
+        "waiting_approval": "Waiting approval",
+        "running": "Running",
+        "done": "Done",
+        "error": "Error"
+      }
     }
   },
   "shortcut": {
@@ -800,7 +850,16 @@
     "checksumFetchFailed": "Unable to fetch checksum file (SHA256SUMS.txt) from GitHub. The downloaded file cannot be verified for integrity.",
     "checksumSkipConfirm": "Continue without verification?",
     "checksumSkipAction": "Skip & Continue",
-    "checksumSkipCancel": "Cancel"
+    "checksumSkipCancel": "Cancel",
+    "reportBug": "Report Bug",
+    "reportBugDesc": "Open GitHub issue template with version & system info pre-filled",
+    "openRepository": "Repository",
+    "openRepositoryDesc": "Open the OpsKat GitHub repository",
+    "debugMode": "Debug Logging",
+    "debugModeDesc": "Lower log level to debug for troubleshooting. Turn off when done.",
+    "debugModeOn": "Debug logging enabled",
+    "debugModeOff": "Debug logging disabled",
+    "openLogsDir": "Open Logs Folder"
   },
   "opsctlApproval": {
     "title": "CLI Operation Approval",
@@ -1121,6 +1180,9 @@
     "newValue": "Value",
     "newScore": "Score",
     "newMember": "Member",
+    "id": "ID",
+    "fields": "Fields",
+    "entryDetail": "Entry Detail",
     "dbKeyCount": "{{count}} keys",
     "copyKeyName": "Copy Key Name",
     "refreshKey": "Refresh",
@@ -1182,5 +1244,80 @@
     "noTools": "No tools",
     "noPolicies": "No policy groups",
     "noPages": "No pages"
+  },
+  "snippet": {
+    "title": "Snippets",
+    "newButton": "New snippet",
+    "searchPlaceholder": "Search name / description / content",
+    "filterByCategory": "Category",
+    "filterByTag": "Tag",
+    "allCategories": "All categories",
+    "emptyState": "No snippets yet. Click + New to create one.",
+    "emptyStateFiltered": "No snippets match current filter.",
+    "readOnlyTooltip": "Managed by extension — duplicate to edit",
+    "unknownCategory": "unknown:{{name}}",
+    "unknownCategoryTooltip": "This snippet's category is no longer registered. The providing extension may have been uninstalled.",
+    "orphanedSuffix": "(orphaned)",
+    "columns": {
+      "category": "Category",
+      "name": "Name",
+      "updated": "Updated",
+      "source": "Source",
+      "actions": "Actions"
+    },
+    "form": {
+      "createTitle": "Create snippet",
+      "editTitle": "Edit snippet",
+      "labelCategory": "Category",
+      "labelName": "Name",
+      "labelDescription": "Description",
+      "labelContent": "Content",
+      "duplicateNameHint": "Another snippet with this name exists in the same category."
+    },
+    "actions": {
+      "run": "Run",
+      "edit": "Edit",
+      "duplicate": "Duplicate",
+      "delete": "Delete",
+      "cancel": "Cancel",
+      "save": "Save",
+      "create": "Create"
+    },
+    "runDrawer": {
+      "title": "Select assets to run on",
+      "description": "Select one or more assets to run this snippet on",
+      "searchPlaceholder": "Search assets…",
+      "noAssets": "No matching assets"
+    },
+    "confirmDelete": {
+      "title": "Delete snippet?",
+      "message": "\"{{name}}\" will be permanently removed. This cannot be undone."
+    },
+    "toast": {
+      "created": "Snippet created",
+      "updated": "Snippet updated",
+      "deleted": "Snippet deleted",
+      "duplicated": "Snippet duplicated"
+    },
+    "categories": {
+      "shell": "Shell",
+      "sql": "SQL",
+      "redis": "Redis",
+      "mongo": "Mongo",
+      "prompt": "Prompt"
+    },
+    "popover": {
+      "searchPlaceholder": "Search snippets…",
+      "insert": "Insert",
+      "sendWithEnter": "Insert + Enter",
+      "empty": "No snippets for this context.",
+      "openManager": "Create in Snippets page",
+      "triggerButton": "Insert snippet"
+    },
+    "slash": {
+      "noMatch": "No matching snippets",
+      "empty": "No prompt snippets yet",
+      "openManager": "Create in Snippets page"
+    }
   }
 }
