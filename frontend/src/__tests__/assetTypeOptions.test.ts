@@ -66,10 +66,6 @@ describe("matchSelectedTypes", () => {
     },
   } as never);
 
-  it('returns all assets when selection is "all"', () => {
-    expect(matchSelectedTypes(assets, "all", opts).map((x) => x.ID)).toEqual([1, 2, 3, 4, 5]);
-  });
-
   it("matches database aliases (mysql, postgresql)", () => {
     expect(matchSelectedTypes(assets, ["database"], opts).map((x) => x.ID)).toEqual([2, 3]);
   });

@@ -14,39 +14,31 @@ import {
 import type { AssetTypeOption } from "@/lib/assetTypes/options";
 
 interface AssetTypeFilterButtonProps {
-  value: string[] | "all";
+  value: string[];
   options: AssetTypeOption[];
-  onChange: (next: string[] | "all") => void;
+  onChange: (next: string[]) => void;
 }
 
 export function AssetTypeFilterButton({ value, options, onChange }: AssetTypeFilterButtonProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
-  const isAll = value === "all";
-  const selectedSet = isAll ? new Set<string>() : new Set(value);
-  const activeCount = isAll ? 0 : value.length;
+  const selectedSet = new Set(value);
+  const activeCount = value.length;
+  const allChecked = options.length > 0 && activeCount === options.length;
 
   const builtin = options.filter((o) => o.group === "builtin");
   const extensions = options.filter((o) => o.group === "extension");
 
-  const tooltipLabel = isAll ? t("asset.filterByType") : t("asset.filterByTypeActive", { count: activeCount });
+  const tooltipLabel =
+    activeCount === 0 ? t("asset.filterByType") : t("asset.filterByTypeActive", { count: activeCount });
 
   const toggleAll = () => {
-    onChange("all");
+    onChange(allChecked ? [] : options.map((o) => o.value));
   };
 
   const toggleOne = (opt: AssetTypeOption) => {
-    if (isAll) {
-      onChange(options.filter((o) => o.value !== opt.value).map((o) => o.value));
-      return;
-    }
-    const next = selectedSet.has(opt.value) ? value.filter((v) => v !== opt.value) : [...value, opt.value];
-    if (next.length === 0) {
-      onChange("all");
-      return;
-    }
-    onChange(next);
+    onChange(selectedSet.has(opt.value) ? value.filter((v) => v !== opt.value) : [...value, opt.value]);
   };
 
   const renderRow = (opt: AssetTypeOption) => {
@@ -56,7 +48,7 @@ export function AssetTypeFilterButton({ value, options, onChange }: AssetTypeFil
         key={opt.value}
         label={opt.labelIsI18nKey ? t(opt.label) : opt.label}
         icon={<Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
-        checked={isAll || selectedSet.has(opt.value)}
+        checked={selectedSet.has(opt.value)}
         onClick={() => toggleOne(opt)}
       />
     );
@@ -69,7 +61,7 @@ export function AssetTypeFilterButton({ value, options, onChange }: AssetTypeFil
           <PopoverTrigger asChild>
             <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 relative" aria-label={tooltipLabel}>
               <Filter className="h-3.5 w-3.5" />
-              {!isAll && (
+              {activeCount > 0 && (
                 <span data-active="true" className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary" />
               )}
             </Button>
@@ -80,7 +72,7 @@ export function AssetTypeFilterButton({ value, options, onChange }: AssetTypeFil
       <PopoverContent align="end" side="bottom" sideOffset={4} className="w-[240px] p-0">
         <ScrollArea className="max-h-[360px]">
           <div className="py-1">
-            <FilterRow label={t("asset.filterAllTypes")} checked={isAll} onClick={toggleAll} />
+            <FilterRow label={t("asset.filterAllTypes")} checked={allChecked} onClick={toggleAll} />
             <div className="my-1 mx-2 h-px bg-border" />
             {builtin.map(renderRow)}
             {extensions.length > 0 && (

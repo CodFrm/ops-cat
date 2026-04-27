@@ -79,10 +79,10 @@ export function getAssetTypeOptions(extensions: Record<string, ExtensionEntryLik
 
 export function matchSelectedTypes(
   assets: asset_entity.Asset[],
-  selectedTypes: string[] | "all",
+  selectedTypes: string[],
   options: AssetTypeOption[]
 ): asset_entity.Asset[] {
-  if (selectedTypes === "all" || selectedTypes.length === 0) return assets;
+  if (selectedTypes.length === 0) return assets;
   const aliasSet = new Set<string>();
   for (const value of selectedTypes) {
     const opt = options.find((o) => o.value === value);

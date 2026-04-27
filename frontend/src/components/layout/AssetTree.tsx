@@ -69,23 +69,23 @@ interface AssetTreeProps {
 
 const FILTER_LS_KEY = "asset_tree_type_filter";
 
-function loadFilter(): string[] | "all" {
+function loadFilter(): string[] {
   try {
     const raw = localStorage.getItem(FILTER_LS_KEY);
-    if (!raw) return "all";
-    if (raw === '"all"' || raw === "all") return "all";
+    if (!raw) return [];
+    if (raw === '"all"' || raw === "all") return [];
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.every((v) => typeof v === "string")) {
-      return parsed.length === 0 ? "all" : (parsed as string[]);
+      return parsed as string[];
     }
-    return "all";
+    return [];
   } catch {
-    return "all";
+    return [];
   }
 }
 
-function saveFilter(value: string[] | "all") {
-  localStorage.setItem(FILTER_LS_KEY, value === "all" ? '"all"' : JSON.stringify(value));
+function saveFilter(value: string[]) {
+  localStorage.setItem(FILTER_LS_KEY, JSON.stringify(value));
 }
 
 export function AssetTree({
@@ -111,7 +111,7 @@ export function AssetTree({
   const extensions = useExtensionStore((s) => s.extensions);
   const activeAssetIds = useActiveAssetIds();
   const [filter, setFilter] = useState("");
-  const [selectedTypes, setSelectedTypes] = useState<string[] | "all">(loadFilter);
+  const [selectedTypes, setSelectedTypes] = useState<string[]>(loadFilter);
   const [deleteConfirm, setDeleteConfirm] = useState<{
     id: number;
     assetCount: number;
