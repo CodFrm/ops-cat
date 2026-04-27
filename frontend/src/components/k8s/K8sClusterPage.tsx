@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Loader2,
@@ -16,6 +16,9 @@ import {
   AlertCircle,
   ChevronRight,
   ChevronDown,
+  Play,
+  Square,
+  ScrollText,
 } from "lucide-react";
 import type { asset_entity } from "../../../wailsjs/go/models";
 import {
@@ -23,7 +26,10 @@ import {
   GetK8sNamespaceResources,
   GetK8sNamespacePods,
   GetK8sPodDetail,
+  StartK8sPodLogs,
+  StopK8sPodLogs,
 } from "../../../wailsjs/go/app/App";
+import { EventsOn, EventsOff } from "../../../wailsjs/runtime/runtime";
 
 interface NodeInfo {
   name: string;
@@ -165,6 +171,13 @@ export function K8sClusterPage({ asset }: Props) {
   const [podDetails, setPodDetails] = useState<Record<string, PodDetail>>({});
   const [loadingPodDetails, setLoadingPodDetails] = useState<Set<string>>(new Set());
   const [podDetailErrors, setPodDetailErrors] = useState<Record<string, string>>({});
+  const [logStreamID, setLogStreamID] = useState<string | null>(null);
+  const [logLines, setLogLines] = useState<string[]>([]);
+  const [logContainer, setLogContainer] = useState("");
+  const [logTailLines, setLogTailLines] = useState(200);
+  const [logError, setLogError] = useState<string | null>(null);
+  const logEndRef = useRef<HTMLDivElement>(null);
+  const logStreamIDRef = useRef<string | null>(null);
 
   const loadInfo = () => {
     setLoading(true);
@@ -308,6 +321,66 @@ export function K8sClusterPage({ asset }: Props) {
     },
     [asset.ID, podDetails, loadingPodDetails]
   );
+
+  const stopLogStream = useCallback(() => {
+    const sid = logStreamIDRef.current;
+    if (sid) {
+      StopK8sPodLogs(sid);
+    }
+    logStreamIDRef.current = null;
+    setLogStreamID(null);
+  }, []);
+
+  const startLogStream = useCallback(
+    (ns: string, podName: string, container: string, tailLines: number) => {
+      stopLogStream();
+      setLogLines([]);
+      setLogError(null);
+      setLogContainer(container);
+
+      StartK8sPodLogs(asset.ID, ns, podName, container, tailLines)
+        .then((streamID: string) => {
+          logStreamIDRef.current = streamID;
+          setLogStreamID(streamID);
+          const dataEvent = "k8s:log:" + streamID;
+          const errEvent = "k8s:logerr:" + streamID;
+          const endEvent = "k8s:logend:" + streamID;
+
+          EventsOn(dataEvent, (data: string) => {
+            const decoded = atob(data);
+            setLogLines((prev) => [...prev, decoded]);
+          });
+
+          EventsOn(errEvent, (err: string) => {
+            setLogError(err);
+          });
+
+          EventsOn(endEvent, () => {
+            setLogStreamID(null);
+            EventsOff(dataEvent);
+            EventsOff(errEvent);
+            EventsOff(endEvent);
+          });
+        })
+        .catch((e: unknown) => {
+          setLogError(String(e));
+        });
+    },
+    [asset.ID, stopLogStream]
+  );
+
+  useEffect(() => {
+    return () => {
+      stopLogStream();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (logEndRef.current) {
+      logEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [logLines]);
 
   useEffect(() => {
     loadInfo();
@@ -1039,6 +1112,84 @@ export function K8sClusterPage({ asset }: Props) {
                     <pre className="bg-muted/50 rounded-lg p-4 text-xs font-mono max-h-96 overflow-y-auto whitespace-pre-wrap">
                       {detail.yaml}
                     </pre>
+                  </div>
+
+                  <div className="rounded-xl border bg-card p-6">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-sm font-semibold flex items-center gap-2">
+                        <ScrollText className="h-4 w-4" />
+                        {t("asset.k8sPodLogs")}
+                      </h4>
+                      <div className="flex items-center gap-2">
+                        <select
+                          className="h-7 rounded-md border bg-background px-2 text-xs"
+                          value={logContainer || detail.containers[0]?.name || ""}
+                          onChange={(e) => {
+                            setLogContainer(e.target.value);
+                            if (logStreamID) {
+                              stopLogStream();
+                              startLogStream(detail.namespace, detail.name, e.target.value, logTailLines);
+                            }
+                          }}
+                          disabled={!!logStreamID}
+                        >
+                          {detail.containers.map((c) => (
+                            <option key={c.name} value={c.name}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          className="h-7 w-16 rounded-md border bg-background px-2 text-xs"
+                          value={logTailLines}
+                          onChange={(e) => setLogTailLines(Number(e.target.value))}
+                          disabled={!!logStreamID}
+                          min={1}
+                          max={10000}
+                          title={t("asset.k8sPodLogsTailLines")}
+                        />
+                        {logStreamID ? (
+                          <button
+                            onClick={stopLogStream}
+                            className="inline-flex items-center gap-1.5 rounded-md border border-destructive/50 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10"
+                          >
+                            <Square className="h-3 w-3" />
+                            {t("asset.k8sPodLogsStop")}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              const container = logContainer || detail.containers[0]?.name || "";
+                              startLogStream(detail.namespace, detail.name, container, logTailLines);
+                            }}
+                            className="inline-flex items-center gap-1.5 rounded-md border border-primary/50 px-3 py-1.5 text-xs text-primary hover:bg-primary/10"
+                          >
+                            <Play className="h-3 w-3" />
+                            {t("asset.k8sPodLogsStart")}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {logError && (
+                      <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive mb-3">
+                        {t("asset.k8sPodLogsError")}: {logError}
+                      </div>
+                    )}
+                    <div className="bg-black rounded-lg p-4 text-xs font-mono max-h-96 overflow-y-auto">
+                      {logLines.length === 0 && !logStreamID && !logError && (
+                        <span className="text-gray-500">{t("asset.k8sPodLogsStopped")}</span>
+                      )}
+                      {logStreamID && logLines.length === 0 && (
+                        <span className="text-gray-500">{t("asset.k8sPodLogsStreaming")}</span>
+                      )}
+                      {logLines.map((line, i) => (
+                        <span key={i} className="text-green-400">
+                          {line}
+                        </span>
+                      ))}
+                      <div ref={logEndRef} />
+                    </div>
                   </div>
                 </div>
               );

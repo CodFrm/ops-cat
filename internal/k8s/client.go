@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -447,4 +448,24 @@ func fmtDuration(d time.Duration) string {
 	days := int(d.Hours()) / 24
 	h := int(d.Hours()) % 24
 	return fmt.Sprintf("%dd%dh", days, h)
+}
+
+func StreamPodLogs(ctx context.Context, kubeconfig, apiServer, token, namespace, podName, container string, tailLines int64) (io.ReadCloser, error) {
+	clientset, err := buildClient(kubeconfig, apiServer, token)
+	if err != nil {
+		return nil, err
+	}
+
+	logOpts := &corev1.PodLogOptions{
+		Container: container,
+		Follow:    true,
+		TailLines: &tailLines,
+	}
+
+	req := clientset.CoreV1().Pods(namespace).GetLogs(podName, logOpts)
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("stream pod logs: %w", err)
+	}
+	return stream, nil
 }

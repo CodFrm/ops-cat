@@ -2,12 +2,16 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"sync/atomic"
 	"time"
 
 	"github.com/opskat/opskat/internal/k8s"
 	"github.com/opskat/opskat/internal/service/asset_svc"
+	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 func (a *App) GetK8sClusterInfo(assetID int64) (string, error) {
@@ -144,4 +148,66 @@ func (a *App) GetK8sPodDetail(assetID int64, namespace, podName string) (string,
 		return "", fmt.Errorf("marshal pod detail: %w", err)
 	}
 	return string(result), nil
+}
+
+func (a *App) StartK8sPodLogs(assetID int64, namespace, podName, container string, tailLines int64) (string, error) {
+	asset, err := asset_svc.Asset().Get(a.ctx, assetID)
+	if err != nil {
+		return "", fmt.Errorf("get asset: %w", err)
+	}
+	if !asset.IsK8s() {
+		return "", fmt.Errorf("asset %d is not a K8S cluster", assetID)
+	}
+
+	cfg, err := asset.GetK8sConfig()
+	if err != nil {
+		return "", fmt.Errorf("get K8S config: %w", err)
+	}
+
+	token := cfg.Token
+	if token == "" && cfg.Kubeconfig == "" && cfg.ApiServer == "" {
+		return "", fmt.Errorf("no kubeconfig or api_server configured for this K8S asset")
+	}
+
+	streamID := fmt.Sprintf("k8s-log-%d", atomic.AddInt64(&a.k8sLogStreamCounter, 1))
+
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.k8sLogStreams.Store(streamID, cancel)
+
+	reader, err := k8s.StreamPodLogs(ctx, cfg.Kubeconfig, cfg.ApiServer, token, namespace, podName, container, tailLines)
+	if err != nil {
+		cancel()
+		a.k8sLogStreams.Delete(streamID)
+		return "", fmt.Errorf("open pod log stream: %w", err)
+	}
+
+	go func() {
+		defer reader.Close()
+		defer cancel()
+		defer a.k8sLogStreams.Delete(streamID)
+
+		buf := make([]byte, 4096)
+		for {
+			n, err := reader.Read(buf)
+			if n > 0 {
+				data := base64.StdEncoding.EncodeToString(buf[:n])
+				wailsRuntime.EventsEmit(a.ctx, "k8s:log:"+streamID, data)
+			}
+			if err != nil {
+				if err != io.EOF {
+					wailsRuntime.EventsEmit(a.ctx, "k8s:logerr:"+streamID, err.Error())
+				}
+				wailsRuntime.EventsEmit(a.ctx, "k8s:logend:"+streamID, streamID)
+				return
+			}
+		}
+	}()
+
+	return streamID, nil
+}
+
+func (a *App) StopK8sPodLogs(streamID string) {
+	if cancel, ok := a.k8sLogStreams.LoadAndDelete(streamID); ok {
+		cancel.(context.CancelFunc)()
+	}
 }
