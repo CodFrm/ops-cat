@@ -39,6 +39,8 @@ func NewAnthropicProvider(name, apiBase, apiKey, model string, maxOutputTokens i
 
 func (p *AnthropicProvider) Name() string { return p.name }
 
+func (p *AnthropicProvider) Model() string { return p.model }
+
 // --- Anthropic API 请求/响应类型 ---
 
 type anthropicCacheControl struct {

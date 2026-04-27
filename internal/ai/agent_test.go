@@ -13,9 +13,17 @@ import (
 type mockProvider struct {
 	responses [][]StreamEvent // 每轮对话的响应事件序列
 	round     int
+	model     string // 可选：测试模型相关分支时设置
 }
 
 func (m *mockProvider) Name() string { return "mock" }
+
+func (m *mockProvider) Model() string {
+	if m.model != "" {
+		return m.model
+	}
+	return "mock-model"
+}
 
 func (m *mockProvider) Chat(_ context.Context, _ []Message, _ []Tool) (<-chan StreamEvent, error) {
 	ch := make(chan StreamEvent, 32)
@@ -180,12 +188,151 @@ type captureMockProvider struct {
 
 func (c *captureMockProvider) Name() string { return "capture_mock" }
 
+func (c *captureMockProvider) Model() string { return c.inner.Model() }
+
 func (c *captureMockProvider) Chat(ctx context.Context, msgs []Message, tools []Tool) (<-chan StreamEvent, error) {
 	// 第二轮调用时捕获完整 messages
 	if c.inner.round > 0 {
 		*c.captured = append(*c.captured, msgs...)
 	}
 	return c.inner.Chat(ctx, msgs, tools)
+}
+
+func TestAgent_ToolStartAndResultCarryToolCallID(t *testing.T) {
+	convey.Convey("tool_start 与 tool_result 事件都带上 ToolCallID（前端用以跨 turn 还原 tool_calls）", t, func() {
+		provider := &mockProvider{
+			responses: [][]StreamEvent{
+				{
+					{Type: "tool_call", ToolCalls: []ToolCall{
+						{ID: "call_xyz", Type: "function", Function: struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						}{Name: "list_assets", Arguments: `{}`}},
+					}},
+					{Type: "done"},
+				},
+				{{Type: "content", Content: "ok"}, {Type: "done"}},
+			},
+		}
+		executor := &mockExecutor{results: map[string]string{"list_assets": `[]`}}
+		agent := NewAgent(provider, func() ToolExecutor { return executor }, nil, NewDefaultConfig())
+
+		var events []StreamEvent
+		err := agent.Chat(context.Background(), []Message{
+			{Role: RoleUser, Content: "list"},
+		}, func(e StreamEvent) { events = append(events, e) }, nil)
+		assert.NoError(t, err)
+
+		var startEvent, resultEvent *StreamEvent
+		for i := range events {
+			switch events[i].Type {
+			case "tool_start":
+				startEvent = &events[i]
+			case "tool_result":
+				resultEvent = &events[i]
+			}
+		}
+		assert.NotNil(t, startEvent)
+		assert.NotNil(t, resultEvent)
+		assert.Equal(t, "call_xyz", startEvent.ToolCallID)
+		assert.Equal(t, "call_xyz", resultEvent.ToolCallID)
+	})
+}
+
+func TestAgent_ToolCallMessageCarriesReasoningContent(t *testing.T) {
+	buildResponses := func() [][]StreamEvent {
+		return [][]StreamEvent{
+			{
+				{Type: "thinking", Content: "先看一下"},
+				{Type: "thinking", Content: "有哪些资产"},
+				{Type: "thinking_done"},
+				{Type: "tool_call", ToolCalls: []ToolCall{
+					{ID: "call_1", Type: "function", Function: struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					}{Name: "list_assets", Arguments: `{}`}},
+				}},
+				{Type: "done"},
+			},
+			{{Type: "content", Content: "完成"}, {Type: "done"}},
+		}
+	}
+
+	convey.Convey("DeepSeek-v4 模型：tool 调用轮 assistant 消息同时携带 Thinking 与 ReasoningContent", t, func() {
+		var capturedMessages []Message
+		provider := &mockProvider{responses: buildResponses(), model: "deepseek-v4-pro"}
+		captureProvider := &captureMockProvider{inner: provider, captured: &capturedMessages}
+		executor := &mockExecutor{results: map[string]string{"list_assets": `[]`}}
+		agent := NewAgent(captureProvider, func() ToolExecutor { return executor }, nil, NewDefaultConfig())
+
+		err := agent.Chat(context.Background(), []Message{{Role: RoleUser, Content: "列出资产"}},
+			func(e StreamEvent) {}, nil)
+		assert.NoError(t, err)
+
+		var assistantMsg *Message
+		for i := range capturedMessages {
+			if capturedMessages[i].Role == RoleAssistant {
+				assistantMsg = &capturedMessages[i]
+				break
+			}
+		}
+		assert.NotNil(t, assistantMsg)
+		expected := "先看一下有哪些资产"
+		assert.Equal(t, expected, assistantMsg.Thinking)
+		assert.Equal(t, expected, assistantMsg.ReasoningContent, "DeepSeek-v4 多轮要求原样回传 reasoning_content")
+	})
+
+	convey.Convey("非 DeepSeek-v4 模型：仅写 Thinking，不写 ReasoningContent，避免对 OpenAI/Anthropic 等 provider 引入未知字段", t, func() {
+		var capturedMessages []Message
+		provider := &mockProvider{responses: buildResponses(), model: "gpt-4o"}
+		captureProvider := &captureMockProvider{inner: provider, captured: &capturedMessages}
+		executor := &mockExecutor{results: map[string]string{"list_assets": `[]`}}
+		agent := NewAgent(captureProvider, func() ToolExecutor { return executor }, nil, NewDefaultConfig())
+
+		err := agent.Chat(context.Background(), []Message{{Role: RoleUser, Content: "列出资产"}},
+			func(e StreamEvent) {}, nil)
+		assert.NoError(t, err)
+
+		var assistantMsg *Message
+		for i := range capturedMessages {
+			if capturedMessages[i].Role == RoleAssistant {
+				assistantMsg = &capturedMessages[i]
+				break
+			}
+		}
+		assert.NotNil(t, assistantMsg)
+		assert.Equal(t, "先看一下有哪些资产", assistantMsg.Thinking)
+		assert.Empty(t, assistantMsg.ReasoningContent, "非 DeepSeek-v4 不应写 ReasoningContent")
+	})
+}
+
+func TestMessage_ReasoningContentJSON(t *testing.T) {
+	convey.Convey("Message.ReasoningContent 序列化为 reasoning_content（DeepSeek/OpenAI 兼容字段）", t, func() {
+		msg := Message{
+			Role:             RoleAssistant,
+			Content:          "",
+			Thinking:         "thoughts",
+			ReasoningContent: "thoughts",
+		}
+		data, err := json.Marshal(msg)
+		assert.NoError(t, err)
+
+		var raw map[string]any
+		assert.NoError(t, json.Unmarshal(data, &raw))
+		assert.Equal(t, "thoughts", raw["thinking"])
+		assert.Equal(t, "thoughts", raw["reasoning_content"])
+	})
+
+	convey.Convey("ReasoningContent 为空时通过 omitempty 不出现在 JSON 中", t, func() {
+		msg := Message{Role: RoleAssistant, Content: "hello"}
+		data, err := json.Marshal(msg)
+		assert.NoError(t, err)
+
+		var raw map[string]any
+		assert.NoError(t, json.Unmarshal(data, &raw))
+		_, exists := raw["reasoning_content"]
+		assert.False(t, exists, "空字符串应被 omitempty 略掉")
+	})
 }
 
 func TestAgent_ToolCallLoop(t *testing.T) {

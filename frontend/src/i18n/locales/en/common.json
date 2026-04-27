@@ -654,9 +654,23 @@
       "promoteToTab": "Open in main tab",
       "promoteHint": "Opened in tab",
       "collapse": "Collapse",
+      "expandRail": "Expand session rail",
+      "collapseRail": "Collapse session rail",
       "emptyGuide": "Click + to start a new chat, or pick one from <history/> History",
       "noConversation": "No conversation selected",
-      "attachedAssets": "Attached assets"
+      "attachedAssets": "Attached assets",
+      "status": {
+        "waiting_approval": "Waiting approval",
+        "running": "Running",
+        "done": "Done",
+        "error": "Error"
+      },
+      "statusSuffix": {
+        "waiting_approval": "Waiting approval",
+        "running": "Running",
+        "done": "Done",
+        "error": "Error"
+      }
     }
   },
   "shortcut": {
@@ -828,6 +842,8 @@
     "checksumSkipCancel": "Cancel",
     "reportBug": "Report Bug",
     "reportBugDesc": "Open GitHub issue template with version & system info pre-filled",
+    "openRepository": "Repository",
+    "openRepositoryDesc": "Open the OpsKat GitHub repository",
     "debugMode": "Debug Logging",
     "debugModeDesc": "Lower log level to debug for troubleshooting. Turn off when done.",
     "debugModeOn": "Debug logging enabled",
