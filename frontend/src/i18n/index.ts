@@ -9,10 +9,16 @@ const resources = {
   en: { common: enCommon },
 };
 
+function detectLanguage(): string {
+  const saved = localStorage.getItem("language");
+  if (saved) return saved;
+  return (navigator.language || "").toLowerCase().startsWith("zh") ? "zh-CN" : "en";
+}
+
 i18n.use(initReactI18next).init({
   resources,
-  lng: localStorage.getItem("language") || navigator.language || "zh-CN",
-  fallbackLng: "zh-CN",
+  lng: detectLanguage(),
+  fallbackLng: "en",
   defaultNS: "common",
   interpolation: {
     escapeValue: false,
