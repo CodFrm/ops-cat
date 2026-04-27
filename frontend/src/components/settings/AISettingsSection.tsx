@@ -245,7 +245,7 @@ function IntegrationSection() {
                   variant="link"
                   size="sm"
                   className="h-auto p-0 text-xs"
-                  onClick={() => BrowserOpenURL("https://github.com/opskat/opskat/release")}
+                  onClick={() => BrowserOpenURL("https://github.com/opskat/opskat/releases")}
                 >
                   <ExternalLink className="h-3 w-3 mr-1" />
                   GitHub Releases
