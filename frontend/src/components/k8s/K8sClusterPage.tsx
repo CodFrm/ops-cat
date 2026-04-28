@@ -1680,9 +1680,9 @@ export function K8sClusterPage({ asset }: Props) {
                     )}
                   />
 
-                  <K8sConditionList conditions={detail.conditions} title={t("asset.k8sPodConditions")} />
+                  <K8sConditionList conditions={detail.conditions} title={t("asset.k8sPodConditions")} defaultCollapsed />
 
-                  <K8sTagList tags={detail.labels} title={t("asset.k8sPodLabels")} />
+                  <K8sTagList tags={detail.labels} title={t("asset.k8sPodLabels")} defaultCollapsed />
 
                   <K8sCodeBlock code={detail.yaml} title={t("asset.k8sPodYAML")} defaultCollapsed />
                 </div>
