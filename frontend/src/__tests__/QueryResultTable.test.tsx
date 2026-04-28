@@ -464,6 +464,17 @@ describe("QueryResultTable — cell context actions", () => {
     expect(screen.getByText("query.filterOperatorIsNot")).toBeVisible();
   });
 
+  it("makes the long filter submenu scroll vertically", async () => {
+    const user = userEvent.setup();
+    openMenu({ onFilterByCellValue: vi.fn(), onClearFilterSort: vi.fn(), onAddColumnFilter: vi.fn() });
+
+    await user.hover(screen.getByText("query.filter"));
+
+    const submenu = screen.getByText("query.filterOperatorIsNotEmpty").parentElement;
+    expect(submenu).toHaveClass("max-h-80", "overflow-y-auto", "overscroll-contain");
+    expect(submenu).not.toHaveClass("overflow-hidden");
+  });
+
   it("hides edit and refresh actions when the table has no matching capability", () => {
     openMenu({ editable: false });
 

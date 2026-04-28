@@ -1602,7 +1602,7 @@ export function QueryResultTable({
                         <ChevronRight className="h-3.5 w-3.5" />
                       </button>
                       <div
-                        className={`absolute left-full top-0 z-50 min-w-[13rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 ${filterSubOpen ? "block" : "hidden"}`}
+                        className={`absolute left-full top-0 z-50 max-h-80 min-w-[13rem] overflow-x-hidden overflow-y-auto overscroll-contain rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 slide-in-from-top-1 zoom-in-95 ${filterSubOpen ? "block" : "hidden"}`}
                       >
                         {onFilterByCellValue &&
                           CELL_FILTER_OPTIONS.map((option) => (
