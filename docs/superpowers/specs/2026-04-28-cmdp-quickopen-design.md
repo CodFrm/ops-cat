@@ -154,7 +154,7 @@ if (meta?.assetId) {
 }
 ```
 
-注意：terminal/query/info meta 都有 `assetId` 字段；page meta 也可选有 `assetId`（扩展页的资产关联）— 一并记录是合理的，未来 Cmd+P 扩展到 page 也能用。
+注意：terminal/query meta 有 `assetId`；page meta 可选 `assetId`（扩展页的资产关联）；**info meta 的字段名是 `targetId` 且只有 `targetType === "asset"` 时才是资产 ID** —— 这种情况下也要 touch。AI tab 没有资产，跳过。
 
 ### `lib/openAssetDefault.ts`
 
@@ -289,7 +289,7 @@ commandPalette.badge.terminal    终端                            Terminal
 commandPalette.badge.query       查询                            Query
 commandPalette.badge.info        信息                            Info
 commandPalette.badge.page        页面                            Page
-shortcutsList.commandQuickopen   快速打开                        Quick Open
+shortcut.command.quickopen       快速打开                        Quick Open
 ```
 
 ## 实施清单（提示给 writing-plans）
