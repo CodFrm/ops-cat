@@ -119,6 +119,7 @@
     "filterByTypeActive": "{{count}} type(s) selected",
     "filterAllTypes": "All types",
     "filterExtensions": "Extensions",
+    "filterHideEmptyGroups": "Hide empty folders",
     "icon": "Icon",
     "iconSearch": "Search icons...",
     "iconNoResults": "No matching icons",

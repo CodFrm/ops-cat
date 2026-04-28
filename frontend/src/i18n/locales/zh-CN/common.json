@@ -119,6 +119,7 @@
     "filterByTypeActive": "已筛选 {{count}} 类",
     "filterAllTypes": "全部类型",
     "filterExtensions": "扩展资产",
+    "filterHideEmptyGroups": "隐藏空文件夹",
     "icon": "图标",
     "iconSearch": "搜索图标...",
     "iconNoResults": "未找到匹配图标",

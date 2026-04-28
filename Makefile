@@ -17,6 +17,7 @@ LDFLAGS := -s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(BUILDINFO_PKG).Commit
 
 # 开发模式（前后端热重载）
 dev:
+	@mkdir -p frontend/dist && [ -e frontend/dist/.keep ] || touch frontend/dist/.keep
 	wails dev
 
 # 直接运行（不热重载）

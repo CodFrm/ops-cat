@@ -17,15 +17,24 @@ interface AssetTypeFilterButtonProps {
   value: string[];
   options: AssetTypeOption[];
   onChange: (next: string[]) => void;
+  hideEmptyGroups?: boolean;
+  onHideEmptyGroupsChange?: (next: boolean) => void;
 }
 
-export function AssetTypeFilterButton({ value, options, onChange }: AssetTypeFilterButtonProps) {
+export function AssetTypeFilterButton({
+  value,
+  options,
+  onChange,
+  hideEmptyGroups,
+  onHideEmptyGroupsChange,
+}: AssetTypeFilterButtonProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
   const selectedSet = new Set(value);
   const activeCount = value.length;
   const allChecked = options.length > 0 && activeCount === options.length;
+  const anyFilterActive = activeCount > 0 || !!hideEmptyGroups;
 
   const builtin = options.filter((o) => o.group === "builtin");
   const extensions = options.filter((o) => o.group === "extension");
@@ -61,7 +70,7 @@ export function AssetTypeFilterButton({ value, options, onChange }: AssetTypeFil
           <PopoverTrigger asChild>
             <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 relative" aria-label={tooltipLabel}>
               <Filter className="h-3.5 w-3.5" />
-              {activeCount > 0 && (
+              {anyFilterActive && (
                 <span data-active="true" className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary" />
               )}
             </Button>
@@ -81,6 +90,16 @@ export function AssetTypeFilterButton({ value, options, onChange }: AssetTypeFil
                   {t("asset.filterExtensions")}
                 </div>
                 {extensions.map(renderRow)}
+              </>
+            )}
+            {onHideEmptyGroupsChange && (
+              <>
+                <div className="my-1 mx-2 h-px bg-border" />
+                <FilterRow
+                  label={t("asset.filterHideEmptyGroups")}
+                  checked={!!hideEmptyGroups}
+                  onClick={() => onHideEmptyGroupsChange(!hideEmptyGroups)}
+                />
               </>
             )}
           </div>

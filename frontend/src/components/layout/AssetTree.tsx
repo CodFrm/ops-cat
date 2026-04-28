@@ -68,6 +68,7 @@ interface AssetTreeProps {
 }
 
 const FILTER_LS_KEY = "asset_tree_type_filter";
+const HIDE_EMPTY_LS_KEY = "asset_tree_hide_empty_groups";
 
 function loadFilter(): string[] {
   try {
@@ -86,6 +87,14 @@ function loadFilter(): string[] {
 
 function saveFilter(value: string[]) {
   localStorage.setItem(FILTER_LS_KEY, JSON.stringify(value));
+}
+
+function loadHideEmpty(): boolean {
+  return localStorage.getItem(HIDE_EMPTY_LS_KEY) === "true";
+}
+
+function saveHideEmpty(value: boolean) {
+  localStorage.setItem(HIDE_EMPTY_LS_KEY, value ? "true" : "false");
 }
 
 export function AssetTree({
@@ -112,6 +121,7 @@ export function AssetTree({
   const activeAssetIds = useActiveAssetIds();
   const [filter, setFilter] = useState("");
   const [selectedTypes, setSelectedTypes] = useState<string[]>(loadFilter);
+  const [hideEmptyGroups, setHideEmptyGroups] = useState<boolean>(loadHideEmpty);
   const [deleteConfirm, setDeleteConfirm] = useState<{
     id: number;
     assetCount: number;
@@ -126,6 +136,10 @@ export function AssetTree({
   useEffect(() => {
     saveFilter(selectedTypes);
   }, [selectedTypes]);
+
+  useEffect(() => {
+    saveHideEmpty(hideEmptyGroups);
+  }, [hideEmptyGroups]);
 
   const typeOptions = useMemo(() => getAssetTypeOptions(extensions), [extensions]);
 
@@ -144,17 +158,22 @@ export function AssetTree({
     groupedAssets.get(gid)!.push(asset);
   }
 
-  const childGroups = (parentId: number) => groups.filter((g) => (g.ParentID || 0) === parentId);
+  const rawChildGroups = (parentId: number) => groups.filter((g) => (g.ParentID || 0) === parentId);
 
   const countAssetsInGroup = (groupId: number): number => {
     let count = (groupedAssets.get(groupId) || []).length;
-    for (const child of childGroups(groupId)) {
+    for (const child of rawChildGroups(groupId)) {
       count += countAssetsInGroup(child.ID);
     }
     return count;
   };
 
-  const visibleRootGroups = childGroups(0).filter((group) => countAssetsInGroup(group.ID) > 0);
+  const childGroups = (parentId: number) => {
+    const all = rawChildGroups(parentId);
+    return hideEmptyGroups ? all.filter((g) => countAssetsInGroup(g.ID) > 0) : all;
+  };
+
+  const visibleRootGroups = childGroups(0);
 
   const handleDeleteGroup = (id: number) => {
     const directAssetCount = (groupedAssets.get(id) || []).length;
@@ -249,7 +268,13 @@ export function AssetTree({
               className="h-7 w-full rounded-md border border-sidebar-border bg-sidebar pl-7 pr-2 text-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/50 placeholder:text-muted-foreground/60 transition-colors duration-150"
             />
           </div>
-          <AssetTypeFilterButton value={selectedTypes} options={typeOptions} onChange={setSelectedTypes} />
+          <AssetTypeFilterButton
+            value={selectedTypes}
+            options={typeOptions}
+            onChange={setSelectedTypes}
+            hideEmptyGroups={hideEmptyGroups}
+            onHideEmptyGroupsChange={setHideEmptyGroups}
+          />
         </div>
       </div>
       <ScrollArea className="flex-1 min-h-0">

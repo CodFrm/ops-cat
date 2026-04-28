@@ -146,4 +146,67 @@ describe("AssetTypeFilterButton", () => {
     await user.click(screen.getByRole("button", { name: /asset.filterByType/i }));
     expect(screen.queryByText("asset.filterExtensions")).toBeNull();
   });
+
+  it("does not render the hide-empty-folders toggle when its callback is omitted", async () => {
+    const user = userEvent.setup();
+    render(
+      <TooltipProvider>
+        <AssetTypeFilterButton value={[]} options={builtinOpts} onChange={() => {}} />
+      </TooltipProvider>
+    );
+    await user.click(screen.getByRole("button", { name: /asset.filterByType/i }));
+    expect(screen.queryByText("asset.filterHideEmptyGroups")).toBeNull();
+  });
+
+  it("renders the hide-empty-folders toggle and reflects current state", async () => {
+    const user = userEvent.setup();
+    render(
+      <TooltipProvider>
+        <AssetTypeFilterButton
+          value={[]}
+          options={builtinOpts}
+          onChange={() => {}}
+          hideEmptyGroups={true}
+          onHideEmptyGroupsChange={() => {}}
+        />
+      </TooltipProvider>
+    );
+    await user.click(screen.getByRole("button", { name: /asset.filterByType/i }));
+    expect(screen.getByText("asset.filterHideEmptyGroups")).toBeTruthy();
+  });
+
+  it("toggling hide-empty-folders flips the value via onHideEmptyGroupsChange", async () => {
+    const user = userEvent.setup();
+    const onHide = vi.fn();
+    render(
+      <TooltipProvider>
+        <AssetTypeFilterButton
+          value={[]}
+          options={builtinOpts}
+          onChange={() => {}}
+          hideEmptyGroups={false}
+          onHideEmptyGroupsChange={onHide}
+        />
+      </TooltipProvider>
+    );
+    await user.click(screen.getByRole("button", { name: /asset.filterByType/i }));
+    await user.click(screen.getByText("asset.filterHideEmptyGroups"));
+    expect(onHide).toHaveBeenCalledWith(true);
+  });
+
+  it("shows the active dot when only hide-empty-folders is on (no type selected)", () => {
+    render(
+      <TooltipProvider>
+        <AssetTypeFilterButton
+          value={[]}
+          options={builtinOpts}
+          onChange={() => {}}
+          hideEmptyGroups={true}
+          onHideEmptyGroupsChange={() => {}}
+        />
+      </TooltipProvider>
+    );
+    const btn = screen.getByRole("button");
+    expect(btn.querySelector('[data-active="true"]')).not.toBeNull();
+  });
 });
