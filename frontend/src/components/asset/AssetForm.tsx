@@ -530,6 +530,18 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     }
   };
 
+  // 测试连接时把当前表单选中的密码来源（托管 / 内联加密缓存）写入 cfg。
+  // 明文 password 仍由调用方作为 TestXxxConnection 的第二参数传入；
+  // 这里只处理"无明文输入"时需要从托管凭据 ID 或已存加密值兜底的字段。
+  const applyTestPasswordSource = <T extends { credential_id?: number; password?: string }>(cfg: T): T => {
+    if (passwordSource === "managed" && passwordCredentialId > 0) {
+      cfg.credential_id = passwordCredentialId;
+    } else if (!password && encryptedPassword) {
+      cfg.password = encryptedPassword;
+    }
+    return cfg;
+  };
+
   const handleTestConnection = async () => {
     const sshConfig: SSHConfig = {
       host,
@@ -537,6 +549,9 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       username,
       auth_type: authType,
     };
+    if (authType === "password") {
+      applyTestPasswordSource(sshConfig);
+    }
     if (authType === "key") {
       if (keySource === "managed" && credentialId > 0) sshConfig.credential_id = credentialId;
       if (keySource === "file" && selectedKeyPaths.length > 0) {
@@ -548,9 +563,6 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
           sshConfig.private_key_passphrase = encryptedPrivateKeyPassphrase;
         }
       }
-    }
-    if (!password && encryptedPassword) {
-      sshConfig.password = encryptedPassword;
     }
     if (connectionType === "jumphost" && sshTunnelId > 0) sshConfig.jump_host_id = sshTunnelId;
     if (connectionType === "proxy" && proxyHost) {
@@ -581,7 +593,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     if (readOnly) cfg.read_only = true;
     if (sshTunnelId > 0) cfg.ssh_asset_id = sshTunnelId;
     if (params) cfg.params = params;
-    if (!password && encryptedPassword) cfg.password = encryptedPassword;
+    applyTestPasswordSource(cfg);
     setTesting(true);
     try {
       await TestDatabaseConnection(JSON.stringify(cfg), password);
@@ -607,7 +619,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     if (redisScanPageSize > 0) cfg.scan_page_size = redisScanPageSize;
     if (redisKeySeparator && redisKeySeparator !== ":") cfg.key_separator = redisKeySeparator;
     if (sshTunnelId > 0) cfg.ssh_asset_id = sshTunnelId;
-    if (!password && encryptedPassword) cfg.password = encryptedPassword;
+    applyTestPasswordSource(cfg);
     setTesting(true);
     try {
       await TestRedisConnection(JSON.stringify(cfg), password);
@@ -633,7 +645,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     if (database) cfg.database = database;
     if (tls) cfg.tls = true;
     if (sshTunnelId > 0) cfg.ssh_asset_id = sshTunnelId;
-    if (!password && encryptedPassword) cfg.password = encryptedPassword;
+    applyTestPasswordSource(cfg);
     setTesting(true);
     try {
       await TestMongoDBConnection(JSON.stringify(cfg), password);
