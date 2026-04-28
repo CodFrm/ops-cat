@@ -11,6 +11,7 @@ export interface LogTabState {
   logContainer: string;
   logTailLines: number;
   logError: string | null;
+  currentPod?: string;
 }
 
 interface K8sLogsPanelProps {
@@ -20,30 +21,44 @@ interface K8sLogsPanelProps {
   podName: string;
   state: LogTabState;
   onStateChange: (patch: Partial<LogTabState>) => void;
+  pods?: { name: string }[];
+  onSwitchPod?: (podName: string) => void;
 }
 
-export function K8sLogsPanel({ assetId, containers, namespace, podName, state, onStateChange }: K8sLogsPanelProps) {
+export function K8sLogsPanel({
+  assetId,
+  containers,
+  namespace,
+  podName,
+  state,
+  onStateChange,
+  pods,
+  onSwitchPod,
+}: K8sLogsPanelProps) {
   const { t } = useTranslation();
   const terminalRef = useRef<K8sLogTerminalHandle>(null);
   const myStreamIDRef = useRef<string | null>(null);
+  const onStateChangeRef = useRef(onStateChange);
+  // eslint-disable-next-line react-hooks/refs
+  onStateChangeRef.current = onStateChange;
 
   const stop = useCallback(() => {
     if (myStreamIDRef.current) {
       StopK8sPodLogs(myStreamIDRef.current);
       myStreamIDRef.current = null;
     }
-    onStateChange({ logStreamID: null });
-  }, [onStateChange]);
+    onStateChangeRef.current({ logStreamID: null });
+  }, []);
 
   const start = useCallback(() => {
     stop();
     terminalRef.current?.clear();
-    onStateChange({ logError: null });
+    onStateChangeRef.current({ logError: null });
 
     StartK8sPodLogs(assetId, namespace, podName, state.logContainer, state.logTailLines)
       .then((streamID: string) => {
         myStreamIDRef.current = streamID;
-        onStateChange({ logStreamID: streamID });
+        onStateChangeRef.current({ logStreamID: streamID });
 
         const dataEvent = "k8s:log:" + streamID;
         const errEvent = "k8s:logerr:" + streamID;
@@ -66,22 +81,22 @@ export function K8sLogsPanel({ assetId, containers, namespace, podName, state, o
         EventsOn(errEvent, (err: string) => {
           if (myStreamIDRef.current !== streamID) return;
           if (err === "context canceled" || err.includes("context canceled")) return;
-          onStateChange({ logError: err });
+          onStateChangeRef.current({ logError: err });
         });
 
         EventsOn(endEvent, () => {
           if (myStreamIDRef.current !== streamID) return;
           myStreamIDRef.current = null;
-          onStateChange({ logStreamID: null });
+          onStateChangeRef.current({ logStreamID: null });
           EventsOff(dataEvent);
           EventsOff(errEvent);
           EventsOff(endEvent);
         });
       })
       .catch((e: unknown) => {
-        onStateChange({ logError: String(e) });
+        onStateChangeRef.current({ logError: String(e) });
       });
-  }, [assetId, namespace, podName, state.logContainer, state.logTailLines, stop, onStateChange]);
+  }, [assetId, namespace, podName, state.logContainer, state.logTailLines, stop]);
 
   useEffect(() => {
     return () => {
@@ -92,6 +107,15 @@ export function K8sLogsPanel({ assetId, containers, namespace, podName, state, o
     };
   }, []);
 
+  useEffect(() => {
+    if (myStreamIDRef.current) {
+      StopK8sPodLogs(myStreamIDRef.current);
+      myStreamIDRef.current = null;
+      onStateChangeRef.current({ logStreamID: null });
+    }
+    terminalRef.current?.clear();
+  }, [podName]);
+
   return (
     <K8sSectionCard className="flex flex-col h-full">
       <div className="flex items-center justify-between mb-3">
@@ -100,25 +124,27 @@ export function K8sLogsPanel({ assetId, containers, namespace, podName, state, o
           {t("asset.k8sPodLogs")}
         </h4>
         <div className="flex items-center gap-2">
-          <select
-            className="h-7 rounded-md border bg-background px-2 text-xs"
-            value={state.logContainer || containers[0]?.name || ""}
-            onChange={(e) => {
-              const container = e.target.value;
-              onStateChange({ logContainer: container });
-              if (state.logStreamID) {
-                stop();
-                // 注意：这里不自动 start，让用户手动点击开始
-              }
-            }}
-            disabled={!!state.logStreamID}
-          >
-            {containers.map((c) => (
-              <option key={c.name} value={c.name}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          {containers.length > 1 && (
+            <select
+              className="h-7 rounded-md border bg-background px-2 text-xs"
+              value={state.logContainer || containers[0]?.name || ""}
+              onChange={(e) => {
+                const container = e.target.value;
+                onStateChange({ logContainer: container });
+                if (state.logStreamID) {
+                  stop();
+                  // 注意：这里不自动 start，让用户手动点击开始
+                }
+              }}
+              disabled={!!state.logStreamID}
+            >
+              {containers.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          )}
           <input
             type="number"
             className="h-7 w-16 rounded-md border bg-background px-2 text-xs"
@@ -148,6 +174,28 @@ export function K8sLogsPanel({ assetId, containers, namespace, podName, state, o
           )}
         </div>
       </div>
+      {pods && pods.length > 0 && onSwitchPod && (
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-xs text-muted-foreground">Pod:</span>
+          <select
+            className="h-7 rounded-md border bg-background px-2 text-xs flex-1 min-w-0"
+            value={podName}
+            onChange={(e) => {
+              const newPod = e.target.value;
+              if (newPod !== podName) {
+                stop();
+                onSwitchPod(newPod);
+              }
+            }}
+          >
+            {pods.map((p) => (
+              <option key={p.name} value={p.name}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       {state.logError && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive mb-3">
           {t("asset.k8sPodLogsError")}: {state.logError}

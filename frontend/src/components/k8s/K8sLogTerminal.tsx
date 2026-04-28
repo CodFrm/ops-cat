@@ -7,7 +7,7 @@ import { builtinThemes, defaultLightTheme, defaultDarkTheme } from "@/data/termi
 import { useResolvedTheme } from "@/components/theme-provider";
 
 export interface K8sLogTerminalHandle {
-  write: (data: string) => void;
+  write: (data: string | Uint8Array) => void;
   clear: () => void;
 }
 
@@ -32,7 +32,7 @@ export const K8sLogTerminal = forwardRef<K8sLogTerminalHandle>(function K8sLogTe
   }, [selectedThemeId, customThemes, resolvedTheme]);
 
   useImperativeHandle(ref, () => ({
-    write: (data: string) => {
+    write: (data: string | Uint8Array) => {
       termRef.current?.write(data);
     },
     clear: () => {
@@ -84,4 +84,4 @@ export const K8sLogTerminal = forwardRef<K8sLogTerminalHandle>(function K8sLogTe
   }, [xtermTheme, fontSize, scrollback]);
 
   return <div ref={wrapperRef} className="flex-1 w-full rounded-lg overflow-hidden min-h-0" />;
-})
+});
