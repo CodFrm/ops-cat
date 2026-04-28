@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -158,6 +160,48 @@ type PodListItem struct {
 	RestartCount int32  `json:"restart_count"`
 }
 
+type DeploymentListItem struct {
+	Name      string        `json:"name"`
+	Namespace string        `json:"namespace"`
+	Ready     string        `json:"ready"`
+	UpToDate  int32         `json:"up_to_date"`
+	Available int32         `json:"available"`
+	Age       string        `json:"age"`
+	Pods      []PodListItem `json:"pods"`
+}
+
+type ServicePortItem struct {
+	Name       string `json:"name"`
+	Port       int32  `json:"port"`
+	TargetPort string `json:"target_port"`
+	NodePort   int32  `json:"node_port"`
+	Protocol   string `json:"protocol"`
+}
+
+type ServiceListItem struct {
+	Name      string            `json:"name"`
+	Namespace string            `json:"namespace"`
+	Type      string            `json:"type"`
+	ClusterIP string            `json:"cluster_ip"`
+	Ports     []ServicePortItem `json:"ports"`
+	Age       string            `json:"age"`
+}
+
+type ConfigMapListItem struct {
+	Name      string            `json:"name"`
+	Namespace string            `json:"namespace"`
+	Data      map[string]string `json:"data"`
+	Age       string            `json:"age"`
+}
+
+type SecretListItem struct {
+	Name      string            `json:"name"`
+	Namespace string            `json:"namespace"`
+	Type      string            `json:"type"`
+	Data      map[string]string `json:"data"`
+	Age       string            `json:"age"`
+}
+
 type ContainerDetail struct {
 	Name         string `json:"name"`
 	Image        string `json:"image"`
@@ -293,34 +337,178 @@ func GetNamespacePods(ctx context.Context, kubeconfig, apiServer, token, namespa
 	now := time.Now()
 	result := make([]PodListItem, 0, len(podList.Items))
 	for _, pod := range podList.Items {
-		readyContainers := int32(0)
-		totalContainers := len(pod.Spec.Containers)
-		status := string(pod.Status.Phase)
-		restarts := int32(0)
-		for _, cs := range pod.Status.ContainerStatuses {
-			if cs.Ready {
-				readyContainers++
+		result = append(result, podListItem(pod, now))
+	}
+	return result, nil
+}
+
+func podListItem(pod corev1.Pod, now time.Time) PodListItem {
+	readyContainers := int32(0)
+	totalContainers := len(pod.Spec.Containers)
+	status := string(pod.Status.Phase)
+	restarts := int32(0)
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Ready {
+			readyContainers++
+		}
+		restarts += cs.RestartCount
+	}
+	if pod.Status.Reason != "" {
+		status = pod.Status.Reason
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.State.Waiting != nil && cs.State.Waiting.Reason != "" {
+			status = cs.State.Waiting.Reason
+		}
+	}
+	return PodListItem{
+		Name:         pod.Name,
+		Namespace:    pod.Namespace,
+		Status:       status,
+		NodeName:     pod.Spec.NodeName,
+		PodIP:        pod.Status.PodIP,
+		Age:          fmtDuration(now.Sub(pod.CreationTimestamp.Time)),
+		Ready:        fmt.Sprintf("%d/%d", readyContainers, totalContainers),
+		RestartCount: restarts,
+	}
+}
+
+func GetNamespaceDeployments(ctx context.Context, kubeconfig, apiServer, token, namespace string, opts ...ClientOption) ([]DeploymentListItem, error) {
+	clientset, err := buildClient(kubeconfig, apiServer, token, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	deployList, err := clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("list deployments: %w", err)
+	}
+	podList, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("list pods: %w", err)
+	}
+
+	now := time.Now()
+	result := make([]DeploymentListItem, 0, len(deployList.Items))
+	for _, deploy := range deployList.Items {
+		selector, err := metav1.LabelSelectorAsSelector(deploy.Spec.Selector)
+		if err != nil {
+			return nil, fmt.Errorf("build deployment selector %s: %w", deploy.Name, err)
+		}
+
+		pods := make([]PodListItem, 0)
+		for _, pod := range podList.Items {
+			if selector.Matches(labels.Set(pod.Labels)) {
+				pods = append(pods, podListItem(pod, now))
 			}
-			restarts += cs.RestartCount
 		}
-		if pod.Status.Reason != "" {
-			status = pod.Status.Reason
+
+		desired := int32(0)
+		if deploy.Spec.Replicas != nil {
+			desired = *deploy.Spec.Replicas
 		}
-		for _, cs := range pod.Status.ContainerStatuses {
-			if cs.State.Waiting != nil && cs.State.Waiting.Reason != "" {
-				status = cs.State.Waiting.Reason
+		result = append(result, DeploymentListItem{
+			Name:      deploy.Name,
+			Namespace: deploy.Namespace,
+			Ready:     fmt.Sprintf("%d/%d", deploy.Status.ReadyReplicas, desired),
+			UpToDate:  deploy.Status.UpdatedReplicas,
+			Available: deploy.Status.AvailableReplicas,
+			Age:       fmtDuration(now.Sub(deploy.CreationTimestamp.Time)),
+			Pods:      pods,
+		})
+	}
+	return result, nil
+}
+
+func GetNamespaceServices(ctx context.Context, kubeconfig, apiServer, token, namespace string, opts ...ClientOption) ([]ServiceListItem, error) {
+	clientset, err := buildClient(kubeconfig, apiServer, token, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	svcList, err := clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("list services: %w", err)
+	}
+
+	now := time.Now()
+	result := make([]ServiceListItem, 0, len(svcList.Items))
+	for _, svc := range svcList.Items {
+		ports := make([]ServicePortItem, 0, len(svc.Spec.Ports))
+		for _, p := range svc.Spec.Ports {
+			targetPort := p.TargetPort.String()
+			if targetPort == "0" {
+				targetPort = ""
 			}
+			ports = append(ports, ServicePortItem{
+				Name:       p.Name,
+				Port:       p.Port,
+				TargetPort: targetPort,
+				NodePort:   p.NodePort,
+				Protocol:   string(p.Protocol),
+			})
 		}
-		age := fmtDuration(now.Sub(pod.CreationTimestamp.Time))
-		result = append(result, PodListItem{
-			Name:         pod.Name,
-			Namespace:    pod.Namespace,
-			Status:       status,
-			NodeName:     pod.Spec.NodeName,
-			PodIP:        pod.Status.PodIP,
-			Age:          age,
-			Ready:        fmt.Sprintf("%d/%d", readyContainers, totalContainers),
-			RestartCount: restarts,
+
+		result = append(result, ServiceListItem{
+			Name:      svc.Name,
+			Namespace: svc.Namespace,
+			Type:      string(svc.Spec.Type),
+			ClusterIP: svc.Spec.ClusterIP,
+			Ports:     ports,
+			Age:       fmtDuration(now.Sub(svc.CreationTimestamp.Time)),
+		})
+	}
+	return result, nil
+}
+
+func GetNamespaceConfigMaps(ctx context.Context, kubeconfig, apiServer, token, namespace string, opts ...ClientOption) ([]ConfigMapListItem, error) {
+	clientset, err := buildClient(kubeconfig, apiServer, token, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	cmList, err := clientset.CoreV1().ConfigMaps(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("list configmaps: %w", err)
+	}
+
+	now := time.Now()
+	result := make([]ConfigMapListItem, 0, len(cmList.Items))
+	for _, cm := range cmList.Items {
+		result = append(result, ConfigMapListItem{
+			Name:      cm.Name,
+			Namespace: cm.Namespace,
+			Data:      cm.Data,
+			Age:       fmtDuration(now.Sub(cm.CreationTimestamp.Time)),
+		})
+	}
+	return result, nil
+}
+
+func GetNamespaceSecrets(ctx context.Context, kubeconfig, apiServer, token, namespace string, opts ...ClientOption) ([]SecretListItem, error) {
+	clientset, err := buildClient(kubeconfig, apiServer, token, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	secretList, err := clientset.CoreV1().Secrets(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("list secrets: %w", err)
+	}
+
+	now := time.Now()
+	result := make([]SecretListItem, 0, len(secretList.Items))
+	for _, s := range secretList.Items {
+		data := make(map[string]string, len(s.Data))
+		for k, v := range s.Data {
+			data[k] = base64.StdEncoding.EncodeToString(v)
+		}
+		result = append(result, SecretListItem{
+			Name:      s.Name,
+			Namespace: s.Namespace,
+			Type:      string(s.Type),
+			Data:      data,
+			Age:       fmtDuration(now.Sub(s.CreationTimestamp.Time)),
 		})
 	}
 	return result, nil

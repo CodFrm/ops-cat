@@ -120,6 +120,142 @@ func (a *App) GetK8sNamespacePods(assetID int64, namespace string) (string, erro
 	return string(result), nil
 }
 
+func (a *App) GetK8sNamespaceDeployments(assetID int64, namespace string) (string, error) {
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+
+	asset, err := asset_svc.Asset().Get(ctx, assetID)
+	if err != nil {
+		return "", fmt.Errorf("get asset: %w", err)
+	}
+	if !asset.IsK8s() {
+		return "", fmt.Errorf("asset %d is not a K8S cluster", assetID)
+	}
+
+	cfg, err := asset.GetK8sConfig()
+	if err != nil {
+		return "", fmt.Errorf("get K8S config: %w", err)
+	}
+
+	token := cfg.Token
+	if token == "" && cfg.Kubeconfig == "" && cfg.ApiServer == "" {
+		return "", fmt.Errorf("no kubeconfig or api_server configured for this K8S asset")
+	}
+
+	deployments, err := k8s.GetNamespaceDeployments(ctx, cfg.Kubeconfig, cfg.ApiServer, token, namespace, a.k8sClientOptions(asset, cfg)...)
+	if err != nil {
+		return "", fmt.Errorf("get K8S namespace deployments: %w", err)
+	}
+
+	result, err := json.Marshal(deployments)
+	if err != nil {
+		return "", fmt.Errorf("marshal deployments: %w", err)
+	}
+	return string(result), nil
+}
+
+func (a *App) GetK8sNamespaceServices(assetID int64, namespace string) (string, error) {
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+
+	asset, err := asset_svc.Asset().Get(ctx, assetID)
+	if err != nil {
+		return "", fmt.Errorf("get asset: %w", err)
+	}
+	if !asset.IsK8s() {
+		return "", fmt.Errorf("asset %d is not a K8S cluster", assetID)
+	}
+
+	cfg, err := asset.GetK8sConfig()
+	if err != nil {
+		return "", fmt.Errorf("get K8S config: %w", err)
+	}
+
+	token := cfg.Token
+	if token == "" && cfg.Kubeconfig == "" && cfg.ApiServer == "" {
+		return "", fmt.Errorf("no kubeconfig or api_server configured for this K8S asset")
+	}
+
+	services, err := k8s.GetNamespaceServices(ctx, cfg.Kubeconfig, cfg.ApiServer, token, namespace, a.k8sClientOptions(asset, cfg)...)
+	if err != nil {
+		return "", fmt.Errorf("get K8S namespace services: %w", err)
+	}
+
+	result, err := json.Marshal(services)
+	if err != nil {
+		return "", fmt.Errorf("marshal services: %w", err)
+	}
+	return string(result), nil
+}
+
+func (a *App) GetK8sNamespaceConfigMaps(assetID int64, namespace string) (string, error) {
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+
+	asset, err := asset_svc.Asset().Get(ctx, assetID)
+	if err != nil {
+		return "", fmt.Errorf("get asset: %w", err)
+	}
+	if !asset.IsK8s() {
+		return "", fmt.Errorf("asset %d is not a K8S cluster", assetID)
+	}
+
+	cfg, err := asset.GetK8sConfig()
+	if err != nil {
+		return "", fmt.Errorf("get K8S config: %w", err)
+	}
+
+	token := cfg.Token
+	if token == "" && cfg.Kubeconfig == "" && cfg.ApiServer == "" {
+		return "", fmt.Errorf("no kubeconfig or api_server configured for this K8S asset")
+	}
+
+	configmaps, err := k8s.GetNamespaceConfigMaps(ctx, cfg.Kubeconfig, cfg.ApiServer, token, namespace, a.k8sClientOptions(asset, cfg)...)
+	if err != nil {
+		return "", fmt.Errorf("get K8S namespace configmaps: %w", err)
+	}
+
+	result, err := json.Marshal(configmaps)
+	if err != nil {
+		return "", fmt.Errorf("marshal configmaps: %w", err)
+	}
+	return string(result), nil
+}
+
+func (a *App) GetK8sNamespaceSecrets(assetID int64, namespace string) (string, error) {
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+
+	asset, err := asset_svc.Asset().Get(ctx, assetID)
+	if err != nil {
+		return "", fmt.Errorf("get asset: %w", err)
+	}
+	if !asset.IsK8s() {
+		return "", fmt.Errorf("asset %d is not a K8S cluster", assetID)
+	}
+
+	cfg, err := asset.GetK8sConfig()
+	if err != nil {
+		return "", fmt.Errorf("get K8S config: %w", err)
+	}
+
+	token := cfg.Token
+	if token == "" && cfg.Kubeconfig == "" && cfg.ApiServer == "" {
+		return "", fmt.Errorf("no kubeconfig or api_server configured for this K8S asset")
+	}
+
+	secrets, err := k8s.GetNamespaceSecrets(ctx, cfg.Kubeconfig, cfg.ApiServer, token, namespace, a.k8sClientOptions(asset, cfg)...)
+	if err != nil {
+		return "", fmt.Errorf("get K8S namespace secrets: %w", err)
+	}
+
+	result, err := json.Marshal(secrets)
+	if err != nil {
+		return "", fmt.Errorf("marshal secrets: %w", err)
+	}
+	return string(result), nil
+}
+
 func (a *App) GetK8sPodDetail(assetID int64, namespace, podName string) (string, error) {
 	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
 	defer cancel()
