@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
 import logoLight from "@/assets/images/logo.png";
@@ -22,11 +23,12 @@ import { useTerminalStore } from "@/stores/terminalStore";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTabStore, type QueryTabMeta, type PageTabMeta, type InfoTabMeta } from "@/stores/tabStore";
 import { useSFTPStore } from "@/stores/sftpStore";
-import { useShortcutStore, formatBinding, type ShortcutAction } from "@/stores/shortcutStore";
+import { useShortcutStore, formatBinding, matchShortcut, type ShortcutAction } from "@/stores/shortcutStore";
 import { asset_entity } from "../../../wailsjs/go/models";
 import { ExtensionPage } from "@/extension";
 import { TopTabBar } from "./TopTabBar";
 import { useLayoutStore } from "@/stores/layoutStore";
+import { CommandPalette } from "@/components/command/CommandPalette";
 
 interface MainPanelProps {
   onEditAsset: (asset: asset_entity.Asset) => void;
@@ -37,6 +39,7 @@ interface MainPanelProps {
 export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPanelProps) {
   const { t } = useTranslation();
   const isFullscreen = useFullscreen();
+  const [commandOpen, setCommandOpen] = useState(false);
 
   const tabs = useTabStore((s) => s.tabs);
   const activeTabId = useTabStore((s) => s.activeTabId);
@@ -49,6 +52,23 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPa
 
   const tabBarLayout = useLayoutStore((s) => s.tabBarLayout);
   const shortcuts = useShortcutStore((s) => s.shortcuts);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const action = matchShortcut(e, shortcuts);
+      if (!action) return;
+
+      switch (action) {
+        case "command.quickopen":
+          e.preventDefault();
+          setCommandOpen((v) => !v);
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [shortcuts]);
 
   const openSettingsTab = () => {
     const tabStore = useTabStore.getState();
@@ -333,6 +353,8 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPa
           </div>
         )}
       </div>
+
+      <CommandPalette open={commandOpen} onOpenChange={setCommandOpen} onConnectAsset={onConnectAsset} />
     </div>
   );
 }
