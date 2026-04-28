@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   ChevronRight,
   ChevronDown,
@@ -12,6 +13,8 @@ import {
   Search,
   Plus,
   Wrench,
+  Trash2,
+  Eraser,
 } from "lucide-react";
 import {
   Button,
@@ -22,7 +25,9 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ConfirmDialog,
 } from "@opskat/ui";
+import { ExecuteSQL } from "../../../wailsjs/go/app/App";
 import { useQueryStore } from "@/stores/queryStore";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { CreateDatabaseDialog } from "./CreateDatabaseDialog";
@@ -47,6 +52,12 @@ export function DatabaseTree({ tabId }: DatabaseTreeProps) {
   const [showAlterTable, setShowAlterTable] = useState(false);
   const [alterDatabase, setAlterDatabase] = useState("");
   const [alterTableName, setAlterTableName] = useState("");
+  const [confirmAction, setConfirmAction] = useState<{
+    type: "drop" | "truncate";
+    database: string;
+    table: string;
+  } | null>(null);
+  const [executingAction, setExecutingAction] = useState(false);
 
   const tab = useTabStore((s) => s.tabs.find((t) => t.id === tabId));
   const tabMeta = tab?.meta as QueryTabMeta | undefined;
@@ -88,6 +99,30 @@ export function DatabaseTree({ tabId }: DatabaseTreeProps) {
     }
     return out;
   }, [dbState, filterLower]);
+
+  const handleConfirmAction = async () => {
+    if (!confirmAction || !tabMeta?.assetId) return;
+    const { type, database, table } = confirmAction;
+    const qualified =
+      driver === "postgresql"
+        ? quoteIdent(table, driver)
+        : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+    const sql = type === "drop" ? `DROP TABLE ${qualified}` : `TRUNCATE TABLE ${qualified}`;
+    setExecutingAction(true);
+    try {
+      await ExecuteSQL(tabMeta.assetId, sql, database);
+      toast.success(t(type === "drop" ? "query.dropTableSuccess" : "query.truncateTableSuccess", { table }));
+      if (type === "drop") {
+        if (selected?.db === database && selected?.table === table) setSelected(null);
+        await refreshTables(tabId, database);
+      }
+      setConfirmAction(null);
+    } catch (err) {
+      toast.error(String(err));
+    } finally {
+      setExecutingAction(false);
+    }
+  };
 
   if (!dbState) return null;
 
@@ -293,6 +328,21 @@ export function DatabaseTree({ tabId }: DatabaseTreeProps) {
                                   <Search className="h-3.5 w-3.5" />
                                   {t("query.newSql")}
                                 </ContextMenuItem>
+                                <ContextMenuSeparator />
+                                <ContextMenuItem
+                                  variant="destructive"
+                                  onClick={() => setConfirmAction({ type: "truncate", database: db, table: tbl })}
+                                >
+                                  <Eraser className="h-3.5 w-3.5" />
+                                  {t("query.truncateTable")}
+                                </ContextMenuItem>
+                                <ContextMenuItem
+                                  variant="destructive"
+                                  onClick={() => setConfirmAction({ type: "drop", database: db, table: tbl })}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  {t("query.dropTable")}
+                                </ContextMenuItem>
                               </ContextMenuContent>
                             </ContextMenu>
                           );
@@ -360,6 +410,21 @@ export function DatabaseTree({ tabId }: DatabaseTreeProps) {
           setAlterDatabase("");
           setAlterTableName("");
         }}
+      />
+
+      <ConfirmDialog
+        open={!!confirmAction}
+        onOpenChange={(open) => {
+          if (!open && !executingAction) setConfirmAction(null);
+        }}
+        title={t(confirmAction?.type === "drop" ? "query.dropTableConfirmTitle" : "query.truncateTableConfirmTitle")}
+        description={t(
+          confirmAction?.type === "drop" ? "query.dropTableConfirmDesc" : "query.truncateTableConfirmDesc",
+          { table: confirmAction?.table ?? "" }
+        )}
+        cancelText={t("action.cancel")}
+        confirmText={t(confirmAction?.type === "drop" ? "query.dropTable" : "query.truncateTable")}
+        onConfirm={handleConfirmAction}
       />
     </div>
   );
