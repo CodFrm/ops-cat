@@ -715,7 +715,32 @@
     "panel.filter": "Find Tabs",
     "page.home": "Switch to Home",
     "page.settings": "Switch to Settings",
-    "page.sshkeys": "Switch to SSH Keys"
+    "page.sshkeys": "Switch to SSH Keys",
+    "command.quickopen": "Quick Open"
+  },
+  "commandPalette": {
+    "placeholder": "Search assets or open tabs...",
+    "section": {
+      "opened": "Open",
+      "recent": "Recent",
+      "assets": "Assets"
+    },
+    "empty": {
+      "noContent": "No items. Add an asset first.",
+      "noMatch": "No matching results"
+    },
+    "footer": {
+      "navigate": "Navigate",
+      "open": "Open",
+      "close": "Close"
+    },
+    "badge": {
+      "terminal": "Terminal",
+      "query": "Query",
+      "info": "Info",
+      "page": "Page",
+      "ai": "AI"
+    }
   },
   "panel": {
     "toggleSidebar": "Toggle Sidebar",

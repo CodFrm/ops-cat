@@ -715,7 +715,32 @@
     "panel.filter": "查找标签页",
     "page.home": "切换到首页",
     "page.settings": "切换到设置",
-    "page.sshkeys": "切换到 SSH 密钥"
+    "page.sshkeys": "切换到 SSH 密钥",
+    "command.quickopen": "快速打开"
+  },
+  "commandPalette": {
+    "placeholder": "搜索资产或已打开的标签...",
+    "section": {
+      "opened": "已打开",
+      "recent": "最近",
+      "assets": "资产"
+    },
+    "empty": {
+      "noContent": "暂无内容，先在左侧添加资产",
+      "noMatch": "没有匹配的结果"
+    },
+    "footer": {
+      "navigate": "选择",
+      "open": "打开",
+      "close": "关闭"
+    },
+    "badge": {
+      "terminal": "终端",
+      "query": "查询",
+      "info": "信息",
+      "page": "页面",
+      "ai": "AI"
+    }
   },
   "panel": {
     "toggleSidebar": "切换资产列表",
