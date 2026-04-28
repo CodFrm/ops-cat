@@ -214,6 +214,26 @@ interface Props {
   asset: asset_entity.Asset;
 }
 
+interface ResourceSearchInputProps {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}
+
+function ResourceSearchInput({ value, onChange, placeholder }: ResourceSearchInputProps) {
+  return (
+    <div className="relative my-1 ml-9 mr-2">
+      <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="h-6 w-full pl-7 text-xs"
+      />
+    </div>
+  );
+}
+
 export function K8sClusterPage({ asset }: Props) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
@@ -867,24 +887,6 @@ export function K8sClusterPage({ asset }: Props) {
       return { ...prev, [tabId]: { ...existing, ...patch } };
     });
   }, []);
-
-  interface ResourceSearchInputProps {
-    value: string;
-    onChange: (value: string) => void;
-    placeholder?: string;
-  }
-
-  const ResourceSearchInput = ({ value, onChange, placeholder }: ResourceSearchInputProps) => (
-    <div className="relative my-1 ml-9 mr-2">
-      <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
-      <Input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="h-6 w-full pl-7 text-xs"
-      />
-    </div>
-  );
 
   useEffect(() => {
     loadInfo();
