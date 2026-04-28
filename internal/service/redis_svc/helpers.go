@@ -9,9 +9,8 @@ import (
 )
 
 const (
-	defaultRedisScanCount       = int64(200)
-	maxRedisScanCount           = int64(2000)
-	filteredRedisScanBatchCount = int64(3000)
+	defaultRedisScanCount = int64(200)
+	maxRedisScanCount     = int64(2000)
 )
 
 var keyspaceLineRE = regexp.MustCompile(`^db(\d+):(.+)$`)

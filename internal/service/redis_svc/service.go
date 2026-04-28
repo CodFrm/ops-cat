@@ -258,9 +258,6 @@ func scanKeys(ctx context.Context, exec redisExecutor, req RedisScanRequest) (Re
 	keys := make([]string, 0)
 	scanCount := req.Count
 	filteredScan := req.Match != "*" || req.Type != ""
-	if filteredScan && scanCount < filteredRedisScanBatchCount {
-		scanCount = filteredRedisScanBatchCount
-	}
 	for {
 		args := []any{"SCAN", cursor, "MATCH", req.Match, "COUNT", scanCount}
 		if req.Type != "" {

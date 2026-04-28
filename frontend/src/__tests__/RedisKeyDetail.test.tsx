@@ -105,6 +105,21 @@ describe("RedisKeyDetail", () => {
     expect(within(valueBox).getByText("1")).toHaveClass("text-purple-700");
     expect(within(valueBox).getByText("true")).toHaveClass("text-amber-700");
   });
+
+  it("executes command input with quoted arguments preserved", async () => {
+    vi.mocked(ExecuteRedisArgs).mockResolvedValue(JSON.stringify({ type: "string", value: "OK" }));
+
+    render(<RedisKeyDetail tabId="query-10" />);
+
+    fireEvent.change(screen.getByPlaceholderText("query.redisPlaceholder"), {
+      target: { value: 'SET "my key" "hello world"' },
+    });
+    fireEvent.keyDown(screen.getByPlaceholderText("query.redisPlaceholder"), { key: "Enter" });
+
+    await waitFor(() => {
+      expect(ExecuteRedisArgs).toHaveBeenCalledWith(10, ["SET", "my key", "hello world"], 2);
+    });
+  });
 });
 
 describe("RedisStreamViewer", () => {

@@ -375,12 +375,26 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
     return flattenTree(keyTree, treeExpanded, keySeparator);
   }, [keyTree, treeExpanded, keySeparator]);
 
+  const rowCount = viewMode === "tree" ? flatRows.length : visibleKeys.length;
   const virtualizer = useVirtualizer({
-    count: viewMode === "tree" ? flatRows.length : visibleKeys.length,
+    count: rowCount,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => KEY_ROW_HEIGHT,
+    initialRect: { width: 0, height: KEY_ROW_HEIGHT * 20 },
     overscan: 20,
   });
+  const virtualRows = virtualizer.getVirtualItems();
+  const renderRows =
+    virtualRows.length > 0
+      ? virtualRows
+      : Array.from({ length: Math.min(rowCount, 20) }, (_, index) => ({
+          index,
+          key: index,
+          start: index * KEY_ROW_HEIGHT,
+          size: KEY_ROW_HEIGHT,
+          end: (index + 1) * KEY_ROW_HEIGHT,
+          lane: 0,
+        }));
   const currentDbTotal = state ? state.dbKeyCounts[state.currentDb] : undefined;
   const keyFilterIsDefault = !state || isDefaultFilter(state.keyFilter);
   const draftFilterIsDefault = isDefaultFilter(draftFilter);
@@ -554,7 +568,14 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
     await selectKey(tabId, key);
   };
 
-  const dbOptions = Array.from({ length: Math.max(16, state.currentDb + 1) }, (_, i) => i);
+  const dbOptions = Array.from(
+    new Set([
+      ...Array.from({ length: Math.max(16, state.currentDb + 1) }, (_, i) => i),
+      ...Object.keys(state.dbKeyCounts)
+        .map(Number)
+        .filter((db) => Number.isInteger(db) && db >= 0),
+    ])
+  ).sort((a, b) => a - b);
 
   return (
     <div className="flex h-full flex-col">
@@ -623,30 +644,23 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
         onScroll={handleScroll}
       >
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
-          {virtualizer.getVirtualItems().map((virtualRow) => {
+          {renderRows.map((virtualRow) => {
             if (viewMode === "tree") {
               const row = flatRows[virtualRow.index];
               if (!row) return null;
               const isKey = row.fullKey !== null;
               const isFolder = row.hasChildren;
               return (
-                <button
+                <div
                   key={virtualRow.key}
-                  className={`absolute left-0 flex w-full items-center gap-1 text-left text-xs hover:bg-accent ${
+                  className={`absolute left-0 flex w-full items-center text-xs hover:bg-accent ${
                     isKey && state.selectedKey === row.fullKey ? "bg-accent text-accent-foreground" : ""
                   }`}
                   style={{
                     top: virtualRow.start,
                     height: virtualRow.size,
-                    paddingLeft: `${row.depth * 16 + 8}px`,
+                    paddingLeft: `${row.depth * 16 + 4}px`,
                     paddingRight: "8px",
-                  }}
-                  onClick={() => {
-                    if (isFolder) {
-                      toggleTreeNode(row.nodeId);
-                    } else if (isKey) {
-                      handleSelectKey(row.fullKey!);
-                    }
                   }}
                   onContextMenu={
                     isKey
@@ -658,27 +672,53 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
                       : undefined
                   }
                 >
-                  {isFolder && row.isExpanded ? (
-                    <>
-                      <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
-                      <FolderOpen className="size-3 shrink-0 text-muted-foreground" />
-                    </>
-                  ) : isFolder ? (
-                    <>
-                      <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
-                      <Folder className="size-3 shrink-0 text-muted-foreground" />
-                    </>
+                  {isFolder ? (
+                    <button
+                      type="button"
+                      className="flex size-5 shrink-0 items-center justify-center rounded-sm hover:bg-accent"
+                      title={`${row.isExpanded ? t("query.collapseFolder") : t("query.expandFolder")} ${row.nodeId}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleTreeNode(row.nodeId);
+                      }}
+                    >
+                      {row.isExpanded ? (
+                        <ChevronDown className="size-3 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="size-3 text-muted-foreground" />
+                      )}
+                    </button>
                   ) : (
-                    <Key className="size-3 shrink-0 text-muted-foreground" />
+                    <span className="size-5 shrink-0" />
                   )}
-                  <span className="truncate font-mono">{row.name}</span>
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 items-center gap-1 text-left"
+                    title={isKey ? row.fullKey! : row.nodeId}
+                    onClick={() => {
+                      if (isKey) {
+                        handleSelectKey(row.fullKey!);
+                      } else if (isFolder) {
+                        toggleTreeNode(row.nodeId);
+                      }
+                    }}
+                  >
+                    {isKey ? (
+                      <Key className="size-3 shrink-0 text-muted-foreground" />
+                    ) : row.isExpanded ? (
+                      <FolderOpen className="size-3 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <Folder className="size-3 shrink-0 text-muted-foreground" />
+                    )}
+                    <span className="truncate font-mono">{row.name}</span>
+                  </button>
                   {isFolder && (
                     <span className="ml-auto shrink-0 text-muted-foreground text-[10px]">
                       {row.keyCount}
                       {treeCountsIncomplete ? "+" : ""}
                     </span>
                   )}
-                </button>
+                </div>
               );
             }
 

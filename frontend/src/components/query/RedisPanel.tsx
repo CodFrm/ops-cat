@@ -24,6 +24,8 @@ function getKeyFromView(view: string) {
 export function RedisPanel({ tabId }: RedisPanelProps) {
   const { t } = useTranslation();
   const selectedKey = useQueryStore((s) => s.redisStates[tabId]?.selectedKey);
+  const removedKey = useQueryStore((s) => s.redisStates[tabId]?.removedKey);
+  const removedKeySeq = useQueryStore((s) => s.redisStates[tabId]?.removedKeySeq);
   const selectKey = useQueryStore((s) => s.selectKey);
   const clearSelectedKey = useQueryStore((s) => s.clearSelectedKey);
   const [activeView, setActiveView] = useState<string>(REDIS_OVERVIEW_VIEW);
@@ -76,6 +78,25 @@ export function RedisPanel({ tabId }: RedisPanelProps) {
       return next;
     });
   };
+
+  useEffect(() => {
+    if (!removedKey || !removedKeySeq) return;
+    setOpenKeys((prev) => {
+      if (!prev.includes(removedKey)) return prev;
+      const next = prev.filter((item) => item !== removedKey);
+      if (activeKey === removedKey) {
+        const currentIndex = prev.indexOf(removedKey);
+        const fallback = next[Math.min(currentIndex, next.length - 1)] ?? null;
+        if (fallback) {
+          setActiveView(getKeyViewId(fallback));
+          selectKey(tabId, fallback);
+        } else {
+          setActiveView(REDIS_OVERVIEW_VIEW);
+        }
+      }
+      return next;
+    });
+  }, [activeKey, removedKey, removedKeySeq, selectKey, tabId]);
 
   const handleTabStripWheel = (event: WheelEvent<HTMLDivElement>) => {
     const target = tabStripRef.current;

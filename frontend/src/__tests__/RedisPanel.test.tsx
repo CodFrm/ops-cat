@@ -193,6 +193,46 @@ describe("RedisPanel", () => {
     });
   });
 
+  it("closes an open key tab when the key is deleted elsewhere in the browser", async () => {
+    render(<RedisPanel tabId="query-10" />);
+
+    act(() => {
+      useQueryStore.setState((s) => ({
+        redisStates: {
+          ...s.redisStates,
+          "query-10": {
+            ...s.redisStates["query-10"],
+            keys: ["common:user:1"],
+            selectedKey: "common:user:1",
+            keyInfo: {
+              type: "string",
+              ttl: -1,
+              total: -1,
+              value: "one",
+              valueCursor: "0",
+              valueOffset: 0,
+              hasMoreValues: false,
+              loadingMore: false,
+            },
+          },
+        },
+      }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /common:user:1/ })).toHaveAttribute("aria-selected", "true");
+    });
+
+    act(() => {
+      useQueryStore.getState().removeKey("query-10", "common:user:1");
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("tab", { name: /common:user:1/ })).not.toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "query.redisOverview" })).toHaveAttribute("aria-selected", "true");
+    });
+  });
+
   it("keeps key tabs readable with full-name tooltips and mouse-wheel horizontal scrolling", async () => {
     const longKey = "dispatcher:dispatch_task_map:5efab087-2cd6-4dc6-b4a9-3ab25";
     render(<RedisPanel tabId="query-10" />);

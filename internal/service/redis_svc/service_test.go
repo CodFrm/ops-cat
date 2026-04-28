@@ -52,7 +52,7 @@ func TestScanKeys(t *testing.T) {
 		})
 
 		require.NoError(t, err)
-		assert.Equal(t, []any{"SCAN", "0", "MATCH", "user:*", "COUNT", filteredRedisScanBatchCount, "TYPE", "hash"}, exec.calls[0])
+		assert.Equal(t, []any{"SCAN", "0", "MATCH", "user:*", "COUNT", int64(2), "TYPE", "hash"}, exec.calls[0])
 		assert.Equal(t, "17", got.Cursor)
 		assert.True(t, got.HasMore)
 		assert.Equal(t, []string{"a", "b"}, got.Keys)
@@ -88,8 +88,8 @@ func TestScanKeys(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Len(t, exec.calls, 2)
-		assert.Equal(t, []any{"SCAN", "0", "MATCH", "*2fe43136-1b38-43c3-b4bf-82b19c66c7bf*", "COUNT", filteredRedisScanBatchCount}, exec.calls[0])
-		assert.Equal(t, []any{"SCAN", "42", "MATCH", "*2fe43136-1b38-43c3-b4bf-82b19c66c7bf*", "COUNT", filteredRedisScanBatchCount}, exec.calls[1])
+		assert.Equal(t, []any{"SCAN", "0", "MATCH", "*2fe43136-1b38-43c3-b4bf-82b19c66c7bf*", "COUNT", int64(100)}, exec.calls[0])
+		assert.Equal(t, []any{"SCAN", "42", "MATCH", "*2fe43136-1b38-43c3-b4bf-82b19c66c7bf*", "COUNT", int64(100)}, exec.calls[1])
 		assert.Equal(t, "0", got.Cursor)
 		assert.Equal(t, []string{"common:event:2fe43136-1b38-43c3-b4bf-82b19c66c7bf"}, got.Keys)
 		assert.False(t, got.HasMore)

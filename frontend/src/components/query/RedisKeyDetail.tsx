@@ -5,10 +5,11 @@ import { toast } from "sonner";
 import { Button, Input, ConfirmDialog } from "@opskat/ui";
 import { useQueryStore } from "@/stores/queryStore";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
-import { ExecuteRedis, RedisDeleteKeys, RedisPersistKey, RedisSetKeyTTL } from "../../../wailsjs/go/app/App";
+import { ExecuteRedisArgs, RedisDeleteKeys, RedisPersistKey, RedisSetKeyTTL } from "../../../wailsjs/go/app/App";
 import { RedisStringEditor } from "@/components/query/RedisStringEditor";
 import { RedisCollectionTable } from "@/components/query/RedisCollectionTable";
 import { RedisStreamViewer } from "@/components/query/RedisStreamViewer";
+import { parseRedisCommandLine } from "@/lib/redisCommand";
 
 interface RedisKeyDetailProps {
   tabId: string;
@@ -95,7 +96,8 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
     setHistoryIdx(-1);
 
     try {
-      const result = await ExecuteRedis(tabMeta.assetId, command.trim(), state.currentDb);
+      const args = parseRedisCommandLine(command);
+      const result = await ExecuteRedisArgs(tabMeta.assetId, args, state.currentDb);
       const parsed: RedisResult = JSON.parse(result);
       setCmdResult(formatResult(parsed));
     } catch (err) {

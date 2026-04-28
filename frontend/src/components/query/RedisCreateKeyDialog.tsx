@@ -20,6 +20,7 @@ import {
 import {
   RedisHashSet,
   RedisListPush,
+  RedisScanKeys,
   RedisSetAdd,
   RedisSetKeyTTL,
   RedisSetStringValue,
@@ -172,6 +173,21 @@ export function RedisCreateKeyDialog({
 
     setSubmitting(true);
     try {
+      const existing = await RedisScanKeys({
+        assetId,
+        db: parsedDb,
+        cursor: "0",
+        match: key,
+        type: "",
+        count: 1,
+        exact: true,
+      });
+      if ((existing.keys || []).includes(key)) {
+        toast.error(t("query.redisKeyAlreadyExists", { key }));
+        setSubmitting(false);
+        return;
+      }
+
       if (type === "string") {
         await RedisSetStringValue({ assetId, db: parsedDb, key, value: stringValue, format: "raw" });
       } else if (type === "hash") {
@@ -179,7 +195,7 @@ export function RedisCreateKeyDialog({
           await RedisHashSet(assetId, parsedDb, key, row.field.trim(), row.value);
         }
       } else if (type === "list") {
-        for (const value of [...listValues].reverse()) {
+        for (const value of listValues) {
           await RedisListPush(assetId, parsedDb, key, value);
         }
       } else if (type === "set") {

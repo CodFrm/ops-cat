@@ -74,6 +74,8 @@ export interface RedisTabState {
   dbKeyCounts: Record<number, number>;
   scanRequestId?: number;
   keyDetailRequestId?: number;
+  removedKey?: string;
+  removedKeySeq?: number;
   error: string | null;
 }
 
@@ -900,6 +902,12 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           keys: s.redisStates[tabId].keys.filter((k) => k !== key),
           selectedKey: s.redisStates[tabId].selectedKey === key ? null : s.redisStates[tabId].selectedKey,
           keyInfo: s.redisStates[tabId].selectedKey === key ? null : s.redisStates[tabId].keyInfo,
+          keyDetailRequestId:
+            s.redisStates[tabId].selectedKey === key
+              ? (s.redisStates[tabId].keyDetailRequestId || 0) + 1
+              : s.redisStates[tabId].keyDetailRequestId,
+          removedKey: key,
+          removedKeySeq: (s.redisStates[tabId].removedKeySeq || 0) + 1,
         },
       },
     }));

@@ -6,6 +6,7 @@ import { useTabStore } from "../stores/tabStore";
 import {
   RedisHashSet,
   RedisListDatabases,
+  RedisListPush,
   RedisScanKeys,
   RedisSetKeyTTL,
   RedisSetStringValue,
@@ -129,6 +130,34 @@ describe("RedisKeyBrowser", () => {
     expect(RedisHashSet).toHaveBeenNthCalledWith(2, 10, 0, "profile:1", "role", "admin");
   });
 
+  it("creates a list key in the same order as the initial values", async () => {
+    vi.mocked(RedisListPush).mockResolvedValue(undefined);
+
+    render(<RedisKeyBrowser tabId="query-10" />);
+
+    fireEvent.click(screen.getByTitle("query.createRedisKey"));
+    fireEvent.change(screen.getByTestId("redis-create-key-input"), {
+      target: { value: "queue:1" },
+    });
+    fireEvent.click(screen.getByTestId("redis-create-type-trigger"));
+    fireEvent.click(await screen.findByRole("option", { name: "list" }));
+
+    fireEvent.change(screen.getAllByPlaceholderText("query.newValue")[0], {
+      target: { value: "first" },
+    });
+    fireEvent.click(screen.getByTestId("redis-create-add-row"));
+    fireEvent.change(screen.getAllByPlaceholderText("query.newValue")[1], {
+      target: { value: "second" },
+    });
+    fireEvent.click(screen.getByText("query.createRedisKeySubmit"));
+
+    await waitFor(() => {
+      expect(RedisListPush).toHaveBeenCalledTimes(2);
+    });
+    expect(RedisListPush).toHaveBeenNthCalledWith(1, 10, 0, "queue:1", "first");
+    expect(RedisListPush).toHaveBeenNthCalledWith(2, 10, 0, "queue:1", "second");
+  });
+
   it("opens a lightweight database menu and selects a db", async () => {
     render(<RedisKeyBrowser tabId="query-10" />);
 
@@ -152,6 +181,24 @@ describe("RedisKeyBrowser", () => {
     expect(screen.queryByTestId("redis-db-menu")).not.toBeInTheDocument();
   });
 
+  it("includes non-empty databases beyond the default range in the db menu", async () => {
+    useQueryStore.setState((s) => ({
+      redisStates: {
+        ...s.redisStates,
+        "query-10": {
+          ...s.redisStates["query-10"],
+          dbKeyCounts: { 0: 7767, 20: 9 },
+        },
+      },
+    }));
+
+    render(<RedisKeyBrowser tabId="query-10" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /db0/ }));
+
+    expect(screen.getByRole("option", { name: /^db20\b/ })).toBeInTheDocument();
+  });
+
   it("keeps prefix keys expandable when a key also has children", () => {
     const tree = buildKeyTree(["root", "root:session"], ":");
     const collapsed = flattenTree(tree, new Set(), ":");
@@ -166,6 +213,59 @@ describe("RedisKeyBrowser", () => {
       })
     );
     expect(expanded.map((row) => row.name)).toEqual(["root", "session"]);
+  });
+
+  it("opens a prefix key and expands its child keys from tree mode", async () => {
+    vi.mocked(RedisScanKeys).mockResolvedValueOnce({
+      cursor: "0",
+      keys: ["root", "root:session"],
+      hasMore: false,
+    });
+
+    render(<RedisKeyBrowser tabId="query-10" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^root$/ }));
+
+    await waitFor(() => {
+      expect(useQueryStore.getState().redisStates["query-10"].selectedKey).toBe("root");
+    });
+
+    fireEvent.click(screen.getByTitle("query.expandFolder root"));
+
+    expect(await screen.findByRole("button", { name: /^session$/ })).toBeInTheDocument();
+  });
+
+  it("does not overwrite an existing key from the add key dialog", async () => {
+    vi.mocked(RedisSetStringValue).mockResolvedValue(undefined);
+
+    render(<RedisKeyBrowser tabId="query-10" />);
+    vi.mocked(RedisScanKeys).mockClear();
+    vi.mocked(RedisScanKeys).mockResolvedValueOnce({
+      cursor: "0",
+      keys: ["new:key"],
+      hasMore: false,
+    });
+
+    fireEvent.click(screen.getByTitle("query.createRedisKey"));
+    fireEvent.change(screen.getByTestId("redis-create-key-input"), {
+      target: { value: "new:key" },
+    });
+    fireEvent.change(screen.getByTestId("redis-create-string-value"), {
+      target: { value: "hello" },
+    });
+    fireEvent.click(screen.getByText("query.createRedisKeySubmit"));
+
+    await waitFor(() => {
+      expect(RedisScanKeys).toHaveBeenCalledWith(
+        expect.objectContaining({
+          assetId: 10,
+          db: 0,
+          match: "new:key",
+          exact: true,
+        })
+      );
+    });
+    expect(RedisSetStringValue).not.toHaveBeenCalled();
   });
 
   it("filters locally while typing and searches Redis on Enter", async () => {
