@@ -14,33 +14,36 @@ vi.mock("../lib/openAssetInfoTab", () => ({
 import { getAssetType } from "../lib/assetTypes";
 import { openAssetInfoTab } from "../lib/openAssetInfoTab";
 
+function makeAsset(id: number, type: string): asset_entity.Asset {
+  return {
+    ID: id,
+    Name: "test",
+    Type: type,
+    GroupID: 0,
+    Icon: "",
+    Tags: "",
+    Description: "",
+    Config: "",
+    CmdPolicy: "",
+    SortOrder: 0,
+    sshTunnelId: 0,
+    Status: 1,
+    Createtime: 0,
+    Updatetime: 0,
+  };
+}
+
 describe("openAssetDefault", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("calls onConnectAsset when asset type canConnect is true", () => {
-    const mockGetAssetType = getAssetType as typeof getAssetType;
     const mockOnConnect = vi.fn();
-    const asset: asset_entity.Asset = {
-      ID: 1,
-      Name: "test",
-      Type: "ssh",
-      Host: "",
-      Port: 0,
-      Username: "",
-      Password: "",
-      PrivateKey: "",
-      Icon: "",
-      Remark: "",
-      GroupID: 0,
-      Color: "",
-      Status: 1,
-      CreatedAt: "",
-      UpdatedAt: "",
-    };
+    const asset = makeAsset(1, "ssh");
 
-    mockGetAssetType.mockReturnValue({ canConnect: true });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(getAssetType).mockReturnValue({ canConnect: true } as any);
 
     openAssetDefault(asset, mockOnConnect);
 
@@ -49,27 +52,11 @@ describe("openAssetDefault", () => {
   });
 
   it("calls openAssetInfoTab when asset type canConnect is false", () => {
-    const mockGetAssetType = getAssetType as typeof getAssetType;
     const mockOnConnect = vi.fn();
-    const asset: asset_entity.Asset = {
-      ID: 42,
-      Name: "test",
-      Type: "unknown",
-      Host: "",
-      Port: 0,
-      Username: "",
-      Password: "",
-      PrivateKey: "",
-      Icon: "",
-      Remark: "",
-      GroupID: 0,
-      Color: "",
-      Status: 1,
-      CreatedAt: "",
-      UpdatedAt: "",
-    };
+    const asset = makeAsset(42, "unknown");
 
-    mockGetAssetType.mockReturnValue({ canConnect: false });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(getAssetType).mockReturnValue({ canConnect: false } as any);
 
     openAssetDefault(asset, mockOnConnect);
 
@@ -78,27 +65,10 @@ describe("openAssetDefault", () => {
   });
 
   it("calls openAssetInfoTab when getAssetType returns undefined", () => {
-    const mockGetAssetType = getAssetType as typeof getAssetType;
     const mockOnConnect = vi.fn();
-    const asset: asset_entity.Asset = {
-      ID: 99,
-      Name: "test",
-      Type: "nonexistent",
-      Host: "",
-      Port: 0,
-      Username: "",
-      Password: "",
-      PrivateKey: "",
-      Icon: "",
-      Remark: "",
-      GroupID: 0,
-      Color: "",
-      Status: 1,
-      CreatedAt: "",
-      UpdatedAt: "",
-    };
+    const asset = makeAsset(99, "nonexistent");
 
-    mockGetAssetType.mockReturnValue(undefined);
+    vi.mocked(getAssetType).mockReturnValue(undefined);
 
     openAssetDefault(asset, mockOnConnect);
 
