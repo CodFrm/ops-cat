@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { K8sSectionCard } from "./K8sSectionCard";
 
-interface Column<T> {
+interface Column {
   key: string;
   label: ReactNode;
   className?: string;
@@ -9,7 +9,7 @@ interface Column<T> {
 
 interface K8sTableSectionProps<T> {
   title: string;
-  columns: Column<T>[];
+  columns: Column[];
   data: T[];
   renderRow: (item: T, index: number) => ReactNode;
   emptyText?: string;
@@ -35,9 +35,7 @@ export function K8sTableSection<T>({ title, columns, data, renderRow, emptyText 
                 ))}
               </tr>
             </thead>
-            <tbody>
-              {data.map((item, i) => renderRow(item, i))}
-            </tbody>
+            <tbody>{data.map((item, i) => renderRow(item, i))}</tbody>
           </table>
         </div>
       )}

@@ -15,9 +15,6 @@ import {
   ChevronRight,
   ChevronDown,
   Search,
-  Play,
-  Square,
-  ScrollText,
 } from "lucide-react";
 import type { asset_entity } from "../../../wailsjs/go/models";
 import {
@@ -1532,7 +1529,9 @@ export function K8sClusterPage({ asset }: Props) {
                       <h3 className="font-mono text-sm font-medium">{rt ? t(rt.labelKey) : resKey}</h3>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{ns}</span>
                     </div>
-                    <K8sMetadataGrid items={[{ label: t("asset.k8sNamespaceResources"), value: String(count), mono: true }]} />
+                    <K8sMetadataGrid
+                      items={[{ label: t("asset.k8sNamespaceResources"), value: String(count), mono: true }]}
+                    />
                   </K8sSectionCard>
                 </div>
               );
@@ -1613,7 +1612,9 @@ export function K8sClusterPage({ asset }: Props) {
                         <td className="py-2 pr-4 font-mono text-sm">{c.name}</td>
                         <td className="py-2 pr-4 font-mono text-xs text-muted-foreground">{c.image}</td>
                         <td className="py-2 pr-4">
-                          <span className={`text-xs px-1.5 py-0.5 rounded-full ${statusVariantToClass(getContainerStateColor(c.state))}`}>
+                          <span
+                            className={`text-xs px-1.5 py-0.5 rounded-full ${statusVariantToClass(getContainerStateColor(c.state))}`}
+                          >
                             {c.state}
                           </span>
                         </td>
@@ -1643,7 +1644,9 @@ export function K8sClusterPage({ asset }: Props) {
                     renderRow={(e, i) => (
                       <tr key={i} className="border-b last:border-0">
                         <td className="py-2 pr-4">
-                          <span className={`text-xs px-1.5 py-0.5 rounded-full ${statusVariantToClass(e.type === "Warning" ? "warning" : "info")}`}>
+                          <span
+                            className={`text-xs px-1.5 py-0.5 rounded-full ${statusVariantToClass(e.type === "Warning" ? "warning" : "info")}`}
+                          >
                             {e.type}
                           </span>
                         </td>
@@ -1766,7 +1769,10 @@ export function K8sClusterPage({ asset }: Props) {
                     <K8sResourceHeader
                       name={cm.name}
                       subtitle={cm.namespace}
-                      status={{ text: `${dataEntries.length} key${dataEntries.length !== 1 ? "s" : ""}`, variant: "neutral" }}
+                      status={{
+                        text: `${dataEntries.length} key${dataEntries.length !== 1 ? "s" : ""}`,
+                        variant: "neutral",
+                      }}
                     />
                     <K8sMetadataGrid items={[{ label: t("asset.k8sPodAge"), value: cm.age, mono: true }]} />
                   </K8sSectionCard>

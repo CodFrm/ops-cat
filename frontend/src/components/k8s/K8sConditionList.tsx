@@ -23,9 +23,7 @@ export function K8sConditionList({ conditions, title }: K8sConditionListProps) {
               <span className="text-sm font-medium">{c.type}</span>
               <span
                 className={`text-xs px-1.5 py-0.5 rounded-full ${
-                  c.status === "True"
-                    ? statusVariantToClass("success")
-                    : statusVariantToClass("error")
+                  c.status === "True" ? statusVariantToClass("success") : statusVariantToClass("error")
                 }`}
               >
                 {c.status}
