@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { RedisKeyDetail } from "../components/query/RedisKeyDetail";
 import { RedisStreamViewer } from "../components/query/RedisStreamViewer";
@@ -72,6 +72,38 @@ describe("RedisKeyDetail", () => {
       expect(RedisSetKeyTTL).toHaveBeenCalledWith(10, 2, "user:1", 120);
     });
     expect(ExecuteRedisArgs).not.toHaveBeenCalled();
+  });
+
+  it("highlights JSON string values without wrapping long content out of the detail area", () => {
+    useQueryStore.setState((s) => ({
+      redisStates: {
+        ...s.redisStates,
+        "query-10": {
+          ...s.redisStates["query-10"],
+          selectedKey: "json:1",
+          keyInfo: {
+            type: "string",
+            ttl: -1,
+            size: 34,
+            total: -1,
+            value: '{"a":1,"enabled":true,"payload":"x"}',
+            valueCursor: "",
+            valueOffset: 0,
+            hasMoreValues: false,
+            loadingMore: false,
+          },
+        },
+      },
+    }));
+
+    render(<RedisKeyDetail tabId="query-10" />);
+
+    const valueBox = screen.getByTestId("redis-string-value");
+    expect(valueBox).toHaveClass("overflow-auto", "whitespace-pre");
+    expect(valueBox).not.toHaveClass("break-all");
+    expect(within(valueBox).getByText('"a"')).toHaveClass("text-sky-700");
+    expect(within(valueBox).getByText("1")).toHaveClass("text-purple-700");
+    expect(within(valueBox).getByText("true")).toHaveClass("text-amber-700");
   });
 });
 

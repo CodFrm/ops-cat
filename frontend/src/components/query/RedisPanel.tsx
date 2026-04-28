@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type WheelEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Activity, Key, X } from "lucide-react";
 import { useResizeHandle } from "@opskat/ui";
@@ -29,6 +29,7 @@ export function RedisPanel({ tabId }: RedisPanelProps) {
   const [activeView, setActiveView] = useState<string>(REDIS_OVERVIEW_VIEW);
   const [openKeys, setOpenKeys] = useState<string[]>([]);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const tabStripRef = useRef<HTMLDivElement>(null);
   const { size: sidebarWidth, handleMouseDown } = useResizeHandle({
     defaultSize: 220,
     minSize: 160,
@@ -76,6 +77,17 @@ export function RedisPanel({ tabId }: RedisPanelProps) {
     });
   };
 
+  const handleTabStripWheel = (event: WheelEvent<HTMLDivElement>) => {
+    const target = tabStripRef.current;
+    if (!target) return;
+
+    const scrollDelta = Math.abs(event.deltaY) > Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+    if (scrollDelta === 0) return;
+
+    event.preventDefault();
+    target.scrollLeft += scrollDelta;
+  };
+
   return (
     <div className="flex h-full w-full">
       {/* Left: Key browser */}
@@ -88,11 +100,18 @@ export function RedisPanel({ tabId }: RedisPanelProps) {
 
       {/* Right: Redis pages */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex shrink-0 items-center overflow-x-auto border-b bg-muted/30">
+        <div
+          ref={tabStripRef}
+          role="tablist"
+          data-testid="redis-key-tab-strip"
+          className="flex h-9 shrink-0 items-stretch overflow-x-auto overflow-y-hidden border-b bg-muted/30"
+          onWheel={handleTabStripWheel}
+        >
           <button
             role="tab"
             aria-selected={activeView === REDIS_OVERVIEW_VIEW}
-            className={`flex items-center gap-1.5 border-r px-3 py-1.5 text-xs transition-colors ${
+            title={t("query.redisOverview")}
+            className={`flex h-9 shrink-0 items-center gap-1.5 border-r px-3 text-xs transition-colors ${
               activeView === REDIS_OVERVIEW_VIEW
                 ? "bg-background text-foreground"
                 : "text-muted-foreground hover:bg-background/50 hover:text-foreground"
@@ -108,7 +127,7 @@ export function RedisPanel({ tabId }: RedisPanelProps) {
             return (
               <div
                 key={key}
-                className={`flex max-w-[320px] shrink-0 items-center border-r text-xs transition-colors ${
+                className={`flex h-9 w-56 max-w-[320px] shrink-0 items-stretch border-r text-xs transition-colors ${
                   selected
                     ? "bg-background text-foreground"
                     : "text-muted-foreground hover:bg-background/50 hover:text-foreground"
@@ -117,7 +136,8 @@ export function RedisPanel({ tabId }: RedisPanelProps) {
                 <button
                   role="tab"
                   aria-selected={selected}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 px-3 py-1.5 text-left"
+                  title={key}
+                  className="flex h-9 min-w-0 flex-1 items-center gap-1.5 px-3 text-left"
                   onClick={() => activateKeyTab(key)}
                 >
                   <Key className="size-3 shrink-0" />
@@ -127,7 +147,7 @@ export function RedisPanel({ tabId }: RedisPanelProps) {
                   type="button"
                   aria-label={`${t("query.closeRedisKeyTab")} ${key}`}
                   title={t("action.close")}
-                  className="mr-1 flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className="my-1 mr-1 flex size-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
                   onClick={(event) => {
                     event.stopPropagation();
                     closeKeyTab(key);

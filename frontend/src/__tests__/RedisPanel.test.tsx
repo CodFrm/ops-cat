@@ -192,4 +192,42 @@ describe("RedisPanel", () => {
       expect(screen.getByRole("tab", { name: /common:user:1/ })).toHaveAttribute("aria-selected", "true");
     });
   });
+
+  it("keeps key tabs readable with full-name tooltips and mouse-wheel horizontal scrolling", async () => {
+    const longKey = "dispatcher:dispatch_task_map:5efab087-2cd6-4dc6-b4a9-3ab25";
+    render(<RedisPanel tabId="query-10" />);
+
+    act(() => {
+      useQueryStore.setState((s) => ({
+        redisStates: {
+          ...s.redisStates,
+          "query-10": {
+            ...s.redisStates["query-10"],
+            selectedKey: longKey,
+            keyInfo: {
+              type: "string",
+              ttl: -1,
+              total: -1,
+              value: "value",
+              valueCursor: "0",
+              valueOffset: 0,
+              hasMoreValues: false,
+              loadingMore: false,
+            },
+          },
+        },
+      }));
+    });
+
+    const tab = await screen.findByRole("tab", { name: longKey });
+    expect(tab).toHaveAttribute("title", longKey);
+
+    const tabStrip = screen.getByTestId("redis-key-tab-strip");
+    expect(tabStrip).toHaveClass("h-9", "overflow-x-auto", "overflow-y-hidden");
+
+    tabStrip.scrollLeft = 0;
+    fireEvent.wheel(tabStrip, { deltaY: 96, deltaX: 0 });
+
+    expect(tabStrip.scrollLeft).toBe(96);
+  });
 });
