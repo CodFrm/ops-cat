@@ -335,15 +335,20 @@ func (a *App) StopK8sPodLogs(streamID string) {
 }
 
 func (a *App) k8sClientOptions(asset *asset_entity.Asset, cfg *asset_entity.K8sConfig) []k8s.ClientOption {
+	opts := make([]k8s.ClientOption, 0, 2)
+	if cfg.Context != "" {
+		opts = append(opts, k8s.WithContext(cfg.Context))
+	}
+
 	tunnelID := asset.SSHTunnelID
 	if tunnelID == 0 {
 		tunnelID = cfg.SSHAssetID
 	}
 	if tunnelID == 0 || a.sshPool == nil {
-		return nil
+		return opts
 	}
 
-	return []k8s.ClientOption{k8s.WithDial(func(ctx context.Context, network, address string) (net.Conn, error) {
+	opts = append(opts, k8s.WithDial(func(ctx context.Context, network, address string) (net.Conn, error) {
 		client, err := a.sshPool.Get(ctx, tunnelID)
 		if err != nil {
 			return nil, fmt.Errorf("get SSH tunnel: %w", err)
@@ -354,7 +359,8 @@ func (a *App) k8sClientOptions(asset *asset_entity.Asset, cfg *asset_entity.K8sC
 			return nil, fmt.Errorf("dial K8S API through SSH tunnel: %w", err)
 		}
 		return &k8sTunnelConn{Conn: conn, pool: a.sshPool, assetID: tunnelID}, nil
-	})}
+	}))
+	return opts
 }
 
 type k8sTunnelConn struct {

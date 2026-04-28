@@ -46,12 +46,19 @@ type ClusterInfo struct {
 type ClientOption func(*clientOptions)
 
 type clientOptions struct {
-	dial func(ctx context.Context, network, address string) (net.Conn, error)
+	dial        func(ctx context.Context, network, address string) (net.Conn, error)
+	contextName string
 }
 
 func WithDial(dial func(ctx context.Context, network, address string) (net.Conn, error)) ClientOption {
 	return func(opts *clientOptions) {
 		opts.dial = dial
+	}
+}
+
+func WithContext(contextName string) ClientOption {
+	return func(opts *clientOptions) {
+		opts.contextName = contextName
 	}
 }
 
@@ -121,7 +128,11 @@ func buildClient(kubeconfig string, opts ...ClientOption) (*kubernetes.Clientset
 	if err != nil {
 		return nil, fmt.Errorf("parse kubeconfig: %w", err)
 	}
-	config, err = clientcmd.NewDefaultClientConfig(*clientCfg, &clientcmd.ConfigOverrides{}).ClientConfig()
+	overrides := &clientcmd.ConfigOverrides{}
+	if clientOpts.contextName != "" {
+		overrides.CurrentContext = clientOpts.contextName
+	}
+	config, err = clientcmd.NewDefaultClientConfig(*clientCfg, overrides).ClientConfig()
 	if err != nil {
 		return nil, fmt.Errorf("build rest config from kubeconfig: %w", err)
 	}
