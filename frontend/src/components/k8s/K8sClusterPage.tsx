@@ -635,6 +635,7 @@ export function K8sClusterPage({ asset }: Props) {
           });
 
           EventsOn(errEvent, (err: string) => {
+            if (err === "context canceled" || err.includes("context canceled")) return;
             setLogError(err);
           });
 
