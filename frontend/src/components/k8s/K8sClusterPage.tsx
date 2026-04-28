@@ -693,6 +693,11 @@ export function K8sClusterPage({ asset }: Props) {
       const ns = parts[1];
       const podName = parts.slice(2).join(":");
       loadPodDetail(ns, podName);
+      // 重置日志状态，避免旧 Pod 的容器名残留
+      stopLogStream();
+      setLogContainer("");
+      setLogLines([]);
+      setLogError(null);
     }
   };
 
@@ -1341,7 +1346,7 @@ export function K8sClusterPage({ asset }: Props) {
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs cursor-pointer border-r border-border whitespace-nowrap select-none transition-colors duration-150 ${
                     isActive ? "bg-background border-b-2 border-b-primary -mb-[1px] font-medium" : "hover:bg-muted/50"
                   }`}
-                  onClick={() => setActiveTabId(tab.id)}
+                  onClick={() => openTab(tab.id, tab.label)}
                 >
                   {tab.id === "overview" ? (
                     <Server className="h-3 w-3" />
