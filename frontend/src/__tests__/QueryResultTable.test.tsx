@@ -134,12 +134,6 @@ describe("QueryResultTable — cell context actions", () => {
     fireEvent.contextMenu(cell, { clientX: 40, clientY: 50 });
   }
 
-  function openRowMenu(props: Partial<React.ComponentProps<typeof QueryResultTable>> = {}) {
-    render(<QueryResultTable columns={columns} rows={rows} editable showRowNumber {...props} />);
-    const rowHeader = document.querySelector('[data-row-header-key="1"]') as HTMLElement;
-    fireEvent.contextMenu(rowHeader, { clientX: 20, clientY: 40 });
-  }
-
   function openColumnMenu(props: Partial<React.ComponentProps<typeof QueryResultTable>> = {}) {
     render(
       <QueryResultTable
@@ -291,10 +285,20 @@ describe("QueryResultTable — cell context actions", () => {
     expect(idCell.style.width).toBe("160px");
     expect(idCell.style.minWidth).toBe("160px");
     expect(idCell.style.maxWidth).toBe("160px");
-    expect(idCell.style.left).toBe("50px");
-    expect(idHeader.style.left).toBe("50px");
+    expect(idCell.style.left).toBe("0px");
+    expect(idHeader.style.left).toBe("0px");
     expect(nameHeader).not.toHaveClass("sticky");
     expect(nameHeader.style.left).toBe("");
+  });
+
+  it("does not render the row number column even when requested", () => {
+    render(<QueryResultTable columns={columns} rows={rows} editable showRowNumber rowNumberOffset={20} />);
+
+    expect(screen.queryByText("#")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-row-header-key]")).toBeNull();
+    expect(
+      Array.from(document.querySelectorAll("[data-column-header-key]")).map((header) => header.textContent)
+    ).toEqual(expect.arrayContaining(["id", "name"]));
   });
 
   it("keeps frozen record cells sticky when selected", async () => {
@@ -311,10 +315,10 @@ describe("QueryResultTable — cell context actions", () => {
 
     expect(idCell).toHaveClass("sticky");
     expect(idCell).not.toHaveClass("relative");
-    expect(idCell.style.left).toBe("50px");
+    expect(idCell.style.left).toBe("0px");
   });
 
-  it("can freeze another column after freezing the first without freezing columns between them", async () => {
+  it("moves only frozen columns to the left frozen area", async () => {
     const user = userEvent.setup();
     render(<QueryResultTable columns={["a", "b", "c"]} rows={[{ a: 1, b: 2, c: 3 }]} editable showRowNumber />);
 
@@ -334,14 +338,14 @@ describe("QueryResultTable — cell context actions", () => {
     const cCell = document.querySelector('[data-cell-key="0:c"]') as HTMLElement;
 
     expect(aCell).toHaveClass("sticky");
-    expect(aCell.style.left).toBe("50px");
+    expect(aCell.style.left).toBe("0px");
     expect(bCell).not.toHaveClass("sticky");
     expect(bCell.style.left).toBe("");
     expect(cCell).toHaveClass("sticky");
-    expect(cCell.style.left).toBe("210px");
+    expect(cCell.style.left).toBe("160px");
   });
 
-  it("freezes the second column only without freezing the first", async () => {
+  it("moves the second column to the left frozen area without freezing the first", async () => {
     const user = userEvent.setup();
     render(
       <QueryResultTable
@@ -362,22 +366,26 @@ describe("QueryResultTable — cell context actions", () => {
     const nameHeader = document.querySelector('[data-column-header-key="name"]') as HTMLElement;
     const nameCell = document.querySelector('[data-cell-key="0:name"]') as HTMLElement;
     const sexCell = document.querySelector('[data-cell-key="0:sex"]') as HTMLElement;
+    const headerOrder = Array.from(document.querySelectorAll("[data-column-header-key]")).map((header) =>
+      header.getAttribute("data-column-header-key")
+    );
 
-    // id is NOT frozen (first column, not in frozen set)
+    expect(headerOrder).toEqual(["name", "id", "sex"]);
+
+    // id is NOT frozen (first column, not in the frozen set)
     expect(idCell).not.toHaveClass("sticky");
+    expect(idCell.style.left).toBe("");
 
-    // name IS frozen (second column)
+    // name IS frozen and moves to the left frozen area.
     expect(nameHeader).toHaveClass("sticky");
     expect(nameCell).toHaveClass("sticky");
-    // name should stick right after the row number column (50px)
-    expect(nameCell.style.left).toBe("50px");
+    expect(nameHeader.style.left).toBe("0px");
+    expect(nameCell.style.left).toBe("0px");
 
     // sex is NOT frozen
     expect(sexCell).not.toHaveClass("sticky");
 
-    // row number should be sticky when any column is frozen
-    const rowNum = document.querySelector('td[data-row-header-key="0"]') as HTMLElement;
-    expect(rowNum).toHaveClass("sticky");
+    expect(document.querySelector("[data-row-header-key]")).toBeNull();
   });
 
   it("uses opaque selected backgrounds for frozen selected columns", async () => {
@@ -454,75 +462,6 @@ describe("QueryResultTable — cell context actions", () => {
 
     expect(screen.getByRole("menu")).not.toHaveClass("overflow-hidden");
     expect(screen.getByText("query.filterOperatorIsNot")).toBeVisible();
-  });
-
-  it("right-clicking a row number selects the full row and shows row actions only", () => {
-    openRowMenu({ onDeleteRow: vi.fn(), onCopyAs: vi.fn(), onFilterByCellValue: vi.fn(), onSortByColumn: vi.fn() });
-
-    const selectedCells = document.querySelectorAll('[data-row-selected="true"]');
-    expect(selectedCells).toHaveLength(columns.length + 1);
-    expect(screen.getByText("query.deleteRecord")).toBeInTheDocument();
-    expect(screen.getByText("query.copyValue")).toBeInTheDocument();
-    expect(screen.getByText("query.copyAs")).toBeInTheDocument();
-    expect(screen.queryByText("query.copyFieldName")).not.toBeInTheDocument();
-    expect(screen.queryByText("query.setNull")).not.toBeInTheDocument();
-    expect(screen.queryByText("query.filterByCellValue")).not.toBeInTheDocument();
-    expect(screen.queryByText("query.sortAscending")).not.toBeInTheDocument();
-  });
-
-  it("mouse-selects multiple rows with shift range and ctrl toggles", () => {
-    const manyRows = [
-      { id: 1, name: "alice" },
-      { id: 2, name: "bob" },
-      { id: 3, name: "carol" },
-      { id: 4, name: "dave" },
-    ];
-    render(<QueryResultTable columns={columns} rows={manyRows} editable showRowNumber />);
-
-    const row0 = document.querySelector('[data-row-header-key="0"]') as HTMLElement;
-    const row2 = document.querySelector('[data-row-header-key="2"]') as HTMLElement;
-    const row1 = document.querySelector('[data-row-header-key="1"]') as HTMLElement;
-
-    fireEvent.mouseDown(row0);
-    fireEvent.mouseDown(row2, { shiftKey: true });
-
-    expect(document.querySelectorAll('[data-row-selected="true"]')).toHaveLength((columns.length + 1) * 3);
-
-    fireEvent.mouseDown(row1, { ctrlKey: true });
-
-    expect(document.querySelectorAll('[data-row-selected="true"]')).toHaveLength((columns.length + 1) * 2);
-    expect(row0).toHaveAttribute("data-row-selected", "true");
-    expect(row1).not.toHaveAttribute("data-row-selected");
-    expect(row2).toHaveAttribute("data-row-selected", "true");
-  });
-
-  it("mouse-dragging row numbers selects a continuous row range", () => {
-    const manyRows = [
-      { id: 1, name: "alice" },
-      { id: 2, name: "bob" },
-      { id: 3, name: "carol" },
-      { id: 4, name: "dave" },
-    ];
-    render(<QueryResultTable columns={columns} rows={manyRows} editable showRowNumber />);
-
-    const row0 = document.querySelector('[data-row-header-key="0"]') as HTMLElement;
-    const row3 = document.querySelector('[data-row-header-key="3"]') as HTMLElement;
-
-    fireEvent.mouseDown(row0, { button: 0 });
-    fireEvent.mouseEnter(row3, { buttons: 1 });
-    fireEvent.mouseUp(row3);
-
-    expect(document.querySelectorAll('[data-row-selected="true"]')).toHaveLength((columns.length + 1) * 4);
-    expect(row0).toHaveAttribute("data-row-selected", "true");
-    expect(row3).toHaveAttribute("data-row-selected", "true");
-  });
-
-  it("row context copy writes the selected row as tab separated values", async () => {
-    openRowMenu();
-
-    fireEvent.click(screen.getByText("query.copyValue"));
-
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("2\tbob"));
   });
 
   it("hides edit and refresh actions when the table has no matching capability", () => {

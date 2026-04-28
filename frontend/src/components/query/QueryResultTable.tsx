@@ -108,7 +108,6 @@ interface QueryResultTableProps {
 // Set so they don't collide with the literal string "null" etc.
 const NULL_KEY = "__opskat_null_sentinel__";
 const DEFAULT_COLUMN_WIDTH = 160;
-const ROW_NUMBER_COLUMN_WIDTH = 50;
 
 const CONTEXT_MENU_ITEM_CLASS =
   "relative flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground";
@@ -249,8 +248,6 @@ export function QueryResultTable({
   onSelectedCellChange,
   onSelectedRowsChange,
   onRefresh,
-  showRowNumber,
-  rowNumberOffset = 0,
   sortColumn: controlledSortCol,
   sortDir: controlledSortDir,
   onSortChange,
@@ -286,12 +283,10 @@ export function QueryResultTable({
   const [frozenColumns, setFrozenColumns] = useState<Set<string>>(() => new Set());
   const displayColumns = useMemo(() => {
     const base = visibleColumns ? columns.filter((col) => visibleColumns.includes(col)) : columns;
-    // Put frozen columns first so they appear at the left edge,
-    // keeping original relative order within each group.
     const frozenOrder = base.filter((col) => frozenColumns.has(col));
     const rest = base.filter((col) => !frozenColumns.has(col));
     return [...frozenOrder, ...rest];
-  }, [columns, visibleColumns, frozenColumns]);
+  }, [columns, frozenColumns, visibleColumns]);
   const headerPaddingClass = rowDensity === "compact" ? "py-1" : rowDensity === "comfortable" ? "py-2" : "py-1.5";
   const cellPaddingClass = rowDensity === "compact" ? "py-0.5" : rowDensity === "comfortable" ? "py-2" : "py-1";
 
@@ -349,8 +344,6 @@ export function QueryResultTable({
   const [selectedRowIdxs, setSelectedRowIdxs] = useState<Set<number>>(() => new Set());
   const [selectedColumns, setSelectedColumns] = useState<Set<string>>(() => new Set());
   const columnSelectionAnchorRef = useRef<string | null>(null);
-  const rowSelectionAnchorRef = useRef<number | null>(null);
-  const rowDragSelectionRef = useRef<{ anchor: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [showColumnChooser, setShowColumnChooser] = useState(false);
   const [showFieldTypes, setShowFieldTypes] = useState(true);
@@ -390,7 +383,6 @@ export function QueryResultTable({
     setColWidths({});
     setSelectedCell(null);
     setSelectedRowIdxs(new Set());
-    rowSelectionAnchorRef.current = null;
     setSelectedColumns(new Set());
     columnSelectionAnchorRef.current = null;
     onSelectedCellChange?.(null);
@@ -402,7 +394,6 @@ export function QueryResultTable({
   useEffect(() => {
     setSelectedCell(null);
     setSelectedRowIdxs(new Set());
-    rowSelectionAnchorRef.current = null;
     setSelectedColumns(new Set());
     columnSelectionAnchorRef.current = null;
     onSelectedCellChange?.(null);
@@ -415,7 +406,6 @@ export function QueryResultTable({
     if (!rows[focusCellRequest.rowIdx] || !displayColumns.includes(focusCellRequest.col)) return;
     setSelectedCell({ origIdx: focusCellRequest.rowIdx, col: focusCellRequest.col });
     setSelectedRowIdxs(new Set());
-    rowSelectionAnchorRef.current = null;
     setSelectedColumns(new Set());
     columnSelectionAnchorRef.current = null;
     setEditingCell(cellKey(focusCellRequest.rowIdx, focusCellRequest.col));
@@ -436,15 +426,14 @@ export function QueryResultTable({
 
   const frozenColumnOffsets = useMemo(() => {
     const offsets: Record<string, number> = {};
-    let left = showRowNumber ? ROW_NUMBER_COLUMN_WIDTH : 0;
+    let left = 0;
     for (const col of displayColumns) {
       if (!frozenColumns.has(col)) break;
       offsets[col] = left;
       left += colWidths[col] ?? DEFAULT_COLUMN_WIDTH;
     }
     return offsets;
-  }, [colWidths, displayColumns, frozenColumns, showRowNumber]);
-  const hasFrozenColumns = Object.keys(frozenColumnOffsets).length > 0;
+  }, [colWidths, displayColumns, frozenColumns]);
 
   // Sorting is enabled whenever we have an onSortChange callback (server-side)
   // or when we're in read-only mode (local client-side sort on the current page).
@@ -857,55 +846,11 @@ export function QueryResultTable({
     (origIdx: number, col: string) => {
       setSelectedCell({ origIdx, col });
       setSelectedRowIdxs(new Set());
-      rowSelectionAnchorRef.current = null;
       onSelectedCellChange?.({ rowIdx: origIdx, col });
       onSelectedRowsChange?.([]);
       containerRef.current?.focus();
     },
     [onSelectedCellChange, onSelectedRowsChange]
-  );
-
-  const selectRow = useCallback(
-    (origIdx: number, event?: Pick<React.MouseEvent, "ctrlKey" | "metaKey" | "shiftKey">) => {
-      const anchor = rowSelectionAnchorRef.current;
-      const isRange = !!event?.shiftKey && anchor != null;
-      const isToggle = !!event?.ctrlKey || !!event?.metaKey;
-      let next: Set<number>;
-
-      if (isRange) {
-        const anchorDisplayIdx = sortedIndices.indexOf(anchor);
-        const targetDisplayIdx = sortedIndices.indexOf(origIdx);
-        if (anchorDisplayIdx === -1 || targetDisplayIdx === -1) {
-          next = new Set([origIdx]);
-        } else {
-          const start = Math.min(anchorDisplayIdx, targetDisplayIdx);
-          const end = Math.max(anchorDisplayIdx, targetDisplayIdx);
-          next = new Set(sortedIndices.slice(start, end + 1));
-        }
-      } else if (isToggle) {
-        next = new Set(selectedRowIdxs);
-        if (next.has(origIdx)) next.delete(origIdx);
-        else next.add(origIdx);
-        rowSelectionAnchorRef.current = origIdx;
-      } else {
-        next = new Set([origIdx]);
-        rowSelectionAnchorRef.current = origIdx;
-      }
-
-      if (isRange && next.size > 0) {
-        rowSelectionAnchorRef.current = anchor;
-      }
-
-      const ordered = sortedIndices.filter((rowIdx) => next.has(rowIdx));
-      setSelectedCell(null);
-      setSelectedRowIdxs(next);
-      setSelectedColumns(new Set());
-      columnSelectionAnchorRef.current = null;
-      onSelectedCellChange?.(ordered.length > 0 ? { rowIdx: origIdx, col: "" } : null);
-      onSelectedRowsChange?.(ordered);
-      containerRef.current?.focus();
-    },
-    [onSelectedCellChange, onSelectedRowsChange, selectedRowIdxs, sortedIndices]
   );
 
   const selectColumn = useCallback(
@@ -941,7 +886,6 @@ export function QueryResultTable({
 
       setSelectedCell(null);
       setSelectedRowIdxs(new Set());
-      rowSelectionAnchorRef.current = null;
       setSelectedColumns(next);
       onSelectedCellChange?.(null);
       onSelectedRowsChange?.([]);
@@ -958,7 +902,6 @@ export function QueryResultTable({
         setSelectedCell({ origIdx, col });
         if (!selectedRowIdxs.has(origIdx)) {
           setSelectedRowIdxs(new Set());
-          rowSelectionAnchorRef.current = null;
           onSelectedRowsChange?.([]);
         }
         if (!selectedColumns.has(col)) {
@@ -975,54 +918,6 @@ export function QueryResultTable({
     [onSelectedCellChange, onSelectedRowsChange, selectCell, selectedRowIdxs, selectedColumns]
   );
 
-  const handleRowContextMenu = useCallback(
-    (e: React.MouseEvent, origIdx: number) => {
-      e.preventDefault();
-      e.stopPropagation();
-      rowDragSelectionRef.current = null;
-      if (!selectedRowIdxs.has(origIdx)) {
-        selectRow(origIdx);
-      } else {
-        setSelectedCell(null);
-        setSelectedColumns(new Set());
-        columnSelectionAnchorRef.current = null;
-        onSelectedCellChange?.({ rowIdx: origIdx, col: "" });
-        containerRef.current?.focus();
-      }
-      setCtxMenu({ kind: "row", x: e.clientX, y: e.clientY, rowIdx: origIdx });
-    },
-    [onSelectedCellChange, selectRow, selectedRowIdxs]
-  );
-
-  const handleRowMouseDown = useCallback(
-    (e: React.MouseEvent, origIdx: number) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      selectRow(origIdx, e);
-
-      if (e.shiftKey || e.ctrlKey || e.metaKey) {
-        rowDragSelectionRef.current = null;
-        return;
-      }
-
-      rowDragSelectionRef.current = { anchor: origIdx };
-      const stopDrag = () => {
-        rowDragSelectionRef.current = null;
-        document.removeEventListener("mouseup", stopDrag);
-      };
-      document.addEventListener("mouseup", stopDrag);
-    },
-    [selectRow]
-  );
-
-  const handleRowMouseEnter = useCallback(
-    (origIdx: number) => {
-      if (!rowDragSelectionRef.current) return;
-      selectRow(origIdx, { shiftKey: true, ctrlKey: false, metaKey: false });
-    },
-    [selectRow]
-  );
-
   const handleColumnContextMenu = useCallback(
     (e: React.MouseEvent, col: string) => {
       e.preventDefault();
@@ -1032,7 +927,6 @@ export function QueryResultTable({
       } else {
         setSelectedCell(null);
         setSelectedRowIdxs(new Set());
-        rowSelectionAnchorRef.current = null;
         onSelectedCellChange?.(null);
         onSelectedRowsChange?.([]);
         containerRef.current?.focus();
@@ -1070,7 +964,6 @@ export function QueryResultTable({
         if ((selectedRowIdxs.size > 0 || selectedColumns.size > 0) && e.key === "Escape") {
           e.preventDefault();
           setSelectedRowIdxs(new Set());
-          rowSelectionAnchorRef.current = null;
           setSelectedColumns(new Set());
           columnSelectionAnchorRef.current = null;
           onSelectedCellChange?.(null);
@@ -1169,15 +1062,6 @@ export function QueryResultTable({
         <table className="border-separate border-spacing-0 text-xs font-mono">
           <thead className="bg-muted sticky top-0">
             <tr>
-              {showRowNumber && (
-                <th
-                  className={`border border-border px-2 py-1.5 text-center font-semibold text-muted-foreground whitespace-nowrap w-[50px] ${
-                    hasFrozenColumns ? "sticky left-0 z-40 bg-muted" : ""
-                  }`}
-                >
-                  #
-                </th>
-              )}
               {displayColumns.map((col) => {
                 const isSorted = sortCol === col;
                 const width = colWidths[col] ?? DEFAULT_COLUMN_WIDTH;
@@ -1315,29 +1199,8 @@ export function QueryResultTable({
             {sortedIndices.map((origIdx, idx) => {
               const row = rows[origIdx];
               const isRowSelected = selectedRowIdxs.has(origIdx);
-              const selectedRowHeaderBgClass = hasFrozenColumns ? "query-table-frozen-cell-selected" : "bg-primary/15";
               return (
                 <tr key={origIdx} className={idx % 2 === 0 ? "bg-background" : "bg-muted/40"}>
-                  {showRowNumber && (
-                    <td
-                      data-row-header-key={origIdx}
-                      data-row-selected={isRowSelected ? "true" : undefined}
-                      className={`border border-border px-2 py-1 text-center text-muted-foreground whitespace-nowrap w-[50px] cursor-default select-none ${
-                        isRowSelected
-                          ? `${selectedRowHeaderBgClass} text-foreground ring-2 ring-inset ring-primary/50 ${
-                              hasFrozenColumns ? "z-30" : "relative z-10"
-                            }`
-                          : hasFrozenColumns
-                            ? "bg-background"
-                            : ""
-                      } ${hasFrozenColumns ? "sticky left-0 z-20" : ""}`}
-                      onMouseDown={(e) => handleRowMouseDown(e, origIdx)}
-                      onMouseEnter={() => handleRowMouseEnter(origIdx)}
-                      onContextMenu={(e) => handleRowContextMenu(e, origIdx)}
-                    >
-                      {rowNumberOffset + origIdx + 1}
-                    </td>
-                  )}
                   {displayColumns.map((col) => {
                     const ck = cellKey(origIdx, col);
                     const isEdited = edits?.has(ck);
