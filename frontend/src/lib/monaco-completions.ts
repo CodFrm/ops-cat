@@ -7,11 +7,13 @@
 //
 // 该模块只能被 import 一次（registerCompletions 内部做了幂等保护）。
 //
-import * as monaco from "monaco-editor";
 import type * as MonacoNS from "monaco-editor";
+import type * as MonacoRuntimeNS from "monaco-editor/esm/vs/editor/editor.api.js";
+
+type MonacoRuntime = typeof MonacoRuntimeNS;
 
 export type CompletionContext = {
-  monaco: typeof MonacoNS;
+  monaco: MonacoRuntime;
   range: MonacoNS.IRange;
   model: MonacoNS.editor.ITextModel;
   position: MonacoNS.Position;
@@ -195,7 +197,7 @@ const MONGO_OPERATORS: MongoOp[] = [
 
 let registered = false;
 
-export function registerCompletions(): void {
+export function registerCompletions(monaco: MonacoRuntime): void {
   if (registered) return;
   registered = true;
 
@@ -238,8 +240,8 @@ export function registerCompletions(): void {
     },
   });
 
-  // Mongo 查询通常用 javascript 模式（用户当前已选 js 高亮）。这里追加 $operators，
-  // monaco 会与 ts.worker 自带补全合并。
+  // Mongo 查询通常用 javascript 模式（用户当前已选 js 高亮）。这里追加 $operators。
+  // 当前只加载基础 javascript 语言包，不启用体积较大的 TypeScript worker。
   monaco.languages.registerCompletionItemProvider("javascript", {
     triggerCharacters: ["$", "."],
     provideCompletionItems(model, position) {
@@ -267,9 +269,8 @@ export function registerCompletions(): void {
     },
   });
 
-  // mongo 查询体作为 JS 解析时，顶层 {...} 会被当作 block + label，
-  // ts.worker 容易标红。关掉语义校验（保留语法校验）。
-  // 0.55 把 typescript 子模块标 deprecated 但运行时仍存在；用宽松类型访问。
+  // 如果未来重新启用 TypeScript language service，mongo 查询体作为 JS 解析时，
+  // 顶层 {...} 会被当作 block + label，容易误报。这里保留兼容逻辑。
   const tsLang = (
     monaco.languages as unknown as {
       typescript?: { javascriptDefaults?: { setDiagnosticsOptions?: (o: unknown) => void } };

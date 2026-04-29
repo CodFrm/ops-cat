@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from "react";
+import { lazy, Suspense, useRef, useState, useEffect } from "react";
 import { cn, useResizeHandle } from "@opskat/ui";
 import { useAIStore, type MentionRef } from "@/stores/aiStore";
 import { useFullscreen } from "@/hooks/useFullscreen";
@@ -6,9 +6,10 @@ import { SideAssistantHeader } from "./SideAssistantHeader";
 import { SideAssistantContextBar } from "./SideAssistantContextBar";
 import { SideAssistantHistoryDropdown } from "./SideAssistantHistoryDropdown";
 import { SideAssistantTabBar } from "./SideAssistantTabBar";
-import { AIChatContent } from "./AIChatContent";
 import { Trans } from "react-i18next";
-import { History } from "lucide-react";
+import { History, Loader2 } from "lucide-react";
+
+const AIChatContent = lazy(() => import("./AIChatContent").then((m) => ({ default: m.AIChatContent })));
 
 interface SideAssistantPanelProps {
   collapsed: boolean;
@@ -198,13 +199,21 @@ export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelPr
               </div>
             ) : (
               <div className="flex-1 min-h-0 flex flex-col">
-                <AIChatContent
-                  sideTabId={activeSidebarTab.id}
-                  conversationId={activeConversationId}
-                  compact
-                  onSendOverride={handleSendOverride}
-                  onStopOverride={handleStopOverride}
-                />
+                <Suspense
+                  fallback={
+                    <div className="flex h-full items-center justify-center">
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    </div>
+                  }
+                >
+                  <AIChatContent
+                    sideTabId={activeSidebarTab.id}
+                    conversationId={activeConversationId}
+                    compact
+                    onSendOverride={handleSendOverride}
+                    onStopOverride={handleStopOverride}
+                  />
+                </Suspense>
               </div>
             )}
           </div>

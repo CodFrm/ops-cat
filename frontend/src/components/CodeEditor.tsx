@@ -79,6 +79,23 @@ export function CodeEditor({
   const resolvedTheme = useResolvedTheme();
   const editorRef = useRef<MonacoNS.editor.IStandaloneCodeEditor | null>(null);
   const modelUriRef = useRef<string | null>(null);
+  const [monacoReady, setMonacoReady] = useState(false);
+  const [monacoLoadError, setMonacoLoadError] = useState<unknown>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    import("@/lib/monaco-setup")
+      .then(({ setupMonaco }) => {
+        setupMonaco();
+        if (!cancelled) setMonacoReady(true);
+      })
+      .catch((error) => {
+        if (!cancelled) setMonacoLoadError(error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // 用 ref 桥接最新的 dynamicCompletions，避免 prop 变化时 re-mount editor
   const dynamicRef = useRef<DynamicCompletionGetter | undefined>(dynamicCompletions);
@@ -137,6 +154,14 @@ export function CodeEditor({
     },
     [handleMount, isControlled, placeholder]
   );
+
+  if (monacoLoadError) {
+    throw monacoLoadError;
+  }
+
+  if (!monacoReady) {
+    return <div className={`relative h-full w-full ${className ?? ""}`} style={{ height }} />;
+  }
 
   return (
     <div className={`relative h-full w-full ${className ?? ""}`}>
