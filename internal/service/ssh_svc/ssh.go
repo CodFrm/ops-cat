@@ -131,7 +131,7 @@ func (s *Session) Write(data []byte) error {
 		s.mu.Unlock()
 		return fmt.Errorf("session is closed")
 	}
-	hasNewline := bytes.IndexAny(data, "\r\n") >= 0
+	hasNewline := bytes.ContainsAny(data, "\r\n")
 	s.markUserInput(data)
 	_, err := s.stdin.Write(data)
 	s.mu.Unlock()
@@ -258,7 +258,7 @@ func (s *Session) markUserInput(data []byte) {
 		return
 	}
 
-	hasNewline := bytes.IndexAny(data, "\r\n") >= 0
+	hasNewline := bytes.ContainsAny(data, "\r\n")
 	changed := false
 	if s.syncState.PromptReady {
 		if s.syncState.PromptClean {
@@ -1338,11 +1338,11 @@ func (s *Session) filterOutput(chunk []byte) []byte {
 }
 
 func trailingPrefixLength(data, prefix []byte) int {
-	max := len(prefix) - 1
-	if max > len(data) {
-		max = len(data)
+	maxSize := len(prefix) - 1
+	if maxSize > len(data) {
+		maxSize = len(data)
 	}
-	for size := max; size > 0; size-- {
+	for size := maxSize; size > 0; size-- {
 		if bytes.Equal(data[len(data)-size:], prefix[:size]) {
 			return size
 		}
@@ -1409,7 +1409,7 @@ func (s *Session) handleSyncPayload(payload string) bool {
 			return false
 		}
 		s.syncMu.Lock()
-		if !(currentNonce == s.promptNonce || (s.promptPendingNonce != "" && currentNonce == s.promptPendingNonce)) {
+		if currentNonce != s.promptNonce && (s.promptPendingNonce == "" || currentNonce != s.promptPendingNonce) {
 			s.syncMu.Unlock()
 			return false
 		}
