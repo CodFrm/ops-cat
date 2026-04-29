@@ -207,6 +207,17 @@ describe("assetStore", () => {
       const path = useAssetStore.getState().getAssetPath({ Name: "S1", GroupID: 2 } as any);
       expect(path).toBe("Orphan / S1");
     });
+
+    it("stops when group parents form a cycle", () => {
+      useAssetStore.setState({
+        groups: [
+          { ID: 1, Name: "A", ParentID: 2 },
+          { ID: 2, Name: "B", ParentID: 1 },
+        ] as any,
+      });
+      const path = useAssetStore.getState().getAssetPath({ Name: "S1", GroupID: 1 } as any);
+      expect(path).toBe("B / A / S1");
+    });
   });
 
   describe("selection", () => {
