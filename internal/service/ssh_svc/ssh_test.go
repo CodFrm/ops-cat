@@ -3,9 +3,12 @@ package ssh_svc
 import (
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/opskat/opskat/internal/pkg/dirsync"
 	"github.com/smartystreets/goconvey/convey"
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/crypto/ssh"
 )
 
 func newTestSyncSession(token string) *Session {
@@ -76,6 +79,14 @@ func TestManager_ConnectInvalidAuth(t *testing.T) {
 			assert.Contains(t, err.Error(), "解析密钥失败")
 		})
 	})
+}
+
+func TestManager_GetSessionSyncStateReturnsDirSyncCodeWhenSessionMissing(t *testing.T) {
+	m := NewManager()
+
+	_, err := m.GetSessionSyncState("missing-session")
+
+	assert.EqualError(t, err, dirsync.CodeSessionNotFound)
 }
 
 func TestSession_ClosedBehavior(t *testing.T) {
@@ -199,7 +210,7 @@ func TestSession_PrepareDirectoryChangeRequiresCleanPrompt(t *testing.T) {
 	sess.notePrompt("/srv/app")
 	sess.markUserInput([]byte("ls"))
 
-	_, err := sess.prepareDirectoryChange("/srv/logs", make(chan error, 1))
+	_, err := sess.prepareDirectoryChange("/srv/logs", "/srv/logs", make(chan error, 1))
 	assert.EqualError(t, err, "DIRSYNC_BUSY")
 }
 
@@ -227,7 +238,7 @@ func TestSession_ReplayedReadableMarkerCannotFinishPendingDirectoryChange(t *tes
 	sess.notePrompt("/srv/app")
 
 	resultCh := make(chan error, 1)
-	_, err := sess.prepareDirectoryChange("/srv/logs", resultCh)
+	_, err := sess.prepareDirectoryChange("/srv/logs", "/srv/logs", resultCh)
 	assert.NoError(t, err)
 
 	replayedChdir := buildTestSyncSequence("real-token", "chdir:ok:/srv/logs")
@@ -339,4 +350,93 @@ func TestParseShellProbeOutput(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "/srv/app", result.cwd)
 	assert.True(t, result.promptReady)
+}
+
+func TestBuildInteractiveShellCommand_BashDoesNotSourceProfiles(t *testing.T) {
+	command := buildInteractiveShellCommand("/bin/bash", shellTypeBash, "token", "nonce")
+
+	assert.NotContains(t, command, ".bash_profile")
+	assert.NotContains(t, command, ".bash_login")
+	assert.NotContains(t, command, ".profile")
+	assert.Contains(t, command, ".bashrc")
+}
+
+func TestSession_PendingDirectoryChangeAcceptsCanonicalCwd(t *testing.T) {
+	sess := newTestSyncSession("real-token")
+	sess.notePrompt("/home/me")
+
+	resultCh := make(chan error, 1)
+	_, err := sess.prepareDirectoryChange("/home/me/current", "/srv/releases/2026", resultCh)
+	assert.NoError(t, err)
+
+	sess.finishPendingDirectoryChangeProbe(sess.pendingDirNonce, sess.pendingDirTarget, "/srv/releases/2026")
+
+	select {
+	case result := <-resultCh:
+		assert.NoError(t, result)
+	default:
+		t.Fatal("expected canonical cwd to complete pending directory change")
+	}
+
+	state := sess.GetSyncState()
+	assert.Equal(t, "/srv/releases/2026", state.Cwd)
+	assert.True(t, state.CwdKnown)
+	assert.True(t, state.PromptReady)
+}
+
+func TestSession_ProbeLoopDisablesSyncAfterRepeatedUnusableResults(t *testing.T) {
+	oldInterval := syncProbeInterval
+	oldMax := syncProbeMaxUnusableResults
+	syncProbeInterval = 5 * time.Millisecond
+	syncProbeMaxUnusableResults = 3
+	defer func() {
+		syncProbeInterval = oldInterval
+		syncProbeMaxUnusableResults = oldMax
+	}()
+
+	sess := newTestSyncSession("real-token")
+	sess.shellPID = 4242
+	sess.shared = &sharedClient{client: &ssh.Client{}}
+	sess.syncProbeActive = true
+	sess.probeShellStateFn = func(_ int) (shellProbeResult, error) {
+		return shellProbeResult{}, nil
+	}
+
+	go sess.runSyncProbeLoop()
+
+	assert.Eventually(t, func() bool {
+		state := sess.GetSyncState()
+		return !state.Supported &&
+			state.Status == directorySyncUnsupported &&
+			state.LastError == dirSyncErrProbeUnsupported &&
+			!state.Busy
+	}, 500*time.Millisecond, 10*time.Millisecond)
+}
+
+func TestSession_ProbeLoopDisablesSyncWhenPromptProbeHasNoCwd(t *testing.T) {
+	oldInterval := syncProbeInterval
+	oldMax := syncProbeMaxUnusableResults
+	syncProbeInterval = 5 * time.Millisecond
+	syncProbeMaxUnusableResults = 3
+	defer func() {
+		syncProbeInterval = oldInterval
+		syncProbeMaxUnusableResults = oldMax
+	}()
+
+	sess := newTestSyncSession("real-token")
+	sess.shellPID = 4242
+	sess.shared = &sharedClient{client: &ssh.Client{}}
+	sess.syncProbeActive = true
+	sess.probeShellStateFn = func(_ int) (shellProbeResult, error) {
+		return shellProbeResult{promptReady: true}, nil
+	}
+
+	go sess.runSyncProbeLoop()
+
+	assert.Eventually(t, func() bool {
+		state := sess.GetSyncState()
+		return !state.Supported &&
+			state.Status == directorySyncUnsupported &&
+			state.LastError == dirSyncErrProbeUnsupported
+	}, 500*time.Millisecond, 10*time.Millisecond)
 }

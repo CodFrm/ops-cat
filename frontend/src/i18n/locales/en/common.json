@@ -1012,7 +1012,12 @@
       "terminalFromPanel": "Change terminal directory to current file manager directory",
       "followToggle": "Keep terminal and file manager directories in sync for this tab",
       "followShort": "Sync",
+      "markerOverflow": "Directory sync marker output was too large",
+      "invalidTarget": "Choose a directory before syncing",
+      "sessionClosed": "The terminal session was closed",
+      "sessionNotFound": "The terminal session no longer exists",
       "unsupported": "The current shell does not support directory sync",
+      "probeUnsupported": "Directory sync is not available in this remote environment",
       "cwdUnknown": "The terminal has not reported a working directory yet",
       "busy": "Wait until the active pane returns to a clean prompt",
       "pending": "A directory change is already in progress",
@@ -1020,7 +1025,8 @@
       "notFound": "The target directory does not exist",
       "notDirectory": "The selected path is not a directory",
       "accessDenied": "The target directory cannot be accessed",
-      "remoteFailed": "The terminal rejected the directory change"
+      "remoteFailed": "The terminal rejected the directory change",
+      "nonceFailed": "Could not start a verified directory change"
     }
   },
   "error": {

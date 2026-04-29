@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/pkg/dirsync"
 	"github.com/opskat/opskat/internal/service/asset_svc"
 	"github.com/opskat/opskat/internal/service/credential_svc"
 	"github.com/opskat/opskat/internal/service/ssh_svc"
@@ -408,15 +409,15 @@ func (a *App) GetSSHSyncState(sessionID string) (ssh_svc.DirectorySyncState, err
 func (a *App) ChangeSSHDirectory(sessionID, targetPath string) error {
 	sess, ok := a.sshManager.GetSession(sessionID)
 	if !ok {
-		return fmt.Errorf("DIRSYNC_SESSION_NOT_FOUND")
+		return dirsync.Error(dirsync.CodeSessionNotFound)
 	}
 
 	state := sess.GetSyncState()
 	switch {
 	case !state.Supported:
-		return fmt.Errorf("DIRSYNC_UNSUPPORTED")
+		return dirsync.Error(dirsync.CodeUnsupported)
 	case !state.CwdKnown:
-		return fmt.Errorf("DIRSYNC_CWD_UNKNOWN")
+		return dirsync.Error(dirsync.CodeCwdUnknown)
 	}
 
 	resolvedPath := targetPath
@@ -425,11 +426,12 @@ func (a *App) ChangeSSHDirectory(sessionID, targetPath string) error {
 	}
 	resolvedPath = path.Clean(resolvedPath)
 
-	if err := a.sftpService.ValidateDirectory(sessionID, resolvedPath); err != nil {
+	expectedPath, err := a.sftpService.ResolveDirectory(sessionID, resolvedPath)
+	if err != nil {
 		return err
 	}
 
-	return sess.ChangeDirectory(resolvedPath)
+	return sess.ChangeDirectoryTo(resolvedPath, expectedPath)
 }
 
 // SplitSSH 在已有会话的连接上创建新会话（分割窗格复用连接）

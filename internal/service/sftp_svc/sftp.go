@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/opskat/opskat/internal/pkg/dirsync"
 	"github.com/opskat/opskat/internal/service/ssh_svc"
 
 	"github.com/cago-frame/cago/pkg/logger"
@@ -90,24 +91,35 @@ func (s *Service) Getwd(sessionID string) (string, error) {
 	return sftpClient.Getwd()
 }
 
-// ValidateDirectory 校验远程目录存在且可访问。
-func (s *Service) ValidateDirectory(sessionID, dirPath string) error {
+// ResolveDirectory validates that a remote directory exists and returns its canonical path.
+func (s *Service) ResolveDirectory(sessionID, dirPath string) (string, error) {
 	sftpClient, err := s.getSFTPClient(sessionID)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	info, err := sftpClient.Stat(dirPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("DIRSYNC_NOT_FOUND")
+			return "", dirsync.Error(dirsync.CodeNotFound)
 		}
-		return fmt.Errorf("DIRSYNC_ACCESS_DENIED")
+		return "", dirsync.Error(dirsync.CodeAccessDenied)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("DIRSYNC_NOT_DIRECTORY")
+		return "", dirsync.Error(dirsync.CodeNotDirectory)
 	}
-	return nil
+
+	realPath, err := sftpClient.RealPath(dirPath)
+	if err != nil || realPath == "" {
+		return dirPath, nil
+	}
+	return realPath, nil
+}
+
+// ValidateDirectory 校验远程目录存在且可访问。
+func (s *Service) ValidateDirectory(sessionID, dirPath string) error {
+	_, err := s.ResolveDirectory(sessionID, dirPath)
+	return err
 }
 
 // FileEntry 远程文件/目录条目

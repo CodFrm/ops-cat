@@ -1,7 +1,12 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { ConnectSSHAsync } from "../../wailsjs/go/app/App";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { ConnectSSHAsync, DisconnectSSH, GetSSHSyncState } from "../../wailsjs/go/app/App";
+import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
 import { useTabStore } from "../stores/tabStore";
-import { useTerminalStore } from "../stores/terminalStore";
+import {
+  __resetTerminalSyncListenersForTest,
+  useTerminalStore,
+  type TerminalDirectorySyncState,
+} from "../stores/terminalStore";
 import { useAssetStore } from "../stores/assetStore";
 import { asset_entity } from "../../wailsjs/go/models";
 
@@ -22,6 +27,26 @@ function makeSSHAsset(id: number, name = `Server ${id}`): asset_entity.Asset {
     Updatetime: 0,
   } as asset_entity.Asset;
 }
+
+function makeSyncState(partial: Partial<TerminalDirectorySyncState> = {}): TerminalDirectorySyncState {
+  return {
+    sessionId: "s1",
+    cwd: "/srv/app",
+    cwdKnown: true,
+    shell: "/bin/bash",
+    shellType: "bash",
+    supported: true,
+    promptReady: true,
+    promptClean: true,
+    busy: false,
+    status: "ready",
+    ...partial,
+  };
+}
+
+afterEach(() => {
+  __resetTerminalSyncListenersForTest();
+});
 
 describe("terminalStore.connect", () => {
   beforeEach(() => {
@@ -298,5 +323,120 @@ describe("terminalStore directory sync", () => {
 
     useTerminalStore.getState().setDirectoryFollowMode("tab1", "off");
     expect(useTerminalStore.getState().tabData.tab1.directoryFollowMode).toBe("off");
+  });
+});
+
+describe("terminalStore sync listener lifecycle", () => {
+  const eventHandlers = new Map<string, (...data: unknown[]) => void>();
+
+  beforeEach(() => {
+    __resetTerminalSyncListenersForTest();
+    eventHandlers.clear();
+    vi.clearAllMocks();
+    vi.mocked(EventsOn).mockImplementation((eventName, handler) => {
+      eventHandlers.set(eventName, handler);
+      return vi.fn();
+    });
+    vi.mocked(GetSSHSyncState).mockResolvedValue(makeSyncState());
+    vi.spyOn(useAssetStore.getState(), "getAssetPath").mockReturnValue("Test/Server");
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useTerminalStore.setState({
+      tabData: {},
+      sessionSync: {},
+      connections: {},
+      connectingAssetIds: new Set(),
+    });
+  });
+
+  async function connectAndEmitSuccess(
+    connectionId = "conn-1",
+    sessionId = "s1",
+    syncState = makeSyncState({ sessionId })
+  ) {
+    vi.mocked(ConnectSSHAsync).mockResolvedValueOnce(connectionId);
+    vi.mocked(GetSSHSyncState).mockResolvedValueOnce(syncState);
+
+    await useTerminalStore.getState().connect(makeSSHAsset(1));
+
+    const connectHandler = eventHandlers.get(`ssh:connect:${connectionId}`);
+    expect(connectHandler).toEqual(expect.any(Function));
+    if (!connectHandler) {
+      throw new Error(`missing connect handler for ${connectionId}`);
+    }
+
+    connectHandler({ type: "connected", sessionId });
+    await Promise.resolve();
+
+    return connectHandler;
+  }
+
+  it("registers a sync listener on successful connect and hydrates initial sync state", async () => {
+    await connectAndEmitSuccess("conn-1", "s1", makeSyncState({ sessionId: "s1", cwd: "/var/www" }));
+
+    expect(EventsOn).toHaveBeenCalledWith("ssh:sync:s1", expect.any(Function));
+    expect(GetSSHSyncState).toHaveBeenCalledWith("s1");
+    expect(useTerminalStore.getState().sessionSync.s1?.cwd).toBe("/var/www");
+  });
+
+  it("does not register a duplicate sync listener for the same session", async () => {
+    const connectHandler = await connectAndEmitSuccess("conn-1", "s1");
+
+    vi.mocked(EventsOn).mockClear();
+    vi.mocked(GetSSHSyncState).mockClear();
+
+    connectHandler({ type: "connected", sessionId: "s1" });
+
+    expect(EventsOn).not.toHaveBeenCalledWith("ssh:sync:s1", expect.any(Function));
+    expect(GetSSHSyncState).not.toHaveBeenCalled();
+  });
+
+  it("unregisters the sync listener and clears sync state when closing a pane", async () => {
+    await connectAndEmitSuccess("conn-1", "s1", makeSyncState({ sessionId: "s1", cwd: "/srv/app" }));
+    expect(useTerminalStore.getState().sessionSync.s1?.cwd).toBe("/srv/app");
+
+    vi.mocked(EventsOff).mockClear();
+
+    useTerminalStore.getState().closePane("s1", "s1");
+
+    expect(EventsOff).toHaveBeenCalledWith("ssh:sync:s1");
+    expect(useTerminalStore.getState().sessionSync.s1).toBeUndefined();
+  });
+
+  it("unregisters the sync listener and clears sync state when closing a tab", async () => {
+    await connectAndEmitSuccess("conn-1", "s1", makeSyncState({ sessionId: "s1", cwd: "/srv/app" }));
+    expect(useTerminalStore.getState().sessionSync.s1?.cwd).toBe("/srv/app");
+
+    vi.mocked(EventsOff).mockClear();
+
+    useTabStore.getState().closeTab("s1");
+
+    expect(EventsOff).toHaveBeenCalledWith("ssh:sync:s1");
+    expect(useTerminalStore.getState().sessionSync.s1).toBeUndefined();
+  });
+
+  it("unregisters the sync listener and clears sync state when disconnecting a pane", async () => {
+    await connectAndEmitSuccess("conn-1", "s1", makeSyncState({ sessionId: "s1", cwd: "/srv/app" }));
+    expect(useTerminalStore.getState().sessionSync.s1?.cwd).toBe("/srv/app");
+
+    vi.mocked(EventsOff).mockClear();
+    vi.mocked(DisconnectSSH).mockClear();
+
+    useTerminalStore.getState().disconnect("s1");
+
+    expect(DisconnectSSH).toHaveBeenCalledWith("s1");
+    expect(EventsOff).toHaveBeenCalledWith("ssh:sync:s1");
+    expect(useTerminalStore.getState().sessionSync.s1).toBeUndefined();
+  });
+
+  it("unregisters the sync listener and clears sync state when a pane closes remotely", async () => {
+    await connectAndEmitSuccess("conn-1", "s1", makeSyncState({ sessionId: "s1", cwd: "/srv/app" }));
+    expect(useTerminalStore.getState().sessionSync.s1?.cwd).toBe("/srv/app");
+
+    vi.mocked(EventsOff).mockClear();
+
+    useTerminalStore.getState().markClosed("s1");
+
+    expect(EventsOff).toHaveBeenCalledWith("ssh:sync:s1");
+    expect(useTerminalStore.getState().sessionSync.s1).toBeUndefined();
   });
 });

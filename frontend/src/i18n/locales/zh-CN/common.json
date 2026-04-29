@@ -1012,7 +1012,12 @@
       "terminalFromPanel": "让当前终端切换到当前目录",
       "followToggle": "在当前终端标签页内保持终端与当前目录始终同步",
       "followShort": "同步",
+      "markerOverflow": "目录同步标记输出过大",
+      "invalidTarget": "请先选择要同步的目录",
+      "sessionClosed": "终端会话已关闭",
+      "sessionNotFound": "终端会话不存在",
       "unsupported": "当前 shell 暂不支持目录同步",
+      "probeUnsupported": "当前远端环境不支持目录同步探测",
       "cwdUnknown": "终端尚未上报当前工作目录",
       "busy": "请等待活动窗格回到可切换目录的提示符状态",
       "pending": "已有目录切换正在进行中",
@@ -1020,7 +1025,8 @@
       "notFound": "目标目录不存在",
       "notDirectory": "目标路径不是目录",
       "accessDenied": "目标目录不可访问",
-      "remoteFailed": "终端拒绝了此次目录切换"
+      "remoteFailed": "终端拒绝了此次目录切换",
+      "nonceFailed": "无法启动已验证的目录切换"
     }
   },
   "error": {

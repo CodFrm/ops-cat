@@ -170,6 +170,10 @@ export function getTerminalActiveAssetIds(): Set<number> {
 
 const syncListeners = new Set<string>();
 
+export function __resetTerminalSyncListenersForTest() {
+  syncListeners.clear();
+}
+
 function registerSessionSyncListener(sessionId: string) {
   if (!sessionId || syncListeners.has(sessionId)) return;
   syncListeners.add(sessionId);
@@ -722,6 +726,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   disconnect: (sessionId) => {
+    unregisterSessionSyncListener(sessionId);
     DisconnectSSH(sessionId);
     set((state) => {
       const newTabData = { ...state.tabData };
@@ -741,6 +746,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   markClosed: (sessionId) => {
+    unregisterSessionSyncListener(sessionId);
     set((state) => {
       const newTabData = { ...state.tabData };
       for (const [tabId, data] of Object.entries(newTabData)) {
