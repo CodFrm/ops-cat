@@ -6,12 +6,36 @@ import { EventsOn, EventsOff } from "../../../wailsjs/runtime/runtime";
 import { K8sSectionCard } from "./K8sSectionCard";
 import { K8sLogTerminal, type K8sLogTerminalHandle } from "./K8sLogTerminal";
 
+const MAX_LOG_CHUNKS = 2000;
+
+export interface LogBufferState {
+  container: string;
+  tailLines: number;
+  chunks: string[];
+}
+
 export interface LogTabState {
   logStreamID: string | null;
   logContainer: string;
   logTailLines: number;
   logError: string | null;
   currentPod?: string;
+  logBuffers?: Record<string, LogBufferState>;
+}
+
+export type LogTabStateUpdate = Partial<LogTabState> | ((prev: LogTabState) => LogTabState);
+
+export function buildLogBufferKey(podName: string, container: string, tailLines: number) {
+  return `${podName}::${container}::${tailLines}`;
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 
 interface K8sLogsPanelProps {
@@ -20,7 +44,7 @@ interface K8sLogsPanelProps {
   namespace: string;
   podName: string;
   state: LogTabState;
-  onStateChange: (patch: Partial<LogTabState>) => void;
+  onStateChange: (update: LogTabStateUpdate) => void;
   pods?: { name: string }[];
   onSwitchPod?: (podName: string) => void;
 }
@@ -39,6 +63,7 @@ export function K8sLogsPanel({
   const terminalRef = useRef<K8sLogTerminalHandle>(null);
   const myStreamIDRef = useRef<string | null>(null);
   const onStateChangeRef = useRef(onStateChange);
+  const activeContainer = state.logContainer || containers[0]?.name || "";
   // eslint-disable-next-line react-hooks/refs
   onStateChangeRef.current = onStateChange;
 
@@ -53,9 +78,21 @@ export function K8sLogsPanel({
   const start = useCallback(() => {
     stop();
     terminalRef.current?.clear();
-    onStateChangeRef.current({ logError: null });
+    const bufferKey = buildLogBufferKey(podName, activeContainer, state.logTailLines);
+    onStateChangeRef.current((prev) => ({
+      ...prev,
+      logError: null,
+      logBuffers: {
+        ...(prev.logBuffers || {}),
+        [bufferKey]: {
+          container: activeContainer,
+          tailLines: state.logTailLines,
+          chunks: [],
+        },
+      },
+    }));
 
-    StartK8sPodLogs(assetId, namespace, podName, state.logContainer, state.logTailLines)
+    StartK8sPodLogs(assetId, namespace, podName, activeContainer, state.logTailLines)
       .then((streamID: string) => {
         myStreamIDRef.current = streamID;
         onStateChangeRef.current({ logStreamID: streamID });
@@ -64,18 +101,25 @@ export function K8sLogsPanel({
         const errEvent = "k8s:logerr:" + streamID;
         const endEvent = "k8s:logend:" + streamID;
 
-        function base64ToBytes(base64: string): Uint8Array {
-          const binary = atob(base64);
-          const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) {
-            bytes[i] = binary.charCodeAt(i);
-          }
-          return bytes;
-        }
-
         EventsOn(dataEvent, (data: string) => {
           if (myStreamIDRef.current !== streamID) return;
           terminalRef.current?.write(base64ToBytes(data));
+          onStateChangeRef.current((prev) => {
+            const existing = prev.logBuffers?.[bufferKey];
+            const chunks = [...(existing?.chunks || []), data];
+            const nextChunks = chunks.length > MAX_LOG_CHUNKS ? chunks.slice(chunks.length - MAX_LOG_CHUNKS) : chunks;
+            return {
+              ...prev,
+              logBuffers: {
+                ...(prev.logBuffers || {}),
+                [bufferKey]: {
+                  container: activeContainer,
+                  tailLines: state.logTailLines,
+                  chunks: nextChunks,
+                },
+              },
+            };
+          });
         });
 
         EventsOn(errEvent, (err: string) => {
@@ -96,7 +140,7 @@ export function K8sLogsPanel({
       .catch((e: unknown) => {
         onStateChangeRef.current({ logError: String(e) });
       });
-  }, [assetId, namespace, podName, state.logContainer, state.logTailLines, stop]);
+  }, [activeContainer, assetId, namespace, podName, state.logTailLines, stop]);
 
   useEffect(() => {
     return () => {
@@ -114,7 +158,12 @@ export function K8sLogsPanel({
       onStateChangeRef.current({ logStreamID: null });
     }
     terminalRef.current?.clear();
-  }, [podName]);
+    const bufferKey = buildLogBufferKey(podName, activeContainer, state.logTailLines);
+    const chunks = state.logBuffers?.[bufferKey]?.chunks || [];
+    for (const chunk of chunks) {
+      terminalRef.current?.write(base64ToBytes(chunk));
+    }
+  }, [activeContainer, podName, state.logTailLines]);
 
   return (
     <K8sSectionCard className="flex flex-col h-full">
@@ -127,7 +176,7 @@ export function K8sLogsPanel({
           {containers.length > 1 && (
             <select
               className="h-7 rounded-md border bg-background px-2 text-xs"
-              value={state.logContainer || containers[0]?.name || ""}
+              value={activeContainer}
               onChange={(e) => {
                 const container = e.target.value;
                 onStateChange({ logContainer: container });

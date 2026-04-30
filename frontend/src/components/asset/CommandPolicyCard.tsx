@@ -58,6 +58,8 @@ export function CommandPolicyCard({
   const managerTab =
     policyType === "ssh"
       ? ("command" as const)
+      : policyType === "k8s"
+        ? ("command" as const)
       : policyType === "database"
         ? ("query" as const)
         : policyType === "redis"

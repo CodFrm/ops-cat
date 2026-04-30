@@ -55,7 +55,7 @@ func AllToolDefs() []ToolDef {
 		},
 		{
 			Name:        "get_asset",
-			Description: "Get detailed information about a specific asset, including its SSH connection configuration (host, port, username, auth method).",
+			Description: "Get detailed information about a specific asset, including SSH connection fields and asset-type-specific metadata. For k8s assets, inspect namespace, context, and ssh_tunnel_id to decide whether kubectl should run through an SSH jump host.",
 			Params: []ParamDef{
 				{Name: "id", Type: ParamNumber, Description: "Asset ID. Use list_assets to find available IDs.", Required: true},
 			},
@@ -70,6 +70,16 @@ func AllToolDefs() []ToolDef {
 			},
 			Handler:          handleRunCommand,
 			CommandExtractor: func(args map[string]any) string { return argString(args, "command") },
+		},
+		{
+			Name:        "exec_k8s",
+			Description: "Execute a kubectl command against a k8s asset. The tool uses the asset's stored kubeconfig, automatically applies the asset's default context/namespace when not explicitly provided, and preserves policy checks, approval, grant matching, and audit logging. If the k8s asset has ssh_tunnel_id, the command runs on that SSH jump host; otherwise kubectl runs locally. Pass either a full kubectl command or just the kubectl subcommand. Do not pass --kubeconfig.",
+			Params: []ParamDef{
+				{Name: "asset_id", Type: ParamNumber, Description: "K8s asset ID. Use list_assets with asset_type='k8s' to find it.", Required: true},
+				{Name: "command", Type: ParamString, Description: "kubectl command or subcommand, for example 'get pods -A' or 'kubectl describe pod api-0'.", Required: true},
+			},
+			Handler:          handleExecK8s,
+			CommandExtractor: k8sAuditCommandFromArgs,
 		},
 		{
 			Name:        "add_asset",
@@ -222,7 +232,7 @@ func AllToolDefs() []ToolDef {
 		},
 		{
 			Name:        "request_permission",
-			Description: "Request approval for grant of command patterns BEFORE executing them. Submit command patterns (one per line, supports '*' wildcard) for one or more target assets. The user will review and may edit the patterns before approving. Once approved, subsequent run_command/exec_sql/exec_redis calls matching any approved pattern will be auto-approved.",
+			Description: "Request approval for grant of command patterns BEFORE executing them. Submit command patterns (one per line, supports '*' wildcard) for one or more target assets. The user will review and may edit the patterns before approving. Once approved, subsequent run_command/exec_k8s/exec_sql/exec_redis calls matching any approved pattern will be auto-approved.",
 			Params: []ParamDef{
 				{Name: "items", Type: ParamString, Description: `JSON array of items. Each item: {"asset_id": <number>, "command_patterns": "<patterns separated by newline>"}. Example: [{"asset_id":1,"command_patterns":"cat /var/log/*\nsystemctl * nginx"},{"asset_id":2,"command_patterns":"SELECT * FROM users"}]`, Required: true},
 				{Name: "reason", Type: ParamString, Description: "Brief explanation of why these permissions are needed.", Required: true},

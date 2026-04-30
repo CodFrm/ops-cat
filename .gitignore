@@ -45,3 +45,4 @@ coverage_new.out
 
 .github/pr-assets/
 docs/superpowers/
+.gocache/

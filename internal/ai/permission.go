@@ -38,6 +38,8 @@ func CheckPermission(ctx context.Context, assetType string, assetID int64, comma
 		return checkRedisPermission(ctx, assetID, command)
 	case asset_entity.AssetTypeMongoDB:
 		return checkMongoDBPermission(ctx, assetID, command)
+	case asset_entity.AssetTypeK8s:
+		return checkK8sPermission(ctx, assetID, command)
 	default:
 		return CheckResult{Decision: NeedConfirm}
 	}
@@ -178,6 +180,37 @@ func checkRedisPermission(ctx context.Context, assetID int64, command string) Ch
 
 	// NeedConfirm：收集允许的 Redis 命令作为提示
 	merged := mergeRedisPolicy(mergedPolicy, asset_entity.DefaultRedisPolicy())
+	if len(merged.AllowList) > 0 {
+		result.HintRules = merged.AllowList
+	}
+	return result
+}
+
+// --- K8s ---
+
+func checkK8sPermission(ctx context.Context, assetID int64, command string) CheckResult {
+	groupResult := CheckGroupGenericPolicy(ctx, assetID, command, MatchCommandRule)
+	if groupResult.Decision == Deny {
+		return groupResult
+	}
+
+	asset, _ := resolveAssetPolicyChain(ctx, assetID)
+	mergedPolicy := collectK8sPolicies(ctx, asset)
+	result := CheckK8sPolicy(ctx, mergedPolicy, command)
+
+	if result.Decision == NeedConfirm && groupResult.Decision == Allow {
+		return groupResult
+	}
+
+	if result.Decision != NeedConfirm {
+		return result
+	}
+
+	if grantResult := matchGrantForAsset(ctx, assetID, command); grantResult != nil {
+		return *grantResult
+	}
+
+	merged := mergeK8sPolicy(mergedPolicy, asset_entity.DefaultK8sPolicy())
 	if len(merged.AllowList) > 0 {
 		result.HintRules = merged.AllowList
 	}

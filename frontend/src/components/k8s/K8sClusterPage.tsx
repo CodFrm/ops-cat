@@ -1025,10 +1025,17 @@ export function K8sClusterPage({ asset }: Props) {
     [asset.ID, podDetails, loadingPodDetails]
   );
 
-  const updateLogTabState = useCallback((tabId: string, patch: Partial<import("./K8sLogsPanel").LogTabState>) => {
+  const updateLogTabState = useCallback((tabId: string, update: import("./K8sLogsPanel").LogTabStateUpdate) => {
     setLogTabStates((prev) => {
-      const existing = prev[tabId] || { logStreamID: null, logContainer: "", logTailLines: 200, logError: null };
-      return { ...prev, [tabId]: { ...existing, ...patch } };
+      const existing = prev[tabId] || {
+        logStreamID: null,
+        logContainer: "",
+        logTailLines: 200,
+        logError: null,
+        logBuffers: {},
+      };
+      const nextState = typeof update === "function" ? update(existing) : { ...existing, ...update };
+      return { ...prev, [tabId]: nextState };
     });
   }, []);
 
@@ -1200,6 +1207,7 @@ export function K8sClusterPage({ asset }: Props) {
           logContainer: container,
           logTailLines: 200,
           logError: null,
+          logBuffers: {},
         },
       }));
     }
@@ -1527,6 +1535,7 @@ export function K8sClusterPage({ asset }: Props) {
                                                           logTailLines: 200,
                                                           logError: null,
                                                           currentPod: firstPod,
+                                                          logBuffers: {},
                                                         },
                                                       }));
                                                     }

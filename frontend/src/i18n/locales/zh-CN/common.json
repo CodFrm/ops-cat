@@ -374,6 +374,7 @@
       "builtin": {
         "linux-readonly": { "name": "Linux 常用只读", "desc": "常用 Linux 只读命令" },
         "k8s-readonly": { "name": "Kubernetes 只读", "desc": "Kubernetes 只读操作命令" },
+        "k8s-dangerous-deny": { "name": "Kubernetes 高危拒绝", "desc": "拒绝执行高危 Kubernetes 命令" },
         "docker-readonly": { "name": "Docker 只读", "desc": "Docker 只读操作命令" },
         "dangerous-deny": { "name": "高危命令拒绝", "desc": "拒绝执行高危系统命令" },
         "sql-readonly": { "name": "SQL 只读", "desc": "只允许查询类 SQL 语句" },

@@ -374,6 +374,7 @@
       "builtin": {
         "linux-readonly": { "name": "Linux Read-Only", "desc": "Common Linux read-only commands" },
         "k8s-readonly": { "name": "Kubernetes Read-Only", "desc": "Kubernetes read-only commands" },
+        "k8s-dangerous-deny": { "name": "Kubernetes Dangerous Deny", "desc": "Deny dangerous Kubernetes commands" },
         "docker-readonly": { "name": "Docker Read-Only", "desc": "Docker read-only commands" },
         "dangerous-deny": { "name": "Dangerous Command Deny", "desc": "Deny dangerous system commands" },
         "sql-readonly": { "name": "SQL Read-Only", "desc": "Allow query-only SQL statements" },

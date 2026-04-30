@@ -48,6 +48,7 @@ type ClientOption func(*clientOptions)
 type clientOptions struct {
 	dial        func(ctx context.Context, network, address string) (net.Conn, error)
 	contextName string
+	timeout     *time.Duration
 }
 
 func WithDial(dial func(ctx context.Context, network, address string) (net.Conn, error)) ClientOption {
@@ -59,6 +60,12 @@ func WithDial(dial func(ctx context.Context, network, address string) (net.Conn,
 func WithContext(contextName string) ClientOption {
 	return func(opts *clientOptions) {
 		opts.contextName = contextName
+	}
+}
+
+func WithTimeout(timeout time.Duration) ClientOption {
+	return func(opts *clientOptions) {
+		opts.timeout = &timeout
 	}
 }
 
@@ -136,7 +143,11 @@ func buildClient(kubeconfig string, opts ...ClientOption) (*kubernetes.Clientset
 	if err != nil {
 		return nil, fmt.Errorf("build rest config from kubeconfig: %w", err)
 	}
-	config.Timeout = 30 * time.Second
+	if clientOpts.timeout != nil {
+		config.Timeout = *clientOpts.timeout
+	} else {
+		config.Timeout = 30 * time.Second
+	}
 	if clientOpts.dial != nil {
 		config.Dial = clientOpts.dial
 		config.Proxy = func(*http.Request) (*url.URL, error) {
@@ -666,7 +677,8 @@ func fmtDuration(d time.Duration) string {
 }
 
 func StreamPodLogs(ctx context.Context, kubeconfig, namespace, podName, container string, tailLines int64, opts ...ClientOption) (io.ReadCloser, error) {
-	clientset, err := buildClient(kubeconfig, opts...)
+	streamOpts := append(append([]ClientOption{}, opts...), WithTimeout(0))
+	clientset, err := buildClient(kubeconfig, streamOpts...)
 	if err != nil {
 		return nil, err
 	}

@@ -14,7 +14,7 @@ type MatchFunc func(rule, command string) bool
 
 // PolicyTestInput 策略测试入参
 type PolicyTestInput struct {
-	PolicyType string // "ssh" | "database" | "redis"
+	PolicyType string // "ssh" | "database" | "redis" | "k8s"
 	AssetID    int64  // 资产ID（从资产的 groupID 开始解析组链）
 	GroupID    int64  // 资产组ID（从父组开始解析，当前组策略由 Current* 字段提供）
 
@@ -22,6 +22,7 @@ type PolicyTestInput struct {
 	CurrentSSH   *asset_entity.CommandPolicy
 	CurrentQuery *asset_entity.QueryPolicy
 	CurrentRedis *asset_entity.RedisPolicy
+	CurrentK8s   *asset_entity.K8sPolicy
 }
 
 // PolicyTestOutput 策略测试结果
@@ -48,6 +49,8 @@ func TestPolicy(ctx context.Context, input PolicyTestInput, command string) Poli
 		return testQueryPolicy(ctx, input.CurrentQuery, groups, command)
 	case "redis":
 		return testRedisPolicy(ctx, input.CurrentRedis, groups, command)
+	case "k8s":
+		return testK8sPolicy(ctx, input.CurrentK8s, groups, command)
 	}
 	return PolicyTestOutput{Decision: NeedConfirm}
 }
@@ -270,6 +273,56 @@ func testRedisPolicy(ctx context.Context, current *asset_entity.RedisPolicy, gro
 	}
 
 	// 映射资产策略结果（Allow 或 NeedConfirm）
+	if result.Decision == NeedConfirm {
+		return PolicyTestOutput{Decision: NeedConfirm}
+	}
+	return PolicyTestOutput{Decision: Allow}
+}
+
+// --- K8S ---
+
+func testK8sPolicy(ctx context.Context, current *asset_entity.K8sPolicy, groups []*group_entity.Group, command string) PolicyTestOutput {
+	var policies []*asset_entity.K8sPolicy
+	if current != nil {
+		policies = append(policies, current)
+	}
+	for _, g := range groups {
+		p, err := g.GetK8sPolicy()
+		if err != nil || p == nil {
+			continue
+		}
+		policies = append(policies, p)
+	}
+
+	if len(policies) == 0 {
+		return PolicyTestOutput{Decision: NeedConfirm}
+	}
+
+	for _, p := range policies {
+		if len(p.Groups) > 0 {
+			grpAllow, grpDeny := resolveCommandGroups(ctx, p.Groups)
+			p.AllowList = append(p.AllowList, grpAllow...)
+			p.DenyList = append(p.DenyList, grpDeny...)
+		}
+	}
+
+	merged := &asset_entity.K8sPolicy{}
+	for _, p := range policies {
+		if len(merged.AllowList) == 0 && len(p.AllowList) > 0 {
+			merged.AllowList = p.AllowList
+		}
+		merged.DenyList = appendUnique(merged.DenyList, p.DenyList...)
+	}
+
+	result := checkK8sPolicyRules(ctx, merged, command)
+	if result.Decision == Deny {
+		return PolicyTestOutput{
+			Decision:       Deny,
+			MatchedPattern: result.MatchedPattern,
+			MatchedSource:  "",
+			Message:        result.Message,
+		}
+	}
 	if result.Decision == NeedConfirm {
 		return PolicyTestOutput{Decision: NeedConfirm}
 	}

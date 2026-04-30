@@ -39,6 +39,10 @@ type safeAssetView struct {
 	ReadOnly bool   `json:"read_only,omitempty"`
 	// Redis 专属
 	RedisDB int `json:"redis_db,omitempty"`
+	// K8s 专属
+	Namespace   string `json:"namespace,omitempty"`
+	K8sContext  string `json:"context,omitempty"`
+	SSHTunnelID int64  `json:"ssh_tunnel_id,omitempty"`
 }
 
 // safeGroupListView 列表视图（不含描述）
@@ -92,6 +96,15 @@ func toSafeView(a *asset_entity.Asset) safeAssetView {
 			}
 			if val, ok := fields["auth_type"].(string); ok {
 				v.AuthType = val
+			}
+			if val, ok := fields["namespace"].(string); ok {
+				v.Namespace = val
+			}
+			if val, ok := fields["context"].(string); ok {
+				v.K8sContext = val
+			}
+			if val, ok := fields["ssh_tunnel_id"].(int64); ok {
+				v.SSHTunnelID = val
 			}
 		}
 	}
