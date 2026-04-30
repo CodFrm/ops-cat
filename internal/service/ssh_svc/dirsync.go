@@ -62,6 +62,11 @@ var (
 	syncProbeMaxUnusableResults = 12
 )
 
+// syncEnableTimeout bounds how long EnableSync waits for the shell to echo
+// the init:pid marker after we write the hook-installer to stdin. Variable so
+// tests can shorten it.
+var syncEnableTimeout = 3 * time.Second
+
 func (s *Session) GetSyncState() DirectorySyncState {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
@@ -569,7 +574,12 @@ func (s *Session) handleSyncPayload(payload string) bool {
 		}
 		s.shellPID = pid
 		s.syncDirty = true
+		bootstrap := s.syncBootstrapCh
+		s.syncBootstrapCh = nil
 		s.syncMu.Unlock()
+		if bootstrap != nil {
+			close(bootstrap)
+		}
 		s.ensureSyncProbe()
 		return true
 	case strings.HasPrefix(body, "prompt:"):
@@ -619,4 +629,124 @@ func (s *Session) handleSyncPayload(payload string) bool {
 		return true
 	}
 	return false
+}
+
+// EnableSync injects the directory-sync hooks into the running interactive
+// shell and waits for the init:pid marker. Idempotent: returns nil immediately
+// if the session is already supported with a known shell PID.
+//
+// On timeout (no marker within syncEnableTimeout), state is rolled back to
+// Supported=false and a CodeTimeout error is returned. Callers should map
+// that to a "please exit foreground program and retry" hint in the UI.
+func (s *Session) EnableSync() error {
+	s.syncMu.Lock()
+	if s.syncState.Supported && s.shellPID > 0 {
+		s.syncMu.Unlock()
+		return nil
+	}
+	if s.shellType == shellTypeUnsupported || s.shellType == "" {
+		s.syncMu.Unlock()
+		return dirsync.Error(dirSyncErrUnsupported)
+	}
+	if s.syncBootstrapCh != nil {
+		// Another EnableSync is in flight; wait on the same channel.
+		ch := s.syncBootstrapCh
+		s.syncMu.Unlock()
+		return waitForSyncBootstrap(ch)
+	}
+
+	token, err := generateSyncToken()
+	if err != nil {
+		s.syncMu.Unlock()
+		return dirsync.Error(dirSyncErrNonceFailed)
+	}
+	promptNonce, err := generateSyncToken()
+	if err != nil {
+		s.syncMu.Unlock()
+		return dirsync.Error(dirSyncErrNonceFailed)
+	}
+	s.syncToken = token
+	s.promptNonce = promptNonce
+	s.shellPID = 0
+	s.syncState.Supported = true
+	s.syncState.Status = directorySyncInitializing
+	s.syncState.LastError = ""
+	s.syncDirty = true
+	bootstrapCh := make(chan struct{})
+	s.syncBootstrapCh = bootstrapCh
+	state := s.syncState
+	cmd := buildEnableSyncCommand(s.shellType, token, promptNonce)
+	s.syncMu.Unlock()
+
+	go s.emitSyncState(state)
+
+	if cmd == "" {
+		s.clearBootstrap(bootstrapCh)
+		return dirsync.Error(dirSyncErrUnsupported)
+	}
+	if err := s.writeInternal([]byte(cmd)); err != nil {
+		s.clearBootstrap(bootstrapCh)
+		s.syncMu.Lock()
+		s.syncState.Supported = false
+		s.syncState.Status = directorySyncUnsupported
+		s.syncState.LastError = err.Error()
+		st := s.syncState
+		s.syncMu.Unlock()
+		s.emitSyncState(st)
+		return err
+	}
+
+	if err := waitForSyncBootstrap(bootstrapCh); err != nil {
+		s.syncMu.Lock()
+		// Only roll back if we still own this bootstrap; init:pid handler may
+		// have raced and already promoted the state to ready.
+		if s.syncBootstrapCh == bootstrapCh {
+			s.syncBootstrapCh = nil
+			s.syncState.Supported = false
+			s.syncState.Status = directorySyncUnsupported
+			s.syncState.LastError = err.Error()
+			s.shellPID = 0
+		}
+		st := s.syncState
+		s.syncMu.Unlock()
+		s.emitSyncState(st)
+		return err
+	}
+	return nil
+}
+
+// DisableSync removes hooks from the running shell and flips state back to
+// unsupported. Best-effort: if the stdin write fails, state is still cleared.
+func (s *Session) DisableSync() {
+	s.syncMu.Lock()
+	if !s.syncState.Supported {
+		s.syncMu.Unlock()
+		return
+	}
+	cmd := buildDisableSyncCommand(s.shellType)
+	s.syncMu.Unlock()
+
+	if cmd != "" {
+		if err := s.writeInternal([]byte(cmd)); err != nil {
+			logger.Default().Warn("write disable-sync command", zap.String("sessionID", s.ID), zap.Error(err))
+		}
+	}
+	s.disableDirectorySync(dirSyncErrUnsupported)
+}
+
+func (s *Session) clearBootstrap(ch chan struct{}) {
+	s.syncMu.Lock()
+	if s.syncBootstrapCh == ch {
+		s.syncBootstrapCh = nil
+	}
+	s.syncMu.Unlock()
+}
+
+func waitForSyncBootstrap(ch chan struct{}) error {
+	select {
+	case <-ch:
+		return nil
+	case <-time.After(syncEnableTimeout):
+		return dirsync.Error(dirSyncErrTimeout)
+	}
 }

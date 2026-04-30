@@ -1,6 +1,7 @@
 package ssh_svc
 
 import (
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -445,5 +446,54 @@ func TestSessionStartsWithSupportedFalse(t *testing.T) {
 	}
 	if state.Status != directorySyncUnsupported {
 		t.Fatalf("Status should be unsupported initially, got %q", state.Status)
+	}
+}
+
+func TestEnableSyncTimesOutWhenNoMarker(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer func() { _ = pw.Close() }()
+	sess := &Session{
+		ID:        "test-timeout",
+		stdin:     pw,
+		shellPath: "/bin/bash",
+		shellType: shellTypeBash,
+	}
+	sess.initSyncState(sess.shellPath, sess.shellType, false)
+
+	// Drain the pipe so writeInternal doesn't block.
+	go func() { _, _ = io.Copy(io.Discard, pr) }()
+
+	prev := syncEnableTimeout
+	syncEnableTimeout = 100 * time.Millisecond
+	defer func() { syncEnableTimeout = prev }()
+
+	err := sess.EnableSync()
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+	if state := sess.GetSyncState(); state.Supported {
+		t.Fatalf("Supported must remain false on timeout, got %#v", state)
+	}
+}
+
+func TestEnableSyncUnsupportedShellReturnsError(t *testing.T) {
+	sess := &Session{ID: "u", shellType: shellTypeUnsupported}
+	sess.initSyncState("/bin/sh", shellTypeUnsupported, false)
+	if err := sess.EnableSync(); err == nil {
+		t.Fatal("expected error for unsupported shell")
+	}
+}
+
+func TestEnableSyncIdempotent(t *testing.T) {
+	sess := &Session{ID: "i", shellType: shellTypeBash, shellPath: "/bin/bash"}
+	sess.initSyncState(sess.shellPath, sess.shellType, true)
+	sess.syncMu.Lock()
+	sess.syncState.Supported = true
+	sess.syncState.Status = directorySyncReady
+	sess.shellPID = 12345
+	sess.syncMu.Unlock()
+
+	if err := sess.EnableSync(); err != nil {
+		t.Fatalf("idempotent enable should return nil, got %v", err)
 	}
 }

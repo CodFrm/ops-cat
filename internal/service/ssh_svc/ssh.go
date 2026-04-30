@@ -91,6 +91,7 @@ type Session struct {
 	promptPendingNonce string
 	shellPID           int
 	syncDirty          bool
+	syncBootstrapCh    chan struct{} // closed when EnableSync receives init:pid; nil when not bootstrapping
 	syncProbeActive    bool
 	probeShellStateFn  func(int) (shellProbeResult, error)
 }
