@@ -16,7 +16,6 @@ let configured = false;
 
 export function setupMonaco(): void {
   if (configured) return;
-  configured = true;
 
   // 用本地的 monaco，避免 @monaco-editor/react 默认走 CDN（在 Wails 环境会断网失败）
   self.MonacoEnvironment = {
@@ -60,4 +59,7 @@ export function setupMonaco(): void {
 
   // 注册 SQL / JS(MongoDB) 的关键字、函数、snippet、operator 补全
   registerCompletions(monaco);
+
+  // 仅在全部步骤成功后置位，失败时下一次挂载可重试。
+  configured = true;
 }

@@ -119,11 +119,8 @@ func resolveGroup(ctx context.Context, identifier string) (int64, string, error)
 		return 0, "", fmt.Errorf("failed to list groups: %w", err)
 	}
 
-	// Build path map for matching
-	pathMap, err := buildGroupPathMap(ctx)
-	if err != nil {
-		return 0, "", err
-	}
+	// Build path map from the already-fetched groups (avoid a second List).
+	pathMap := buildGroupPathMapFromGroups(groups)
 
 	var candidates []struct {
 		id   int64

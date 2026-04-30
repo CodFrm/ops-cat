@@ -81,9 +81,11 @@ export function CodeEditor({
   const modelUriRef = useRef<string | null>(null);
   const [monacoReady, setMonacoReady] = useState(false);
   const [monacoLoadError, setMonacoLoadError] = useState<unknown>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setMonacoLoadError(null);
     import("@/lib/monaco-setup")
       .then(({ setupMonaco }) => {
         setupMonaco();
@@ -95,6 +97,10 @@ export function CodeEditor({
     return () => {
       cancelled = true;
     };
+  }, [loadAttempt]);
+
+  const handleRetryLoad = useCallback(() => {
+    setLoadAttempt((n) => n + 1);
   }, []);
 
   // 用 ref 桥接最新的 dynamicCompletions，避免 prop 变化时 re-mount editor
@@ -156,7 +162,23 @@ export function CodeEditor({
   );
 
   if (monacoLoadError) {
-    throw monacoLoadError;
+    const message = monacoLoadError instanceof Error ? monacoLoadError.message : String(monacoLoadError);
+    return (
+      <div
+        className={`relative h-full w-full flex flex-col items-center justify-center gap-2 p-4 text-xs text-muted-foreground ${className ?? ""}`}
+        style={{ height }}
+      >
+        <div className="text-destructive">编辑器加载失败</div>
+        <div className="font-mono text-[11px] opacity-70 max-w-full truncate">{message}</div>
+        <button
+          type="button"
+          onClick={handleRetryLoad}
+          className="px-2 py-1 text-xs rounded border border-border hover:bg-accent"
+        >
+          重试
+        </button>
+      </div>
+    );
   }
 
   if (!monacoReady) {

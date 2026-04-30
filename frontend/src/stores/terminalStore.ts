@@ -18,7 +18,7 @@ import { useAssetStore } from "./assetStore";
 function disposeTerminalInstance(sessionId: string): void {
   import("@/components/terminal/terminalRegistry")
     .then(({ disposeTerminal }) => disposeTerminal(sessionId))
-    .catch((error) => console.error("Failed to dispose terminal instance:", error));
+    .catch((error) => console.error(`Failed to dispose terminal instance ${sessionId}:`, error));
 }
 
 // Split tree types
