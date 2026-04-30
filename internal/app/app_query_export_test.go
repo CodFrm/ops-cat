@@ -19,7 +19,7 @@ func TestWriteTableExportFileWithEncoding(t *testing.T) {
 			t.Fatalf("writeTableExportFile() error = %v", err)
 		}
 
-		got, err := os.ReadFile(target)
+		got, err := os.ReadFile(target) // #nosec G304 -- target is created under t.TempDir by this test.
 		if err != nil {
 			t.Fatalf("ReadFile() error = %v", err)
 		}
@@ -37,7 +37,7 @@ func TestWriteTableExportFileWithEncoding(t *testing.T) {
 			t.Fatalf("writeTableExportFile() error = %v", err)
 		}
 
-		got, err := os.ReadFile(target)
+		got, err := os.ReadFile(target) // #nosec G304 -- target is created under t.TempDir by this test.
 		if err != nil {
 			t.Fatalf("ReadFile() error = %v", err)
 		}
@@ -59,7 +59,7 @@ func TestWriteTableExportFileWithEncoding(t *testing.T) {
 			t.Fatalf("append write error = %v", err)
 		}
 
-		got, err := os.ReadFile(target)
+		got, err := os.ReadFile(target) // #nosec G304 -- target is created under t.TempDir by this test.
 		if err != nil {
 			t.Fatalf("ReadFile() error = %v", err)
 		}
@@ -81,7 +81,7 @@ func TestWriteTableExportFileWithEncoding(t *testing.T) {
 		if err := writeTableExportFile(target, "second", TableExportWriteOptions{Encoding: "utf-16le", Append: true}); err != nil {
 			t.Fatalf("append write error = %v", err)
 		}
-		got, err := os.ReadFile(target)
+		got, err := os.ReadFile(target) // #nosec G304 -- target is created under t.TempDir by this test.
 		if err != nil {
 			t.Fatalf("ReadFile() error = %v", err)
 		}
@@ -103,7 +103,7 @@ func TestWriteTableExportFileWithEncoding(t *testing.T) {
 			t.Fatalf("writeTableExportFile() error = %v", err)
 		}
 
-		got, err := os.ReadFile(target)
+		got, err := os.ReadFile(target) // #nosec G304 -- target is created under t.TempDir by this test.
 		if err != nil {
 			t.Fatalf("ReadFile() error = %v", err)
 		}

@@ -27,6 +27,7 @@ import {
 } from "@opskat/ui";
 import { FilePlus2, Link, Loader2, Play, Table2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { ExecuteSQL } from "../../../wailsjs/go/app/App";
 import {
   buildImportInsertSql,
   detectDelimiter,
@@ -152,6 +153,20 @@ function nextAutoMapping(headers: string[], columns: string[]): Record<string, s
 
 function importModeNeedsPrimaryKey(mode: ImportMode): boolean {
   return mode === "update" || mode === "append-update" || mode === "append-skip" || mode === "delete";
+}
+
+function importModeAffects(mode: ImportMode): keyof Pick<ImportProgress, "added" | "updated" | "deleted"> {
+  if (mode === "update") return "updated";
+  if (mode === "delete") return "deleted";
+  return "added";
+}
+
+function importNeedsBackendBatch(
+  mode: ImportMode,
+  continueOnError: boolean,
+  disableForeignKeyChecks: boolean
+): boolean {
+  return mode === "copy" || !continueOnError || disableForeignKeyChecks;
 }
 
 async function executeTableImport(
@@ -391,45 +406,93 @@ export function ImportTableDataDialog({
     setProgress({ processed: 0, added: 0, updated: 0, deleted: 0, error: 0, seconds: 0 });
 
     try {
-      if (isSubmitCancelled?.(requestId)) return;
-      const result = await executeTableImport(assetId, database, {
-        statements,
-        mode: importMode,
-        continueOnError,
-        disableForeignKeyChecks: ignoreForeignKeyConstraint && driver !== "postgresql",
-      });
+      const disableForeignKeyChecks = ignoreForeignKeyConstraint && driver !== "postgresql";
       if (isSubmitCancelled?.(requestId)) return;
 
-      const added = Number(result.added ?? 0);
-      const updated = Number(result.updated ?? 0);
-      const deleted = Number(result.deleted ?? 0);
-      const error = Number(result.error ?? 0);
-      const processed = Number(result.processed ?? statements.length);
-      for (const item of result.errors ?? []) {
-        nextLogLines.push(`[ERR] ${item.message}`);
-        if (item.statement) nextLogLines.push(`[ERR] ${item.statement}`);
-      }
-      setProgress({
-        processed,
-        added,
-        updated,
-        deleted,
-        error,
-        seconds: (performance.now() - startedAt) / 1000,
-      });
-      if (error === 0) {
-        toast.success(t("query.importSuccess", { affected: added + updated + deleted }));
-        onOpenChange(false);
-        onSuccess();
+      if (importNeedsBackendBatch(importMode, continueOnError, disableForeignKeyChecks)) {
+        const result = await executeTableImport(assetId, database, {
+          statements,
+          mode: importMode,
+          continueOnError,
+          disableForeignKeyChecks,
+        });
+        if (isSubmitCancelled?.(requestId)) return;
+
+        const added = Number(result.added ?? 0);
+        const updated = Number(result.updated ?? 0);
+        const deleted = Number(result.deleted ?? 0);
+        const error = Number(result.error ?? 0);
+        const processed = Number(result.processed ?? statements.length);
+        for (const item of result.errors ?? []) {
+          nextLogLines.push(`[ERR] ${item.message}`);
+          if (item.statement) nextLogLines.push(`[ERR] ${item.statement}`);
+        }
+        setProgress({
+          processed,
+          added,
+          updated,
+          deleted,
+          error,
+          seconds: (performance.now() - startedAt) / 1000,
+        });
+        if (error === 0) {
+          toast.success(t("query.importSuccess", { affected: added + updated + deleted }));
+          onOpenChange(false);
+          onSuccess();
+        } else {
+          nextLogLines.push(
+            `[IMP] Processed: ${processed}, Added: ${added}, Updated: ${updated}, Deleted: ${deleted}, Errors: ${error}`
+          );
+          if (result.rolledBack) nextLogLines.push("[IMP] Rolled back");
+          nextLogLines.push("[IMP] Finished with error");
+          setLogLines([...nextLogLines]);
+          const firstError = result.errors?.[0]?.message;
+          if (firstError) toast.error(firstError);
+        }
       } else {
-        nextLogLines.push(
-          `[IMP] Processed: ${processed}, Added: ${added}, Updated: ${updated}, Deleted: ${deleted}, Errors: ${error}`
-        );
-        if (result.rolledBack) nextLogLines.push("[IMP] Rolled back");
-        nextLogLines.push("[IMP] Finished with error");
-        setLogLines([...nextLogLines]);
-        const firstError = result.errors?.[0]?.message;
-        if (firstError) toast.error(firstError);
+        let added = 0;
+        let updated = 0;
+        let deleted = 0;
+        let error = 0;
+        for (let index = 0; index < statements.length; index++) {
+          if (isSubmitCancelled?.(requestId)) return;
+          try {
+            const result = await ExecuteSQL(assetId, statements[index], database);
+            if (isSubmitCancelled?.(requestId)) return;
+            const parsedResult = JSON.parse(result || "{}") as { affected_rows?: number };
+            const affected = Number(parsedResult.affected_rows ?? 0);
+            const affectedBucket = importModeAffects(importMode);
+            if (affectedBucket === "updated") updated += affected;
+            else if (affectedBucket === "deleted") deleted += affected;
+            else added += affected;
+          } catch (e) {
+            error += 1;
+            const message = e instanceof Error ? e.message : String(e);
+            nextLogLines.push(`[ERR] ${message}`);
+            nextLogLines.push(`[ERR] ${statements[index]}`);
+            setLogLines([...nextLogLines]);
+            toast.error(message);
+          }
+          setProgress({
+            processed: index + 1,
+            added,
+            updated,
+            deleted,
+            error,
+            seconds: (performance.now() - startedAt) / 1000,
+          });
+        }
+        if (error === 0) {
+          toast.success(t("query.importSuccess", { affected: added }));
+          onOpenChange(false);
+          onSuccess();
+        } else {
+          nextLogLines.push(
+            `[IMP] Processed: ${statements.length}, Added: ${added}, Updated: ${updated}, Deleted: ${deleted}, Errors: ${error}`
+          );
+          nextLogLines.push("[IMP] Finished with error");
+          setLogLines([...nextLogLines]);
+        }
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);

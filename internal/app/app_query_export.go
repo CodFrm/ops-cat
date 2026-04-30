@@ -55,7 +55,7 @@ func (a *App) WriteTableExportFile(filePath, content string, options *TableExpor
 	return writeTableExportFile(filePath, content, opts)
 }
 
-func writeTableExportFile(filePath, content string, options TableExportWriteOptions) error {
+func writeTableExportFile(filePath, content string, options TableExportWriteOptions) (err error) {
 	suppressBOM := false
 	if options.Append {
 		if info, statErr := os.Stat(filePath); statErr == nil && info.Size() > 0 {
@@ -77,7 +77,12 @@ func writeTableExportFile(filePath, content string, options TableExportWriteOpti
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
+
 	_, err = f.Write(data)
 	return err
 }
