@@ -67,6 +67,12 @@ var (
 // tests can shorten it.
 var syncEnableTimeout = 3 * time.Second
 
+// syncFirstCwdGrace bounds the additional wait, after init:pid arrives, for
+// the first prompt nonce / probe to populate cwd. Without this, the first
+// F→T click after lazy enable can race the not-yet-arrived prompt nonce and
+// surface a spurious CWD_UNKNOWN toast.
+var syncFirstCwdGrace = 500 * time.Millisecond
+
 func (s *Session) GetSyncState() DirectorySyncState {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
@@ -726,6 +732,20 @@ func (s *Session) EnableSync() error {
 	s.syncMu.Unlock()
 	if !ok {
 		return dirsync.Error(dirSyncErrUnsupported)
+	}
+
+	// init:pid confirms the shell ran our injection, but cwd is filled by the
+	// next prompt nonce or the probe loop. Poll briefly so the first F→T click
+	// after lazy enable doesn't race a not-yet-arrived prompt.
+	deadline := time.Now().Add(syncFirstCwdGrace)
+	for time.Now().Before(deadline) {
+		s.syncMu.Lock()
+		known := s.syncState.CwdKnown
+		s.syncMu.Unlock()
+		if known {
+			return nil
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	return nil
 }
