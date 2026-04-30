@@ -280,12 +280,16 @@ export function K8sClusterPage({ asset }: Props) {
   );
   const [activeTabId, setActiveTabId] = useState<InnerTabId>(initialSnapshot?.activeTabId || "overview");
   const [expandedNodes, setExpandedNodes] = useState(initialSnapshot?.expandedNodes || false);
-  const [expandedNamespaces, setExpandedNamespaces] = useState<Set<string>>(new Set(initialSnapshot?.expandedNamespaces || []));
+  const [expandedNamespaces, setExpandedNamespaces] = useState<Set<string>>(
+    new Set(initialSnapshot?.expandedNamespaces || [])
+  );
   const [expandedPods, setExpandedPods] = useState<Set<string>>(new Set(initialSnapshot?.expandedPods || []));
   const [expandedDeployments, setExpandedDeployments] = useState<Set<string>>(
     new Set(initialSnapshot?.expandedDeployments || [])
   );
-  const [expandedServices, setExpandedServices] = useState<Set<string>>(new Set(initialSnapshot?.expandedServices || []));
+  const [expandedServices, setExpandedServices] = useState<Set<string>>(
+    new Set(initialSnapshot?.expandedServices || [])
+  );
   const [expandedConfigMaps, setExpandedConfigMaps] = useState<Set<string>>(
     new Set(initialSnapshot?.expandedConfigMaps || [])
   );
