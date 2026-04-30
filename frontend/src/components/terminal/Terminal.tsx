@@ -45,6 +45,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const [hasSelection, setHasSelection] = useState(false);
   const shortcuts = useShortcutStore((s) => s.shortcuts);
   const fontSize = useTerminalThemeStore((s) => s.fontSize);
+  const fontFamily = useTerminalThemeStore((s) => s.fontFamily);
   const scrollback = useTerminalThemeStore((s) => s.scrollback);
   const selectedThemeId = useTerminalThemeStore((s) => s.selectedThemeId);
   const customThemes = useTerminalThemeStore((s) => s.customThemes);
@@ -86,7 +87,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
 
-    const inst = getOrCreateTerminal(sessionId, { fontSize, theme: xtermTheme, scrollback });
+    const inst = getOrCreateTerminal(sessionId, { fontSize, fontFamily, theme: xtermTheme, scrollback });
     termRef.current = inst.term;
     fitAddonRef.current = inst.fitAddon;
     searchAddonRef.current = inst.searchAddon;
@@ -164,9 +165,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     if (!termRef.current) return;
     termRef.current.options.theme = xtermTheme;
     termRef.current.options.fontSize = fontSize;
+    termRef.current.options.fontFamily = fontFamily;
     termRef.current.options.scrollback = scrollback;
     fitAddonRef.current?.fit();
-  }, [xtermTheme, fontSize, scrollback]);
+  }, [xtermTheme, fontSize, fontFamily, scrollback]);
 
   useEffect(() => {
     activeRef.current = active;

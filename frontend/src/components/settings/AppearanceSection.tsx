@@ -18,7 +18,12 @@ import {
 } from "@opskat/ui";
 import { useTheme, useResolvedTheme } from "@/components/theme-provider";
 import { Plus, Pencil, Trash2 } from "lucide-react";
-import { useTerminalThemeStore, SCROLLBACK_MIN, SCROLLBACK_MAX } from "@/stores/terminalThemeStore";
+import {
+  useTerminalThemeStore,
+  SCROLLBACK_MIN,
+  SCROLLBACK_MAX,
+  TERMINAL_FONT_PRESETS,
+} from "@/stores/terminalThemeStore";
 import { builtinThemes, defaultLightTheme, defaultDarkTheme, TerminalTheme } from "@/data/terminalThemes";
 import { TerminalThemeEditor } from "@/components/settings/TerminalThemeEditor";
 
@@ -96,6 +101,8 @@ export function TerminalSection() {
     setSelectedThemeId,
     fontSize,
     setFontSize,
+    fontPresetId,
+    setFontPresetId,
     scrollback,
     setScrollback,
     customThemes,
@@ -128,6 +135,22 @@ export function TerminalSection() {
               />
               <span className="text-sm text-muted-foreground">px</span>
             </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label>{t("terminal.fontPreset")}</Label>
+            <Select value={fontPresetId} onValueChange={setFontPresetId}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="popper" align="start">
+                {TERMINAL_FONT_PRESETS.map((preset) => (
+                  <SelectItem key={preset.id} value={preset.id}>
+                    {preset.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Scrollback */}

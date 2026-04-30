@@ -775,6 +775,7 @@
     "title": "Terminal",
     "desc": "Terminal color scheme and font settings",
     "fontSize": "Font Size",
+    "fontPreset": "Font Preset",
     "scrollback": "Scrollback",
     "scrollbackUnit": "lines",
     "scrollbackHint": "Maximum lines retained for scrolling back. Larger values use more memory (range 100 - 1000000).",

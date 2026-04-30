@@ -775,6 +775,7 @@
     "title": "终端",
     "desc": "终端配色与字体设置",
     "fontSize": "字体大小",
+    "fontPreset": "字体预设",
     "scrollback": "回滚缓冲区",
     "scrollbackUnit": "行",
     "scrollbackHint": "终端可向上回滚的最大行数，越大越占内存（范围 100 - 1000000）",

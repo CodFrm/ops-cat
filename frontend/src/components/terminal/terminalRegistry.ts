@@ -6,6 +6,7 @@ import { WriteSSH } from "../../../wailsjs/go/app/App";
 import { EventsOn, EventsOff } from "../../../wailsjs/runtime/runtime";
 import { bytesToBase64 } from "@/lib/terminalEncode";
 import { useTerminalStore } from "@/stores/terminalStore";
+import { DEFAULT_TERMINAL_FONT_FAMILY } from "@/stores/terminalThemeStore";
 
 export interface TerminalInstance {
   term: XTerminal;
@@ -24,7 +25,7 @@ const registry = new Map<string, InternalInstance>();
 
 export function getOrCreateTerminal(
   sessionId: string,
-  init: { fontSize: number; theme?: ITheme; scrollback: number }
+  init: { fontSize: number; fontFamily?: string; theme?: ITheme; scrollback: number }
 ): TerminalInstance {
   const cached = registry.get(sessionId);
   if (cached) return cached;
@@ -36,7 +37,7 @@ export function getOrCreateTerminal(
   const term = new XTerminal({
     cursorBlink: true,
     fontSize: init.fontSize,
-    fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+    fontFamily: init.fontFamily || DEFAULT_TERMINAL_FONT_FAMILY,
     theme: init.theme,
     scrollback: init.scrollback,
   });

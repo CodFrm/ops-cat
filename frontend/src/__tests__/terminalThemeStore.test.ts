@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { useTerminalThemeStore, SCROLLBACK_DEFAULT } from "../stores/terminalThemeStore";
+import {
+  DEFAULT_TERMINAL_FONT_FAMILY,
+  DEFAULT_TERMINAL_FONT_PRESET_ID,
+  TERMINAL_FONT_PRESETS,
+  useTerminalThemeStore,
+  SCROLLBACK_DEFAULT,
+} from "../stores/terminalThemeStore";
 import { builtinThemes, type TerminalTheme } from "../data/terminalThemes";
 
 function makeCustomTheme(id: string, name: string): TerminalTheme {
@@ -35,6 +41,8 @@ describe("terminalThemeStore", () => {
       selectedThemeId: "default",
       customThemes: [],
       fontSize: 14,
+      fontPresetId: DEFAULT_TERMINAL_FONT_PRESET_ID,
+      fontFamily: DEFAULT_TERMINAL_FONT_FAMILY,
       scrollback: SCROLLBACK_DEFAULT,
     });
   });
@@ -60,6 +68,49 @@ describe("terminalThemeStore", () => {
     it("clamps to maximum 32", () => {
       useTerminalThemeStore.getState().setFontSize(100);
       expect(useTerminalThemeStore.getState().fontSize).toBe(32);
+    });
+  });
+
+  describe("setFontPresetId", () => {
+    it("switches to bundled preset font family", () => {
+      useTerminalThemeStore.getState().setFontPresetId("hack-nerd");
+      expect(useTerminalThemeStore.getState().fontPresetId).toBe("hack-nerd");
+      expect(useTerminalThemeStore.getState().fontFamily).toContain("Hack Nerd Font Mono");
+    });
+
+    it("falls back to default preset for unknown value", () => {
+      useTerminalThemeStore.getState().setFontPresetId("menlo");
+      expect(useTerminalThemeStore.getState().fontPresetId).toBe(DEFAULT_TERMINAL_FONT_PRESET_ID);
+      expect(useTerminalThemeStore.getState().fontFamily).toBe(DEFAULT_TERMINAL_FONT_FAMILY);
+    });
+
+    it("keeps the preset list aligned with bundled font count", () => {
+      expect(TERMINAL_FONT_PRESETS).toHaveLength(12);
+    });
+  });
+
+  describe("persisted font migration", () => {
+    it("rehydrates with the default preset for removed values", async () => {
+      localStorage.setItem(
+        "terminal_theme",
+        JSON.stringify({
+          state: {
+            selectedThemeId: "default",
+            customThemes: [],
+            fontSize: 14,
+            fontPresetId: "consolas",
+            fontFamily: "'Consolas', monospace",
+            scrollback: SCROLLBACK_DEFAULT,
+          },
+          version: 2,
+        })
+      );
+
+      useTerminalThemeStore.persist.rehydrate();
+      await Promise.resolve();
+
+      expect(useTerminalThemeStore.getState().fontPresetId).toBe(DEFAULT_TERMINAL_FONT_PRESET_ID);
+      expect(useTerminalThemeStore.getState().fontFamily).toBe(DEFAULT_TERMINAL_FONT_FAMILY);
     });
   });
 
