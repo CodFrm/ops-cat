@@ -8,8 +8,8 @@ export function sqlQuote(value: unknown): string {
 }
 
 export function quoteIdent(name: string, driver?: string): string {
-  if (driver === "postgresql") return `"${name}"`;
-  return `\`${name}\``;
+  if (driver === "postgresql") return `"${name.replace(/"/g, '""')}"`;
+  return `\`${name.replace(/`/g, "``")}\``;
 }
 
 export type CellValueFilterOperator = TableFilterOperator;

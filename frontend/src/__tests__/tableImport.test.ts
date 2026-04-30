@@ -79,6 +79,34 @@ describe("table import helpers", () => {
     ]);
   });
 
+  it("uses ON CONFLICT DO NOTHING for postgresql append-update with no value columns", () => {
+    expect(
+      buildImportInsertSql({
+        tableName: "appdb.users",
+        headers: ["id"],
+        rows: [["1"]],
+        mapping: { id: "id" },
+        nullStrategy: "literal-null",
+        primaryKeys: ["id"],
+        mode: "append-update",
+        driver: "postgresql",
+      })
+    ).toEqual([`INSERT INTO "appdb"."users" ("id") VALUES ('1') ON CONFLICT ("id") DO NOTHING;`]);
+
+    expect(
+      buildImportInsertSql({
+        tableName: "appdb.users",
+        headers: ["id"],
+        rows: [["1"]],
+        mapping: { id: "id" },
+        nullStrategy: "literal-null",
+        primaryKeys: ["id"],
+        mode: "append-update",
+        driver: "mysql",
+      })
+    ).toEqual(["INSERT IGNORE INTO `appdb`.`users` (`id`) VALUES ('1');"]);
+  });
+
   it("detects TSV when tabs outnumber commas in the header", () => {
     expect(detectDelimiter("id\tname\tnote\n1\tAlice\tok")).toBe("\t");
     expect(detectDelimiter("id,name,note\n1,Alice,ok")).toBe(",");

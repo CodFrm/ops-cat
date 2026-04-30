@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { buildDeleteStatement, buildFilterByCellValueClause } from "@/lib/tableSql";
+import { buildDeleteStatement, buildFilterByCellValueClause, quoteIdent } from "@/lib/tableSql";
 
 describe("table SQL helpers", () => {
+  it("escapes embedded quotes in identifiers", () => {
+    expect(quoteIdent("name`with`backtick", "mysql")).toBe("`name``with``backtick`");
+    expect(quoteIdent('name"with"quote', "postgresql")).toBe('"name""with""quote"');
+    expect(quoteIdent("plain", "mysql")).toBe("`plain`");
+    expect(quoteIdent("plain", "postgresql")).toBe('"plain"');
+  });
+
   it("builds filter clauses for NULL and quoted values", () => {
     expect(buildFilterByCellValueClause("deleted_at", null)).toBe("`deleted_at` IS NULL");
     expect(buildFilterByCellValueClause("name", "O'Reilly")).toBe("`name` = 'O''Reilly'");

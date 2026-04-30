@@ -335,18 +335,24 @@ export function buildImportInsertSql({
     });
   } else if (mode === "append-update") {
     const insertPrefix = "INSERT INTO";
-    const updateSql =
-      driver === "postgresql"
-        ? ` ON CONFLICT (${keyMapped.map((item) => quoteIdent(item.target, driver)).join(", ")}) DO UPDATE SET ${valueMapped
-            .map((item) => `${quoteIdent(item.target, driver)} = excluded.${quoteIdent(item.target, driver)}`)
-            .join(", ")}`
-        : ` ON DUPLICATE KEY UPDATE ${valueMapped
-            .map((item) => `${quoteIdent(item.target, driver)} = VALUES(${quoteIdent(item.target, driver)})`)
-            .join(", ")}`;
-    statements =
-      valueMapped.length === 0
-        ? buildInsertStatements("INSERT IGNORE INTO")
-        : buildInsertStatements(insertPrefix, updateSql);
+    if (valueMapped.length === 0) {
+      if (driver === "postgresql") {
+        const suffix = ` ON CONFLICT (${keyMapped.map((item) => quoteIdent(item.target, driver)).join(", ")}) DO NOTHING`;
+        statements = buildInsertStatements(insertPrefix, suffix);
+      } else {
+        statements = buildInsertStatements("INSERT IGNORE INTO");
+      }
+    } else {
+      const updateSql =
+        driver === "postgresql"
+          ? ` ON CONFLICT (${keyMapped.map((item) => quoteIdent(item.target, driver)).join(", ")}) DO UPDATE SET ${valueMapped
+              .map((item) => `${quoteIdent(item.target, driver)} = excluded.${quoteIdent(item.target, driver)}`)
+              .join(", ")}`
+          : ` ON DUPLICATE KEY UPDATE ${valueMapped
+              .map((item) => `${quoteIdent(item.target, driver)} = VALUES(${quoteIdent(item.target, driver)})`)
+              .join(", ")}`;
+      statements = buildInsertStatements(insertPrefix, updateSql);
+    }
   } else if (mode === "append-skip") {
     if (driver === "postgresql") {
       const suffix = ` ON CONFLICT (${keyMapped.map((item) => quoteIdent(item.target, driver)).join(", ")}) DO NOTHING`;

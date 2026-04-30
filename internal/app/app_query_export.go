@@ -56,7 +56,13 @@ func (a *App) WriteTableExportFile(filePath, content string, options *TableExpor
 }
 
 func writeTableExportFile(filePath, content string, options TableExportWriteOptions) error {
-	data, err := encodeTableExportContent(content, options.Encoding)
+	suppressBOM := false
+	if options.Append {
+		if info, statErr := os.Stat(filePath); statErr == nil && info.Size() > 0 {
+			suppressBOM = true
+		}
+	}
+	data, err := encodeTableExportContent(content, options.Encoding, suppressBOM)
 	if err != nil {
 		return err
 	}
@@ -76,12 +82,15 @@ func writeTableExportFile(filePath, content string, options TableExportWriteOpti
 	return err
 }
 
-func encodeTableExportContent(content, charset string) ([]byte, error) {
+func encodeTableExportContent(content, charset string, suppressBOM bool) ([]byte, error) {
 	normalized := strings.ToLower(strings.TrimSpace(charset))
 	if normalized == "" || normalized == "utf-8" || normalized == "utf8" || normalized == "65001" {
 		return []byte(content), nil
 	}
 	if normalized == "utf-8-bom" || normalized == "utf8-bom" {
+		if suppressBOM {
+			return []byte(content), nil
+		}
 		return append([]byte{0xef, 0xbb, 0xbf}, []byte(content)...), nil
 	}
 
@@ -93,7 +102,7 @@ func encodeTableExportContent(content, charset string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encode export content as %s: %w", charset, err)
 	}
-	if len(bom) > 0 {
+	if len(bom) > 0 && !suppressBOM {
 		data = append(bytes.Clone(bom), data...)
 	}
 	return data, nil
