@@ -128,7 +128,10 @@ func (s *Session) initSyncState(shellPath, shellType string, supported bool) {
 	if supported {
 		state.Status = directorySyncInitializing
 	}
-	state.Busy = !state.PromptReady || !state.PromptClean
+	// Busy means "currently mid-sync, can't accept another op". For an
+	// unsupported session, sync was never started — the toggle button must
+	// not be gated on busy or the user can't enable in the first place.
+	state.Busy = supported && (!state.PromptReady || !state.PromptClean)
 
 	s.syncMu.Lock()
 	s.syncState = state
