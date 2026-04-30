@@ -699,7 +699,7 @@ func (s *Session) EnableSync() error {
 		st := s.syncState
 		s.syncMu.Unlock()
 		s.emitSyncState(st)
-		return err
+		return dirsync.Error(dirsync.CodeSessionClosed)
 	}
 
 	if err := waitForSyncBootstrap(bootstrapCh); err != nil {
