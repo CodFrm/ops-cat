@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import { ChangeSSHDirectory, EnableSSHSync } from "../../wailsjs/go/app/App";
+import { ChangeSSHDirectory, EnableSSHSync, GetSSHSyncState } from "../../wailsjs/go/app/App";
 import { useTerminalDirectorySync } from "@/components/terminal/file-manager/useTerminalDirectorySync";
 import { useTerminalStore, type TerminalDirectorySyncState, type TerminalTabData } from "@/stores/terminalStore";
 
@@ -24,40 +24,36 @@ function primeStore(sessionSync: Record<string, TerminalDirectorySyncState>) {
   } as never);
 }
 
+function readySyncState(cwd = "/srv/app"): TerminalDirectorySyncState {
+  return {
+    sessionId,
+    supported: true,
+    cwd,
+    cwdKnown: true,
+    shell: "/bin/bash",
+    shellType: "bash",
+    promptReady: true,
+    promptClean: true,
+    busy: false,
+    status: "ready",
+  };
+}
+
 describe("useTerminalDirectorySync — lazy enable", () => {
   beforeEach(() => {
     vi.mocked(EnableSSHSync).mockReset().mockResolvedValue(undefined);
     vi.mocked(ChangeSSHDirectory).mockReset().mockResolvedValue(undefined);
+    vi.mocked(GetSSHSyncState)
+      .mockReset()
+      .mockResolvedValue(readySyncState() as never);
   });
 
   afterEach(() => {
     primeStore({});
   });
 
-  it("calls EnableSSHSync when sessionSync is missing, then reads cwd from store", async () => {
+  it("calls EnableSSHSync when sessionSync is missing, then fetches latest cwd", async () => {
     primeStore({});
-
-    // Simulate the backend pushing sync state after EnableSync resolves.
-    vi.mocked(EnableSSHSync).mockImplementationOnce(async () => {
-      useTerminalStore.setState((state) => ({
-        sessionSync: {
-          ...state.sessionSync,
-          [sessionId]: {
-            sessionId,
-            supported: true,
-            cwd: "/srv/app",
-            cwdKnown: true,
-            shell: "/bin/bash",
-            shellType: "bash",
-            promptReady: true,
-            promptClean: true,
-            busy: false,
-            status: "ready",
-          },
-        },
-      }));
-      return undefined;
-    });
 
     const loadDir = vi.fn().mockResolvedValue(true);
     const currentPathRef = { current: "/" };
@@ -69,23 +65,14 @@ describe("useTerminalDirectorySync — lazy enable", () => {
     });
 
     expect(EnableSSHSync).toHaveBeenCalledWith(sessionId);
+    expect(GetSSHSyncState).toHaveBeenCalledWith(sessionId);
     expect(loadDir).toHaveBeenCalledWith("/srv/app");
+    expect(useTerminalStore.getState().sessionSync[sessionId]).toEqual(readySyncState());
   });
 
   it("does NOT call EnableSSHSync when sessionSync is already supported", async () => {
     primeStore({
-      [sessionId]: {
-        sessionId,
-        supported: true,
-        cwd: "/srv/app",
-        cwdKnown: true,
-        shell: "/bin/bash",
-        shellType: "bash",
-        promptReady: true,
-        promptClean: true,
-        busy: false,
-        status: "ready",
-      },
+      [sessionId]: readySyncState(),
     });
 
     const loadDir = vi.fn().mockResolvedValue(true);
@@ -98,6 +85,7 @@ describe("useTerminalDirectorySync — lazy enable", () => {
     });
 
     expect(EnableSSHSync).not.toHaveBeenCalled();
+    expect(GetSSHSyncState).not.toHaveBeenCalled();
     expect(loadDir).toHaveBeenCalledWith("/srv/app");
   });
 });

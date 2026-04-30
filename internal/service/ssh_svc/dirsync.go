@@ -177,6 +177,10 @@ func (s *Session) markUserInput(data []byte) {
 
 func (s *Session) notePrompt(cwd string) {
 	s.syncMu.Lock()
+	if !s.syncState.Supported {
+		s.syncMu.Unlock()
+		return
+	}
 	s.syncState.Cwd = strings.TrimRight(cwd, "\r\n")
 	s.syncState.CwdKnown = s.syncState.Cwd != ""
 	s.syncState.PromptReady = true
@@ -197,6 +201,10 @@ func (s *Session) noteObservedCwd(cwd string) {
 	}
 
 	s.syncMu.Lock()
+	if !s.syncState.Supported {
+		s.syncMu.Unlock()
+		return
+	}
 	s.syncState.Cwd = cleaned
 	s.syncState.CwdKnown = true
 	s.syncDirty = false
@@ -238,7 +246,7 @@ func (s *Session) prepareDirectoryChange(targetPath, expectedPath string, result
 	s.syncDirty = true
 	state := s.syncState
 
-	go s.emitSyncState(state)
+	s.emitSyncState(state)
 	return buildDirectoryChangeCommand(targetPath), nil
 }
 
@@ -313,6 +321,9 @@ func (s *Session) disableDirectorySync(reason string) {
 	bootstrapCh := s.syncBootstrapCh
 	s.syncBootstrapCh = nil
 	s.shellPID = 0
+	s.syncToken = ""
+	s.promptNonce = ""
+	s.promptPendingNonce = ""
 	state := s.syncState
 	s.syncMu.Unlock()
 
@@ -571,7 +582,10 @@ func trailingPrefixLength(data, prefix []byte) int {
 
 func (s *Session) handleSyncPayload(payload string) bool {
 	token, body, ok := strings.Cut(payload, ":")
-	if !ok || token == "" || token != s.syncToken {
+	s.syncMu.Lock()
+	syncToken := s.syncToken
+	s.syncMu.Unlock()
+	if !ok || token == "" || token != syncToken {
 		return false
 	}
 
@@ -583,7 +597,7 @@ func (s *Session) handleSyncPayload(payload string) bool {
 			return false
 		}
 		s.syncMu.Lock()
-		if s.shellPID != 0 {
+		if s.syncBootstrapCh == nil || !s.syncState.Supported || s.shellPID != 0 {
 			s.syncMu.Unlock()
 			return false
 		}
@@ -611,9 +625,10 @@ func (s *Session) handleSyncPayload(payload string) bool {
 		promptNonce := s.promptNonce
 		promptPendingNonce := s.promptPendingNonce
 		shellPID := s.shellPID
+		supported := s.syncState.Supported
 		s.syncMu.Unlock()
 		validCurrent := currentNonce == promptNonce || (promptPendingNonce != "" && currentNonce == promptPendingNonce)
-		if promptNonce == "" || !validCurrent || shellPID <= 0 {
+		if !supported || promptNonce == "" || !validCurrent || shellPID <= 0 {
 			return false
 		}
 		probe, err := s.probeShellState(shellPID)
@@ -654,6 +669,9 @@ func (s *Session) handleSyncPayload(payload string) bool {
 // Supported=false and a CodeTimeout error is returned. Callers should map
 // that to a "please exit foreground program and retry" hint in the UI.
 func (s *Session) EnableSync() error {
+	s.syncEnableMu.Lock()
+	defer s.syncEnableMu.Unlock()
+
 	s.syncMu.Lock()
 	if s.syncState.Supported && s.shellPID > 0 {
 		s.syncMu.Unlock()
@@ -662,12 +680,6 @@ func (s *Session) EnableSync() error {
 	if s.shellType == shellTypeUnsupported {
 		s.syncMu.Unlock()
 		return dirsync.Error(dirSyncErrUnsupported)
-	}
-	if s.syncBootstrapCh != nil {
-		// Another EnableSync is in flight; wait on the same channel.
-		ch := s.syncBootstrapCh
-		s.syncMu.Unlock()
-		return waitForSyncBootstrap(ch)
 	}
 
 	// Lazy shell detection: deferred from createSession to avoid the probe
@@ -698,8 +710,14 @@ func (s *Session) EnableSync() error {
 	}
 	s.syncToken = token
 	s.promptNonce = promptNonce
+	s.promptPendingNonce = ""
 	s.shellPID = 0
 	s.syncState.Supported = true
+	s.syncState.Cwd = ""
+	s.syncState.CwdKnown = false
+	s.syncState.PromptReady = false
+	s.syncState.PromptClean = true
+	s.syncState.Busy = true
 	s.syncState.Status = directorySyncInitializing
 	s.syncState.LastError = ""
 	s.syncDirty = true
@@ -709,21 +727,14 @@ func (s *Session) EnableSync() error {
 	cmd := buildEnableSyncCommand(s.shellType, token, promptNonce)
 	s.syncMu.Unlock()
 
-	go s.emitSyncState(state)
+	s.emitSyncState(state)
 
-	// cmd == "" is unreachable: shellTypeUnsupported was rejected at line 660
+	// cmd == "" is unreachable: shellTypeUnsupported was rejected above
 	// and buildEnableSyncCommand only returns "" for that case. No defensive
 	// branch needed; if invariants change, the write below will fail visibly.
 
 	if err := s.writeInternal([]byte(cmd)); err != nil {
-		s.clearBootstrap(bootstrapCh)
-		s.syncMu.Lock()
-		s.syncState.Supported = false
-		s.syncState.Status = directorySyncUnsupported
-		s.syncState.LastError = err.Error()
-		s.syncDirty = false
-		st := s.syncState
-		s.syncMu.Unlock()
+		st := s.rollbackSyncBootstrap(bootstrapCh, err.Error())
 		s.emitSyncState(st)
 		return dirsync.Error(dirsync.CodeSessionClosed)
 	}
@@ -733,17 +744,19 @@ func (s *Session) EnableSync() error {
 		// Only roll back if we still own this bootstrap; init:pid handler may
 		// have raced and already promoted the state to ready.
 		if s.syncBootstrapCh == bootstrapCh {
-			s.syncBootstrapCh = nil
-			s.syncState.Supported = false
-			s.syncState.Status = directorySyncUnsupported
-			s.syncState.LastError = err.Error()
-			s.shellPID = 0
-			s.syncDirty = false
+			s.rollbackSyncBootstrapLocked(err.Error())
+			st := s.syncState
+			s.syncMu.Unlock()
+			s.emitSyncState(st)
+			return err
 		}
+		ok := s.syncState.Supported && s.shellPID > 0
 		st := s.syncState
 		s.syncMu.Unlock()
 		s.emitSyncState(st)
-		return err
+		if !ok {
+			return err
+		}
 	}
 
 	// Bootstrap channel closed. Could be init:pid (success) or DisableSync
@@ -798,12 +811,31 @@ func (s *Session) DisableSync() {
 	s.disableDirectorySync(dirSyncErrUnsupported)
 }
 
-func (s *Session) clearBootstrap(ch chan struct{}) {
+func (s *Session) rollbackSyncBootstrap(ch chan struct{}, lastError string) DirectorySyncState {
 	s.syncMu.Lock()
 	if s.syncBootstrapCh == ch {
-		s.syncBootstrapCh = nil
+		s.rollbackSyncBootstrapLocked(lastError)
 	}
+	state := s.syncState
 	s.syncMu.Unlock()
+	return state
+}
+
+func (s *Session) rollbackSyncBootstrapLocked(lastError string) {
+	s.syncBootstrapCh = nil
+	s.shellPID = 0
+	s.syncToken = ""
+	s.promptNonce = ""
+	s.promptPendingNonce = ""
+	s.syncDirty = false
+	s.syncState.Supported = false
+	s.syncState.Cwd = ""
+	s.syncState.CwdKnown = false
+	s.syncState.PromptReady = false
+	s.syncState.PromptClean = true
+	s.syncState.Busy = false
+	s.syncState.Status = directorySyncUnsupported
+	s.syncState.LastError = lastError
 }
 
 func waitForSyncBootstrap(ch chan struct{}) error {

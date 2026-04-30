@@ -72,13 +72,13 @@ type Session struct {
 	onClosed func(sessionID string) // 会话关闭回调
 	onSync   func(sessionID string, state DirectorySyncState)
 
-	// shellPath / shellType are detected once at session creation by
-	// detectRemoteShell. They are read by EnableSync to build the right
-	// hook-installer payload. Empty / "unsupported" means lazy sync is
-	// not available for this session.
+	// shellPath / shellType are detected lazily by EnableSync. Empty means no
+	// sync attempt has needed shell detection yet; "unsupported" means the
+	// remote shell cannot host the directory-sync prompt hook.
 	shellPath string
 	shellType string
 
+	syncEnableMu       sync.Mutex
 	syncMu             sync.Mutex
 	syncState          DirectorySyncState
 	pendingDirChange   chan error
