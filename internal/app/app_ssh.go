@@ -406,6 +406,7 @@ func (a *App) GetSSHSyncState(sessionID string) (ssh_svc.DirectorySyncState, err
 }
 
 // ChangeSSHDirectory 请求当前终端切换到指定目录。
+// 若目录同步尚未启用，会自动注入钩子（一次性，会话内后续切换不再注入）。
 func (a *App) ChangeSSHDirectory(sessionID, targetPath string) error {
 	sess, ok := a.sshManager.GetSession(sessionID)
 	if !ok {
@@ -413,10 +414,15 @@ func (a *App) ChangeSSHDirectory(sessionID, targetPath string) error {
 	}
 
 	state := sess.GetSyncState()
-	switch {
-	case !state.Supported:
-		return dirsync.Error(dirsync.CodeUnsupported)
-	case !state.CwdKnown:
+	if !state.Supported {
+		if err := sess.EnableSync(); err != nil {
+			return err
+		}
+		state = sess.GetSyncState()
+	}
+	if !state.CwdKnown {
+		// EnableSync resolved init:pid; the first prompt nonce may not have
+		// arrived yet. Surface a typed retry error so the frontend can debounce.
 		return dirsync.Error(dirsync.CodeCwdUnknown)
 	}
 
@@ -432,6 +438,17 @@ func (a *App) ChangeSSHDirectory(sessionID, targetPath string) error {
 	}
 
 	return sess.ChangeDirectoryTo(resolvedPath, expectedPath)
+}
+
+// EnableSSHSync 显式启用目录同步（用于面板"跟随终端"按钮的首次点击）。
+// 注入钩子需要终端处于 shell 提示符状态；若用户处于 vim/less/tmux 等前台
+// 程序中，会在 ~3s 后超时返回 DIRSYNC_TIMEOUT，前端应提示用户先退出该程序。
+func (a *App) EnableSSHSync(sessionID string) error {
+	sess, ok := a.sshManager.GetSession(sessionID)
+	if !ok {
+		return dirsync.Error(dirsync.CodeSessionNotFound)
+	}
+	return sess.EnableSync()
 }
 
 // SplitSSH 在已有会话的连接上创建新会话（分割窗格复用连接）

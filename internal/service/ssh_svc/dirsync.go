@@ -62,6 +62,17 @@ var (
 	syncProbeMaxUnusableResults = 12
 )
 
+// syncEnableTimeout bounds how long EnableSync waits for the shell to echo
+// the init:pid marker after we write the hook-installer to stdin. Variable so
+// tests can shorten it.
+var syncEnableTimeout = 3 * time.Second
+
+// syncFirstCwdGrace bounds the additional wait, after init:pid arrives, for
+// the first prompt nonce / probe to populate cwd. Without this, the first
+// F→T click after lazy enable can race the not-yet-arrived prompt nonce and
+// surface a spurious CWD_UNKNOWN toast.
+var syncFirstCwdGrace = 500 * time.Millisecond
+
 func (s *Session) GetSyncState() DirectorySyncState {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
@@ -117,7 +128,10 @@ func (s *Session) initSyncState(shellPath, shellType string, supported bool) {
 	if supported {
 		state.Status = directorySyncInitializing
 	}
-	state.Busy = !state.PromptReady || !state.PromptClean
+	// Busy means "currently mid-sync, can't accept another op". For an
+	// unsupported session, sync was never started — the toggle button must
+	// not be gated on busy or the user can't enable in the first place.
+	state.Busy = supported && (!state.PromptReady || !state.PromptClean)
 
 	s.syncMu.Lock()
 	s.syncState = state
@@ -163,6 +177,10 @@ func (s *Session) markUserInput(data []byte) {
 
 func (s *Session) notePrompt(cwd string) {
 	s.syncMu.Lock()
+	if !s.syncState.Supported {
+		s.syncMu.Unlock()
+		return
+	}
 	s.syncState.Cwd = strings.TrimRight(cwd, "\r\n")
 	s.syncState.CwdKnown = s.syncState.Cwd != ""
 	s.syncState.PromptReady = true
@@ -183,6 +201,10 @@ func (s *Session) noteObservedCwd(cwd string) {
 	}
 
 	s.syncMu.Lock()
+	if !s.syncState.Supported {
+		s.syncMu.Unlock()
+		return
+	}
 	s.syncState.Cwd = cleaned
 	s.syncState.CwdKnown = true
 	s.syncDirty = false
@@ -224,7 +246,7 @@ func (s *Session) prepareDirectoryChange(targetPath, expectedPath string, result
 	s.syncDirty = true
 	state := s.syncState
 
-	go s.emitSyncState(state)
+	s.emitSyncState(state)
 	return buildDirectoryChangeCommand(targetPath), nil
 }
 
@@ -296,6 +318,12 @@ func (s *Session) disableDirectorySync(reason string) {
 	s.syncState.Busy = false
 	s.syncState.Status = directorySyncUnsupported
 	s.syncState.LastError = reason
+	bootstrapCh := s.syncBootstrapCh
+	s.syncBootstrapCh = nil
+	s.shellPID = 0
+	s.syncToken = ""
+	s.promptNonce = ""
+	s.promptPendingNonce = ""
 	state := s.syncState
 	s.syncMu.Unlock()
 
@@ -303,6 +331,9 @@ func (s *Session) disableDirectorySync(reason string) {
 	if ch != nil {
 		ch <- err
 		close(ch)
+	}
+	if bootstrapCh != nil {
+		close(bootstrapCh)
 	}
 	s.emitSyncState(state)
 }
@@ -551,7 +582,10 @@ func trailingPrefixLength(data, prefix []byte) int {
 
 func (s *Session) handleSyncPayload(payload string) bool {
 	token, body, ok := strings.Cut(payload, ":")
-	if !ok || token == "" || token != s.syncToken {
+	s.syncMu.Lock()
+	syncToken := s.syncToken
+	s.syncMu.Unlock()
+	if !ok || token == "" || token != syncToken {
 		return false
 	}
 
@@ -563,13 +597,18 @@ func (s *Session) handleSyncPayload(payload string) bool {
 			return false
 		}
 		s.syncMu.Lock()
-		if s.shellPID != 0 {
+		if s.syncBootstrapCh == nil || !s.syncState.Supported || s.shellPID != 0 {
 			s.syncMu.Unlock()
 			return false
 		}
 		s.shellPID = pid
 		s.syncDirty = true
+		bootstrap := s.syncBootstrapCh
+		s.syncBootstrapCh = nil
 		s.syncMu.Unlock()
+		if bootstrap != nil {
+			close(bootstrap)
+		}
 		s.ensureSyncProbe()
 		return true
 	case strings.HasPrefix(body, "prompt:"):
@@ -586,9 +625,10 @@ func (s *Session) handleSyncPayload(payload string) bool {
 		promptNonce := s.promptNonce
 		promptPendingNonce := s.promptPendingNonce
 		shellPID := s.shellPID
+		supported := s.syncState.Supported
 		s.syncMu.Unlock()
 		validCurrent := currentNonce == promptNonce || (promptPendingNonce != "" && currentNonce == promptPendingNonce)
-		if promptNonce == "" || !validCurrent || shellPID <= 0 {
+		if !supported || promptNonce == "" || !validCurrent || shellPID <= 0 {
 			return false
 		}
 		probe, err := s.probeShellState(shellPID)
@@ -619,4 +659,190 @@ func (s *Session) handleSyncPayload(payload string) bool {
 		return true
 	}
 	return false
+}
+
+// EnableSync injects the directory-sync hooks into the running interactive
+// shell and waits for the init:pid marker. Idempotent: returns nil immediately
+// if the session is already supported with a known shell PID.
+//
+// On timeout (no marker within syncEnableTimeout), state is rolled back to
+// Supported=false and a CodeTimeout error is returned. Callers should map
+// that to a "please exit foreground program and retry" hint in the UI.
+func (s *Session) EnableSync() error {
+	s.syncEnableMu.Lock()
+	defer s.syncEnableMu.Unlock()
+
+	s.syncMu.Lock()
+	if s.syncState.Supported && s.shellPID > 0 {
+		s.syncMu.Unlock()
+		return nil
+	}
+	if s.shellType == shellTypeUnsupported {
+		s.syncMu.Unlock()
+		return dirsync.Error(dirSyncErrUnsupported)
+	}
+
+	// Lazy shell detection: deferred from createSession to avoid the probe
+	// channel consuming PAM motd output before the main session shows it.
+	if s.shellType == "" {
+		s.syncMu.Unlock()
+		shellPath, shellType := detectRemoteShell(s.shared.client)
+		s.syncMu.Lock()
+		s.shellPath = shellPath
+		s.shellType = shellType
+		s.syncState.Shell = shellPath
+		s.syncState.ShellType = shellType
+		if shellType == shellTypeUnsupported {
+			s.syncMu.Unlock()
+			return dirsync.Error(dirSyncErrUnsupported)
+		}
+	}
+
+	token, err := generateSyncToken()
+	if err != nil {
+		s.syncMu.Unlock()
+		return dirsync.Error(dirSyncErrNonceFailed)
+	}
+	promptNonce, err := generateSyncToken()
+	if err != nil {
+		s.syncMu.Unlock()
+		return dirsync.Error(dirSyncErrNonceFailed)
+	}
+	s.syncToken = token
+	s.promptNonce = promptNonce
+	s.promptPendingNonce = ""
+	s.shellPID = 0
+	s.syncState.Supported = true
+	s.syncState.Cwd = ""
+	s.syncState.CwdKnown = false
+	s.syncState.PromptReady = false
+	s.syncState.PromptClean = true
+	s.syncState.Busy = true
+	s.syncState.Status = directorySyncInitializing
+	s.syncState.LastError = ""
+	s.syncDirty = true
+	bootstrapCh := make(chan struct{})
+	s.syncBootstrapCh = bootstrapCh
+	state := s.syncState
+	cmd := buildEnableSyncCommand(s.shellType, token, promptNonce)
+	s.syncMu.Unlock()
+
+	s.emitSyncState(state)
+
+	// cmd == "" is unreachable: shellTypeUnsupported was rejected above
+	// and buildEnableSyncCommand only returns "" for that case. No defensive
+	// branch needed; if invariants change, the write below will fail visibly.
+
+	if err := s.writeInternal([]byte(cmd)); err != nil {
+		st := s.rollbackSyncBootstrap(bootstrapCh, err.Error())
+		s.emitSyncState(st)
+		return dirsync.Error(dirsync.CodeSessionClosed)
+	}
+
+	if err := waitForSyncBootstrap(bootstrapCh); err != nil {
+		s.syncMu.Lock()
+		// Only roll back if we still own this bootstrap; init:pid handler may
+		// have raced and already promoted the state to ready.
+		if s.syncBootstrapCh == bootstrapCh {
+			s.rollbackSyncBootstrapLocked(err.Error())
+			st := s.syncState
+			s.syncMu.Unlock()
+			s.emitSyncState(st)
+			return err
+		}
+		ok := s.syncState.Supported && s.shellPID > 0
+		st := s.syncState
+		s.syncMu.Unlock()
+		s.emitSyncState(st)
+		if !ok {
+			return err
+		}
+	}
+
+	// Bootstrap channel closed. Could be init:pid (success) or DisableSync
+	// racing in (failure). Re-check state under lock.
+	s.syncMu.Lock()
+	ok := s.syncState.Supported && s.shellPID > 0
+	s.syncMu.Unlock()
+	if !ok {
+		return dirsync.Error(dirSyncErrUnsupported)
+	}
+
+	// init:pid confirms the shell ran our injection, but cwd is filled by the
+	// next prompt nonce or the probe loop. Poll briefly so the first F→T click
+	// after lazy enable doesn't race a not-yet-arrived prompt. We don't surface
+	// an error if the grace expires — the shell is alive (init:pid arrived);
+	// the frontend will see cwd populate via the ssh:sync event whenever it
+	// finally lands.
+	deadline := time.Now().Add(syncFirstCwdGrace)
+	for time.Now().Before(deadline) {
+		s.syncMu.Lock()
+		known := s.syncState.CwdKnown
+		s.syncMu.Unlock()
+		if known {
+			return nil
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return nil
+}
+
+// DisableSync removes hooks from the running shell and flips state back to
+// unsupported. Best-effort: if the stdin write fails, state is still cleared.
+//
+// No frontend caller wires this up yet — kept for symmetry with EnableSync
+// and as the entry point when an explicit "disable directory sync" toggle
+// ships. If the toggle never lands, this and buildDisableSyncCommand can be
+// dropped.
+func (s *Session) DisableSync() {
+	s.syncMu.Lock()
+	if !s.syncState.Supported {
+		s.syncMu.Unlock()
+		return
+	}
+	cmd := buildDisableSyncCommand(s.shellType)
+	s.syncMu.Unlock()
+
+	if cmd != "" {
+		if err := s.writeInternal([]byte(cmd)); err != nil {
+			logger.Default().Warn("write disable-sync command", zap.String("sessionID", s.ID), zap.Error(err))
+		}
+	}
+	s.disableDirectorySync(dirSyncErrUnsupported)
+}
+
+func (s *Session) rollbackSyncBootstrap(ch chan struct{}, lastError string) DirectorySyncState {
+	s.syncMu.Lock()
+	if s.syncBootstrapCh == ch {
+		s.rollbackSyncBootstrapLocked(lastError)
+	}
+	state := s.syncState
+	s.syncMu.Unlock()
+	return state
+}
+
+func (s *Session) rollbackSyncBootstrapLocked(lastError string) {
+	s.syncBootstrapCh = nil
+	s.shellPID = 0
+	s.syncToken = ""
+	s.promptNonce = ""
+	s.promptPendingNonce = ""
+	s.syncDirty = false
+	s.syncState.Supported = false
+	s.syncState.Cwd = ""
+	s.syncState.CwdKnown = false
+	s.syncState.PromptReady = false
+	s.syncState.PromptClean = true
+	s.syncState.Busy = false
+	s.syncState.Status = directorySyncUnsupported
+	s.syncState.LastError = lastError
+}
+
+func waitForSyncBootstrap(ch chan struct{}) error {
+	select {
+	case <-ch:
+		return nil
+	case <-time.After(syncEnableTimeout):
+		return dirsync.Error(dirSyncErrTimeout)
+	}
 }

@@ -1,7 +1,10 @@
 package ssh_svc
 
 import (
+	"errors"
+	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +22,62 @@ func newTestSyncSession(token string) *Session {
 
 func buildTestSyncSequence(token, payload string) []byte {
 	return []byte(syncSequencePrefix + token + ":" + payload + syncSequenceTerm)
+}
+
+type recordingWriteCloser struct {
+	mu      sync.Mutex
+	writes  [][]byte
+	err     error
+	onWrite func([]byte)
+}
+
+func (w *recordingWriteCloser) Write(data []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	copied := append([]byte(nil), data...)
+	w.mu.Lock()
+	w.writes = append(w.writes, copied)
+	w.mu.Unlock()
+	if w.onWrite != nil {
+		w.onWrite(copied)
+	}
+	return len(data), nil
+}
+
+func (w *recordingWriteCloser) Close() error {
+	return nil
+}
+
+func (w *recordingWriteCloser) writeCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return len(w.writes)
+}
+
+func (w *recordingWriteCloser) lastWrite() []byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.writes) == 0 {
+		return nil
+	}
+	return append([]byte(nil), w.writes[len(w.writes)-1]...)
+}
+
+func extractInitTokenFromEnableCommand(t *testing.T, cmd []byte) string {
+	t.Helper()
+	const marker = "1337;opskat:"
+	text := string(cmd)
+	idx := strings.LastIndex(text, marker)
+	if idx < 0 {
+		t.Fatalf("enable command missing init marker: %q", text)
+	}
+	remainder := text[idx+len(marker):]
+	token, _, ok := strings.Cut(remainder, ":init:pid:")
+	if !ok || token == "" {
+		t.Fatalf("enable command missing init token: %q", text)
+	}
+	return token
 }
 
 func TestManager_Basic(t *testing.T) {
@@ -129,6 +188,7 @@ func TestNormalizeShellType(t *testing.T) {
 
 func TestSession_FilterOutputCapturesInitMarker(t *testing.T) {
 	sess := newTestSyncSession("real-token")
+	sess.syncBootstrapCh = make(chan struct{})
 
 	raw := []byte("hello" + syncSequencePrefix + "real-token:init:pid:4242" + syncSequenceTerm + "world")
 	filtered := sess.filterOutput(raw)
@@ -136,6 +196,7 @@ func TestSession_FilterOutputCapturesInitMarker(t *testing.T) {
 	assert.Equal(t, "helloworld", string(filtered))
 	assert.Equal(t, 4242, sess.shellPID)
 	assert.True(t, sess.syncDirty)
+	assert.Nil(t, sess.syncBootstrapCh)
 }
 
 func TestSession_FilterOutputAcceptsValidatedPromptProof(t *testing.T) {
@@ -352,15 +413,6 @@ func TestParseShellProbeOutput(t *testing.T) {
 	assert.True(t, result.promptReady)
 }
 
-func TestBuildInteractiveShellCommand_BashDoesNotSourceProfiles(t *testing.T) {
-	command := buildInteractiveShellCommand("/bin/bash", shellTypeBash, "token", "nonce")
-
-	assert.NotContains(t, command, ".bash_profile")
-	assert.NotContains(t, command, ".bash_login")
-	assert.NotContains(t, command, ".profile")
-	assert.Contains(t, command, ".bashrc")
-}
-
 func TestSession_PendingDirectoryChangeAcceptsCanonicalCwd(t *testing.T) {
 	sess := newTestSyncSession("real-token")
 	sess.notePrompt("/home/me")
@@ -439,4 +491,227 @@ func TestSession_ProbeLoopDisablesSyncWhenPromptProbeHasNoCwd(t *testing.T) {
 			state.Status == directorySyncUnsupported &&
 			state.LastError == dirSyncErrProbeUnsupported
 	}, 500*time.Millisecond, 10*time.Millisecond)
+}
+
+func TestSessionStartsWithSupportedFalse(t *testing.T) {
+	sess := &Session{ID: "test"}
+	sess.initSyncState("/bin/bash", shellTypeBash, false)
+
+	state := sess.GetSyncState()
+	if state.Supported {
+		t.Fatal("Supported must be false until EnableSync is invoked")
+	}
+	if state.ShellType != shellTypeBash {
+		t.Fatalf("ShellType not retained: %q", state.ShellType)
+	}
+	if state.Status != directorySyncUnsupported {
+		t.Fatalf("Status should be unsupported initially, got %q", state.Status)
+	}
+}
+
+func TestEnableSyncTimesOutWhenNoMarker(t *testing.T) {
+	stdin := &recordingWriteCloser{}
+	sess := &Session{
+		ID:        "test-timeout",
+		stdin:     stdin,
+		shellPath: "/bin/bash",
+		shellType: shellTypeBash,
+	}
+	sess.initSyncState(sess.shellPath, sess.shellType, false)
+
+	prev := syncEnableTimeout
+	syncEnableTimeout = 100 * time.Millisecond
+	defer func() { syncEnableTimeout = prev }()
+
+	err := sess.EnableSync()
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+	if state := sess.GetSyncState(); state.Supported {
+		t.Fatalf("Supported must remain false on timeout, got %#v", state)
+	}
+	if sess.syncToken != "" || sess.promptNonce != "" || sess.promptPendingNonce != "" {
+		t.Fatal("timeout must invalidate sync tokens")
+	}
+	if sess.shellPID != 0 {
+		t.Fatalf("timeout must clear shellPID, got %d", sess.shellPID)
+	}
+}
+
+func TestEnableSyncIgnoresLateInitMarkerAfterTimeout(t *testing.T) {
+	stdin := &recordingWriteCloser{}
+	sess := &Session{
+		ID:        "test-late-marker",
+		stdin:     stdin,
+		shellPath: "/bin/bash",
+		shellType: shellTypeBash,
+	}
+	sess.initSyncState(sess.shellPath, sess.shellType, false)
+
+	prevTimeout := syncEnableTimeout
+	syncEnableTimeout = 20 * time.Millisecond
+	defer func() { syncEnableTimeout = prevTimeout }()
+
+	err := sess.EnableSync()
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+
+	token := extractInitTokenFromEnableCommand(t, stdin.lastWrite())
+	filtered := sess.filterOutput(buildTestSyncSequence(token, "init:pid:999"))
+	assert.NotEmpty(t, filtered, "late marker should be replayed as ordinary output")
+
+	state := sess.GetSyncState()
+	assert.False(t, state.Supported)
+	assert.Equal(t, directorySyncUnsupported, state.Status)
+	assert.Equal(t, 0, sess.shellPID)
+}
+
+func TestSessionIgnoresPromptAfterDisable(t *testing.T) {
+	sess := newTestSyncSession("real-token")
+	sess.promptNonce = "prompt-one"
+	sess.shellPID = 4242
+	sess.disableDirectorySync(dirSyncErrUnsupported)
+
+	filtered := sess.filterOutput(buildTestSyncSequence("real-token", "prompt:prompt-one:prompt-two:/srv/app"))
+	assert.NotEmpty(t, filtered, "stale prompt marker should not be consumed after disable")
+
+	state := sess.GetSyncState()
+	assert.False(t, state.Supported)
+	assert.False(t, state.CwdKnown)
+	assert.Equal(t, 0, sess.shellPID)
+}
+
+func TestEnableSyncUnsupportedShellReturnsError(t *testing.T) {
+	sess := &Session{ID: "u", shellType: shellTypeUnsupported}
+	sess.initSyncState("/bin/sh", shellTypeUnsupported, false)
+	if err := sess.EnableSync(); err == nil {
+		t.Fatal("expected error for unsupported shell")
+	}
+}
+
+func TestEnableSyncIdempotent(t *testing.T) {
+	sess := &Session{ID: "i", shellType: shellTypeBash, shellPath: "/bin/bash"}
+	sess.initSyncState(sess.shellPath, sess.shellType, true)
+	sess.syncMu.Lock()
+	sess.syncState.Supported = true
+	sess.syncState.Status = directorySyncReady
+	sess.shellPID = 12345
+	sess.syncMu.Unlock()
+
+	if err := sess.EnableSync(); err != nil {
+		t.Fatalf("idempotent enable should return nil, got %v", err)
+	}
+}
+
+func TestEnableSyncSerializesConcurrentFirstEnable(t *testing.T) {
+	stdin := &recordingWriteCloser{}
+	sess := &Session{
+		ID:        "test-concurrent",
+		stdin:     stdin,
+		shellPath: "/bin/bash",
+		shellType: shellTypeBash,
+	}
+	sess.initSyncState(sess.shellPath, sess.shellType, false)
+	stdin.onWrite = func(data []byte) {
+		token := extractInitTokenFromEnableCommand(t, data)
+		_ = sess.filterOutput(buildTestSyncSequence(token, "init:pid:4242"))
+	}
+
+	prevGrace := syncFirstCwdGrace
+	syncFirstCwdGrace = time.Millisecond
+	defer func() { syncFirstCwdGrace = prevGrace }()
+
+	start := make(chan struct{})
+	errCh := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errCh <- sess.EnableSync()
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		assert.NoError(t, err)
+	}
+	assert.Equal(t, 1, stdin.writeCount(), "concurrent first enable should write one bootstrap command")
+	state := sess.GetSyncState()
+	assert.True(t, state.Supported)
+	assert.Equal(t, 4242, sess.shellPID)
+}
+
+func TestEnableSyncWriteFailureRollsBackBootstrap(t *testing.T) {
+	stdin := &recordingWriteCloser{err: errors.New("broken pipe")}
+	sess := &Session{
+		ID:        "test-write-failure",
+		stdin:     stdin,
+		shellPath: "/bin/bash",
+		shellType: shellTypeBash,
+	}
+	sess.initSyncState(sess.shellPath, sess.shellType, false)
+
+	err := sess.EnableSync()
+	assert.EqualError(t, err, dirsync.CodeSessionClosed)
+
+	state := sess.GetSyncState()
+	assert.False(t, state.Supported)
+	assert.False(t, state.Busy)
+	assert.Equal(t, directorySyncUnsupported, state.Status)
+	assert.Empty(t, sess.syncToken)
+	assert.Empty(t, sess.promptNonce)
+	assert.Nil(t, sess.syncBootstrapCh)
+}
+
+func TestEnableSyncReturnsErrorIfDisableRacesIn(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer func() { _ = pw.Close() }()
+	sess := &Session{
+		ID:        "test-race",
+		stdin:     pw,
+		shellPath: "/bin/bash",
+		shellType: shellTypeBash,
+	}
+	sess.initSyncState(sess.shellPath, sess.shellType, false)
+	go func() { _, _ = io.Copy(io.Discard, pr) }()
+
+	prev := syncEnableTimeout
+	syncEnableTimeout = 500 * time.Millisecond
+	defer func() { syncEnableTimeout = prev }()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- sess.EnableSync() }()
+
+	assert.Eventually(t, func() bool {
+		sess.syncMu.Lock()
+		bootstrapping := sess.syncBootstrapCh != nil
+		state := sess.syncState
+		sess.syncMu.Unlock()
+		return bootstrapping &&
+			state.Supported &&
+			state.Busy &&
+			state.Status == directorySyncInitializing &&
+			!state.CwdKnown
+	}, 500*time.Millisecond, 10*time.Millisecond, "EnableSync should enter busy initializing state")
+
+	// Simulate a disable racing in before init:pid arrives.
+	sess.disableDirectorySync(dirSyncErrUnsupported)
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("EnableSync must report error when DisableSync races in")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("EnableSync did not return after DisableSync; bootstrap channel not closed?")
+	}
+
+	if state := sess.GetSyncState(); state.Supported {
+		t.Fatalf("Supported must be false after disable race, got %#v", state)
+	}
 }

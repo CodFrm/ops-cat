@@ -62,82 +62,54 @@ func generateSyncToken() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-func buildInteractiveShellCommand(shellPath, shellType, syncToken, promptNonce string) string {
+// buildEnableSyncCommand returns a single-line shell statement to be written
+// to the running interactive shell's stdin. It installs the prompt-proof
+// hook, sets the initial nonce, and emits the init:pid marker so the host
+// can confirm the shell received the injection.
+//
+// shellType MUST be one of shellTypeBash/shellTypeZsh/shellTypeKsh/shellTypeMksh.
+// Returns empty string for shellTypeUnsupported (or anything else).
+func buildEnableSyncCommand(shellType, syncToken, promptNonce string) string {
 	switch shellType {
 	case shellTypeBash:
-		return fmt.Sprintf(`rc="$(mktemp "${TMPDIR:-/tmp}/opskat-bash-XXXXXX")" && cat >"$rc" <<'EOF'
-[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"
-opskat_next_prompt_nonce() {
-  local opskat_now opskat_rand
-  opskat_now=$(date +%%s%%N 2>/dev/null || date +%%s 2>/dev/null || printf '0')
-  opskat_rand=${RANDOM:-0}
-  printf '%%s-%%s-%%s' "$$" "$opskat_rand" "$opskat_now"
-}
-opskat_prompt_proof() {
-  local opskat_pwd opskat_current opskat_next
-  opskat_current=${OPSKAT_PROMPT_NONCE:-}
-  [ -n "$opskat_current" ] || return
-  opskat_next=$(opskat_next_prompt_nonce)
-  opskat_pwd=$(builtin pwd -P 2>/dev/null || builtin pwd 2>/dev/null || printf '')
-  printf '\033]1337;opskat:%s:prompt:%%s:%%s:%%s\007' "$opskat_current" "$opskat_next" "$opskat_pwd"
-  OPSKAT_PROMPT_NONCE=$opskat_next
-}
-OPSKAT_PROMPT_NONCE=%s
-PROMPT_COMMAND="opskat_prompt_proof${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
-EOF
-printf '\033]1337;opskat:%s:init:pid:%%s\007' "$$"
-exec %s --rcfile "$rc" -i`, syncToken, shellQuote(promptNonce), syncToken, shellQuote(shellPath))
+		return fmt.Sprintf(
+			`opskat_next_prompt_nonce(){ local n r;n=$(date +%%s%%N 2>/dev/null||date +%%s 2>/dev/null||printf 0);r=${RANDOM:-0};printf '%%s-%%s-%%s' "$$" "$r" "$n";};`+
+				`opskat_prompt_proof(){ local p c x;c=${OPSKAT_PROMPT_NONCE:-};[ -n "$c" ]||return;x=$(opskat_next_prompt_nonce);p=$(builtin pwd -P 2>/dev/null||builtin pwd 2>/dev/null||printf '');printf '\033]1337;opskat:%s:prompt:%%s:%%s:%%s\007' "$c" "$x" "$p";OPSKAT_PROMPT_NONCE=$x;};`+
+				`OPSKAT_PROMPT_NONCE=%s;`+
+				`PROMPT_COMMAND="opskat_prompt_proof${PROMPT_COMMAND:+;$PROMPT_COMMAND}";`+
+				`printf '\033]1337;opskat:%s:init:pid:%%s\007' "$$"`+"\r",
+			syncToken, shellQuote(promptNonce), syncToken)
 	case shellTypeZsh:
-		return fmt.Sprintf(`dir="$(mktemp -d "${TMPDIR:-/tmp}/opskat-zsh-XXXXXX")" && cat >"$dir/.zshenv" <<'EOF_ENV'
-[[ -f "$HOME/.zshenv" ]] && source "$HOME/.zshenv"
-EOF_ENV
-cat >"$dir/.zshrc" <<'EOF_RC'
-[[ -f "$HOME/.zprofile" ]] && source "$HOME/.zprofile"
-[[ -f "$HOME/.zshrc" ]] && source "$HOME/.zshrc"
-autoload -Uz add-zsh-hook
-opskat_next_prompt_nonce() {
-  local opskat_now opskat_rand
-  opskat_now=$(date +%%s%%N 2>/dev/null || date +%%s 2>/dev/null || printf '0')
-  opskat_rand=${RANDOM:-0}
-  printf '%%s-%%s-%%s' "$$" "$opskat_rand" "$opskat_now"
-}
-opskat_prompt_proof() {
-  local opskat_pwd opskat_current opskat_next
-  opskat_current=${OPSKAT_PROMPT_NONCE:-}
-  [[ -n "$opskat_current" ]] || return
-  opskat_next=$(opskat_next_prompt_nonce)
-  opskat_pwd=$(pwd -P 2>/dev/null || pwd 2>/dev/null || printf '')
-  printf '\033]1337;opskat:%s:prompt:%%s:%%s:%%s\007' "$opskat_current" "$opskat_next" "$opskat_pwd"
-  OPSKAT_PROMPT_NONCE=$opskat_next
-}
-OPSKAT_PROMPT_NONCE=%s
-add-zsh-hook precmd opskat_prompt_proof
-EOF_RC
-export ZDOTDIR="$dir"
-printf '\033]1337;opskat:%s:init:pid:%%s\007' "$$"
-exec %s -i`, syncToken, shellQuote(promptNonce), syncToken, shellQuote(shellPath))
+		return fmt.Sprintf(
+			`opskat_next_prompt_nonce(){ local n r;n=$(date +%%s%%N 2>/dev/null||date +%%s 2>/dev/null||printf 0);r=${RANDOM:-0};printf '%%s-%%s-%%s' "$$" "$r" "$n";};`+
+				`opskat_prompt_proof(){ local p c x;c=${OPSKAT_PROMPT_NONCE:-};[[ -n "$c" ]]||return;x=$(opskat_next_prompt_nonce);p=$(pwd -P 2>/dev/null||pwd 2>/dev/null||printf '');printf '\033]1337;opskat:%s:prompt:%%s:%%s:%%s\007' "$c" "$x" "$p";OPSKAT_PROMPT_NONCE=$x;};`+
+				`OPSKAT_PROMPT_NONCE=%s;`+
+				`autoload -Uz add-zsh-hook;add-zsh-hook precmd opskat_prompt_proof;`+
+				`printf '\033]1337;opskat:%s:init:pid:%%s\007' "$$"`+"\r",
+			syncToken, shellQuote(promptNonce), syncToken)
 	case shellTypeKsh, shellTypeMksh:
-		return fmt.Sprintf(`envfile="$(mktemp "${TMPDIR:-/tmp}/opskat-ksh-XXXXXX")" && cat >"$envfile" <<'EOF'
-[ -f "$HOME/.profile" ] && . "$HOME/.profile"
-opskat_next_prompt_nonce() {
-  OPSKAT_NOW=$(date +%%s%%N 2>/dev/null || date +%%s 2>/dev/null || printf '0')
-  OPSKAT_RAND=${RANDOM:-0}
-  printf '%%s-%%s-%%s' "$$" "$OPSKAT_RAND" "$OPSKAT_NOW"
+		return fmt.Sprintf(
+			`opskat_next_prompt_nonce(){ OPSKAT_NOW=$(date +%%s%%N 2>/dev/null||date +%%s 2>/dev/null||printf 0);OPSKAT_RAND=${RANDOM:-0};printf '%%s-%%s-%%s' "$$" "$OPSKAT_RAND" "$OPSKAT_NOW";};`+
+				`opskat_prompt_proof(){ OPSKAT_CURRENT=${OPSKAT_PROMPT_NONCE:-};[ -n "$OPSKAT_CURRENT" ]||return;OPSKAT_NEXT=$(opskat_next_prompt_nonce);OPSKAT_PWD=$(pwd -P 2>/dev/null||pwd 2>/dev/null||printf '');printf '\033]1337;opskat:%s:prompt:%%s:%%s:%%s\007' "$OPSKAT_CURRENT" "$OPSKAT_NEXT" "$OPSKAT_PWD";OPSKAT_PROMPT_NONCE=$OPSKAT_NEXT;};`+
+				`OPSKAT_PROMPT_NONCE=%s;`+
+				`OPSKAT_ORIG_PS1=${OPSKAT_ORIG_PS1:-$PS1};PS1='$(opskat_prompt_proof)'"$OPSKAT_ORIG_PS1";`+
+				`printf '\033]1337;opskat:%s:init:pid:%%s\007' "$$"`+"\r",
+			syncToken, shellQuote(promptNonce), syncToken)
+	default:
+		return ""
+	}
 }
-opskat_prompt_proof() {
-  OPSKAT_CURRENT=${OPSKAT_PROMPT_NONCE:-}
-  [ -n "$OPSKAT_CURRENT" ] || return
-  OPSKAT_NEXT=$(opskat_next_prompt_nonce)
-  OPSKAT_PWD=$(pwd -P 2>/dev/null || pwd 2>/dev/null || printf '')
-  printf '\033]1337;opskat:%s:prompt:%%s:%%s:%%s\007' "$OPSKAT_CURRENT" "$OPSKAT_NEXT" "$OPSKAT_PWD"
-  OPSKAT_PROMPT_NONCE=$OPSKAT_NEXT
-}
-OPSKAT_PROMPT_NONCE=%s
-PS1='$(opskat_prompt_proof)'"$PS1"
-EOF
-export ENV="$envfile"
-printf '\033]1337;opskat:%s:init:pid:%%s\007' "$$"
-exec %s -i`, syncToken, shellQuote(promptNonce), syncToken, shellQuote(shellPath))
+
+// buildDisableSyncCommand returns a one-line statement that removes the hook
+// and unsets helper functions. Safe to send even if EnableSync was never run.
+func buildDisableSyncCommand(shellType string) string {
+	switch shellType {
+	case shellTypeBash:
+		return `PROMPT_COMMAND=${PROMPT_COMMAND#opskat_prompt_proof};PROMPT_COMMAND=${PROMPT_COMMAND#;};unset -f opskat_prompt_proof opskat_next_prompt_nonce 2>/dev/null;unset OPSKAT_PROMPT_NONCE` + "\r"
+	case shellTypeZsh:
+		return `add-zsh-hook -d precmd opskat_prompt_proof 2>/dev/null;unset -f opskat_prompt_proof opskat_next_prompt_nonce 2>/dev/null;unset OPSKAT_PROMPT_NONCE` + "\r"
+	case shellTypeKsh, shellTypeMksh:
+		return `[ -n "$OPSKAT_ORIG_PS1" ] && PS1=$OPSKAT_ORIG_PS1;unset -f opskat_prompt_proof opskat_next_prompt_nonce 2>/dev/null;unset OPSKAT_PROMPT_NONCE OPSKAT_ORIG_PS1` + "\r"
 	default:
 		return ""
 	}

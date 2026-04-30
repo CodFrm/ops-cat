@@ -72,6 +72,13 @@ type Session struct {
 	onClosed func(sessionID string) // 会话关闭回调
 	onSync   func(sessionID string, state DirectorySyncState)
 
+	// shellPath / shellType are detected lazily by EnableSync. Empty means no
+	// sync attempt has needed shell detection yet; "unsupported" means the
+	// remote shell cannot host the directory-sync prompt hook.
+	shellPath string
+	shellType string
+
+	syncEnableMu       sync.Mutex
 	syncMu             sync.Mutex
 	syncState          DirectorySyncState
 	pendingDirChange   chan error
@@ -84,6 +91,7 @@ type Session struct {
 	promptPendingNonce string
 	shellPID           int
 	syncDirty          bool
+	syncBootstrapCh    chan struct{} // closed when EnableSync receives init:pid; nil when not bootstrapping
 	syncProbeActive    bool
 	probeShellStateFn  func(int) (shellProbeResult, error)
 }
@@ -319,57 +327,27 @@ func (m *Manager) createSession(shared *sharedClient, assetID int64, cols, rows 
 	sessionID := fmt.Sprintf("ssh-%d", m.counter)
 	m.mu.Unlock()
 
-	syncToken, err := generateSyncToken()
-	if err != nil {
-		if closeErr := session.Close(); closeErr != nil {
-			logger.Default().Warn("close session after sync token failure", zap.Error(closeErr))
-		}
-		return "", fmt.Errorf("生成目录同步令牌失败: %w", err)
-	}
-	promptNonce, err := generateSyncToken()
-	if err != nil {
-		if closeErr := session.Close(); closeErr != nil {
-			logger.Default().Warn("close session after prompt nonce failure", zap.Error(closeErr))
-		}
-		return "", fmt.Errorf("生成提示符校验令牌失败: %w", err)
-	}
-
 	sess := &Session{
-		ID:          sessionID,
-		AssetID:     assetID,
-		shared:      shared,
-		session:     session,
-		stdin:       stdin,
-		stdout:      stdout,
-		onData:      func(data []byte) { onData(sessionID, data) },
-		onClosed:    onClosed,
-		syncToken:   syncToken,
-		promptNonce: promptNonce,
+		ID:       sessionID,
+		AssetID:  assetID,
+		shared:   shared,
+		session:  session,
+		stdin:    stdin,
+		stdout:   stdout,
+		onData:   func(data []byte) { onData(sessionID, data) },
+		onClosed: onClosed,
 	}
 	if onSync != nil {
 		sess.onSync = func(_ string, state DirectorySyncState) { onSync(sessionID, state) }
 	}
 
-	shellPath, shellType := detectRemoteShell(shared.client)
-	supported := shellType == shellTypeBash || shellType == shellTypeZsh || shellType == shellTypeKsh || shellType == shellTypeMksh
-	sess.initSyncState(shellPath, shellType, supported)
+	// Start a native interactive shell so sshd emits "Last login" / motd /
+	// banner natively. Shell-type detection and sync hooks are deferred to
+	// Session.EnableSync — opening a probe SSH channel here would consume the
+	// PAM motd output before the user's main session sees it.
+	sess.initSyncState("", "", false)
 
-	if supported {
-		if err := session.Start(buildInteractiveShellCommand(shellPath, shellType, syncToken, promptNonce)); err != nil {
-			logger.Default().Warn("wrapped shell start failed, fallback to plain shell",
-				zap.Error(err),
-				zap.String("shellPath", shellPath),
-				zap.String("shellType", shellType),
-			)
-			sess.initSyncState(shellPath, shellType, false)
-			if err := session.Shell(); err != nil {
-				if closeErr := session.Close(); closeErr != nil {
-					logger.Default().Warn("close session after shell fallback failure", zap.Error(closeErr))
-				}
-				return "", fmt.Errorf("启动shell失败: %w", err)
-			}
-		}
-	} else if err := session.Shell(); err != nil {
+	if err := session.Shell(); err != nil {
 		if closeErr := session.Close(); closeErr != nil {
 			logger.Default().Warn("close session after shell start failure", zap.Error(closeErr))
 		}

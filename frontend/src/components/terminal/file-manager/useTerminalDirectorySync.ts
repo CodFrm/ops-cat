@@ -1,9 +1,9 @@
 import { useCallback, type MutableRefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { ChangeSSHDirectory } from "../../../../wailsjs/go/app/App";
+import { ChangeSSHDirectory, EnableSSHSync, GetSSHSyncState } from "../../../../wailsjs/go/app/App";
 import { DIRSYNC_ERROR_CODES, type DirSyncErrorCode, formatDirSyncError } from "@/lib/dirSyncErrors";
-import { useTerminalStore } from "@/stores/terminalStore";
+import { useTerminalStore, type TerminalDirectorySyncState } from "@/stores/terminalStore";
 import { normalizeRemotePath } from "./utils";
 
 interface UseTerminalDirectorySyncOptions {
@@ -40,20 +40,32 @@ export function useTerminalDirectorySync({
   );
 
   const syncPanelFromTerminal = useCallback(async () => {
-    if (!sessionSync) {
+    let sync = sessionSync;
+    if (!sync || !sync.supported) {
+      try {
+        await EnableSSHSync(sessionId);
+        const latest = (await GetSSHSyncState(sessionId)) as TerminalDirectorySyncState;
+        useTerminalStore.getState().setSessionSyncState(sessionId, latest);
+        sync = latest;
+      } catch (e) {
+        showSyncError(e);
+        return false;
+      }
+    }
+    if (!sync) {
       showSyncCode(DIRSYNC_ERROR_CODES.CWD_UNKNOWN);
       return false;
     }
-    if (!sessionSync.supported) {
+    if (!sync.supported) {
       showSyncCode(DIRSYNC_ERROR_CODES.UNSUPPORTED);
       return false;
     }
-    if (!sessionSync.cwdKnown || !sessionSync.cwd) {
+    if (!sync.cwdKnown || !sync.cwd) {
       showSyncCode(DIRSYNC_ERROR_CODES.CWD_UNKNOWN);
       return false;
     }
-    return loadDir(sessionSync.cwd);
-  }, [loadDir, sessionSync, showSyncCode]);
+    return loadDir(sync.cwd);
+  }, [loadDir, sessionId, sessionSync, showSyncCode, showSyncError]);
 
   const syncTerminalToPath = useCallback(
     async (targetPath: string) => {
