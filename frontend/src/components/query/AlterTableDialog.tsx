@@ -16,6 +16,7 @@ import {
 import { ExecuteSQL } from "../../../wailsjs/go/app/App";
 import { SqlPreviewDialog } from "./SqlPreviewDialog";
 import { toast } from "sonner";
+import { quoteIdent, quoteTableRef, sqlQuote } from "@/lib/tableSql";
 
 interface AlterTableDialogProps {
   open: boolean;
@@ -50,18 +51,8 @@ interface DraftColumn {
   isNew: boolean;
 }
 
-function quoteIdent(name: string, driver?: string): string {
-  if (driver === "postgresql") return `"${name.replace(/"/g, '""')}"`;
-  return `\`${name.replace(/`/g, "``")}\``;
-}
-
 function escapeLiteral(value: string): string {
   return value.replace(/'/g, "''");
-}
-
-function sqlQuote(value: string): string {
-  const escaped = value.replace(/'/g, "''");
-  return `'${escaped}'`;
 }
 
 function formatDefaultValue(value: string): string {
@@ -106,11 +97,6 @@ function buildColumnDefinition(
   return `${quoteIdent(column.name.trim(), driver)} ${column.type.trim()}${nullable}${defaultPart}${commentPart}`;
 }
 
-function toTableRef(database: string, table: string, driver?: string): string {
-  if (driver === "postgresql") return quoteIdent(table, driver);
-  return `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
-}
-
 export function buildAlterStatements(params: {
   driver?: string;
   database: string;
@@ -136,15 +122,15 @@ export function buildAlterStatements(params: {
   const nextTableName = tableNameDraft.trim();
   const hasRenameTable = !!nextTableName && nextTableName !== table;
 
-  const originalTableRef = toTableRef(database, table, driver);
+  const originalTableRef = quoteTableRef(database, table, driver);
   const targetTable = hasRenameTable ? nextTableName : table;
-  const targetTableRef = toTableRef(database, targetTable, driver);
+  const targetTableRef = quoteTableRef(database, targetTable, driver);
 
   if (hasRenameTable) {
     if (driver === "postgresql") {
       statements.push(`ALTER TABLE ${originalTableRef} RENAME TO ${quoteIdent(nextTableName, driver)}`);
     } else {
-      statements.push(`RENAME TABLE ${originalTableRef} TO ${toTableRef(database, nextTableName, driver)}`);
+      statements.push(`RENAME TABLE ${originalTableRef} TO ${quoteTableRef(database, nextTableName, driver)}`);
     }
   }
 

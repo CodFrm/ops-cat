@@ -12,6 +12,19 @@ export function quoteIdent(name: string, driver?: string): string {
   return `\`${name.replace(/`/g, "``")}\``;
 }
 
+export function quoteQualifiedIdent(name: string, driver?: string): string {
+  return name
+    .split(".")
+    .filter(Boolean)
+    .map((part) => quoteIdent(part, driver))
+    .join(".");
+}
+
+export function quoteTableRef(database: string, table: string, driver?: string): string {
+  if (driver === "postgresql") return quoteQualifiedIdent(table, driver);
+  return `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+}
+
 export type CellValueFilterOperator = TableFilterOperator;
 
 function toRangeValues(value: unknown): [unknown, unknown] | null {
@@ -99,8 +112,7 @@ export function buildDeleteStatement({
     return `${quoteIdent(col, driver)} = ${sqlQuote(value)}`;
   });
 
-  const tableName =
-    driver === "postgresql" ? `"${table}"` : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+  const tableName = quoteTableRef(database, table, driver);
   const whereSQL = whereClauses.join(" AND ");
 
   if (driver === "postgresql") {

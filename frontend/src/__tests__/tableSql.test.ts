@@ -38,6 +38,20 @@ describe("table SQL helpers", () => {
     expect(result.usesPrimaryKey).toBe(true);
   });
 
+  it("escapes postgresql table names in DELETE SQL", () => {
+    const result = buildDeleteStatement({
+      database: "appdb",
+      table: 'audit"logs',
+      columns: ['id"part', "name"],
+      row: { 'id"part': 7, name: "alice" },
+      primaryKeys: ['id"part'],
+      driver: "postgresql",
+    });
+
+    expect(result.sql).toBe(`DELETE FROM "audit""logs" WHERE "id""part" = '7';`);
+    expect(result.usesPrimaryKey).toBe(true);
+  });
+
   it("falls back to all columns when deleting without a primary key", () => {
     const result = buildDeleteStatement({
       database: "appdb",

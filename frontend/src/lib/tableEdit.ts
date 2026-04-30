@@ -1,4 +1,4 @@
-import { quoteIdent, sqlQuote } from "./tableSql";
+import { quoteIdent, quoteTableRef, sqlQuote } from "./tableSql";
 
 export interface TableColumnRule {
   name: string;
@@ -30,10 +30,7 @@ export function validateInsertRow(rules: TableColumnRule[], values: Record<strin
 }
 
 export function buildInsertStatement({ database, table, driver, values }: BuildInsertStatementInput): string {
-  const tableName =
-    driver === "postgresql"
-      ? quoteIdent(table, driver)
-      : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+  const tableName = quoteTableRef(database, table, driver);
   const columns = Object.keys(values);
 
   if (columns.length === 0) {

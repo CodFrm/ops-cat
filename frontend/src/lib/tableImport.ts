@@ -1,4 +1,4 @@
-import { quoteIdent, sqlQuote } from "./tableSql";
+import { quoteIdent, quoteQualifiedIdent, sqlQuote } from "./tableSql";
 
 export type Delimiter = "," | "\t";
 export type ImportNullStrategy = "empty-is-empty-string" | "empty-is-null" | "literal-null";
@@ -215,14 +215,6 @@ export function parseImportSourceText(args: ParseImportSourceTextArgs): ParsedDe
   return applyRowOptions(rows, args);
 }
 
-function quoteTableName(tableName: string, driver?: string): string {
-  return tableName
-    .split(".")
-    .filter(Boolean)
-    .map((part) => quoteIdent(part, driver))
-    .join(".");
-}
-
 function importValue(cell: string, nullStrategy: ImportNullStrategy): unknown {
   if (nullStrategy === "empty-is-null" && cell === "") return null;
   if (nullStrategy === "literal-null" && cell.toUpperCase() === "NULL") return null;
@@ -291,7 +283,7 @@ export function buildImportInsertSql({
 
   if (mapped.length === 0) return [];
 
-  const quotedTable = quoteTableName(tableName, driver);
+  const quotedTable = quoteQualifiedIdent(tableName, driver);
   const columnSql = mapped.map((item) => quoteIdent(item.target, driver)).join(", ");
   const primaryKeySet = new Set(primaryKeys);
   const keyMapped = mapped.filter((item) => primaryKeySet.has(item.target));

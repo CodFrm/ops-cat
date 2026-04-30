@@ -14,7 +14,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function setupStores() {
+function setupStores(driver = "mysql", table = "users") {
   useTabStore.setState({
     tabs: [
       {
@@ -27,7 +27,7 @@ function setupStores() {
           assetName: "db",
           assetIcon: "",
           assetType: "database",
-          driver: "mysql",
+          driver,
         },
       },
     ],
@@ -37,10 +37,10 @@ function setupStores() {
     dbStates: {
       "query-1": {
         databases: ["appdb"],
-        tables: { appdb: ["users"] },
+        tables: { appdb: [table] },
         expandedDbs: ["appdb"],
         loadingDbs: false,
-        innerTabs: [{ id: "table-1", type: "table", database: "appdb", table: "users" }],
+        innerTabs: [{ id: "table-1", type: "table", database: "appdb", table }],
         activeInnerTabId: "table-1",
         error: null,
       },
@@ -123,6 +123,23 @@ describe("TableDataTab loading cancellation", () => {
 
     await waitFor(() =>
       expect(vi.mocked(ExecuteSQL).mock.calls.some(([, sql]) => String(sql).includes("LIMIT 250 OFFSET 0"))).toBe(true)
+    );
+  });
+
+  it("escapes postgresql table identifiers when loading data", async () => {
+    setupStores("postgresql", 'audit"logs');
+    vi.mocked(ExecuteSQL).mockResolvedValue(
+      JSON.stringify({ columns: ['id"part', "name"], rows: [{ 'id"part': 1, name: "ada" }] })
+    );
+
+    render(<TableDataTab tabId="query-1" innerTabId="table-1" database="appdb" table={'audit"logs'} />);
+
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(ExecuteSQL)
+          .mock.calls.some(([, sql]) => String(sql).includes(`SELECT * FROM "audit""logs" LIMIT 1000 OFFSET 0`))
+      ).toBe(true)
     );
   });
 });

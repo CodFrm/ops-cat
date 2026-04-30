@@ -15,6 +15,7 @@ import {
 import { ExecuteSQL } from "../../../wailsjs/go/app/App";
 import { toast } from "sonner";
 import { SqlPreviewDialog } from "./SqlPreviewDialog";
+import { quoteIdent, sqlQuote } from "@/lib/tableSql";
 
 interface CreateDatabaseDialogProps {
   open: boolean;
@@ -23,16 +24,6 @@ interface CreateDatabaseDialogProps {
   defaultDatabase: string;
   driver?: string;
   onSuccess: () => void;
-}
-
-function quoteIdent(name: string, driver?: string): string {
-  if (driver === "postgresql") return `"${name.replace(/"/g, '""')}"`;
-  return `\`${name.replace(/`/g, "``")}\``;
-}
-
-function sqlQuote(value: string): string {
-  const escaped = value.replace(/'/g, "''");
-  return `'${escaped}'`;
 }
 
 function isSafeOption(value: string): boolean {

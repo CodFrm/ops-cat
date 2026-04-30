@@ -36,6 +36,7 @@ import {
   buildDeleteStatement,
   buildFilterByCellValueClause,
   quoteIdent,
+  quoteTableRef,
   sqlQuote,
   type CellValueFilterOperator,
 } from "@/lib/tableSql";
@@ -184,8 +185,8 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     try {
       let sql: string;
       if (driver === "postgresql") {
-        const escapedTable = table.replace(/'/g, "''");
-        sql = `SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.table_schema = 'public' AND tc.table_name = '${escapedTable}' AND tc.constraint_type = 'PRIMARY KEY' ORDER BY kcu.ordinal_position`;
+        const tableLiteral = sqlQuote(table);
+        sql = `SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.table_schema = 'public' AND tc.table_name = ${tableLiteral} AND tc.constraint_type = 'PRIMARY KEY' ORDER BY kcu.ordinal_position`;
       } else {
         sql = `SHOW KEYS FROM ${quoteIdent(database, driver)}.${quoteIdent(table, driver)} WHERE Key_name = 'PRIMARY'`;
       }
@@ -205,10 +206,10 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     try {
       let sql: string;
       if (driver === "postgresql") {
-        const escapedTable = table.replace(/'/g, "''");
+        const tableLiteral = sqlQuote(table);
         sql =
           `SELECT column_name, data_type, udt_name, is_nullable, column_default FROM information_schema.columns ` +
-          `WHERE table_schema = 'public' AND table_name = '${escapedTable}' ORDER BY ordinal_position`;
+          `WHERE table_schema = 'public' AND table_name = ${tableLiteral} ORDER BY ordinal_position`;
       } else {
         sql = `SHOW COLUMNS FROM ${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
       }
@@ -254,8 +255,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     if (!assetId) return;
     const requestId = nextRequestId();
     latestCountRequest.current = requestId;
-    const tableName =
-      driver === "postgresql" ? `"${table}"` : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+    const tableName = quoteTableRef(database, table, driver);
     const where = whereClause.trim();
     const wherePart = where ? ` WHERE ${where}` : "";
     try {
@@ -284,8 +284,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
       setError(null);
 
       const offset = pageNum * pageSize;
-      const tableName =
-        driver === "postgresql" ? `"${table}"` : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+      const tableName = quoteTableRef(database, table, driver);
       const where = whereClause.trim();
       // Header-click sort takes precedence over the manual ORDER BY input.
       const orderBy =
@@ -436,8 +435,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
         }
       }
 
-      const tableName =
-        driver === "postgresql" ? `"${table}"` : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+      const tableName = quoteTableRef(database, table, driver);
       const whereSQL = whereClauses.join(" AND ");
 
       if (driver === "postgresql") {
@@ -841,9 +839,9 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
       let ddl = "";
 
       if (driver === "postgresql") {
-        const escapedTable = table.replace(/'/g, "''");
-        const columnsSql = `SELECT column_name, data_type, udt_name, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${escapedTable}' ORDER BY ordinal_position`;
-        const primaryKeySql = `SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.table_schema = 'public' AND tc.table_name = '${escapedTable}' AND tc.constraint_type = 'PRIMARY KEY' ORDER BY kcu.ordinal_position`;
+        const tableLiteral = sqlQuote(table);
+        const columnsSql = `SELECT column_name, data_type, udt_name, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ${tableLiteral} ORDER BY ordinal_position`;
+        const primaryKeySql = `SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.table_schema = 'public' AND tc.table_name = ${tableLiteral} AND tc.constraint_type = 'PRIMARY KEY' ORDER BY kcu.ordinal_position`;
 
         const columnsResult = await ExecuteSQL(assetId, columnsSql, database);
         const primaryKeyResult = await ExecuteSQL(assetId, primaryKeySql, database);
@@ -864,17 +862,17 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
             const type = dataType === "USER-DEFINED" && udtName ? udtName : dataType;
             const nullable = String(col.is_nullable ?? "").toUpperCase() === "YES";
 
-            let line = `"${name}" ${type}`;
+            let line = `${quoteIdent(name, driver)} ${type}`;
             if (!nullable) line += " NOT NULL";
             if (columnDefault) line += ` DEFAULT ${columnDefault}`;
             return line;
           });
 
           if (primaryKeyColumns.length > 0) {
-            defs.push(`PRIMARY KEY (${primaryKeyColumns.map((c) => `"${c}"`).join(", ")})`);
+            defs.push(`PRIMARY KEY (${primaryKeyColumns.map((c) => quoteIdent(c, driver)).join(", ")})`);
           }
 
-          ddl = `CREATE TABLE "public"."${table}" (\n  ${defs.join(",\n  ")}\n);`;
+          ddl = `CREATE TABLE ${quoteIdent("public", driver)}.${quoteIdent(table, driver)} (\n  ${defs.join(",\n  ")}\n);`;
         }
       } else {
         const quotedTable = quoteIdent(table, driver);

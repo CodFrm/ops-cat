@@ -1,4 +1,4 @@
-import { quoteIdent, sqlQuote } from "./tableSql";
+import { quoteIdent, quoteQualifiedIdent, quoteTableRef, sqlQuote } from "./tableSql";
 
 type TableRow = Record<string, unknown>;
 export type TableExportFormat = "csv" | "tsv" | "sql";
@@ -171,14 +171,6 @@ function toDelimitedData(columns: string[], rows: TableRow[], delimiter: string)
   return rows.map((row) => columns.map((col) => escapeDelimited(row[col], delimiter)).join(delimiter)).join("\n");
 }
 
-function quoteTableName(tableName: string, driver?: string): string {
-  return tableName
-    .split(".")
-    .filter(Boolean)
-    .map((part) => quoteIdent(part, driver))
-    .join(".");
-}
-
 export function toTsv(columns: string[], rows: TableRow[], options?: TableExportOptions): string {
   return toDelimited(columns, rows, "\t", options);
 }
@@ -196,7 +188,7 @@ export function toTsvFields(columns: string[]): string {
 }
 
 export function toInsertSql(tableName: string, columns: string[], rows: TableRow[], driver?: string): string {
-  const quotedTable = quoteTableName(tableName, driver);
+  const quotedTable = quoteQualifiedIdent(tableName, driver);
   const columnSql = columns.map((col) => quoteIdent(col, driver)).join(", ");
   return rows
     .map((row) => {
@@ -213,7 +205,7 @@ export function toUpdateSql(
   primaryKeys: string[],
   driver?: string
 ): string {
-  const quotedTable = quoteTableName(tableName, driver);
+  const quotedTable = quoteQualifiedIdent(tableName, driver);
   const setSql = columns.map((col) => `${quoteIdent(col, driver)} = ${sqlQuote(row[col])}`).join(", ");
   const whereColumns = primaryKeys.length > 0 ? primaryKeys : columns;
   const whereSql = whereColumns
@@ -259,10 +251,7 @@ export function buildTableExportSelectSql({
   page,
   pageSize,
 }: BuildTableExportSelectSqlInput): string {
-  const tableName =
-    driver === "postgresql"
-      ? quoteIdent(table, driver)
-      : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+  const tableName = quoteTableRef(database, table, driver);
   const where = whereClause.trim();
   const orderBy =
     sortColumn && sortDir
