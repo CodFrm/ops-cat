@@ -48,14 +48,17 @@ export function Sidebar({
   const setActivePanel = useLayoutStore((s) => s.setActivePanel);
   const toggleVisible = useLayoutStore((s) => s.toggleVisible);
 
-  const navItems = [
-    { id: "home", icon: Home, label: t("nav.home") },
-    { id: "forward", icon: ArrowRightLeft, label: t("nav.forward") },
-    { id: "sshkeys", icon: KeyRound, label: t("nav.sshKeys") },
-    { id: "snippets", icon: FileCode, label: t("nav.snippets") },
-    { id: "audit", icon: ScrollText, label: t("nav.audit") },
-  ];
+  type NavItem = { id: string; icon: typeof Home; label: string };
 
+  const navGroups: NavItem[][] = [
+    [{ id: "home", icon: Home, label: t("nav.home") }],
+    [
+      { id: "forward", icon: ArrowRightLeft, label: t("nav.forward") },
+      { id: "sshkeys", icon: KeyRound, label: t("nav.sshKeys") },
+      { id: "snippets", icon: FileCode, label: t("nav.snippets") },
+      { id: "audit", icon: ScrollText, label: t("nav.audit") },
+    ],
+  ];
   const sidePanels: Array<{ id: SidePanel; icon: typeof Server; label: string }> = [
     { id: "assets", icon: Server, label: t("sideTabs.assetsPanel") },
     { id: "tabs", icon: LayoutList, label: t("sideTabs.tabsPanel") },
@@ -86,26 +89,31 @@ export function Sidebar({
 
       {/* Navigation */}
       <div className="flex flex-col items-center gap-1">
-        {navItems.map((item) => (
-          <Tooltip key={item.id}>
-            <TooltipTrigger asChild>
-              <button
-                className={cn(
-                  "relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors duration-150",
-                  activePage === item.id
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                )}
-                onClick={() => onPageChange(item.id)}
-              >
-                {activePage === item.id && (
-                  <span className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[calc(50%+1px)] h-4 w-1 rounded-full bg-primary" />
-                )}
-                <item.icon className="h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">{item.label}</TooltipContent>
-          </Tooltip>
+        {navGroups.map((group, gi) => (
+          <div key={gi} className="flex flex-col items-center gap-1">
+            {gi > 0 && <div className="h-px w-6 bg-border" />}
+            {group.map((item) => (
+              <Tooltip key={item.id}>
+                <TooltipTrigger asChild>
+                  <button
+                    className={cn(
+                      "relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors duration-150",
+                      activePage === item.id
+                        ? "bg-accent text-accent-foreground"
+                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    )}
+                    onClick={() => onPageChange(item.id)}
+                  >
+                    {activePage === item.id && (
+                      <span className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[calc(50%+1px)] h-4 w-1 rounded-full bg-primary" />
+                    )}
+                    <item.icon className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">{item.label}</TooltipContent>
+              </Tooltip>
+            ))}
+          </div>
         ))}
 
         {tabBarLayout === "left" && (

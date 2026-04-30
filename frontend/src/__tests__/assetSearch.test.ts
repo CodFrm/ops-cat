@@ -23,6 +23,13 @@ describe("buildGroupPathMap", () => {
     const map = buildGroupPathMap(groups);
     expect(map.get(2)).toBe("孤儿");
   });
+
+  it("parent 链成环时按当前组视角截断路径", () => {
+    const groups = [group(1, "A", 2), group(2, "B", 1)];
+    const map = buildGroupPathMap(groups);
+    expect(map.get(1)).toBe("B/A");
+    expect(map.get(2)).toBe("A/B");
+  });
 });
 
 describe("filterAssets", () => {

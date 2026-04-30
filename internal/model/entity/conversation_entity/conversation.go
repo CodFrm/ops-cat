@@ -84,11 +84,12 @@ func (Message) TableName() string {
 
 // ContentBlock 前端内容块（用于持久化显示状态）
 type ContentBlock struct {
-	Type      string `json:"type"` // "text" | "tool"
-	Content   string `json:"content"`
-	ToolName  string `json:"toolName,omitempty"`
-	ToolInput string `json:"toolInput,omitempty"`
-	Status    string `json:"status,omitempty"` // "running" | "completed" | "error"
+	Type       string `json:"type"` // "text" | "tool"
+	Content    string `json:"content"`
+	ToolName   string `json:"toolName,omitempty"`
+	ToolInput  string `json:"toolInput,omitempty"`
+	ToolCallID string `json:"toolCallId,omitempty"` // 跨 turn 还原 tool_calls 历史；老数据无此字段，前端兜底为塌缩消息
+	Status     string `json:"status,omitempty"`     // "running" | "completed" | "error"
 }
 
 // GetBlocks 获取前端显示块

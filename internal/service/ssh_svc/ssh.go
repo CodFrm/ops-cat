@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/pkg/dirsync"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
@@ -69,16 +70,38 @@ type Session struct {
 	closed   bool
 	onData   func(data []byte)      // 终端输出回调
 	onClosed func(sessionID string) // 会话关闭回调
+	onSync   func(sessionID string, state DirectorySyncState)
+
+	syncMu             sync.Mutex
+	syncState          DirectorySyncState
+	pendingDirChange   chan error
+	pendingDirNonce    string
+	pendingDirTarget   string
+	pendingDirExpected string
+	parserRemainder    []byte
+	syncToken          string
+	promptNonce        string
+	promptPendingNonce string
+	shellPID           int
+	syncDirty          bool
+	syncProbeActive    bool
+	probeShellStateFn  func(int) (shellProbeResult, error)
 }
 
 // Write 向终端写入数据（用户输入）
 func (s *Session) Write(data []byte) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.closed {
+		s.mu.Unlock()
 		return fmt.Errorf("session is closed")
 	}
+	hasNewline := bytes.ContainsAny(data, "\r\n")
+	s.markUserInput(data)
 	_, err := s.stdin.Write(data)
+	s.mu.Unlock()
+	if err == nil && hasNewline {
+		s.ensureSyncProbe()
+	}
 	return err
 }
 
@@ -94,6 +117,7 @@ func (s *Session) Resize(cols, rows int) error {
 
 // Close 关闭会话
 func (s *Session) Close() {
+	s.failPendingDirectoryChange(dirsync.Error(dirSyncErrSessionClosed))
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -119,6 +143,16 @@ func (s *Session) IsClosed() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.closed
+}
+
+func (s *Session) writeInternal(data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return fmt.Errorf("session is closed")
+	}
+	_, err := s.stdin.Write(data)
+	return err
 }
 
 // Manager 管理所有 SSH 会话
@@ -148,6 +182,7 @@ type ConnectConfig struct {
 	Rows          int
 	OnData        func(sessionID string, data []byte) // 终端输出回调
 	OnClosed      func(sessionID string)              // 关闭回调
+	OnSync        func(sessionID string, state DirectorySyncState)
 
 	// 进度回调（异步连接用），step: resolve/connect/auth/shell
 	OnProgress func(step, message string)
@@ -228,7 +263,7 @@ func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
 
 	emitProgress(&cfg, "shell", "正在启动终端...")
 
-	sessionID, err := m.createSession(shared, cfg.AssetID, cfg.Cols, cfg.Rows, cfg.OnData, cfg.OnClosed)
+	sessionID, err := m.createSession(shared, cfg.AssetID, cfg.Cols, cfg.Rows, cfg.OnData, cfg.OnClosed, cfg.OnSync)
 	if err != nil {
 		shared.release()
 		return "", err
@@ -239,7 +274,7 @@ func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
 
 // createSession 在 sharedClient 上创建新的 SSH 会话（PTY + shell）
 func (m *Manager) createSession(shared *sharedClient, assetID int64, cols, rows int,
-	onData func(string, []byte), onClosed func(string)) (string, error) {
+	onData func(string, []byte), onClosed func(string), onSync func(string, DirectorySyncState)) (string, error) {
 
 	session, err := shared.client.NewSession()
 	if err != nil {
@@ -279,27 +314,66 @@ func (m *Manager) createSession(shared *sharedClient, assetID int64, cols, rows 
 		return "", fmt.Errorf("获取stdout失败: %w", err)
 	}
 
-	if err := session.Shell(); err != nil {
-		if closeErr := session.Close(); closeErr != nil {
-			logger.Default().Warn("close session after shell start failure", zap.Error(closeErr))
-		}
-		return "", fmt.Errorf("启动shell失败: %w", err)
-	}
-
 	m.mu.Lock()
 	m.counter++
 	sessionID := fmt.Sprintf("ssh-%d", m.counter)
 	m.mu.Unlock()
 
+	syncToken, err := generateSyncToken()
+	if err != nil {
+		if closeErr := session.Close(); closeErr != nil {
+			logger.Default().Warn("close session after sync token failure", zap.Error(closeErr))
+		}
+		return "", fmt.Errorf("生成目录同步令牌失败: %w", err)
+	}
+	promptNonce, err := generateSyncToken()
+	if err != nil {
+		if closeErr := session.Close(); closeErr != nil {
+			logger.Default().Warn("close session after prompt nonce failure", zap.Error(closeErr))
+		}
+		return "", fmt.Errorf("生成提示符校验令牌失败: %w", err)
+	}
+
 	sess := &Session{
-		ID:       sessionID,
-		AssetID:  assetID,
-		shared:   shared,
-		session:  session,
-		stdin:    stdin,
-		stdout:   stdout,
-		onData:   func(data []byte) { onData(sessionID, data) },
-		onClosed: onClosed,
+		ID:          sessionID,
+		AssetID:     assetID,
+		shared:      shared,
+		session:     session,
+		stdin:       stdin,
+		stdout:      stdout,
+		onData:      func(data []byte) { onData(sessionID, data) },
+		onClosed:    onClosed,
+		syncToken:   syncToken,
+		promptNonce: promptNonce,
+	}
+	if onSync != nil {
+		sess.onSync = func(_ string, state DirectorySyncState) { onSync(sessionID, state) }
+	}
+
+	shellPath, shellType := detectRemoteShell(shared.client)
+	supported := shellType == shellTypeBash || shellType == shellTypeZsh || shellType == shellTypeKsh || shellType == shellTypeMksh
+	sess.initSyncState(shellPath, shellType, supported)
+
+	if supported {
+		if err := session.Start(buildInteractiveShellCommand(shellPath, shellType, syncToken, promptNonce)); err != nil {
+			logger.Default().Warn("wrapped shell start failed, fallback to plain shell",
+				zap.Error(err),
+				zap.String("shellPath", shellPath),
+				zap.String("shellType", shellType),
+			)
+			sess.initSyncState(shellPath, shellType, false)
+			if err := session.Shell(); err != nil {
+				if closeErr := session.Close(); closeErr != nil {
+					logger.Default().Warn("close session after shell fallback failure", zap.Error(closeErr))
+				}
+				return "", fmt.Errorf("启动shell失败: %w", err)
+			}
+		}
+	} else if err := session.Shell(); err != nil {
+		if closeErr := session.Close(); closeErr != nil {
+			logger.Default().Warn("close session after shell start failure", zap.Error(closeErr))
+		}
+		return "", fmt.Errorf("启动shell失败: %w", err)
 	}
 
 	m.sessions.Store(sessionID, sess)
@@ -310,7 +384,7 @@ func (m *Manager) createSession(shared *sharedClient, assetID int64, cols, rows 
 
 // NewSessionFrom 在已有会话的连接上创建新会话（用于分割窗格）
 func (m *Manager) NewSessionFrom(existingSessionID string, cols, rows int,
-	onData func(string, []byte), onClosed func(string)) (string, error) {
+	onData func(string, []byte), onClosed func(string), onSync func(string, DirectorySyncState)) (string, error) {
 
 	existing, ok := m.GetSession(existingSessionID)
 	if !ok {
@@ -322,7 +396,7 @@ func (m *Manager) NewSessionFrom(existingSessionID string, cols, rows int,
 
 	existing.shared.acquire()
 
-	sessionID, err := m.createSession(existing.shared, existing.AssetID, cols, rows, onData, onClosed)
+	sessionID, err := m.createSession(existing.shared, existing.AssetID, cols, rows, onData, onClosed, onSync)
 	if err != nil {
 		existing.shared.release()
 		return "", err
@@ -655,10 +729,17 @@ func (m *Manager) readOutput(sess *Session) {
 		select {
 		case r := <-readCh:
 			if r.err != nil {
+				if len(sess.parserRemainder) > 0 {
+					pending.Write(sess.parserRemainder)
+					sess.parserRemainder = nil
+				}
 				flush()
 				return
 			}
-			pending.Write(r.data)
+			filtered := sess.filterOutput(r.data)
+			if len(filtered) > 0 {
+				pending.Write(filtered)
+			}
 			if pending.Len() >= 32*1024 {
 				flush()
 			}
@@ -675,6 +756,15 @@ func (m *Manager) GetSession(id string) (*Session, bool) {
 		return nil, false
 	}
 	return v.(*Session), true
+}
+
+// GetSessionSyncState 获取会话目录同步状态。
+func (m *Manager) GetSessionSyncState(id string) (DirectorySyncState, error) {
+	sess, ok := m.GetSession(id)
+	if !ok {
+		return DirectorySyncState{}, dirsync.Error(dirsync.CodeSessionNotFound)
+	}
+	return sess.GetSyncState(), nil
 }
 
 // Disconnect 断开指定会话

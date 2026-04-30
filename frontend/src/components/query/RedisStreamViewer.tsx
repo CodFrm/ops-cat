@@ -1,8 +1,11 @@
 import { useRef, useState, useMemo } from "react";
-import { Loader2, X } from "lucide-react";
+import { Loader2, Plus, Trash2, X } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Button, ScrollArea } from "@opskat/ui";
+import { toast } from "sonner";
+import { Button, Input, ScrollArea } from "@opskat/ui";
 import { useQueryStore, RedisKeyInfo, RedisStreamEntry } from "@/stores/queryStore";
+import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
+import { RedisStreamAdd, RedisStreamDelete } from "../../../wailsjs/go/app/App";
 
 const VALUE_ROW_HEIGHT = 30;
 
@@ -22,10 +25,18 @@ export function RedisStreamViewer({
   tabId: string;
   t: (key: string, opts?: Record<string, unknown>) => string;
 }) {
-  const { loadMoreValues } = useQueryStore();
+  const { loadMoreValues, redisStates, selectKey } = useQueryStore();
+  const state = redisStates[tabId];
+  const tab = useTabStore((s) => s.tabs.find((tb) => tb.id === tabId));
+  const tabMeta = tab?.meta as QueryTabMeta | undefined;
   const scrollRef = useRef<HTMLDivElement>(null);
   const entries = (info.value as RedisStreamEntry[]) || [];
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  const [entryId, setEntryId] = useState("*");
+  const [field, setField] = useState("");
+  const [value, setValue] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
@@ -42,6 +53,44 @@ export function RedisStreamViewer({
 
   const handleRowClick = (entryId: string) => {
     setSelectedEntryId((prev) => (prev === entryId ? null : entryId));
+  };
+
+  const refreshSelectedKey = () => {
+    if (state?.selectedKey) {
+      selectKey(tabId, state.selectedKey);
+    }
+  };
+
+  const handleAddEntry = async () => {
+    if (!tabMeta || !state?.selectedKey || !field.trim()) return;
+    setAdding(true);
+    try {
+      await RedisStreamAdd(tabMeta.assetId, state.currentDb, state.selectedKey, entryId.trim() || "*", [
+        { field: field.trim(), value },
+      ]);
+      setEntryId("*");
+      setField("");
+      setValue("");
+      refreshSelectedKey();
+    } catch (err) {
+      toast.error(String(err));
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleDeleteEntry = async (id: string) => {
+    if (!tabMeta || !state?.selectedKey) return;
+    setDeletingId(id);
+    try {
+      await RedisStreamDelete(tabMeta.assetId, state.currentDb, state.selectedKey, [id]);
+      setSelectedEntryId(null);
+      refreshSelectedKey();
+    } catch (err) {
+      toast.error(String(err));
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   return (
@@ -81,9 +130,24 @@ export function RedisStreamViewer({
         <div className="shrink-0 border-t">
           <div className="flex items-center justify-between border-b px-2 py-1">
             <span className="text-xs font-medium text-muted-foreground">{t("query.entryDetail")}</span>
-            <button className="inline-flex rounded p-0.5 hover:bg-accent" onClick={() => setSelectedEntryId(null)}>
-              <X className="size-3 text-muted-foreground" />
-            </button>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => handleDeleteEntry(selectedEntry.id)}
+                disabled={deletingId === selectedEntry.id}
+                title={t("query.deleteEntry")}
+              >
+                {deletingId === selectedEntry.id ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <Trash2 className="size-3 text-muted-foreground hover:text-destructive" />
+                )}
+              </Button>
+              <button className="inline-flex rounded p-0.5 hover:bg-accent" onClick={() => setSelectedEntryId(null)}>
+                <X className="size-3 text-muted-foreground" />
+              </button>
+            </div>
           </div>
           <StreamEntryJsonViewer fields={selectedEntry.fields} t={t} />
         </div>
@@ -104,6 +168,39 @@ export function RedisStreamViewer({
           </Button>
         </div>
       )}
+
+      <div className="flex items-center gap-1 border-t px-2 py-1.5">
+        <Input
+          className="h-6 w-28 shrink-0 font-mono text-xs"
+          placeholder={t("query.streamEntryId")}
+          value={entryId}
+          onChange={(e) => setEntryId(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAddEntry()}
+        />
+        <Input
+          className="h-6 w-32 shrink-0 font-mono text-xs"
+          placeholder={t("query.streamField")}
+          value={field}
+          onChange={(e) => setField(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAddEntry()}
+        />
+        <Input
+          className="h-6 min-w-0 flex-1 font-mono text-xs"
+          placeholder={t("query.streamValue")}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAddEntry()}
+        />
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          onClick={handleAddEntry}
+          disabled={adding || !field.trim()}
+          title={t("query.addEntry")}
+        >
+          {adding ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
+        </Button>
+      </div>
     </div>
   );
 }

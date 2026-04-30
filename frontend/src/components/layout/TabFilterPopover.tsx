@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from "react";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Popover, PopoverAnchor, PopoverContent } from "@opskat/ui";
-import { useTabStore } from "@/stores/tabStore";
+import { useTabStore, type Tab } from "@/stores/tabStore";
 import { filterMatches, highlightMatch } from "@/lib/highlightMatch";
 import { TabFilterInput } from "./TabFilterInput";
 import { resolveTabLabel } from "./pageTabMeta";
@@ -12,13 +12,13 @@ interface TabFilterPopoverProps {
   onOpenChange: (open: boolean) => void;
   /** Real DOM element to anchor against — typically the container of the ⋯ button */
   children: ReactElement;
+  tabs: Tab[];
 }
 
-export function TabFilterPopover({ open, onOpenChange, children }: TabFilterPopoverProps) {
+export function TabFilterPopover({ open, onOpenChange, children, tabs }: TabFilterPopoverProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
-  const tabs = useTabStore((s) => s.tabs);
   const activateTab = useTabStore((s) => s.activateTab);
 
   useEffect(() => {

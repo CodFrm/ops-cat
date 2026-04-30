@@ -5,10 +5,11 @@ import { toast } from "sonner";
 import { Button, Input, ConfirmDialog } from "@opskat/ui";
 import { useQueryStore } from "@/stores/queryStore";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
-import { ExecuteRedis, ExecuteRedisArgs } from "../../../wailsjs/go/app/App";
+import { ExecuteRedisArgs, RedisDeleteKeys, RedisPersistKey, RedisSetKeyTTL } from "../../../wailsjs/go/app/App";
 import { RedisStringEditor } from "@/components/query/RedisStringEditor";
 import { RedisCollectionTable } from "@/components/query/RedisCollectionTable";
 import { RedisStreamViewer } from "@/components/query/RedisStreamViewer";
+import { parseRedisCommandLine } from "@/lib/redisCommand";
 
 interface RedisKeyDetailProps {
   tabId: string;
@@ -95,7 +96,8 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
     setHistoryIdx(-1);
 
     try {
-      const result = await ExecuteRedis(tabMeta.assetId, command.trim(), state.currentDb);
+      const args = parseRedisCommandLine(command);
+      const result = await ExecuteRedisArgs(tabMeta.assetId, args, state.currentDb);
       const parsed: RedisResult = JSON.parse(result);
       setCmdResult(formatResult(parsed));
     } catch (err) {
@@ -139,7 +141,7 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
     if (!tabMeta || !state?.selectedKey) return;
     setDeleting(true);
     try {
-      await ExecuteRedisArgs(tabMeta.assetId, ["DEL", state.selectedKey], state.currentDb);
+      await RedisDeleteKeys(tabMeta.assetId, state.currentDb, [state.selectedKey]);
       removeKey(tabId, state.selectedKey);
       loadDbKeyCounts(tabId);
     } catch (err) {
@@ -173,7 +175,7 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
     const seconds = parseInt(ttlInput, 10);
     if (isNaN(seconds) || seconds <= 0) return;
     try {
-      await ExecuteRedisArgs(tabMeta.assetId, ["EXPIRE", state.selectedKey, String(seconds)], state.currentDb);
+      await RedisSetKeyTTL(tabMeta.assetId, state.currentDb, state.selectedKey, seconds);
       selectKey(tabId, state.selectedKey);
     } catch (err) {
       toast.error(String(err));
@@ -184,7 +186,7 @@ export function RedisKeyDetail({ tabId }: RedisKeyDetailProps) {
   const persistKey = useCallback(async () => {
     if (!tabMeta || !state?.selectedKey) return;
     try {
-      await ExecuteRedisArgs(tabMeta.assetId, ["PERSIST", state.selectedKey], state.currentDb);
+      await RedisPersistKey(tabMeta.assetId, state.currentDb, state.selectedKey);
       selectKey(tabId, state.selectedKey);
     } catch (err) {
       toast.error(String(err));

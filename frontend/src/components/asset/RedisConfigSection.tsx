@@ -13,6 +13,24 @@ export interface RedisConfigSectionProps {
   setUsername: (v: string) => void;
   tls: boolean;
   setTls: (v: boolean) => void;
+  tlsInsecure: boolean;
+  setTlsInsecure: (v: boolean) => void;
+  tlsServerName: string;
+  setTlsServerName: (v: string) => void;
+  tlsCAFile: string;
+  setTlsCAFile: (v: string) => void;
+  tlsCertFile: string;
+  setTlsCertFile: (v: string) => void;
+  tlsKeyFile: string;
+  setTlsKeyFile: (v: string) => void;
+  database: number;
+  setDatabase: (v: number) => void;
+  commandTimeoutSeconds: number;
+  setCommandTimeoutSeconds: (v: number) => void;
+  scanPageSize: number;
+  setScanPageSize: (v: number) => void;
+  keySeparator: string;
+  setKeySeparator: (v: string) => void;
   sshTunnelId: number;
   setSshTunnelId: (v: number) => void;
   // Password fields
@@ -36,6 +54,24 @@ export function RedisConfigSection({
   setUsername,
   tls,
   setTls,
+  tlsInsecure,
+  setTlsInsecure,
+  tlsServerName,
+  setTlsServerName,
+  tlsCAFile,
+  setTlsCAFile,
+  tlsCertFile,
+  setTlsCertFile,
+  tlsKeyFile,
+  setTlsKeyFile,
+  database,
+  setDatabase,
+  commandTimeoutSeconds,
+  setCommandTimeoutSeconds,
+  scanPageSize,
+  setScanPageSize,
+  keySeparator,
+  setKeySeparator,
   sshTunnelId,
   setSshTunnelId,
   password,
@@ -93,6 +129,87 @@ export function RedisConfigSection({
       <div className="flex items-center justify-between">
         <Label>{t("asset.tls")}</Label>
         <Switch checked={tls} onCheckedChange={setTls} />
+      </div>
+
+      {tls && (
+        <>
+          <div className="flex items-center justify-between">
+            <Label>{t("asset.redisTlsInsecure")}</Label>
+            <Switch checked={tlsInsecure} onCheckedChange={setTlsInsecure} />
+          </div>
+
+          <div className="grid gap-2">
+            <Label>{t("asset.redisTlsServerName")}</Label>
+            <Input
+              value={tlsServerName}
+              onChange={(e) => setTlsServerName(e.target.value)}
+              placeholder="redis.example.com"
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label>{t("asset.redisTlsCAFile")}</Label>
+            <Input value={tlsCAFile} onChange={(e) => setTlsCAFile(e.target.value)} placeholder="/path/to/ca.pem" />
+          </div>
+
+          <div className="grid gap-2">
+            <Label>{t("asset.redisTlsCertFile")}</Label>
+            <Input
+              value={tlsCertFile}
+              onChange={(e) => setTlsCertFile(e.target.value)}
+              placeholder="/path/to/client.crt"
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label>{t("asset.redisTlsKeyFile")}</Label>
+            <Input
+              value={tlsKeyFile}
+              onChange={(e) => setTlsKeyFile(e.target.value)}
+              placeholder="/path/to/client.key"
+            />
+          </div>
+        </>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-2">
+          <Label>{t("asset.redisDatabase")}</Label>
+          <Input
+            className="[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            type="number"
+            min={0}
+            value={database}
+            onChange={(e) => setDatabase(Math.max(0, Number(e.target.value) || 0))}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label>{t("asset.redisCommandTimeout")}</Label>
+          <Input
+            className="[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            type="number"
+            min={0}
+            value={commandTimeoutSeconds}
+            onChange={(e) => setCommandTimeoutSeconds(Math.max(0, Number(e.target.value) || 0))}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-2">
+          <Label>{t("asset.redisScanPageSize")}</Label>
+          <Input
+            className="[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            type="number"
+            min={0}
+            value={scanPageSize}
+            onChange={(e) => setScanPageSize(Math.max(0, Number(e.target.value) || 0))}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label>{t("asset.redisKeySeparator")}</Label>
+          <Input value={keySeparator} onChange={(e) => setKeySeparator(e.target.value)} placeholder=":" />
+        </div>
       </div>
 
       {/* SSH Tunnel */}

@@ -23,6 +23,7 @@ describe("sftpStore", () => {
     useSFTPStore.setState({
       transfers: {},
       fileManagerOpenTabs: {},
+      fileManagerPaths: {},
       fileManagerWidth: 280,
     });
   });
@@ -120,6 +121,16 @@ describe("sftpStore", () => {
 
       useSFTPStore.getState().toggleFileManager("tab1");
       expect(useSFTPStore.getState().fileManagerOpenTabs["tab1"]).toBe(false);
+    });
+  });
+
+  describe("setFileManagerPath", () => {
+    it("stores current file manager path per tab", () => {
+      useSFTPStore.getState().setFileManagerPath("tab1", "/var/log");
+      useSFTPStore.getState().setFileManagerPath("tab2", "/srv/app");
+
+      expect(useSFTPStore.getState().fileManagerPaths["tab1"]).toBe("/var/log");
+      expect(useSFTPStore.getState().fileManagerPaths["tab2"]).toBe("/srv/app");
     });
   });
 

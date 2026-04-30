@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef } from "react";
-import { Terminal as XTerminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import { SearchAddon } from "@xterm/addon-search";
-import "@xterm/xterm/css/xterm.css";
+import type { Terminal as XTerminal } from "@xterm/xterm";
+import type { FitAddon } from "@xterm/addon-fit";
+import type { SearchAddon } from "@xterm/addon-search";
 import { WriteSSH, ResizeSSH } from "../../../wailsjs/go/app/App";
-import { EventsOn, EventsOff } from "../../../wailsjs/runtime/runtime";
 import { useShortcutStore, matchShortcut, formatBinding, formatModKey } from "@/stores/shortcutStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useTerminalThemeStore, toXtermTheme } from "@/stores/terminalThemeStore";
@@ -24,6 +22,7 @@ import { TerminalSearchBar } from "./TerminalSearchBar";
 import { useSFTPStore } from "@/stores/sftpStore";
 import { useTabStore } from "@/stores/tabStore";
 import { bytesToBase64 } from "@/lib/terminalEncode";
+import { getOrCreateTerminal, getTerminalInstance } from "./terminalRegistry";
 
 export interface TerminalHandle {
   toggleSearch: () => void;
@@ -37,7 +36,7 @@ interface TerminalProps {
 
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal({ sessionId, active, tabId }, ref) {
   const { t } = useTranslation();
-  const containerRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
@@ -46,6 +45,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const [hasSelection, setHasSelection] = useState(false);
   const shortcuts = useShortcutStore((s) => s.shortcuts);
   const fontSize = useTerminalThemeStore((s) => s.fontSize);
+  const scrollback = useTerminalThemeStore((s) => s.scrollback);
   const selectedThemeId = useTerminalThemeStore((s) => s.selectedThemeId);
   const customThemes = useTerminalThemeStore((s) => s.customThemes);
   const resolvedTheme = useResolvedTheme();
@@ -83,38 +83,32 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   }, []);
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
 
-    const term = new XTerminal({
-      cursorBlink: true,
-      fontSize,
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
-      theme: xtermTheme,
-    });
+    const inst = getOrCreateTerminal(sessionId, { fontSize, theme: xtermTheme, scrollback });
+    termRef.current = inst.term;
+    fitAddonRef.current = inst.fitAddon;
+    searchAddonRef.current = inst.searchAddon;
 
-    const fitAddon = new FitAddon();
-    const searchAddon = new SearchAddon();
-    term.loadAddon(fitAddon);
-    term.loadAddon(searchAddon);
-    term.open(containerRef.current);
+    // Attach the persistent host into the React-managed wrapper. Xterm content
+    // survives because both the host element and the XTerminal live in the
+    // registry, not in this component — so split-pane re-renders that unmount
+    // this component don't destroy scrollback.
+    wrapper.appendChild(inst.container);
 
-    // 初始 fit
     requestAnimationFrame(() => {
-      fitAddon.fit();
+      inst.fitAddon.fit();
     });
 
-    // Let global shortcut handler handle shortcut keys instead of xterm.
-    // The panel.filter binding also opens in-terminal search when xterm is focused
-    // (matched via current user binding — rebinding the shortcut moves both together).
-    term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+    inst.term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
       const action = matchShortcut(e, useShortcutStore.getState().shortcuts);
       if (action === "panel.filter" && e.type === "keydown") {
         setShowSearch((v) => !v);
         return false;
       }
-      // Cmd+C (Mac) or Ctrl+C (non-Mac): copy selection + show toast
       if (e.key === "c" && (e.ctrlKey || e.metaKey) && e.type === "keydown") {
-        const selection = term.getSelection();
+        const selection = inst.term.getSelection();
         if (selection) {
           navigator.clipboard.writeText(selection);
           toast.success(t("ssh.contextMenu.copied"), { duration: 1500 });
@@ -124,62 +118,41 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       return !action;
     });
 
-    termRef.current = term;
-    fitAddonRef.current = fitAddon;
-    searchAddonRef.current = searchAddon;
-
-    // 跟踪选中状态
-    const selDispose = term.onSelectionChange(() => {
-      setHasSelection(!!term.getSelection());
+    const selDispose = inst.term.onSelectionChange(() => {
+      setHasSelection(!!inst.term.getSelection());
     });
+    setHasSelection(!!inst.term.getSelection());
 
-    // 用户输入 → 后端
-    const onDataDispose = term.onData((data) => {
-      WriteSSH(sessionId, bytesToBase64(new TextEncoder().encode(data))).catch(console.error);
-    });
-
-    // 后端输出 → 终端（Go 侧已做 10ms 合并，此处直接写入，依赖 xterm.js 内部写入缓冲）
-    const eventName = "ssh:data:" + sessionId;
-    EventsOn(eventName, (dataB64: string) => {
-      const binary = atob(dataB64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      term.write(bytes);
-    });
-
-    // 会话关闭事件
-    const closedEvent = "ssh:closed:" + sessionId;
-    EventsOn(closedEvent, () => {
-      term.write("\r\n\x1b[31m[Connection closed]\x1b[0m\r\n");
-      useTerminalStore.getState().markClosed(sessionId);
-    });
-
-    // 窗口尺寸变化（debounce 避免过渡动画期间密集 refit）
     let resizeTimer = 0;
     const resizeObserver = new ResizeObserver(() => {
-      if (!activeRef.current) return; // 非活动 tab 跳过 resize
+      if (!activeRef.current) return;
       clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(() => {
         if (!activeRef.current) return;
-        fitAddon.fit();
-        const dims = fitAddon.proposeDimensions();
+        inst.fitAddon.fit();
+        const dims = inst.fitAddon.proposeDimensions();
         if (dims) {
           ResizeSSH(sessionId, dims.cols, dims.rows).catch(console.error);
         }
       }, 50);
     });
-    resizeObserver.observe(containerRef.current);
+    resizeObserver.observe(wrapper);
 
     return () => {
       clearTimeout(resizeTimer);
       selDispose.dispose();
-      onDataDispose.dispose();
-      EventsOff(eventName);
-      EventsOff(closedEvent);
       resizeObserver.disconnect();
-      term.dispose();
+      // If the registry already disposed this session (e.g. closePane / reconnect /
+      // tab close ran before this cleanup), the xterm instance is destroyed —
+      // skip any term operations and just detach.
+      const stillAlive = getTerminalInstance(sessionId) === inst;
+      if (stillAlive) {
+        // Drop key handler so its closures can be GC'd; xterm only stores one slot.
+        inst.term.attachCustomKeyEventHandler(() => true);
+      }
+      if (inst.container.parentElement === wrapper) {
+        wrapper.removeChild(inst.container);
+      }
       termRef.current = null;
       fitAddonRef.current = null;
       searchAddonRef.current = null;
@@ -187,20 +160,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
-  // 主题或字体变更时实时刷新终端
   useEffect(() => {
     if (!termRef.current) return;
     termRef.current.options.theme = xtermTheme;
     termRef.current.options.fontSize = fontSize;
+    termRef.current.options.scrollback = scrollback;
     fitAddonRef.current?.fit();
-  }, [xtermTheme, fontSize]);
+  }, [xtermTheme, fontSize, scrollback]);
 
-  // 同步 active 状态到 ref，供 ResizeObserver 闭包读取
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
 
-  // 当切换回来时 refit 并聚焦（页面切换期间容器尺寸可能变化）
   useEffect(() => {
     if (active) {
       requestAnimationFrame(() => {
@@ -235,7 +206,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         }}
       >
         <ContextMenuTrigger className="flex-1 min-h-0">
-          <div ref={containerRef} className="h-full w-full" style={{ padding: "4px" }} />
+          <div ref={wrapperRef} className="h-full w-full" style={{ padding: "4px" }} />
         </ContextMenuTrigger>
         <ContextMenuContent>
           <ContextMenuItem onClick={handleCopy} disabled={!hasSelection}>

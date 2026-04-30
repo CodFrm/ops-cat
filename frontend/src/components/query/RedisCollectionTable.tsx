@@ -5,7 +5,17 @@ import { toast } from "sonner";
 import { Button, Input, ConfirmDialog } from "@opskat/ui";
 import { useQueryStore, RedisKeyInfo } from "@/stores/queryStore";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
-import { ExecuteRedisArgs } from "../../../wailsjs/go/app/App";
+import {
+  RedisHashDelete,
+  RedisHashSet,
+  RedisListDelete,
+  RedisListPush,
+  RedisListSet,
+  RedisSetAdd,
+  RedisSetRemove,
+  RedisZSetAdd,
+  RedisZSetRemove,
+} from "../../../wailsjs/go/app/App";
 
 const VALUE_ROW_HEIGHT = 30;
 
@@ -229,58 +239,56 @@ export function RedisCollectionTable({
 
   const handleEditHash = async (field: string, newVal: string) => {
     if (!tabMeta || !selectedKey) return;
-    await ExecuteRedisArgs(tabMeta.assetId, ["HSET", selectedKey, field, newVal], db);
+    await RedisHashSet(tabMeta.assetId, db, selectedKey, field, newVal);
     selectKey(tabId, selectedKey);
   };
 
   const handleDeleteHash = async (field: string) => {
     if (!tabMeta || !selectedKey) return;
-    await ExecuteRedisArgs(tabMeta.assetId, ["HDEL", selectedKey, field], db);
+    await RedisHashDelete(tabMeta.assetId, db, selectedKey, field);
     selectKey(tabId, selectedKey);
   };
 
   const handleEditList = async (index: number, newVal: string) => {
     if (!tabMeta || !selectedKey) return;
-    await ExecuteRedisArgs(tabMeta.assetId, ["LSET", selectedKey, String(index), newVal], db);
+    await RedisListSet(tabMeta.assetId, db, selectedKey, index, newVal);
     selectKey(tabId, selectedKey);
   };
 
   const handleDeleteList = async (index: number) => {
     if (!tabMeta || !selectedKey) return;
-    const sentinel = "__OPSCAT_DEL_" + Date.now() + "__";
-    await ExecuteRedisArgs(tabMeta.assetId, ["LSET", selectedKey, String(index), sentinel], db);
-    await ExecuteRedisArgs(tabMeta.assetId, ["LREM", selectedKey, "1", sentinel], db);
+    await RedisListDelete(tabMeta.assetId, db, selectedKey, index);
     selectKey(tabId, selectedKey);
   };
 
   const handleDeleteSet = async (member: string) => {
     if (!tabMeta || !selectedKey) return;
-    await ExecuteRedisArgs(tabMeta.assetId, ["SREM", selectedKey, member], db);
+    await RedisSetRemove(tabMeta.assetId, db, selectedKey, member);
     selectKey(tabId, selectedKey);
   };
 
   const handleEditZsetScore = async (member: string, newScore: string) => {
     if (!tabMeta || !selectedKey) return;
-    await ExecuteRedisArgs(tabMeta.assetId, ["ZADD", selectedKey, newScore, member], db);
+    await RedisZSetAdd(tabMeta.assetId, db, selectedKey, member, Number(newScore));
     selectKey(tabId, selectedKey);
   };
 
   const handleDeleteZset = async (member: string) => {
     if (!tabMeta || !selectedKey) return;
-    await ExecuteRedisArgs(tabMeta.assetId, ["ZREM", selectedKey, member], db);
+    await RedisZSetRemove(tabMeta.assetId, db, selectedKey, member);
     selectKey(tabId, selectedKey);
   };
 
   const handleAdd = async (args: string[]) => {
     if (!tabMeta || !selectedKey) return;
     if (info.type === "hash" && args.length === 2) {
-      await ExecuteRedisArgs(tabMeta.assetId, ["HSET", selectedKey, args[0], args[1]], db);
+      await RedisHashSet(tabMeta.assetId, db, selectedKey, args[0], args[1]);
     } else if (info.type === "list" && args.length === 1) {
-      await ExecuteRedisArgs(tabMeta.assetId, ["RPUSH", selectedKey, args[0]], db);
+      await RedisListPush(tabMeta.assetId, db, selectedKey, args[0]);
     } else if (info.type === "set" && args.length === 1) {
-      await ExecuteRedisArgs(tabMeta.assetId, ["SADD", selectedKey, args[0]], db);
+      await RedisSetAdd(tabMeta.assetId, db, selectedKey, args[0]);
     } else if (info.type === "zset" && args.length === 2) {
-      await ExecuteRedisArgs(tabMeta.assetId, ["ZADD", selectedKey, args[0], args[1]], db);
+      await RedisZSetAdd(tabMeta.assetId, db, selectedKey, args[1], Number(args[0]));
     }
     selectKey(tabId, selectedKey);
   };

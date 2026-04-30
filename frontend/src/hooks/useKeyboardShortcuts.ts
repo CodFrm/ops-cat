@@ -7,14 +7,30 @@ import { useLayoutStore } from "@/stores/layoutStore";
 interface ShortcutHandlers {
   onToggleAIPanel: () => void;
   onToggleSidebar: () => void;
+  onToggleCommandPalette: () => void;
 }
 
-export function useKeyboardShortcuts({ onToggleAIPanel, onToggleSidebar }: ShortcutHandlers) {
+export function useKeyboardShortcuts({ onToggleAIPanel, onToggleSidebar, onToggleCommandPalette }: ShortcutHandlers) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const { shortcuts, isRecording } = useShortcutStore.getState();
       if (isRecording) return;
 
+      // 先计算 action：command.quickopen 需要在输入框内也能触发，
+      // 必须早于"输入框内忽略"分支处理。
+      const action = matchShortcut(e, shortcuts);
+      if (!action) return;
+
+      // command.quickopen 早期处理：在输入框内也应该能触发
+      if (action === "command.quickopen") {
+        e.preventDefault();
+        e.stopPropagation();
+        onToggleCommandPalette();
+        return;
+      }
+
+      // 普通快捷键：输入框内（除 xterm）忽略
+      // 注意 panel.filter 也走这一段，让出 Cmd+F 给浏览器/原生 find-in-page。
       const target = e.target as HTMLElement;
       if (
         (target.tagName === "INPUT" ||
@@ -25,9 +41,6 @@ export function useKeyboardShortcuts({ onToggleAIPanel, onToggleSidebar }: Short
       ) {
         return;
       }
-
-      const action = matchShortcut(e, shortcuts);
-      if (!action) return;
 
       // panel.filter 特殊处理：xterm 聚焦时透传，否则通过 store 触发 filter 面板
       if (action === "panel.filter") {
@@ -156,5 +169,5 @@ export function useKeyboardShortcuts({ onToggleAIPanel, onToggleSidebar }: Short
 
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [onToggleAIPanel, onToggleSidebar]);
+  }, [onToggleAIPanel, onToggleSidebar, onToggleCommandPalette]);
 }

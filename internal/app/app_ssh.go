@@ -5,10 +5,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/pkg/dirsync"
 	"github.com/opskat/opskat/internal/service/asset_svc"
 	"github.com/opskat/opskat/internal/service/credential_svc"
 	"github.com/opskat/opskat/internal/service/ssh_svc"
@@ -71,6 +73,9 @@ func (a *App) ConnectSSH(req SSHConnectRequest) (string, error) {
 		},
 		OnClosed: func(sid string) {
 			wailsRuntime.EventsEmit(a.ctx, "ssh:closed:"+sid, nil)
+		},
+		OnSync: func(sid string, state ssh_svc.DirectorySyncState) {
+			wailsRuntime.EventsEmit(a.ctx, "ssh:sync:"+sid, state)
 		},
 	}
 
@@ -178,6 +183,9 @@ func (a *App) ConnectSSHAsync(req SSHConnectRequest) (string, error) {
 			},
 			OnClosed: func(sid string) {
 				wailsRuntime.EventsEmit(a.ctx, "ssh:closed:"+sid, nil)
+			},
+			OnSync: func(sid string, state ssh_svc.DirectorySyncState) {
+				wailsRuntime.EventsEmit(a.ctx, "ssh:sync:"+sid, state)
 			},
 			OnProgress: func(step, message string) {
 				emitEvent(SSHConnectEvent{Type: "progress", Step: step, Message: message})
@@ -392,6 +400,40 @@ func (a *App) ResizeSSH(sessionID string, cols int, rows int) error {
 	return sess.Resize(cols, rows)
 }
 
+// GetSSHSyncState 返回会话当前的目录同步状态。
+func (a *App) GetSSHSyncState(sessionID string) (ssh_svc.DirectorySyncState, error) {
+	return a.sshManager.GetSessionSyncState(sessionID)
+}
+
+// ChangeSSHDirectory 请求当前终端切换到指定目录。
+func (a *App) ChangeSSHDirectory(sessionID, targetPath string) error {
+	sess, ok := a.sshManager.GetSession(sessionID)
+	if !ok {
+		return dirsync.Error(dirsync.CodeSessionNotFound)
+	}
+
+	state := sess.GetSyncState()
+	switch {
+	case !state.Supported:
+		return dirsync.Error(dirsync.CodeUnsupported)
+	case !state.CwdKnown:
+		return dirsync.Error(dirsync.CodeCwdUnknown)
+	}
+
+	resolvedPath := targetPath
+	if !strings.HasPrefix(resolvedPath, "/") {
+		resolvedPath = path.Join(state.Cwd, resolvedPath)
+	}
+	resolvedPath = path.Clean(resolvedPath)
+
+	expectedPath, err := a.sftpService.ResolveDirectory(sessionID, resolvedPath)
+	if err != nil {
+		return err
+	}
+
+	return sess.ChangeDirectoryTo(resolvedPath, expectedPath)
+}
+
 // SplitSSH 在已有会话的连接上创建新会话（分割窗格复用连接）
 func (a *App) SplitSSH(existingSessionID string, cols, rows int) (string, error) {
 	return a.sshManager.NewSessionFrom(existingSessionID, cols, rows,
@@ -400,6 +442,9 @@ func (a *App) SplitSSH(existingSessionID string, cols, rows int) (string, error)
 		},
 		func(sid string) {
 			wailsRuntime.EventsEmit(a.ctx, "ssh:closed:"+sid, nil)
+		},
+		func(sid string, state ssh_svc.DirectorySyncState) {
+			wailsRuntime.EventsEmit(a.ctx, "ssh:sync:"+sid, state)
 		},
 	)
 }

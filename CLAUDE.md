@@ -4,181 +4,101 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-OpsKat is an AI-first desktop application for managing remote infrastructure (SSH, databases, Redis). Built with **Wails v2** (Go 1.25 backend + React 19 frontend). The desktop app communicates via Wails IPC — there is no HTTP API.
-
-Module: `github.com/opskat/opskat`
+OpsKat is an AI-first desktop app for managing remote infrastructure (SSH, databases, Redis). **Wails v2** (Go 1.25 + React 19), IPC only — no HTTP API. Module: `github.com/opskat/opskat`.
 
 ## Common Commands
 
-### Development
 ```bash
-make dev              # Wails dev mode with hot reload
-make install          # Install frontend deps (pnpm)
-make run              # Run the embedded production build (no hot reload)
-make clean            # Remove build/bin, frontend/dist, embedded opsctl, coverage files
-```
-
-### Build
-```bash
+# Dev / build
+make dev              # Wails hot-reload dev
 make build            # Production build
-make build-embed      # Production with embedded opsctl CLI
-make build-cli        # Standalone opsctl CLI binary
-make install-cli      # Install opsctl to GOPATH/bin
-```
+make build-embed      # Production with embedded opsctl
+make build-cli        # Standalone opsctl CLI
+make clean
 
-### Testing
-```bash
-make test                              # Go tests (internal, cmd/opsctl, cmd/devserver, pkg)
-make test-cover                        # Coverage report → coverage.html, opens in browser
-go test ./internal/ai/...             # Single package
-go test ./internal/ai/ -run TestName  # Single test
-cd frontend && pnpm test              # Frontend tests (vitest)
-cd frontend && pnpm test:watch        # Frontend tests in watch mode
-```
+# Test
+make test                              # All Go tests
+go test ./internal/ai/ -run TestName   # Single Go test
+cd frontend && pnpm test               # Frontend (vitest)
+make test-fixtures && make test-e2e    # E2E (needs ../extensions sibling)
 
-### Linting & Formatting
-```bash
-make lint             # golangci-lint (10m timeout, config in .golangci.yml)
-make lint-fix         # golangci-lint with auto-fix
-cd frontend && pnpm lint       # ESLint + Prettier
-cd frontend && pnpm lint:fix   # ESLint auto-fix
-```
+# Lint
+make lint / make lint-fix              # golangci-lint
+cd frontend && pnpm lint / pnpm lint:fix
 
-### Extensions (DevServer)
-```bash
-make devserver EXT=<name>       # Run isolated dev server for one extension
-                                # Builds extension in ../extensions, loads its WASM + manifest
-make build-devserver-ui         # Rebuild embedded devserver UI (frontend/packages/devserver-ui)
-```
-DevServer refuses to start when `OPSKAT_ENV=production`. Extension source lives in a sibling repo at `../extensions/` (see reference memory).
-
-### Plugin
-```bash
-make install-skill    # Register Claude Code opsctl plugin (symlinks plugin/ into ~/.claude)
+# Extensions
+make devserver EXT=<name>              # Standalone dev server for one extension (refuses if OPSKAT_ENV=production)
 ```
 
 ## Architecture
 
-### Backend (Go) — Layered Architecture
+### Backend (Go) — layered
 
 ```
-main.go (Wails entry)
-  └─ internal/app/        App struct — Wails binding layer, all public methods exposed to frontend via IPC
-       ├─ internal/service/    Business logic (15 service packages: ssh_svc, sftp_svc, ai_provider_svc, extension_svc, etc.)
-       ├─ internal/repository/ Data access (12 repos with interface + impl pattern)
-       └─ internal/model/      Domain entities
+main.go → internal/app/ (Wails bindings)
+            → internal/service/    (business logic, *_svc)
+            → internal/repository/ (data access, interface + impl)
+            → internal/model/      (entities)
 ```
+
+Bindings stay thin: parse → service → return. Business rules in `service/`, persistence in `repository/`. Logic inside `App` is unreachable from tests and `opsctl`.
 
 **Key subsystems:**
-- `internal/ai/` — AI agent: provider abstraction (Anthropic/OpenAI), tool registry, command policy checker, conversation runner, context compression, audit logging
-- `internal/sshpool/` — SSH connection pool with Unix socket proxy for opsctl CLI
-- `internal/connpool/` — Database/Redis tunnel management
-- `internal/approval/` — Inter-process approval workflow (Unix socket between desktop app and opsctl)
-- `internal/bootstrap/` — App initialization: database, credentials, migrations, auth tokens
-- `internal/embedded/` — Embedded opsctl binary (build tag: `embed_opsctl`)
-- `pkg/extension/` — WASM extension runtime (wazero): manifest parsing, plugin lifecycle, host bridge (I/O, KV, file dialogs, action events), policy evaluation
-- `internal/service/extension_svc/` + `internal/app/app_extension.go` + `app_ext_host.go` — extension install/load/wiring into the desktop app
-- `cmd/opsctl/` — Standalone CLI tool for remote operations, designed for AI assistant integration
-- `cmd/devserver/` — Standalone HTTP dev server for a single extension (loads one WASM + manifest, proxies frontend HMR)
+- `internal/ai/` — provider abstraction (Anthropic/OpenAI), tool registry, command policy, conversation runner, audit
+- `internal/sshpool/`, `internal/connpool/` — SSH pool (Unix socket proxy for opsctl); DB/Redis tunnels
+- `internal/approval/` — Unix-socket approval flow between desktop app and opsctl
+- `internal/bootstrap/` — DB, credentials, migrations, auth tokens
+- `pkg/extension/` — WASM runtime (wazero); `HostProvider` in `host.go` defines WASM capabilities
+- `cmd/opsctl/`, `cmd/devserver/` — standalone CLI / single-extension dev server
 
-**Repository pattern:** Each repo has an interface, a default singleton, and `Register()`/getter functions.
+**Data:** GORM + SQLite, gormigrate migrations in `/migrations/`. Soft deletes via `Status` field (`StatusActive=1`, `StatusDeleted=2`), **not** GORM soft delete. Credentials: Argon2id KDF + AES-256-GCM, master key in OS keychain.
 
-**Database:** GORM + SQLite, migrations in `/migrations/` using gormigrate.
-
-**Credential encryption:** Argon2id KDF + AES-256-GCM, master key in OS keychain.
-
-**Extension system:** Extensions are WASM modules loaded at runtime. Each extension declares tools in `manifest.json`. AI invokes extension tools via a **single `exec_tool` tool** (not individual tools per extension) — the handler at `internal/ai/tool_handler_ext.go` dispatches by `extension` + `tool` args, enforces the extension's policy type against asset policy groups, and calls `Plugin.CallTool`. Host capabilities exposed to WASM are defined by `HostProvider` in `pkg/extension/host.go` (I/O open/read/write, KV, asset config, file dialogs, logging, events).
+**Extensions:** WASM modules with `manifest.json`-declared tools. AI invokes them via a **single `exec_tool`** (not one tool per extension). Dispatcher in `internal/ai/tool_handler_ext.go` enforces extension policy type against asset policy groups before `Plugin.CallTool`.
 
 ### Frontend (React + TypeScript)
 
-Located in `frontend/` — a pnpm workspace monorepo. Root app consumes `@opskat/ui` (from `packages/ui`); `packages/devserver-ui` is embedded by `cmd/devserver`. Uses Vite 6 bundler, Tailwind CSS 4, shadcn/ui (Radix), Zustand 5 for state.
+`frontend/` is a pnpm workspace. Root app uses `@opskat/ui` (`packages/ui`); `packages/devserver-ui` is embedded by `cmd/devserver`. Vite 6, Tailwind 4, shadcn/ui (Radix), Zustand 5.
 
-**No React Router** — uses a custom tab-based navigation system (`tabStore`). Tab types: terminal, ai, query, page, info.
+- **No React Router** — custom tabs in `tabStore`. Tab types: `terminal | ai | query | page | info`.
+- One Zustand store per domain in `src/stores/`.
+- Backend calls via Wails-generated bindings (`frontend/wailsjs/go/app/App`); events via `EventsOn()`.
+- i18n: i18next, locales in `src/i18n/locales/{zh-CN,en}/common.json`, all keys under `"common"` namespace → `t("key.subkey")`.
+- Terminal: xterm.js 6, split-pane.
+- Tests: Vitest + happy-dom + RTL; Wails runtime mocked in `src/__tests__/setup.ts`.
 
-**State stores** (`src/stores/`): One Zustand store per domain — assetStore, tabStore, terminalStore, aiStore, queryStore, sftpStore, shortcutStore, terminalThemeStore.
+## Conventions
 
-**Backend calls:** Generated Wails bindings in `frontend/wailsjs/`. Import from `wailsjs/go/app/App`. Real-time updates via `EventsOn()`.
+- **Commits:** gitmoji — ✨ feature, 🐛 fix, ♻️ refactor, 🎨 UI, ⚡️ perf, 🔒 security, 🔧 config, ✅ tests, 📄 docs, 🚀 release.
+- **Go mocks:** `go.uber.org/mock` in `mock_*/` subdirs; regen via `go generate ./...`.
+- **Go tests:** goconvey + testify.
+- **Frontend:** Prettier (120 col, 2-space).
 
-**i18n:** i18next with `zh-CN` and `en` locales in `src/i18n/locales/`.
+## Fix policy — root cause, in scope, no parking
 
-**Terminal:** xterm.js 6 with split-pane support.
+- **Fix root causes, not symptoms.** Don't guard at the call site to mask a producer that emits bad values — fix the producer. Don't re-normalize a field at multiple consumers — normalize once at the boundary. If the design is wrong, refactor the affected piece; don't route around it. A comment explaining why a workaround is needed usually means the underlying code should change.
+- **Fix in-scope drift in the same change.** Stale docstring, lying CLAUDE.md line, dead reference, obvious one-line bug under your cursor → fix it now, don't TODO it.
+- **Stay in scope.** Multi-day refactors / hot subsystems / design-discussion territory → flag and ask. Genuine out-of-scope workaround → isolate it in one place with a clear comment and surface it; don't normalize patching as the default.
 
-**Tests:** Vitest + happy-dom + React Testing Library. Setup file mocks Wails runtime at `src/__tests__/setup.ts`.
+## Reuse first — grep before writing new code
 
-### CI (`.github/workflows/ci.yml`)
+Parallel copies drift within weeks. Before writing any component / hook / util / Go helper, grep for the existing one.
 
-Runs on PR and pushes to main/develop:
-- Go: golangci-lint + `go test`
-- Frontend: `pnpm lint` + `pnpm test` + `pnpm build`
+Recurring smells:
+- **Hand-rolled UI instead of the shared primitive.** `AssetSelect` / `AssetMultiSelect` / `GroupSelect`, `TreeSelect` / `TreeCheckList`, `ConfirmDialog`, `PasswordSourceField`, `IconPicker`, terminal panes, query result grid, tab system, shortcut store all exist — don't re-derive expand/collapse, tri-state checkboxes, search/pinyin, shortcuts, approval flows, or icon resolution.
+- **Hardcoded defaults instead of the entity's own field.** Resolve `Icon` / `Type` / `Color` / policy group via the canonical helper (`getIconComponent` + `getIconColor`, `getAssetType`); fall back only when empty.
+- **Inline filters / data loading.** Common filters (`Status === 1`, type filter, excludeIds, sort) belong in the shared hook (`useAssetStore`, `useAssetTree`, `useGroupTree`, `useShortcutStore`). New filter → hook option, not inline.
+- **Re-implementing cross-cutting concerns.** Logging, audit, AI tool registration, approval, credential encryption, connection pools, i18n all have canonical entry points — don't spin up a second one.
 
-### Git Commit Convention
+Heuristics: importing a primitive (`lucide-react`, tree, Radix, `ConfirmDialog`, xterm) **and** an entity store from a new file usually means you're re-implementing a picker/pane/dialog. About to copy >10 lines? Extract. Same fix in two near-identical blocks? The second block is the bug — delete it, call the first.
 
-Use **gitmoji** for commit messages. Common prefixes:
-- ✨ New feature
-- 🐛 Bug fix
-- ♻️ Refactor
-- 🎨 UI improvement
-- ⚡️ Performance
-- 🔒 Security
-- 🔧 Configuration / tooling
-- ✅ Tests
-- 📄 Documentation
-- 🚀 Deploy / release related
+## ⚠️ Generated / auto-managed files
 
-### Conventions
+| Path | Producer | Regenerate |
+|------|----------|------------|
+| `frontend/wailsjs/go/app/App.{d.ts,js}`, `models.ts` | Wails (from `internal/app/*.go` + Go structs) | `make dev` / `wails build` |
+| `frontend/wailsjs/runtime/runtime.{js,d.ts}` | Wails runtime shim | shipped with Wails CLI |
+| `internal/**/mock_*/` | `mockgen` | `go generate ./...` |
+| `internal/embedded/opsctl_bin` | `make build-cli-embed` | `make build-embed` |
+| `frontend/packages/devserver-ui/dist/` | Vite (embedded by `cmd/devserver`) | `make build-devserver-ui` |
 
-- Go mocks: generated with `go.uber.org/mock` in `mock_*/` subdirectories
-- Go test assertions: goconvey + testify
-- Frontend formatting: Prettier (120 char width, 2-space indent)
-- Soft deletes via Status field (StatusActive=1, StatusDeleted=2), not GORM soft delete
-- i18n keys namespaced under `"common"` — use `t("key.subkey")`
-- Version info embedded via ldflags at build time
-
-### Code smells to avoid — reuse first, SOLID always
-
-**Before writing any new component, hook, util, or Go helper: grep the codebase first.** If similar behavior already exists, extend or wrap it — do NOT fork a parallel copy. Every parallel copy we've shipped has drifted from the canonical one (missing features, inconsistent UX, stale bugfixes) and turned into tech debt within weeks.
-
-Concrete smells we've hit and keep hitting:
-
-- **Parallel hand-rolled UI instead of the shared primitive.**
-  If a shared component exists — `AssetSelect` / `AssetMultiSelect` / `GroupSelect`, `TreeSelect` / `TreeCheckList`, `ConfirmDialog`, `PasswordSourceField`, `IconPicker`, terminal panes, query result grid, drawer/dialog wrappers, tab system, shortcut store — use it. Don't re-derive expand/collapse state, tri-state checkboxes, search/pinyin, keyboard shortcuts, approval flows, or icon resolution in a leaf component.
-- **Hardcoded defaults instead of reading the entity's own field.**
-  When an entity carries a user-configured property (asset/group `Icon`, asset `Type`, `Color`, policy group, etc.), render/resolve it via the canonical helper (`getIconComponent` + `getIconColor`, `getAssetType`, etc.), falling back to a generic default only when the field is empty. Never slap a fixed constant over every row.
-- **Duplicating filters, data loading, or derivations at call sites.**
-  Common filters (`Status === 1`, type filter, excludeIds, sort order) and data access belong in the shared hook/store (`useAssetStore`, `useAssetTree`, `useGroupTree`, `useShortcutStore`, …) — leaf components consume, not re-fetch. If a caller needs a new filter, add it to the hook, don't inline a new one.
-- **Fat Wails binding methods in `internal/app/*.go`.**
-  Binding methods should be thin: parse args, call a service, return. Business rules live in `internal/service/`; persistence in `internal/repository/`. If you're writing a query, a policy check, or a retry loop inside `App`, push it down a layer — otherwise the logic becomes unreachable from tests and from `opsctl`.
-- **Re-implementing cross-cutting concerns.**
-  Logging, audit, AI tool registration, approval flow, credential encryption, connection pools, i18n keys — all have canonical entry points (`internal/ai/`, `internal/approval/`, `internal/sshpool/`, `internal/connpool/`, `src/i18n`). Don't spin up a second logger, a second approval socket, or a parallel i18n scheme.
-
-SOLID reminders — the recurring regressions map back to these:
-
-- **SRP** — one responsibility per unit. A picker renders a picker; it doesn't own filtering, data fetching, icon theming, and Wails calls all at once.
-- **OCP** — extend the shared layer (add a prop / hook option / strategy) to absorb a new case; don't fork a parallel copy to add the feature.
-- **LSP** — when swapping a hand-rolled widget for a shared one, preserve the caller contract (value type, empty state, default filters like `activeOnly`).
-- **ISP** — keep prop and interface surfaces minimal. Prefer option-object props (`UseAssetTreeOptions`-style) over ten booleans; don't leak every internal knob.
-- **DIP** — UI depends on hooks/stores; services depend on repo interfaces; binding methods depend on services. Never skip layers to "save a line."
-
-Rules of thumb:
-
-- If a new file imports a primitive (`lucide-react`, tree component, Radix primitive, `ConfirmDialog`, xterm, etc.) **and** an entity list/store, you are probably re-implementing a picker/pane/dialog that already exists — stop and grep first.
-- If you're about to copy–paste more than ~10 lines from another file, that's the signal to extract, not copy.
-- If a fix has to be applied to two near-identical blocks, the second block is the bug — delete it, call the first one.
-
-### ⚠️ Generated / auto-managed files — DO NOT edit by hand
-
-These files are produced by tools and will be overwritten. Change the source instead, then regenerate.
-
-| Path | Producer | How to regenerate |
-|------|----------|-------------------|
-| `frontend/wailsjs/go/app/App.d.ts` | Wails (from `internal/app/*.go` exported methods on `App`) | `make dev` / `wails build` |
-| `frontend/wailsjs/go/app/App.js`   | Wails (same source) | `make dev` / `wails build` |
-| `frontend/wailsjs/go/models.ts`    | Wails (from Go structs returned/accepted by App methods) | `make dev` / `wails build` |
-| `frontend/wailsjs/runtime/runtime.js`, `runtime.d.ts` | Wails runtime shim | shipped with Wails CLI |
-| `internal/**/mock_*/` (e.g. `mock_asset_repo/asset.go`) | `mockgen` (`go.uber.org/mock`) — header `// Code generated by MockGen. DO NOT EDIT.` | `go generate ./...` against the matching `//go:generate` directive on the source repo interface |
-| `internal/embedded/opsctl_bin` | `make build-cli-embed` | `make build-embed` rebuilds it |
-| `frontend/packages/devserver-ui/dist/` | Vite build, embedded into `cmd/devserver` via `embed.go` | `make build-devserver-ui` |
-
-Build artifacts and caches (gitignored, safe to delete via `make clean`): `build/bin/`, `frontend/dist/`, `coverage.out`, `coverage.html`, `coverage_new.out`, `tsconfig.tsbuildinfo`, `package.json.md5`, the top-level `opskat`, `opsctl`, `devserver` binaries.
-
-Lockfiles — never hand-edit; modify via the package manager: `go.sum` (use `go mod tidy`), `frontend/pnpm-lock.yaml` (use `pnpm add/remove/install`).
+Lockfiles (`go.sum`, `frontend/pnpm-lock.yaml`) — never hand-edit; use `go mod tidy` / `pnpm add|remove|install`.

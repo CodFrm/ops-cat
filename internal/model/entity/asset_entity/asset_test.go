@@ -146,6 +146,46 @@ func TestAsset_SSHAddress(t *testing.T) {
 	})
 }
 
+func TestRedisConfig(t *testing.T) {
+	convey.Convey("Redis配置序列化与反序列化", t, func() {
+		a := &Asset{Name: "cache", Type: AssetTypeRedis}
+		cfg := &RedisConfig{
+			Host:                  "redis.example.com",
+			Port:                  6380,
+			Username:              "default",
+			Database:              2,
+			TLS:                   true,
+			TLSInsecure:           true,
+			TLSServerName:         "redis.internal",
+			TLSCAFile:             "/etc/redis/ca.pem",
+			TLSCertFile:           "/etc/redis/client.pem",
+			TLSKeyFile:            "/etc/redis/client-key.pem",
+			CommandTimeoutSeconds: 7,
+			ScanPageSize:          500,
+			KeySeparator:          "/",
+		}
+
+		err := a.SetRedisConfig(cfg)
+		assert.NoError(t, err)
+
+		got, err := a.GetRedisConfig()
+		assert.NoError(t, err)
+		assert.Equal(t, cfg.Host, got.Host)
+		assert.Equal(t, cfg.Port, got.Port)
+		assert.Equal(t, cfg.Username, got.Username)
+		assert.Equal(t, cfg.Database, got.Database)
+		assert.Equal(t, cfg.TLS, got.TLS)
+		assert.Equal(t, cfg.TLSInsecure, got.TLSInsecure)
+		assert.Equal(t, cfg.TLSServerName, got.TLSServerName)
+		assert.Equal(t, cfg.TLSCAFile, got.TLSCAFile)
+		assert.Equal(t, cfg.TLSCertFile, got.TLSCertFile)
+		assert.Equal(t, cfg.TLSKeyFile, got.TLSKeyFile)
+		assert.Equal(t, cfg.CommandTimeoutSeconds, got.CommandTimeoutSeconds)
+		assert.Equal(t, cfg.ScanPageSize, got.ScanPageSize)
+		assert.Equal(t, cfg.KeySeparator, got.KeySeparator)
+	})
+}
+
 func TestMongoDBConfig(t *testing.T) {
 	convey.Convey("MongoDB配置序列化与反序列化", t, func() {
 		convey.Convey("IsMongoDB类型判断", func() {

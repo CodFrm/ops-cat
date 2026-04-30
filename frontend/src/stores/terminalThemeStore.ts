@@ -2,13 +2,19 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { TerminalTheme, builtinThemes } from "@/data/terminalThemes";
 
+export const SCROLLBACK_MIN = 100;
+export const SCROLLBACK_MAX = 1000000;
+export const SCROLLBACK_DEFAULT = 25000;
+
 interface TerminalThemeState {
   selectedThemeId: string;
   customThemes: TerminalTheme[];
   fontSize: number;
+  scrollback: number;
 
   setSelectedThemeId: (id: string) => void;
   setFontSize: (size: number) => void;
+  setScrollback: (lines: number) => void;
   addCustomTheme: (theme: TerminalTheme) => void;
   updateCustomTheme: (theme: TerminalTheme) => void;
   removeCustomTheme: (id: string) => void;
@@ -21,10 +27,16 @@ export const useTerminalThemeStore = create<TerminalThemeState>()(
       selectedThemeId: "default",
       customThemes: [],
       fontSize: 14,
+      scrollback: SCROLLBACK_DEFAULT,
 
       setSelectedThemeId: (id) => set({ selectedThemeId: id }),
 
       setFontSize: (size) => set({ fontSize: Math.max(8, Math.min(32, size)) }),
+
+      setScrollback: (lines) => {
+        const n = Number.isFinite(lines) ? Math.floor(lines) : SCROLLBACK_DEFAULT;
+        set({ scrollback: Math.max(SCROLLBACK_MIN, Math.min(SCROLLBACK_MAX, n)) });
+      },
 
       addCustomTheme: (theme) =>
         set((state) => ({

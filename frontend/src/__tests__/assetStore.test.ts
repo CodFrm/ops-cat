@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useAssetStore } from "../stores/assetStore";
+import { useRecentAssetStore } from "../stores/recentAssetStore";
 import {
   ListAssets,
   ListGroups,
@@ -18,6 +19,7 @@ vi.mocked(ListGroups).mockResolvedValue([]);
 describe("assetStore", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     useAssetStore.setState({
       assets: [],
       groups: [],
@@ -26,6 +28,7 @@ describe("assetStore", () => {
       loading: false,
       initialized: false,
     });
+    useRecentAssetStore.setState({ recentIds: [] });
   });
 
   describe("fetchAssets", () => {
@@ -113,6 +116,36 @@ describe("assetStore", () => {
       expect(useAssetStore.getState().selectedAssetId).toBeNull();
     });
 
+    it("deleteAsset removes the asset from recentAssetStore after backend succeeds", async () => {
+      vi.mocked(DeleteAsset).mockResolvedValue(undefined as any);
+      vi.mocked(ListAssets).mockResolvedValue([]);
+      vi.mocked(ListGroups).mockResolvedValue([]);
+
+      // Pre-seed the recent store as if the asset was previously opened
+      useRecentAssetStore.getState().touch(42);
+      expect(useRecentAssetStore.getState().recentIds.includes(42)).toBe(true);
+
+      await useAssetStore.getState().deleteAsset(42);
+
+      expect(useRecentAssetStore.getState().recentIds.includes(42)).toBe(false);
+    });
+
+    it("does not remove from recentAssetStore when backend deleteAsset fails", async () => {
+      vi.mocked(DeleteAsset).mockRejectedValue(new Error("backend error"));
+      vi.mocked(ListAssets).mockResolvedValue([]);
+      vi.mocked(ListGroups).mockResolvedValue([]);
+
+      useRecentAssetStore.getState().touch(99);
+
+      await useAssetStore
+        .getState()
+        .deleteAsset(99)
+        .catch(() => {});
+
+      // Recent entry should remain because the backend call failed
+      expect(useRecentAssetStore.getState().recentIds.includes(99)).toBe(true);
+    });
+
     it("getAsset calls backend", async () => {
       vi.mocked(GetAsset).mockResolvedValue({ ID: 1, Name: "S1" } as any);
       const asset = await useAssetStore.getState().getAsset(1);
@@ -173,6 +206,17 @@ describe("assetStore", () => {
       });
       const path = useAssetStore.getState().getAssetPath({ Name: "S1", GroupID: 2 } as any);
       expect(path).toBe("Orphan / S1");
+    });
+
+    it("stops when group parents form a cycle", () => {
+      useAssetStore.setState({
+        groups: [
+          { ID: 1, Name: "A", ParentID: 2 },
+          { ID: 2, Name: "B", ParentID: 1 },
+        ] as any,
+      });
+      const path = useAssetStore.getState().getAssetPath({ Name: "S1", GroupID: 1 } as any);
+      expect(path).toBe("B / A / S1");
     });
   });
 

@@ -11,6 +11,10 @@ vi.mock("../../wailsjs/runtime/runtime", () => ({
   EventsOn: vi.fn(),
   EventsOff: vi.fn(),
   EventsEmit: vi.fn(),
+  OnFileDrop: vi.fn(),
+  OnFileDropOff: vi.fn(),
+  BrowserOpenURL: vi.fn(),
+  Quit: vi.fn(),
   WindowIsFullscreen: vi.fn().mockResolvedValue(false),
 }));
 

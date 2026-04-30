@@ -18,6 +18,7 @@ import (
 	"github.com/opskat/opskat/internal/repository/extension_state_repo"
 	"github.com/opskat/opskat/internal/service/credential_resolver"
 	"github.com/opskat/opskat/internal/service/extension_svc"
+	"github.com/opskat/opskat/internal/service/redis_svc"
 	"github.com/opskat/opskat/internal/service/sftp_svc"
 	"github.com/opskat/opskat/internal/service/snippet_svc"
 	"github.com/opskat/opskat/internal/service/ssh_svc"
@@ -73,6 +74,7 @@ type App struct {
 	approvalServer          *approval.Server           // opsctl 审批 Unix socket 服务
 	sshPool                 *sshpool.Pool              // opsctl SSH 连接池
 	sshProxyServer          *sshpool.Server            // SSH 连接池 Unix socket 服务
+	redisService            *redis_svc.Service         // Redis 浏览/编辑服务
 	shutdownCh              chan struct{}              // 关闭信号，cleanup 时 close 以解除所有阻塞等待
 	pendingAuthResponses    sync.Map                   // map[string]chan []string（keyboard-interactive 认证响应用）
 	pendingHostKeyResponses sync.Map                   // map[string]chan ssh_svc.HostKeyAction（主机密钥校验响应用）
@@ -114,6 +116,7 @@ func (a *App) Startup(ctx context.Context) {
 
 	a.startApprovalServer(authToken)
 	a.startSSHPoolServer(authToken)
+	a.redisService = redis_svc.New(a.sshPool)
 	a.startAutoUpdateCheck()
 	a.InitAIProvider()
 	a.subscribeAIFlushAck()

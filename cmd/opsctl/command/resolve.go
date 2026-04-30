@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/model/entity/group_entity"
 	"github.com/opskat/opskat/internal/repository/asset_repo"
 	"github.com/opskat/opskat/internal/repository/group_repo"
 
@@ -118,11 +119,8 @@ func resolveGroup(ctx context.Context, identifier string) (int64, string, error)
 		return 0, "", fmt.Errorf("failed to list groups: %w", err)
 	}
 
-	// Build path map for matching
-	pathMap, err := buildGroupPathMap(ctx)
-	if err != nil {
-		return 0, "", err
-	}
+	// Build path map from the already-fetched groups (avoid a second List).
+	pathMap := buildGroupPathMapFromGroups(groups)
 
 	var candidates []struct {
 		id   int64
@@ -163,39 +161,45 @@ func buildGroupPathMap(ctx context.Context) (map[int64]string, error) {
 		return nil, fmt.Errorf("failed to list groups: %w", err)
 	}
 
-	byID := make(map[int64]string)
-	idToParent := make(map[int64]int64)
-	idToName := make(map[int64]string)
+	return buildGroupPathMapFromGroups(groups), nil
+}
+
+func buildGroupPathMapFromGroups(groups []*group_entity.Group) map[int64]string {
+	byID := make(map[int64]*group_entity.Group, len(groups))
 	for _, g := range groups {
-		idToParent[g.ID] = g.ParentID
-		idToName[g.ID] = g.Name
+		byID[g.ID] = g
 	}
 
-	// Build paths by walking up parent chain
-	var buildPath func(id int64, depth int) string
-	buildPath = func(id int64, depth int) string {
-		if id == 0 || depth > 5 {
-			return ""
-		}
-		if cached, ok := byID[id]; ok {
-			return cached
-		}
-		name := idToName[id]
-		parent := idToParent[id]
-		parentPath := buildPath(parent, depth+1)
-		var path string
-		if parentPath != "" {
-			path = parentPath + "/" + name
-		} else {
-			path = name
-		}
-		byID[id] = path
-		return path
-	}
-
+	paths := make(map[int64]string, len(groups))
 	for _, g := range groups {
-		buildPath(g.ID, 0)
+		paths[g.ID] = buildGroupPathFromLookup(byID, g.ID)
+	}
+	return paths
+}
+
+func buildGroupPathFromLookup(groups map[int64]*group_entity.Group, groupID int64) string {
+	if groupID == 0 {
+		return ""
 	}
 
-	return byID, nil
+	var names []string
+	seen := make(map[int64]struct{})
+	for id := groupID; id > 0; {
+		if _, ok := seen[id]; ok {
+			break
+		}
+		seen[id] = struct{}{}
+
+		group, ok := groups[id]
+		if !ok {
+			break
+		}
+		names = append(names, group.Name)
+		id = group.ParentID
+	}
+
+	for i, j := 0, len(names)-1; i < j; i, j = i+1, j-1 {
+		names[i], names[j] = names[j], names[i]
+	}
+	return strings.Join(names, "/")
 }

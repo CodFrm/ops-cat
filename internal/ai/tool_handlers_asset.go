@@ -193,8 +193,10 @@ func handleUpdateAsset(ctx context.Context, args map[string]any) (string, error)
 	if _, ok := args["description"]; ok {
 		asset.Description = argString(args, "description")
 	}
-	if _, ok := args["group_id"]; ok {
-		asset.GroupID = argInt64(args, "group_id")
+	// 仅接受正整数：避免 AI 误传 group_id=0 把资产悄悄移到未分组。
+	// 用户若想解绑，请走前端 UI——这是潜在破坏性操作。
+	if gid := argInt64(args, "group_id"); gid > 0 {
+		asset.GroupID = gid
 	}
 	if icon := argString(args, "icon"); icon != "" {
 		asset.Icon = icon
@@ -297,8 +299,9 @@ func handleUpdateGroup(ctx context.Context, args map[string]any) (string, error)
 	if name := argString(args, "name"); name != "" {
 		group.Name = name
 	}
-	if _, ok := args["parent_id"]; ok {
-		group.ParentID = argInt64(args, "parent_id")
+	// 仅接受正整数：避免 AI 误传 parent_id=0 把分组悄悄变成顶级。
+	if pid := argInt64(args, "parent_id"); pid > 0 {
+		group.ParentID = pid
 	}
 	if _, ok := args["icon"]; ok {
 		group.Icon = argString(args, "icon")

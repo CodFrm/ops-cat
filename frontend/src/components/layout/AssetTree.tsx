@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import {
   ChevronRight,
@@ -42,8 +42,11 @@ import {
 import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
 import { filterAssets } from "@/lib/assetSearch";
 import { getAssetType } from "@/lib/assetTypes";
+import { getAssetTypeOptions, matchSelectedTypes } from "@/lib/assetTypes/options";
+import { AssetTypeFilterButton } from "@/components/asset/AssetTypeFilterButton";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
+import { useExtensionStore } from "@/extension";
 import { useActiveAssetIds } from "@/hooks/useActiveAssetIds";
 import { MoveAsset, MoveGroup } from "../../../wailsjs/go/app/App";
 import { asset_entity, group_entity } from "../../../wailsjs/go/models";
@@ -62,6 +65,36 @@ interface AssetTreeProps {
   onConnectAssetInNewTab?: (asset: asset_entity.Asset) => void;
   onSelectAsset: (asset: asset_entity.Asset) => void;
   onOpenInfoTab?: (type: "asset" | "group", id: number, name: string, icon?: string) => void;
+}
+
+const FILTER_LS_KEY = "asset_tree_type_filter";
+const HIDE_EMPTY_LS_KEY = "asset_tree_hide_empty_groups";
+
+function loadFilter(): string[] {
+  try {
+    const raw = localStorage.getItem(FILTER_LS_KEY);
+    if (!raw) return [];
+    if (raw === '"all"' || raw === "all") return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every((v) => typeof v === "string")) {
+      return parsed as string[];
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function saveFilter(value: string[]) {
+  localStorage.setItem(FILTER_LS_KEY, JSON.stringify(value));
+}
+
+function loadHideEmpty(): boolean {
+  return localStorage.getItem(HIDE_EMPTY_LS_KEY) === "true";
+}
+
+function saveHideEmpty(value: boolean) {
+  localStorage.setItem(HIDE_EMPTY_LS_KEY, value ? "true" : "false");
 }
 
 export function AssetTree({
@@ -84,8 +117,11 @@ export function AssetTree({
   const { assets, groups, selectedAssetId, fetchAssets, fetchGroups, deleteAsset, deleteGroup, refresh } =
     useAssetStore();
   const connectingAssetIds = useTerminalStore((s) => s.connectingAssetIds);
+  const extensions = useExtensionStore((s) => s.extensions);
   const activeAssetIds = useActiveAssetIds();
   const [filter, setFilter] = useState("");
+  const [selectedTypes, setSelectedTypes] = useState<string[]>(loadFilter);
+  const [hideEmptyGroups, setHideEmptyGroups] = useState<boolean>(loadHideEmpty);
   const [deleteConfirm, setDeleteConfirm] = useState<{
     id: number;
     assetCount: number;
@@ -97,9 +133,22 @@ export function AssetTree({
     fetchGroups();
   }, [fetchAssets, fetchGroups]);
 
+  useEffect(() => {
+    saveFilter(selectedTypes);
+  }, [selectedTypes]);
+
+  useEffect(() => {
+    saveHideEmpty(hideEmptyGroups);
+  }, [hideEmptyGroups]);
+
+  const typeOptions = useMemo(() => getAssetTypeOptions(extensions), [extensions]);
+
   if (collapsed) return null;
 
-  const filteredAssets = filter ? filterAssets(assets, groups, { query: filter }).map((r) => r.asset) : assets;
+  const typeFilteredAssets = matchSelectedTypes(assets, selectedTypes, typeOptions);
+  const filteredAssets = filter
+    ? filterAssets(typeFilteredAssets, groups, { query: filter }).map((r) => r.asset)
+    : typeFilteredAssets;
 
   // Group assets by GroupID
   const groupedAssets = new Map<number, asset_entity.Asset[]>();
@@ -109,15 +158,22 @@ export function AssetTree({
     groupedAssets.get(gid)!.push(asset);
   }
 
-  const childGroups = (parentId: number) => groups.filter((g) => (g.ParentID || 0) === parentId);
+  const rawChildGroups = (parentId: number) => groups.filter((g) => (g.ParentID || 0) === parentId);
 
   const countAssetsInGroup = (groupId: number): number => {
     let count = (groupedAssets.get(groupId) || []).length;
-    for (const child of childGroups(groupId)) {
+    for (const child of rawChildGroups(groupId)) {
       count += countAssetsInGroup(child.ID);
     }
     return count;
   };
+
+  const childGroups = (parentId: number) => {
+    const all = rawChildGroups(parentId);
+    return hideEmptyGroups ? all.filter((g) => countAssetsInGroup(g.ID) > 0) : all;
+  };
+
+  const visibleRootGroups = childGroups(0);
 
   const handleDeleteGroup = (id: number) => {
     const directAssetCount = (groupedAssets.get(id) || []).length;
@@ -202,13 +258,22 @@ export function AssetTree({
             </Button>
           </div>
         </div>
-        <div className="relative">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-          <input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder={t("asset.search") || "Search..."}
-            className="h-7 w-full rounded-md border border-sidebar-border bg-sidebar pl-7 pr-2 text-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/50 placeholder:text-muted-foreground/60 transition-colors duration-150"
+        <div className="flex items-center gap-1">
+          <div className="relative flex-1">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder={t("asset.search") || "Search..."}
+              className="h-7 w-full rounded-md border border-sidebar-border bg-sidebar pl-7 pr-2 text-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/50 placeholder:text-muted-foreground/60 transition-colors duration-150"
+            />
+          </div>
+          <AssetTypeFilterButton
+            value={selectedTypes}
+            options={typeOptions}
+            onChange={setSelectedTypes}
+            hideEmptyGroups={hideEmptyGroups}
+            onHideEmptyGroupsChange={setHideEmptyGroups}
           />
         </div>
       </div>
@@ -216,7 +281,7 @@ export function AssetTree({
         <ContextMenu>
           <ContextMenuTrigger className="block min-h-full">
             <div className="p-2 space-y-0.5">
-              {childGroups(0).map((group) => (
+              {visibleRootGroups.map((group) => (
                 <GroupItem
                   key={group.ID}
                   group={group}
@@ -276,7 +341,7 @@ export function AssetTree({
                   t={t}
                 />
               )}
-              {filteredAssets.length === 0 && groups.length === 0 && (
+              {filteredAssets.length === 0 && (
                 <p className="text-xs text-muted-foreground text-center py-4">{t("asset.addAsset")}</p>
               )}
             </div>
@@ -552,7 +617,7 @@ function GroupItem({
                   {onOpenInfoTab && (
                     <ContextMenuItem onClick={() => onOpenInfoTab("asset", asset.ID, asset.Name, asset.Icon)}>
                       <Eye className="h-3.5 w-3.5 mr-1.5" />
-                      {t("action.openInTab")}
+                      {t("action.editPermission")}
                     </ContextMenuItem>
                   )}
                   <ContextMenuItem onClick={() => onEditAsset(asset)}>

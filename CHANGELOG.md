@@ -1,3 +1,49 @@
+<a name="1.4.1"></a>
+
+## 1.4.1 (2026-04-28)
+
+本次版本对资产树和 SSH 终端做了体验优化，并修复非中英文系统下 i18n 兜底语言的问题。
+
+### ✨ 新功能
+
+- ✨ 资产树支持隐藏空文件夹 (by @CodFrm)
+- ✨ SSH 终端回滚缓冲区可配置，默认调整为 25000 行 (by @CodFrm)
+
+### 🐛 Bug 修复
+
+- 🐛 修复非中英文系统下 i18n 兜底为中文的问题 (by @CodFrm)
+
+<a name="1.4.0"></a>
+
+## 1.4.0 (2026-04-27)
+
+本次版本带来代码片段（Snippets）复用系统与 WebDAV 备份提供方，AI 助手扩展为多会话标签栏并支持会话重命名、历史消息编辑重发与工具卡片展开；首页分区与设置页完成整合，资产树新增类型筛选，Redis 面板补齐 Stream 类型展示；同时修复了终端分屏内容丢失、Ctrl+A 全选、DeepSeek thinking 模式 400 等多项问题。
+
+### 🚀 主要新功能
+
+- 💥 代码片段（Snippets）复用系统 (by @CodFrm)
+- 💥 新增 WebDAV 备份提供方 ([#47](https://github.com/opskat/opskat/pull/47)) (by @Pililink)
+- 💥 侧边 AI 助手多会话标签与右侧会话栏 ([#35](https://github.com/opskat/opskat/pull/35)) (by @2849236173)
+- ✨ 新增 AI 会话重命名功能 ([#38](https://github.com/opskat/opskat/pull/38)) (by @2849236173)
+- ✨ 支持 AI 对话编辑历史消息后重发 ([#30](https://github.com/opskat/opskat/pull/30)) (by @2849236173)
+- ✨ AI 工具卡片可展开查看调用参数 (by @CodFrm)
+- ✨ AI 资产工具补齐密码/私钥/分组管理并触发左侧树刷新 (by @CodFrm)
+- ✨ 实现 Redis Stream 类型数据展示 ([#36](https://github.com/opskat/opskat/pull/36)) (by @shanaiardor)
+- ✨ 资产树类型筛选 + 移除 Sidebar 分区按钮 ([#51](https://github.com/opskat/opskat/pull/51)) (by @CodFrm)
+- ✨ 首页分区与设置页整合，修复列表交互状态 ([#37](https://github.com/opskat/opskat/pull/37)) (by @tangqiu0205)
+- ✨ 设置页新增 Bug 反馈、Debug 日志开关与打开日志目录 (by @CodFrm)
+- ✨ 设置页显示仓库地址 ([#45](https://github.com/opskat/opskat/pull/45)) (by @Pililink)
+- ✨ 扩展框架支持通用 TCP IO、deadline、action 取消与 textarea 格式化 ([#31](https://github.com/opskat/opskat/pull/31)) (by @CodFrm)
+
+### 🐛 Bug 修复
+
+- 🐛 修复 SSH 分屏后已存在终端内容被清空 (by @CodFrm)
+- 🐛 修复 Ctrl+A 全选导致整页文本被选中 [#48](https://github.com/opskat/opskat/issues/48) (by @CodFrm)
+- 🐛 修复终端 Ctrl+F 硬编码导致用户改绑无效 ([#32](https://github.com/opskat/opskat/pull/32)) (by @CodFrm)
+- 🐛 修复 DeepSeek thinking 模式下多轮对话报 400 错误的问题 ([#42](https://github.com/opskat/opskat/pull/42)) (by @shanaiardor)
+- 🐛 修复 Windows 环境下 OpenDirectory 因隐藏界面而无法正常显示 explorer 的问题 ([#41](https://github.com/opskat/opskat/pull/41)) (by @shanaiardor)
+- 🐛 修复 GitHub Releases 手动安装链接 ([#50](https://github.com/opskat/opskat/pull/50)) (by @Pililink)
+
 <a name="1.3.0"></a>
 
 ## 1.3.0 (2026-04-23)

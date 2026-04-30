@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { MessageSquare, Search, Trash2 } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Check, MessageSquare, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger } from "@opskat/ui";
 import { useAIStore } from "@/stores/aiStore";
@@ -20,37 +20,80 @@ function formatRelativeTime(timestamp: number, locale: string): string {
 interface SideAssistantHistoryDropdownProps {
   activeConversationId: number | null;
   onSelect: (conversationId: number) => void;
+  onOpenInTab: (conversationId: number) => void;
   onClose: () => void;
 }
 
 export function SideAssistantHistoryDropdown({
   activeConversationId,
   onSelect,
+  onOpenInTab,
   onClose,
 }: SideAssistantHistoryDropdownProps) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language || "zh-CN";
-  const { conversations, deleteConversation } = useAIStore();
-  const tabs = useTabStore((s) => s.tabs);
-  const openInTabIds = useMemo(
-    () =>
-      new Set(
-        tabs
-          .filter((tb) => tb.type === "ai")
-          .map((tb) => (tb.meta as AITabMeta).conversationId)
-          .filter((x): x is number => x != null)
-      ),
-    [tabs]
-  );
+  const { conversations, deleteConversation, renameConversation, sidebarTabs } = useAIStore();
+  const workspaceTabs = useTabStore((s) => s.tabs);
+  const openInTabIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const tab of sidebarTabs) {
+      if (tab.conversationId != null) ids.add(tab.conversationId);
+    }
+    for (const tab of workspaceTabs) {
+      if (tab.type !== "ai") continue;
+      const convId = (tab.meta as AITabMeta).conversationId;
+      if (convId != null) ids.add(convId);
+    }
+    return ids;
+  }, [sidebarTabs, workspaceTabs]);
 
   const [query, setQuery] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
+  const [renameTarget, setRenameTarget] = useState<number | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameSaving, setRenameSaving] = useState(false);
+  const renameSavingRef = useRef(false);
+  const renameSessionRef = useRef(0);
 
   const filtered = useMemo(() => {
     if (!query) return conversations;
     const q = query.toLowerCase();
     return conversations.filter((c) => c.Title.toLowerCase().includes(q));
   }, [conversations, query]);
+
+  const cancelRename = () => {
+    if (renameSavingRef.current) return;
+    renameSessionRef.current += 1;
+    setRenameTarget(null);
+    setRenameDraft("");
+    renameSavingRef.current = false;
+    setRenameSaving(false);
+  };
+
+  const startRename = (conversationId: number, title: string) => {
+    if (renameSavingRef.current) return;
+    renameSessionRef.current += 1;
+    setDeleteTarget(null);
+    setRenameTarget(conversationId);
+    setRenameDraft(title);
+  };
+
+  const submitRename = async (conversationId: number) => {
+    if (renameSavingRef.current) return;
+    const renameSession = renameSessionRef.current;
+    renameSavingRef.current = true;
+    setRenameSaving(true);
+    const renamed = await renameConversation(conversationId, renameDraft);
+    if (renameSessionRef.current !== renameSession) {
+      return;
+    }
+    renameSavingRef.current = false;
+    setRenameSaving(false);
+    if (renamed) {
+      renameSessionRef.current += 1;
+      cancelRename();
+    }
+  };
 
   return (
     <div
@@ -80,6 +123,7 @@ export function SideAssistantHistoryDropdown({
             const isActive = activeConversationId === conv.ID;
             const isInTab = openInTabIds.has(conv.ID);
             const isDeleting = deleteTarget === conv.ID;
+            const isRenaming = renameTarget === conv.ID;
             return (
               <div
                 key={conv.ID}
@@ -88,56 +132,147 @@ export function SideAssistantHistoryDropdown({
                   isActive && "bg-accent/50 border-l-2 border-primary"
                 )}
                 onClick={() => {
-                  if (isDeleting) return;
+                  if (isDeleting || isRenaming) return;
                   onSelect(conv.ID);
                   onClose();
                 }}
               >
                 <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <div className="flex-1 min-w-0">
-                  <p className="truncate">{conv.Title}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatRelativeTime(conv.Updatetime, locale)}
-                    {isInTab && ` · ${t("ai.sidebar.promoteHint")}`}
-                  </p>
-                </div>
-                <Popover open={isDeleting} onOpenChange={(open) => setDeleteTarget(open ? conv.ID : null)}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className={cn("h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100", isDeleting && "opacity-100")}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    side="top"
-                    align="end"
-                    sideOffset={6}
-                    className="w-auto p-3"
-                    onOpenAutoFocus={(e) => e.preventDefault()}
-                  >
-                    <p className="text-xs mb-2">{t("ai.deleteConversationDesc")}</p>
-                    <div className="flex gap-2 justify-end">
-                      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setDeleteTarget(null)}>
-                        {t("action.cancel")}
+                  {isRenaming ? (
+                    <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
+                      <Input
+                        value={renameDraft}
+                        onChange={(event) => setRenameDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if ((event.nativeEvent as KeyboardEvent).isComposing) {
+                            return;
+                          }
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void submitRename(conv.ID);
+                          }
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            cancelRename();
+                          }
+                        }}
+                        className="h-7 text-xs"
+                        autoFocus
+                        placeholder={t("ai.renameConversationPlaceholder")}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0"
+                        onClick={() => void submitRename(conv.ID)}
+                        title={t("action.save")}
+                        aria-label={t("action.save")}
+                        disabled={renameSaving}
+                      >
+                        <Check className="h-3 w-3" />
                       </Button>
                       <Button
-                        variant="destructive"
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={async () => {
-                          await deleteConversation(conv.ID);
-                          setDeleteTarget(null);
-                        }}
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0"
+                        onClick={cancelRename}
+                        title={t("action.cancel")}
+                        aria-label={t("action.cancel")}
+                        disabled={renameSaving}
                       >
-                        {t("action.delete")}
+                        <X className="h-3 w-3" />
                       </Button>
                     </div>
-                  </PopoverContent>
-                </Popover>
+                  ) : (
+                    <>
+                      <p className="truncate">{conv.Title}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatRelativeTime(conv.Updatetime, locale)}
+                        {isInTab && ` · ${t("ai.sidebar.promoteHint")}`}
+                      </p>
+                    </>
+                  )}
+                </div>
+                {!isRenaming && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100"
+                    title={t("action.openInTab")}
+                    aria-label={t("action.openInTab")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenInTab(conv.ID);
+                    }}
+                  >
+                    <Plus className="h-3 w-3" />
+                  </Button>
+                )}
+                {!isRenaming && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      startRename(conv.ID, conv.Title);
+                    }}
+                    title={t("ai.renameConversation")}
+                    aria-label={t("ai.renameConversation")}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                )}
+                {!isRenaming && (
+                  <Popover open={isDeleting} onOpenChange={(open) => setDeleteTarget(open ? conv.ID : null)}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                          "h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100",
+                          isDeleting && "opacity-100"
+                        )}
+                        title={t("action.delete")}
+                        aria-label={t("action.delete")}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      side="top"
+                      align="end"
+                      sideOffset={6}
+                      className="w-auto p-3"
+                      onOpenAutoFocus={(e) => e.preventDefault()}
+                    >
+                      <p className="text-xs mb-2">{t("ai.deleteConversationDesc")}</p>
+                      <div className="flex gap-2 justify-end">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() => setDeleteTarget(null)}
+                        >
+                          {t("action.cancel")}
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={async () => {
+                            await deleteConversation(conv.ID);
+                            setDeleteTarget(null);
+                          }}
+                        >
+                          {t("action.delete")}
+                        </Button>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                )}
               </div>
             );
           })

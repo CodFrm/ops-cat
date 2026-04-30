@@ -285,7 +285,7 @@ export function TopTabBar() {
         style={{ "--wails-draggable": "drag" } as React.CSSProperties}
       >
         <div className="flex items-center min-w-0 flex-1">{tabs.map((tab) => renderTabItem(tab))}</div>
-        <TabFilterPopover open={filterOpen} onOpenChange={setFilterOpen}>
+        <TabFilterPopover open={filterOpen} onOpenChange={setFilterOpen} tabs={tabs}>
           <div
             className="flex items-center shrink-0 px-1"
             style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}

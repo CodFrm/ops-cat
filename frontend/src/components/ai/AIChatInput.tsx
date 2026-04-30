@@ -35,6 +35,7 @@ export interface AIChatInputHandle {
 export interface AIChatInputProps {
   onSubmit: (text: string, mentions: MentionRef[]) => void;
   onEmptyChange?: (empty: boolean) => void;
+  onDraftChange?: (draft: AIChatInputDraft) => void;
   sendOnEnter: boolean;
   userMessageHistory?: string[];
   placeholder?: string;
@@ -358,12 +359,13 @@ function applyInputHistoryMessage(editor: Editor, nextMessage: string | AIChatIn
 }
 
 export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(function AIChatInput(
-  { onSubmit, onEmptyChange, sendOnEnter, userMessageHistory = [], placeholder, disabled, editorRef },
+  { onSubmit, onEmptyChange, onDraftChange, sendOnEnter, userMessageHistory = [], placeholder, disabled, editorRef },
   ref
 ) {
   const submitRef = useRef(onSubmit);
   const sendOnEnterRef = useRef(sendOnEnter);
   const onEmptyChangeRef = useRef(onEmptyChange);
+  const onDraftChangeRef = useRef(onDraftChange);
   const historyRef = useRef(userMessageHistory);
   const historyIndexRef = useRef(-1);
   const applyingHistoryRef = useRef(false);
@@ -377,6 +379,9 @@ export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(funct
   useEffect(() => {
     onEmptyChangeRef.current = onEmptyChange;
   }, [onEmptyChange]);
+  useEffect(() => {
+    onDraftChangeRef.current = onDraftChange;
+  }, [onDraftChange]);
   useEffect(() => {
     // 历史列表变化（切换会话、新消息到达等）时复位浏览游标，避免旧 index 落到错位条目。
     historyRef.current = userMessageHistory;
@@ -527,6 +532,8 @@ export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(funct
         historyIndexRef.current = -1;
       }
       onEmptyChangeRef.current?.(ed.isEmpty);
+      const { text, mentions } = extractTextAndMentions(ed.state.doc as unknown as ProseMirrorLikeNode);
+      onDraftChangeRef.current?.({ content: text, mentions });
     },
     editable: !disabled,
   });
@@ -548,7 +555,9 @@ export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(funct
       if (!text.trim() && mentions.length === 0) return;
       historyIndexRef.current = -1;
       submitRef.current(text, mentions);
-      editor.commands.clearContent();
+      // emitUpdate=true：默认 false 时 onUpdate 不会触发，外部 inputDraft 仍保留旧内容；
+      // 侧边助手随后创建会话、conversationId 变化时会按草稿把刚发送的消息回填到输入框。
+      editor.commands.clearContent(true);
     };
   }, [editor]);
 

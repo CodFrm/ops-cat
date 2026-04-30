@@ -51,7 +51,7 @@ describe("getSessionIds", () => {
 describe("getTerminalActiveAssetIds", () => {
   beforeEach(() => {
     useTabStore.setState({ tabs: [], activeTabId: null });
-    useTerminalStore.setState({ tabData: {}, connections: {}, connectingAssetIds: new Set() });
+    useTerminalStore.setState({ tabData: {}, sessionSync: {}, connections: {}, connectingAssetIds: new Set() });
   });
 
   it("returns empty set when no terminal tabs exist", () => {
@@ -85,6 +85,7 @@ describe("getTerminalActiveAssetIds", () => {
           splitTree: { type: "terminal", sessionId: "s1" },
           activePaneId: "s1",
           panes: { s1: { sessionId: "s1", connected: true, connectedAt: Date.now() } },
+          directoryFollowMode: "off",
         },
       },
       connections: {},
@@ -121,6 +122,7 @@ describe("getTerminalActiveAssetIds", () => {
           splitTree: { type: "pending", pendingId: "p1" },
           activePaneId: "p1",
           panes: {},
+          directoryFollowMode: "off",
         },
       },
       connections: {},

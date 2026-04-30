@@ -117,9 +117,15 @@
   }
   html, body {
     @apply h-full overflow-hidden;
+    user-select: none;
+    -webkit-user-select: none;
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
+  }
+  input, textarea, [contenteditable="true"], .select-text {
+    user-select: text;
+    -webkit-user-select: text;
   }
   html {
     transition: background-color 200ms ease, color 200ms ease;

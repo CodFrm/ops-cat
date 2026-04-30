@@ -58,6 +58,7 @@ import {
 import { toast } from "sonner";
 import { BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
 import { AIProviderForm, type AIProviderFormValues } from "@/components/ai/AIProviderForm";
+import { useAIStore } from "@/stores/aiStore";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -245,7 +246,7 @@ function IntegrationSection() {
                   variant="link"
                   size="sm"
                   className="h-auto p-0 text-xs"
-                  onClick={() => BrowserOpenURL("https://github.com/opskat/opskat/release")}
+                  onClick={() => BrowserOpenURL("https://github.com/opskat/opskat/releases")}
                 >
                   <ExternalLink className="h-3 w-3 mr-1" />
                   GitHub Releases
@@ -365,6 +366,7 @@ export function AISettingsSection() {
     try {
       const list = await ListAIProviders();
       setProviders(list || []);
+      await useAIStore.getState().checkConfigured();
     } catch (e) {
       toast.error(errMsg(e));
     }

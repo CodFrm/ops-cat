@@ -35,8 +35,9 @@ import { useTerminalThemeStore } from "@/stores/terminalThemeStore";
 interface ExportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  mode: "file" | "gist";
+  mode: "file" | "gist" | "webdav";
   onGistExport?: (password: string, opts: backup_svc.ExportOptions) => Promise<void>;
+  onWebDAVExport?: (password: string, opts: backup_svc.ExportOptions) => Promise<void>;
 }
 
 type AssetSelectionMode = "all" | "specific";
@@ -48,7 +49,7 @@ function generatePassword(length = 20): string {
   return Array.from(arr, (b) => chars[b % chars.length]).join("");
 }
 
-export function ExportDialog({ open, onOpenChange, mode, onGistExport }: ExportDialogProps) {
+export function ExportDialog({ open, onOpenChange, mode, onGistExport, onWebDAVExport }: ExportDialogProps) {
   const { t } = useTranslation();
   const { assets } = useAssetStore();
   const { shortcuts } = useShortcutStore();
@@ -66,6 +67,7 @@ export function ExportDialog({ open, onOpenChange, mode, onGistExport }: ExportD
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const requiresPassword = mode !== "file" || includeCredentials;
 
   // Reset state when dialog opens
   useEffect(() => {
@@ -85,10 +87,10 @@ export function ExportDialog({ open, onOpenChange, mode, onGistExport }: ExportD
   const selectNone = () => setSelectedIds([]);
 
   const canExport = useMemo(() => {
-    if (includeCredentials && !password) return false;
+    if (requiresPassword && !password) return false;
     if (selectionMode === "specific" && selectedIds.length === 0) return false;
     return true;
-  }, [includeCredentials, password, selectionMode, selectedIds]);
+  }, [password, requiresPassword, selectionMode, selectedIds]);
 
   const buildOptions = useCallback((): backup_svc.ExportOptions => {
     const opts = new backup_svc.ExportOptions();
@@ -135,14 +137,22 @@ export function ExportDialog({ open, onOpenChange, mode, onGistExport }: ExportD
     try {
       const opts = buildOptions();
       if (mode === "gist" && onGistExport) {
-        await onGistExport(includeCredentials ? password : "", opts);
+        await onGistExport(password, opts);
+      } else if (mode === "webdav" && onWebDAVExport) {
+        await onWebDAVExport(password, opts);
       } else {
         await ExportToFile(includeCredentials ? password : "", opts);
       }
-      toast.success(t("backup.exportSuccess"));
+      toast.success(
+        mode === "gist"
+          ? t("backup.gistPushSuccess")
+          : mode === "webdav"
+            ? t("backup.webdavPushSuccess")
+            : t("backup.exportSuccess")
+      );
       onOpenChange(false);
     } catch (e) {
-      toast.error(String(e));
+      toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setExporting(false);
     }
@@ -253,12 +263,14 @@ export function ExportDialog({ open, onOpenChange, mode, onGistExport }: ExportD
           </div>
 
           {/* Credential password */}
-          {includeCredentials && (
+          {requiresPassword && (
             <div className="space-y-2">
-              <div className="flex items-center gap-2 rounded-md bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
-                <AlertTriangle className="h-4 w-4 shrink-0" />
-                <span>{t("backup.credentialWarning")}</span>
-              </div>
+              {includeCredentials && (
+                <div className="flex items-center gap-2 rounded-md bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  <span>{t("backup.credentialWarning")}</span>
+                </div>
+              )}
               <Label>{t("backup.password")}</Label>
               <div className="flex gap-1">
                 <div className="relative flex-1">

@@ -18,7 +18,7 @@ import {
 } from "@opskat/ui";
 import { useTheme, useResolvedTheme } from "@/components/theme-provider";
 import { Plus, Pencil, Trash2 } from "lucide-react";
-import { useTerminalThemeStore } from "@/stores/terminalThemeStore";
+import { useTerminalThemeStore, SCROLLBACK_MIN, SCROLLBACK_MAX } from "@/stores/terminalThemeStore";
 import { builtinThemes, defaultLightTheme, defaultDarkTheme, TerminalTheme } from "@/data/terminalThemes";
 import { TerminalThemeEditor } from "@/components/settings/TerminalThemeEditor";
 
@@ -96,6 +96,8 @@ export function TerminalSection() {
     setSelectedThemeId,
     fontSize,
     setFontSize,
+    scrollback,
+    setScrollback,
     customThemes,
     addCustomTheme,
     updateCustomTheme,
@@ -126,6 +128,24 @@ export function TerminalSection() {
               />
               <span className="text-sm text-muted-foreground">px</span>
             </div>
+          </div>
+
+          {/* Scrollback */}
+          <div className="grid gap-2">
+            <Label>{t("terminal.scrollback")}</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={SCROLLBACK_MIN}
+                max={SCROLLBACK_MAX}
+                step={100}
+                value={scrollback}
+                onChange={(e) => setScrollback(Number(e.target.value))}
+                className="w-32"
+              />
+              <span className="text-sm text-muted-foreground">{t("terminal.scrollbackUnit")}</span>
+            </div>
+            <p className="text-xs text-muted-foreground">{t("terminal.scrollbackHint")}</p>
           </div>
 
           <Separator />

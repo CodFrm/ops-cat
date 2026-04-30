@@ -3,6 +3,7 @@ import { useTabStore } from "../stores/tabStore";
 import { useQueryStore } from "../stores/queryStore";
 import { useAssetStore } from "../stores/assetStore";
 import { asset_entity } from "../../wailsjs/go/models";
+import { RedisGetKeyDetail, RedisListDatabases, RedisScanKeys } from "../../wailsjs/go/app/App";
 
 function makeDatabaseAsset(id: number, name = `DB ${id}`): asset_entity.Asset {
   return {
@@ -159,5 +160,267 @@ describe("queryStore.openQueryTab", () => {
     expect(useTabStore.getState().tabs).toHaveLength(1);
     // Should activate it
     expect(useTabStore.getState().activeTabId).toBe("query-20");
+  });
+});
+
+describe("queryStore redis actions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useQueryStore.setState({ dbStates: {}, redisStates: {}, mongoStates: {} });
+    vi.spyOn(useAssetStore.getState(), "getAssetPath").mockReturnValue("Test/Redis");
+    useQueryStore.getState().openQueryTab(makeRedisAsset(10));
+  });
+
+  it("scans redis keys through typed binding", async () => {
+    vi.mocked(RedisScanKeys).mockResolvedValue({ cursor: "5", keys: ["a", "b"], hasMore: true });
+
+    await useQueryStore.getState().scanKeys("query-10", true);
+
+    expect(RedisScanKeys).toHaveBeenCalledWith({
+      assetId: 10,
+      db: 0,
+      cursor: "0",
+      match: "*",
+      type: "",
+      count: 200,
+      exact: false,
+    });
+    const state = useQueryStore.getState().redisStates["query-10"];
+    expect(state.keys).toEqual(["a", "b"]);
+    expect(state.scanCursor).toBe("5");
+    expect(state.hasMore).toBe(true);
+  });
+
+  it("ignores stale redis scan responses after a newer search starts", async () => {
+    let resolveFirst!: (value: { cursor: string; keys: string[]; hasMore: boolean }) => void;
+    let resolveSecond!: (value: { cursor: string; keys: string[]; hasMore: boolean }) => void;
+    vi.mocked(RedisScanKeys)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          })
+      );
+
+    const first = useQueryStore.getState().scanKeys("query-10", true);
+    useQueryStore.getState().setKeyFilter("query-10", "root");
+    const second = useQueryStore.getState().scanKeys("query-10", true);
+
+    resolveSecond({ cursor: "0", keys: ["root:user"], hasMore: false });
+    await second;
+    expect(useQueryStore.getState().redisStates["query-10"].keys).toEqual(["root:user"]);
+
+    resolveFirst({ cursor: "5", keys: ["old:key"], hasMore: true });
+    await first;
+    expect(useQueryStore.getState().redisStates["query-10"].keys).toEqual(["root:user"]);
+    expect(useQueryStore.getState().redisStates["query-10"].scanCursor).toBe("0");
+  });
+
+  it("uses contains matching for plain redis key search", async () => {
+    vi.mocked(RedisScanKeys).mockResolvedValue({ cursor: "0", keys: [], hasMore: false });
+
+    useQueryStore.getState().setKeyFilter("query-10", "2fe43136-1b38-43c3-b4bf-82b19c66c7bf");
+    await useQueryStore.getState().scanKeys("query-10", true);
+
+    expect(RedisScanKeys).toHaveBeenCalledWith(
+      expect.objectContaining({
+        match: "*2fe43136-1b38-43c3-b4bf-82b19c66c7bf*",
+      })
+    );
+  });
+
+  it("preserves explicit redis match patterns", async () => {
+    vi.mocked(RedisScanKeys).mockResolvedValue({ cursor: "0", keys: [], hasMore: false });
+
+    useQueryStore.getState().setKeyFilter("query-10", "common:*");
+    await useQueryStore.getState().scanKeys("query-10", true);
+
+    expect(RedisScanKeys).toHaveBeenCalledWith(expect.objectContaining({ match: "common:*" }));
+  });
+
+  it("loads selected key detail through typed binding", async () => {
+    vi.mocked(RedisGetKeyDetail).mockResolvedValue({
+      key: "user:1",
+      type: "hash",
+      ttl: 120,
+      size: 42,
+      total: 1,
+      value: [{ field: "name", value: "Ada" }],
+      valueCursor: "0",
+      valueOffset: 0,
+      hasMoreValues: false,
+    });
+
+    await useQueryStore.getState().selectKey("query-10", "user:1");
+
+    expect(RedisGetKeyDetail).toHaveBeenCalledWith({
+      assetId: 10,
+      db: 0,
+      key: "user:1",
+      cursor: "",
+      offset: 0,
+      count: 100,
+    });
+    const info = useQueryStore.getState().redisStates["query-10"].keyInfo;
+    expect(info?.type).toBe("hash");
+    expect(info?.ttl).toBe(120);
+    expect(info?.value).toEqual([["name", "Ada"]]);
+  });
+
+  it("ignores stale selected key detail responses", async () => {
+    let resolveFirst!: (value: Awaited<ReturnType<typeof RedisGetKeyDetail>>) => void;
+    let resolveSecond!: (value: Awaited<ReturnType<typeof RedisGetKeyDetail>>) => void;
+    vi.mocked(RedisGetKeyDetail)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          })
+      );
+
+    const first = useQueryStore.getState().selectKey("query-10", "user:old");
+    const second = useQueryStore.getState().selectKey("query-10", "user:new");
+
+    resolveSecond({
+      key: "user:new",
+      type: "string",
+      ttl: -1,
+      size: 3,
+      total: -1,
+      value: "new",
+      valueCursor: "0",
+      valueOffset: 0,
+      hasMoreValues: false,
+    });
+    await second;
+
+    resolveFirst({
+      key: "user:old",
+      type: "string",
+      ttl: -1,
+      size: 3,
+      total: -1,
+      value: "old",
+      valueCursor: "0",
+      valueOffset: 0,
+      hasMoreValues: false,
+    });
+    await first;
+
+    const state = useQueryStore.getState().redisStates["query-10"];
+    expect(state.selectedKey).toBe("user:new");
+    expect(state.keyInfo?.value).toBe("new");
+  });
+
+  it("ignores stale load-more responses after selecting another key", async () => {
+    let resolveMore!: (value: Awaited<ReturnType<typeof RedisGetKeyDetail>>) => void;
+    vi.mocked(RedisGetKeyDetail).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMore = resolve;
+        })
+    );
+    useQueryStore.setState((s) => ({
+      redisStates: {
+        ...s.redisStates,
+        "query-10": {
+          ...s.redisStates["query-10"],
+          selectedKey: "list:old",
+          keyInfo: {
+            type: "list",
+            ttl: -1,
+            total: 3,
+            value: ["a"],
+            valueCursor: "0",
+            valueOffset: 1,
+            hasMoreValues: true,
+            loadingMore: false,
+          },
+        },
+      },
+    }));
+
+    const loadMore = useQueryStore.getState().loadMoreValues("query-10");
+    useQueryStore.setState((s) => ({
+      redisStates: {
+        ...s.redisStates,
+        "query-10": {
+          ...s.redisStates["query-10"],
+          selectedKey: "list:new",
+          keyInfo: {
+            type: "list",
+            ttl: -1,
+            total: 1,
+            value: ["z"],
+            valueCursor: "0",
+            valueOffset: 1,
+            hasMoreValues: false,
+            loadingMore: false,
+          },
+        },
+      },
+    }));
+
+    resolveMore({
+      key: "list:old",
+      type: "list",
+      ttl: -1,
+      size: 3,
+      total: 3,
+      value: ["b", "c"],
+      valueCursor: "0",
+      valueOffset: 3,
+      hasMoreValues: false,
+    });
+    await loadMore;
+
+    const state = useQueryStore.getState().redisStates["query-10"];
+    expect(state.selectedKey).toBe("list:new");
+    expect(state.keyInfo?.value).toEqual(["z"]);
+  });
+
+  it("loads db key counts through typed binding", async () => {
+    vi.mocked(RedisListDatabases).mockResolvedValue([
+      { db: 0, keys: 2, expires: 1, avgTtl: 10 },
+      { db: 3, keys: 7, expires: 0, avgTtl: 0 },
+    ]);
+
+    await useQueryStore.getState().loadDbKeyCounts("query-10");
+
+    expect(RedisListDatabases).toHaveBeenCalledWith(10);
+    expect(useQueryStore.getState().redisStates["query-10"].dbKeyCounts).toEqual({ 0: 2, 3: 7 });
+  });
+
+  it("uses redis browser options from asset config", async () => {
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useQueryStore.setState({ dbStates: {}, redisStates: {}, mongoStates: {} });
+    const asset = makeRedisAsset(11);
+    asset.Config = JSON.stringify({ host: "10.0.0.1", port: 6379, database: 3, scan_page_size: 500 });
+    vi.mocked(RedisScanKeys).mockResolvedValue({ cursor: "0", keys: [], hasMore: false });
+
+    useQueryStore.getState().openQueryTab(asset);
+    await useQueryStore.getState().scanKeys("query-11", true);
+
+    expect(useQueryStore.getState().redisStates["query-11"].currentDb).toBe(3);
+    expect(RedisScanKeys).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: 11,
+        db: 3,
+        count: 500,
+      })
+    );
   });
 });

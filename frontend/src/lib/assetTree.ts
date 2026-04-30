@@ -26,15 +26,38 @@ export const defaultGroupIcon: ReactNode = createElement(Folder, { className: IC
  * from its entity's `Icon` field (via getIconComponent/getIconColor) with a fallback
  * to Server / Folder when no icon is configured.
  */
-export function buildAssetTree(assets: asset_entity.Asset[], groups: group_entity.Group[]): TreeNode[] {
+export function buildAssetTree(
+  assets: asset_entity.Asset[],
+  groups: group_entity.Group[],
+  options: UseAssetTreeOptions = {}
+): TreeNode[] {
+  const visibleAssets = filterAssetTreeAssets(assets, options);
+  const groupsByParent = new Map<number, group_entity.Group[]>();
+  const assetsByGroup = new Map<number, asset_entity.Asset[]>();
+
+  for (const group of groups) {
+    const parentId = group.ParentID || 0;
+    const siblings = groupsByParent.get(parentId) ?? [];
+    siblings.push(group);
+    groupsByParent.set(parentId, siblings);
+  }
+
+  for (const asset of visibleAssets) {
+    const groupId = asset.GroupID || 0;
+    const siblings = assetsByGroup.get(groupId) ?? [];
+    siblings.push(asset);
+    assetsByGroup.set(groupId, siblings);
+  }
+
   const visit = (parentId: number): TreeNode[] =>
-    groups
-      .filter((g) => (g.ParentID || 0) === parentId)
+    (groupsByParent.get(parentId) ?? [])
       .map((g) => {
         const childGroups = visit(g.ID);
-        const childAssets: TreeNode[] = assets
-          .filter((a) => a.GroupID === g.ID)
-          .map((a) => ({ id: a.ID, label: a.Name, icon: renderEntityIcon(a.Icon, Server) }));
+        const childAssets: TreeNode[] = (assetsByGroup.get(g.ID) ?? []).map((a) => ({
+          id: a.ID,
+          label: a.Name,
+          icon: renderEntityIcon(a.Icon, Server),
+        }));
         return {
           id: -g.ID,
           label: g.Name,
@@ -46,8 +69,7 @@ export function buildAssetTree(assets: asset_entity.Asset[], groups: group_entit
       .filter((g) => g.children && g.children.length > 0);
 
   const nodes: TreeNode[] = visit(0);
-  const ungrouped = assets.filter((a) => !a.GroupID || a.GroupID === 0);
-  for (const a of ungrouped) {
+  for (const a of assetsByGroup.get(0) ?? []) {
     nodes.push({ id: a.ID, label: a.Name, icon: renderEntityIcon(a.Icon, Server) });
   }
   return nodes;
@@ -67,9 +89,23 @@ export interface UseAssetTreeOptions {
   /** Filter assets by type (e.g. "ssh"). */
   filterType?: string;
   /** Asset IDs to exclude (e.g. exclude self for jump host selection). */
-  excludeIds?: number[];
+  excludeIds?: Iterable<number>;
   /** Only include assets with Status === 1. */
   activeOnly?: boolean;
+}
+
+/** Shared asset filtering for tree/picker UIs. Keep status/type/exclude semantics in one place. */
+export function filterAssetTreeAssets(
+  assets: asset_entity.Asset[],
+  { filterType, excludeIds, activeOnly }: UseAssetTreeOptions = {}
+): asset_entity.Asset[] {
+  const exclude = excludeIds ? new Set(excludeIds) : undefined;
+  return assets.filter((asset) => {
+    if (activeOnly && asset.Status !== 1) return false;
+    if (filterType && asset.Type !== filterType) return false;
+    if (exclude?.has(asset.ID)) return false;
+    return true;
+  });
 }
 
 /**
@@ -80,15 +116,10 @@ export interface UseAssetTreeOptions {
 export function useAssetTree({ filterType, excludeIds, activeOnly }: UseAssetTreeOptions = {}): TreeNode[] {
   const { assets, groups } = useAssetStore();
 
-  const filtered = useMemo(() => {
-    let list = assets;
-    if (activeOnly) list = list.filter((a) => a.Status === 1);
-    if (filterType) list = list.filter((a) => a.Type === filterType);
-    if (excludeIds?.length) list = list.filter((a) => !excludeIds.includes(a.ID));
-    return list;
-  }, [assets, filterType, excludeIds, activeOnly]);
-
-  return useMemo(() => buildAssetTree(filtered, groups), [filtered, groups]);
+  return useMemo(
+    () => buildAssetTree(assets, groups, { filterType, excludeIds, activeOnly }),
+    [assets, groups, filterType, excludeIds, activeOnly]
+  );
 }
 
 export interface UseGroupTreeOptions {

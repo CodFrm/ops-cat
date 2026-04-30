@@ -101,12 +101,12 @@ function setupConversationFixture({
 }) {
   useAIStore.setState({
     configured: true,
-    tabStates: tabId ? { [tabId]: {} } : {},
+    tabStates: tabId ? { [tabId]: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null } } : {},
     conversationMessages: { [conversationId]: messages },
     conversationStreaming: { [conversationId]: { sending, pendingQueue } },
     conversations: [],
-    sidebarConversationId: null,
-    sidebarUIState: { inputDraft: "", scrollTop: 0 },
+    sidebarTabs: [],
+    activeSidebarTabId: null,
   });
 
   useTabStore.setState(
@@ -146,8 +146,8 @@ describe("AIChat edit-and-resend regression", () => {
       conversations: [],
       conversationMessages: {},
       conversationStreaming: {},
-      sidebarConversationId: null,
-      sidebarUIState: { inputDraft: "", scrollTop: 0 },
+      sidebarTabs: [],
+      activeSidebarTabId: null,
     });
 
     vi.mocked(SendAIMessage).mockResolvedValue(undefined as never);

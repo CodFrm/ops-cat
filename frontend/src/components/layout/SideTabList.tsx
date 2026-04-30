@@ -18,6 +18,7 @@ export function SideTabList() {
   const isFullscreen = useFullscreen();
   const tabs = useTabStore((s) => s.tabs);
   const activeTabId = useTabStore((s) => s.activeTabId);
+  const visibleTabs = tabs;
   const activateTab = useTabStore((s) => s.activateTab);
   const closeTab = useTabStore((s) => s.closeTab);
   const reorderTab = useTabStore((s) => s.reorderTab);
@@ -35,13 +36,14 @@ export function SideTabList() {
 
   const matchedWithLabel = useMemo(
     () =>
-      tabs
+      visibleTabs
         .map((tab) => ({ tab, displayLabel: resolveTabLabel(tab, t) }))
         .filter(({ displayLabel }) => filterMatches(displayLabel, query)),
-    [tabs, query, t]
+    [visibleTabs, query, t]
   );
 
   // 稳定 Context value —— 否则每次父组件 render 都会强制所有 SideTabItem 消费者重渲
+  // 必须使用完整 tabs：SideTabItem 的 globalIndex/total 与 moveTabTo/closeLeftTabs 需要相对全量列表的索引
   const dragContextValue = useMemo(
     () => ({ dragKeyRef, reorder: reorderTab, moveTo: moveTabTo, tabs }),
     [reorderTab, moveTabTo, tabs]
@@ -101,8 +103,8 @@ export function SideTabList() {
           </span>
           <span className="text-xs text-muted-foreground">
             {query
-              ? t("sideTabs.countFiltered", { filtered: matchedWithLabel.length, total: tabs.length })
-              : t("sideTabs.count", { count: tabs.length })}
+              ? t("sideTabs.countFiltered", { filtered: matchedWithLabel.length, total: visibleTabs.length })
+              : t("sideTabs.count", { count: visibleTabs.length })}
           </span>
           <button
             type="button"
@@ -138,7 +140,7 @@ export function SideTabList() {
         <div className="flex-1 overflow-y-auto py-1 px-1">
           {matchedWithLabel.length === 0 ? (
             <p className="px-3 py-2 text-xs text-muted-foreground text-center">
-              {tabs.length === 0 ? t("sideTabs.noTabs") : t("sideTabs.emptyHint")}
+              {visibleTabs.length === 0 ? t("sideTabs.noTabs") : t("sideTabs.emptyHint")}
             </p>
           ) : (
             matchedWithLabel.map(({ tab, displayLabel }) => {

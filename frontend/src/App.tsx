@@ -22,7 +22,7 @@ import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { getAssetType } from "@/lib/assetTypes";
-import { useTabStore, type InfoTabMeta } from "@/stores/tabStore";
+import { useTabStore } from "@/stores/tabStore";
 import { useExtensionStore } from "@/extension";
 import { bootstrapExtensions } from "@/extension/init";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -118,6 +118,7 @@ function App() {
     () => localStorage.getItem("sidebar_collapsed") === "true"
   );
   const [aiPanelCollapsed, setAiPanelCollapsed] = useState(() => localStorage.getItem("ai_panel_collapsed") === "true");
+  const [commandOpen, setCommandOpen] = useState(false);
   const [assetTreeWidth, setAssetTreeWidth] = useState(() => {
     const saved = localStorage.getItem("asset_tree_width");
     return saved ? Math.max(160, Math.min(480, Number(saved))) : 224;
@@ -169,9 +170,14 @@ function App() {
     document.addEventListener("mouseup", onMouseUp);
   }, []);
 
+  const toggleCommandPalette = useCallback(() => {
+    setCommandOpen((prev) => !prev);
+  }, []);
+
   useKeyboardShortcuts({
     onToggleAIPanel: toggleAIPanel,
     onToggleSidebar: toggleSidebar,
+    onToggleCommandPalette: toggleCommandPalette,
   });
 
   // 资产表单
@@ -214,32 +220,6 @@ function App() {
 
   const handleSelectAsset = (asset: asset_entity.Asset) => {
     selectAsset(asset.ID);
-    const tabStore = useTabStore.getState();
-    const previewTabId = "info-preview";
-    const existing = tabStore.tabs.find((t) => t.id === previewTabId);
-    const meta: InfoTabMeta = {
-      type: "info",
-      targetType: "asset",
-      targetId: asset.ID,
-      name: asset.Name,
-      icon: asset.Icon || undefined,
-    };
-    if (existing) {
-      tabStore.updateTab(previewTabId, {
-        label: asset.Name,
-        icon: asset.Icon || undefined,
-        meta,
-      });
-      tabStore.activateTab(previewTabId);
-    } else {
-      tabStore.openTab({
-        id: previewTabId,
-        type: "info",
-        label: asset.Name,
-        icon: asset.Icon || undefined,
-        meta,
-      });
-    }
   };
 
   const handleOpenInfoTab = useCallback((type: "asset" | "group", id: number, name: string, icon?: string) => {
@@ -312,12 +292,11 @@ function App() {
   const handlePageChange = useCallback((page: string) => {
     const tabStore = useTabStore.getState();
     if (page === "home") {
-      // Activate first non-page tab, or deactivate
-      const homeTab = tabStore.tabs.find((t) => t.type === "terminal" || t.type === "info");
+      const homeTab = tabStore.tabs.find((t) => t.type === "terminal" || t.type === "info" || t.type === "query");
       tabStore.activateTab(homeTab?.id || tabStore.tabs[0]?.id || "");
       return;
     }
-    // Page tabs: settings, forward, sshkeys, audit
+    // Page tabs: settings, forward, sshkeys, audit, snippets
     const existing = tabStore.tabs.find((t) => t.id === page);
     if (existing) {
       tabStore.activateTab(page);
@@ -337,13 +316,7 @@ function App() {
 
   // Derive active page for sidebar highlighting
   const activeTab = useTabStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
-  const activePage = !activeTab
-    ? "home"
-    : activeTab.type === "page"
-      ? activeTab.id
-      : activeTab.type === "terminal" || activeTab.type === "info"
-        ? "home"
-        : "other";
+  const activePage = activeTab?.type === "page" ? activeTab.id : "home";
 
   return (
     <ThemeProvider defaultTheme="system">
@@ -457,6 +430,8 @@ function App() {
               onEditAsset={handleEditAsset}
               onDeleteAsset={handleDeleteAsset}
               onConnectAsset={handleConnectAsset}
+              commandOpen={commandOpen}
+              setCommandOpen={setCommandOpen}
             />
             <SideAssistantPanel collapsed={aiPanelCollapsed} onToggle={toggleAIPanel} />
             {aiPanelCollapsed && <EdgeRevealStrip side="right" onClick={toggleAIPanel} />}

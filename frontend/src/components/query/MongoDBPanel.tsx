@@ -14,6 +14,7 @@ import { ExecuteMongo } from "../../../wailsjs/go/app/App";
 import { CodeEditor } from "@/components/CodeEditor";
 import { SnippetPopover } from "@/components/snippet/SnippetPopover";
 import { parseMongosh, type ParsedMongosh } from "@/lib/mongosh-parser";
+import type { DynamicCompletionGetter } from "@/lib/monaco-completions";
 
 interface MongoDBPanelProps {
   tabId: string;
@@ -526,13 +527,8 @@ function MongoQueryContent({ tabId, assetId, innerTab }: MongoQueryContentProps)
     return mongoState.collections[database] ?? [];
   }, [database, mongoState]);
 
-  const dynamicCompletions = useCallback(
-    (ctx: {
-      monaco: typeof MonacoNS;
-      range: MonacoNS.IRange;
-      model: MonacoNS.editor.ITextModel;
-      position: MonacoNS.Position;
-    }) => {
+  const dynamicCompletions = useCallback<DynamicCompletionGetter>(
+    (ctx) => {
       const line = ctx.model.getLineContent(ctx.position.lineNumber);
       const before = line.slice(0, ctx.position.column - 1);
       const items: MonacoNS.languages.CompletionItem[] = [];

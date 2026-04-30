@@ -30,7 +30,8 @@ export type ShortcutAction =
   | "panel.filter"
   | "page.home"
   | "page.settings"
-  | "page.sshkeys";
+  | "page.sshkeys"
+  | "command.quickopen";
 
 export const SHORTCUT_ACTIONS: ShortcutAction[] = [
   "tab.1",
@@ -54,6 +55,7 @@ export const SHORTCUT_ACTIONS: ShortcutAction[] = [
   "page.home",
   "page.settings",
   "page.sshkeys",
+  "command.quickopen",
 ];
 
 export const DEFAULT_SHORTCUTS: Record<ShortcutAction, ShortcutBinding> = {
@@ -78,6 +80,7 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, ShortcutBinding> = {
   "page.home": { code: "KeyH", mod: true, shift: true, alt: false },
   "page.settings": { code: "Comma", mod: true, shift: false, alt: false },
   "page.sshkeys": { code: "KeyK", mod: true, shift: true, alt: false },
+  "command.quickopen": { code: "KeyP", mod: true, shift: false, alt: false },
 };
 
 const STORAGE_KEY = "keyboard_shortcuts";

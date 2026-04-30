@@ -113,7 +113,7 @@ func AllToolDefs() []ToolDef {
 				{Name: "redis_db", Type: ParamNumber, Description: "New default Redis DB index. Redis only."},
 				{Name: "ssh_asset_id", Type: ParamNumber, Description: "New SSH tunnel asset ID. Pass 0 to detach. Database / redis / mongodb only."},
 				{Name: "description", Type: ParamString, Description: "New description. Pass empty string to clear."},
-				{Name: "group_id", Type: ParamNumber, Description: "New group ID. Pass 0 to detach from group."},
+				{Name: "group_id", Type: ParamNumber, Description: "New group ID (must be a positive integer from list_groups). Omit to keep current group; values <= 0 are ignored. To remove an asset from its group, ask the user to do it in the UI."},
 				{Name: "icon", Type: ParamString, Description: "New icon name."},
 			},
 			Handler: handleUpdateAsset,
@@ -145,11 +145,11 @@ func AllToolDefs() []ToolDef {
 		},
 		{
 			Name:        "update_group",
-			Description: "Update an existing asset group. Only provide the fields you want to change; omitted fields remain unchanged. Pass empty string to clear icon / description, or 0 to detach parent_id.",
+			Description: "Update an existing asset group. Only provide the fields you want to change; omitted fields remain unchanged. Pass empty string to clear icon / description.",
 			Params: []ParamDef{
 				{Name: "id", Type: ParamNumber, Description: "ID of the group to update.", Required: true},
 				{Name: "name", Type: ParamString, Description: "New display name."},
-				{Name: "parent_id", Type: ParamNumber, Description: "New parent group ID. Pass 0 to make it a top-level group."},
+				{Name: "parent_id", Type: ParamNumber, Description: "New parent group ID (must be a positive integer from list_groups). Omit to keep current parent; values <= 0 are ignored. To make a group top-level, ask the user to do it in the UI."},
 				{Name: "icon", Type: ParamString, Description: "New icon name. Empty string clears."},
 				{Name: "description", Type: ParamString, Description: "New description. Empty string clears."},
 				{Name: "sort_order", Type: ParamNumber, Description: "New sort order."},

@@ -8,6 +8,7 @@ import {
   SFTPCancelTransfer,
 } from "../../wailsjs/go/app/App";
 import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
+import { registerTabCloseHook } from "./tabStore";
 
 export interface SFTPTransfer {
   transferId: string;
@@ -32,6 +33,7 @@ interface SFTPState {
 
   // File manager panel state
   fileManagerOpenTabs: Record<string, boolean>;
+  fileManagerPaths: Record<string, string>;
   fileManagerWidth: number;
 
   startUpload: (sessionId: string, remotePath: string) => Promise<string | null>;
@@ -46,6 +48,7 @@ interface SFTPState {
   getSessionTransfers: (sessionId: string) => SFTPTransfer[];
 
   toggleFileManager: (tabId: string) => void;
+  setFileManagerPath: (tabId: string, path: string) => void;
   setFileManagerWidth: (width: number) => void;
 }
 
@@ -150,6 +153,7 @@ function subscribeProgress(
 export const useSFTPStore = create<SFTPState>((set, get) => ({
   transfers: {},
   fileManagerOpenTabs: {},
+  fileManagerPaths: {},
   fileManagerWidth: DEFAULT_FILE_MANAGER_WIDTH,
 
   startUpload: async (sessionId, remotePath) => {
@@ -235,9 +239,32 @@ export const useSFTPStore = create<SFTPState>((set, get) => ({
     }));
   },
 
+  setFileManagerPath: (tabId, path) => {
+    set((state) => ({
+      fileManagerPaths: {
+        ...state.fileManagerPaths,
+        [tabId]: path,
+      },
+    }));
+  },
+
   setFileManagerWidth: (width) => {
     set({
       fileManagerWidth: Math.max(MIN_FILE_MANAGER_WIDTH, Math.min(MAX_FILE_MANAGER_WIDTH, width)),
     });
   },
 }));
+
+registerTabCloseHook((tab) => {
+  if (tab.type !== "terminal") return;
+  useSFTPStore.setState((state) => {
+    const nextOpenTabs = { ...state.fileManagerOpenTabs };
+    delete nextOpenTabs[tab.id];
+    const nextPaths = { ...state.fileManagerPaths };
+    delete nextPaths[tab.id];
+    return {
+      fileManagerOpenTabs: nextOpenTabs,
+      fileManagerPaths: nextPaths,
+    };
+  });
+});
