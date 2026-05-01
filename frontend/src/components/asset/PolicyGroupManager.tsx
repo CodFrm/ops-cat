@@ -26,6 +26,7 @@ const builtinTabs: { key: string; label: string }[] = [
   { key: "query", label: "Database" },
   { key: "redis", label: "Redis" },
   { key: "mongo", label: "MongoDB" },
+  { key: "kafka", label: "Kafka" },
 ];
 
 const builtinTabKeys = new Set(builtinTabs.map((t) => t.key));
@@ -523,7 +524,9 @@ export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initia
                 ) : (
                   <div className="grid grid-cols-2 gap-3">
                     <PolicyTagEditor
-                      label={t("asset.cmdPolicyAllowList")}
+                      label={t(
+                        editState.policyType === "kafka" ? "asset.kafkaPolicyAllowList" : "asset.cmdPolicyAllowList"
+                      )}
                       items={editState.policy.allow_list || []}
                       onAdd={
                         editState.readonly
@@ -540,11 +543,15 @@ export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initia
                                 (editState.policy.allow_list || []).filter((_, idx) => idx !== i)
                               )
                       }
-                      placeholder={t("asset.cmdPolicyPlaceholder")}
+                      placeholder={t(
+                        editState.policyType === "kafka" ? "asset.kafkaPolicyPlaceholder" : "asset.cmdPolicyPlaceholder"
+                      )}
                       variant="allow"
                     />
                     <PolicyTagEditor
-                      label={t("asset.cmdPolicyDenyList")}
+                      label={t(
+                        editState.policyType === "kafka" ? "asset.kafkaPolicyDenyList" : "asset.cmdPolicyDenyList"
+                      )}
                       items={editState.policy.deny_list || []}
                       onAdd={
                         editState.readonly
@@ -561,7 +568,9 @@ export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initia
                                 (editState.policy.deny_list || []).filter((_, idx) => idx !== i)
                               )
                       }
-                      placeholder={t("asset.cmdPolicyPlaceholder")}
+                      placeholder={t(
+                        editState.policyType === "kafka" ? "asset.kafkaPolicyPlaceholder" : "asset.cmdPolicyPlaceholder"
+                      )}
                       variant="deny"
                     />
                   </div>

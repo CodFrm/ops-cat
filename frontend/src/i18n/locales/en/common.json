@@ -26,6 +26,7 @@
     "ssh": "SSH",
     "redis": "Redis",
     "mongodb": "MongoDB",
+    "kafka": "Kafka",
     "sshKeys": "Credentials",
     "settings": "Settings",
     "appearance": "Appearance",
@@ -211,6 +212,7 @@
     "typeDatabase": "Database",
     "typeRedis": "Redis",
     "typeMongoDB": "MongoDB",
+    "typeKafka": "Kafka",
     "driver": "Database Driver",
     "driverMySQL": "MySQL",
     "driverPostgreSQL": "PostgreSQL",
@@ -232,6 +234,18 @@
     "redisTlsCAFile": "CA Certificate Path",
     "redisTlsCertFile": "Client Certificate Path",
     "redisTlsKeyFile": "Client Key Path",
+    "kafkaBrokers": "Bootstrap Brokers",
+    "kafkaClientId": "Client ID",
+    "kafkaSaslMechanism": "SASL Mechanism",
+    "kafkaSaslNone": "Disabled",
+    "kafkaRequestTimeout": "Request Timeout (s)",
+    "kafkaMessagePreviewBytes": "Message Preview Bytes",
+    "kafkaMessageFetchLimit": "Message Fetch Limit",
+    "kafkaTlsInsecure": "Skip Certificate Verification",
+    "kafkaTlsServerName": "TLS Server Name",
+    "kafkaTlsCAFile": "CA Certificate Path",
+    "kafkaTlsCertFile": "Client Certificate Path",
+    "kafkaTlsKeyFile": "Client Key Path",
     "tls": "TLS Encryption",
     "queryPolicy": "SQL Policy",
     "queryPolicyAllowTypes": "Allowed Statement Types",
@@ -250,6 +264,11 @@
     "mongoPolicyDenyTypes": "Denied Operation Types",
     "mongoPolicyHint": "Uses default policy when not configured",
     "mongoPolicyPlaceholder": "Press Enter to add, comma-separated, e.g. find, aggregate",
+    "kafkaPolicy": "Kafka Operation Policy",
+    "kafkaPolicyAllowList": "Allow List (execute without confirmation)",
+    "kafkaPolicyDenyList": "Deny List (always reject)",
+    "kafkaPolicyHint": "Kafka operations not listed will require user confirmation",
+    "kafkaPolicyPlaceholder": "Add action/resource rules, e.g. topic.read orders-*",
     "mongoUri": "Connection URI",
     "mongoUriPlaceholder": "mongodb://user:pass@host:port",
     "mongoReplicaSet": "Replica Set",
@@ -264,6 +283,7 @@
     "policyTestSqlPlaceholder": "Type SQL to test, e.g. SELECT * FROM users",
     "policyTestRedisPlaceholder": "Type Redis command to test, e.g. GET user:1",
     "policyTestMongoPlaceholder": "Type MongoDB operation to test, e.g. find",
+    "policyTestKafkaPlaceholder": "Type Kafka operation to test, e.g. topic.read orders",
     "policyTestAllow": "Allowed",
     "policyTestDeny": "Denied",
     "policyTestConfirm": "Requires user confirmation",
@@ -296,7 +316,29 @@
         "sql-readonly": { "name": "SQL Read-Only", "desc": "Allow query-only SQL statements" },
         "sql-dangerous-deny": { "name": "SQL Dangerous Deny", "desc": "Deny dangerous SQL operations" },
         "redis-readonly": { "name": "Redis Read-Only", "desc": "Allow Redis read-only commands" },
-        "redis-dangerous-deny": { "name": "Redis Dangerous Deny", "desc": "Deny dangerous Redis commands" }
+        "redis-dangerous-deny": { "name": "Redis Dangerous Deny", "desc": "Deny dangerous Redis commands" },
+        "kafka-metadata-readonly": {
+          "name": "Kafka Metadata Read-Only",
+          "desc": "Allow cluster, broker, topic, and consumer group metadata reads"
+        },
+        "kafka-message-read": { "name": "Kafka Message Read", "desc": "Allow reading message payloads" },
+        "kafka-schema-readonly": {
+          "name": "Schema Registry Read-Only",
+          "desc": "Allow reading Schema Registry metadata and schemas"
+        },
+        "kafka-connect-readonly": {
+          "name": "Kafka Connect Read-Only",
+          "desc": "Allow reading connector status and configs"
+        },
+        "kafka-operator": {
+          "name": "Kafka Operator",
+          "desc": "Allow topic, partition, and consumer group offset management"
+        },
+        "kafka-security-admin": { "name": "Kafka Security Admin", "desc": "Allow Kafka ACL management" },
+        "kafka-dangerous-deny": {
+          "name": "Kafka Dangerous Deny",
+          "desc": "Deny destructive and security-sensitive Kafka operations"
+        }
       }
     }
   },

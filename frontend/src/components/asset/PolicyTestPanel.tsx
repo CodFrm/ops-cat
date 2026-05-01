@@ -25,6 +25,7 @@ const PLACEHOLDER_MAP: Record<string, string> = {
   redis: "asset.policyTestRedisPlaceholder",
   mongodb: "asset.policyTestMongoPlaceholder",
   mongo: "asset.policyTestMongoPlaceholder",
+  kafka: "asset.policyTestKafkaPlaceholder",
 };
 
 const RESULT_CONFIG = {

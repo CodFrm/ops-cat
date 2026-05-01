@@ -231,6 +231,8 @@ function TypeBadge({ type, compact }: { type: string; compact?: boolean }) {
     exec: Terminal,
     sql: Database,
     redis: Server,
+    mongo: Database,
+    kafka: Database,
     grant: Globe,
   };
   const Icon = icons[type] || Terminal;

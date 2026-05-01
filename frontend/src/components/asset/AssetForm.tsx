@@ -32,12 +32,14 @@ import {
   TestDatabaseConnection,
   TestRedisConnection,
   TestMongoDBConnection,
+  TestKafkaConnection,
 } from "../../../wailsjs/go/app/App";
 import { app } from "../../../wailsjs/go/models";
 import { SSHConfigSection } from "@/components/asset/SSHConfigSection";
 import { DatabaseConfigSection } from "@/components/asset/DatabaseConfigSection";
 import { RedisConfigSection } from "@/components/asset/RedisConfigSection";
 import { MongoDBConfigSection } from "@/components/asset/MongoDBConfigSection";
+import { KafkaConfigSection } from "@/components/asset/KafkaConfigSection";
 import { useExtensionStore } from "@/extension";
 import { ExtensionConfigForm } from "@/components/asset/ExtensionConfigForm";
 
@@ -117,7 +119,26 @@ interface MongoDBConfig {
   ssh_asset_id?: number;
 }
 
-type AssetType = "ssh" | "database" | "redis" | "mongodb" | (string & {});
+interface KafkaConfig {
+  brokers: string[];
+  client_id?: string;
+  sasl_mechanism?: string;
+  username?: string;
+  password?: string;
+  credential_id?: number;
+  tls?: boolean;
+  tls_insecure?: boolean;
+  tls_server_name?: string;
+  tls_ca_file?: string;
+  tls_cert_file?: string;
+  tls_key_file?: string;
+  request_timeout_seconds?: number;
+  message_preview_bytes?: number;
+  message_fetch_limit?: number;
+  ssh_asset_id?: number;
+}
+
+type AssetType = "ssh" | "database" | "redis" | "mongodb" | "kafka" | (string & {});
 
 const DEFAULT_PORTS: Record<string, number> = {
   ssh: 22,
@@ -125,6 +146,7 @@ const DEFAULT_PORTS: Record<string, number> = {
   postgresql: 5432,
   redis: 6379,
   mongodb: 27017,
+  kafka: 9092,
 };
 
 const DEFAULT_ICONS: Record<string, string> = {
@@ -133,6 +155,7 @@ const DEFAULT_ICONS: Record<string, string> = {
   postgresql: "postgresql",
   redis: "redis",
   mongodb: "mongodb",
+  kafka: "kafka",
 };
 
 export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }: AssetFormProps) {
@@ -214,6 +237,19 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   const [replicaSet, setReplicaSet] = useState("");
   const [authSource, setAuthSource] = useState("");
 
+  // Kafka fields
+  const [kafkaBrokersText, setKafkaBrokersText] = useState("");
+  const [kafkaClientId, setKafkaClientId] = useState("opskat");
+  const [kafkaSaslMechanism, setKafkaSaslMechanism] = useState("none");
+  const [kafkaTlsInsecure, setKafkaTlsInsecure] = useState(false);
+  const [kafkaTlsServerName, setKafkaTlsServerName] = useState("");
+  const [kafkaTlsCAFile, setKafkaTlsCAFile] = useState("");
+  const [kafkaTlsCertFile, setKafkaTlsCertFile] = useState("");
+  const [kafkaTlsKeyFile, setKafkaTlsKeyFile] = useState("");
+  const [kafkaRequestTimeoutSeconds, setKafkaRequestTimeoutSeconds] = useState(30);
+  const [kafkaMessagePreviewBytes, setKafkaMessagePreviewBytes] = useState(4096);
+  const [kafkaMessageFetchLimit, setKafkaMessageFetchLimit] = useState(50);
+
   // Extension config
   const [extConfig, setExtConfig] = useState<Record<string, unknown>>({});
 
@@ -258,6 +294,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
           loadRedisConfig(editAsset);
         } else if (editType === "mongodb") {
           loadMongoDBConfig(editAsset);
+        } else if (editType === "kafka") {
+          loadKafkaConfig(editAsset);
         } else {
           // Extension type: load decrypted config
           const extInfo = useExtensionStore.getState().getExtensionForAssetType(editType);
@@ -280,6 +318,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         resetDatabaseFields();
         resetRedisFields();
         resetMongoDBFields();
+        resetKafkaFields();
         setExtConfig({});
       }
     }
@@ -439,6 +478,41 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     }
   };
 
+  const loadKafkaConfig = (asset: asset_entity.Asset) => {
+    try {
+      const cfg: KafkaConfig = JSON.parse(asset.Config || "{}");
+      setKafkaBrokersText((cfg.brokers || []).join("\n"));
+      setKafkaClientId(cfg.client_id || "opskat");
+      setKafkaSaslMechanism(cfg.sasl_mechanism || "none");
+      setUsername(cfg.username || "");
+      setTls(cfg.tls || false);
+      setKafkaTlsInsecure(cfg.tls_insecure || false);
+      setKafkaTlsServerName(cfg.tls_server_name || "");
+      setKafkaTlsCAFile(cfg.tls_ca_file || "");
+      setKafkaTlsCertFile(cfg.tls_cert_file || "");
+      setKafkaTlsKeyFile(cfg.tls_key_file || "");
+      setKafkaRequestTimeoutSeconds(cfg.request_timeout_seconds || 30);
+      setKafkaMessagePreviewBytes(cfg.message_preview_bytes || 4096);
+      setKafkaMessageFetchLimit(cfg.message_fetch_limit || 50);
+      setSshTunnelId(asset.sshTunnelId || cfg.ssh_asset_id || 0);
+
+      if (cfg.credential_id) {
+        setPasswordSource("managed");
+        setPasswordCredentialId(cfg.credential_id);
+        setEncryptedPassword("");
+        setPassword("");
+      } else {
+        setPasswordSource("inline");
+        setPasswordCredentialId(0);
+        setEncryptedPassword(cfg.password || "");
+        setPassword("");
+      }
+    } catch {
+      resetSharedFields("kafka");
+      resetKafkaFields();
+    }
+  };
+
   // Reset shared connection fields with type-appropriate defaults
   const resetSharedFields = (type: AssetType, dbDriver = "mysql") => {
     setHost("");
@@ -506,6 +580,22 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setTls(false);
   };
 
+  const resetKafkaFields = () => {
+    setKafkaBrokersText("");
+    setKafkaClientId("opskat");
+    setKafkaSaslMechanism("none");
+    setTls(false);
+    setKafkaTlsInsecure(false);
+    setKafkaTlsServerName("");
+    setKafkaTlsCAFile("");
+    setKafkaTlsCertFile("");
+    setKafkaTlsKeyFile("");
+    setKafkaRequestTimeoutSeconds(30);
+    setKafkaMessagePreviewBytes(4096);
+    setKafkaMessageFetchLimit(50);
+    setSshTunnelId(0);
+  };
+
   const handleTypeChange = (newType: AssetType) => {
     if (newType === assetType) return;
     setAssetType(newType);
@@ -539,6 +629,36 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     } else if (!password && encryptedPassword) {
       cfg.password = encryptedPassword;
     }
+    return cfg;
+  };
+
+  const kafkaBrokers = () =>
+    kafkaBrokersText
+      .split(/[\n,]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+  const buildKafkaConfig = (): KafkaConfig => {
+    const cfg: KafkaConfig = {
+      brokers: kafkaBrokers(),
+    };
+    if (kafkaClientId.trim()) cfg.client_id = kafkaClientId.trim();
+    if (kafkaSaslMechanism && kafkaSaslMechanism !== "none") {
+      cfg.sasl_mechanism = kafkaSaslMechanism;
+      if (username) cfg.username = username;
+    } else {
+      cfg.sasl_mechanism = "none";
+    }
+    if (tls) cfg.tls = true;
+    if (tls && kafkaTlsInsecure) cfg.tls_insecure = true;
+    if (tls && kafkaTlsServerName) cfg.tls_server_name = kafkaTlsServerName;
+    if (tls && kafkaTlsCAFile) cfg.tls_ca_file = kafkaTlsCAFile;
+    if (tls && kafkaTlsCertFile) cfg.tls_cert_file = kafkaTlsCertFile;
+    if (tls && kafkaTlsKeyFile) cfg.tls_key_file = kafkaTlsKeyFile;
+    if (kafkaRequestTimeoutSeconds > 0) cfg.request_timeout_seconds = kafkaRequestTimeoutSeconds;
+    if (kafkaMessagePreviewBytes > 0) cfg.message_preview_bytes = kafkaMessagePreviewBytes;
+    if (kafkaMessageFetchLimit > 0) cfg.message_fetch_limit = kafkaMessageFetchLimit;
+    if (sshTunnelId > 0) cfg.ssh_asset_id = sshTunnelId;
     return cfg;
   };
 
@@ -649,6 +769,22 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setTesting(true);
     try {
       await TestMongoDBConnection(JSON.stringify(cfg), password);
+      toast.success(t("asset.testConnectionSuccess"));
+    } catch (e) {
+      toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleTestKafkaConnection = async () => {
+    const cfg = buildKafkaConfig();
+    if (kafkaSaslMechanism !== "none") {
+      applyTestPasswordSource(cfg);
+    }
+    setTesting(true);
+    try {
+      await TestKafkaConnection(JSON.stringify(cfg), password);
       toast.success(t("asset.testConnectionSuccess"));
     } catch (e) {
       toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
@@ -796,6 +932,18 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       if (database) mongoConfig.database = database;
       if (tls) mongoConfig.tls = true;
       config = JSON.stringify(mongoConfig);
+    } else if (assetType === "kafka") {
+      const kafkaConfig = buildKafkaConfig();
+      if (kafkaSaslMechanism !== "none") {
+        if (passwordSource === "managed" && passwordCredentialId > 0) {
+          kafkaConfig.credential_id = passwordCredentialId;
+        } else {
+          const encrypted = await encryptPasswordValue();
+          if (encrypted === undefined) return;
+          if (encrypted) kafkaConfig.password = encrypted;
+        }
+      }
+      config = JSON.stringify(kafkaConfig);
     } else {
       // Extension type: encrypt password fields from configSchema before saving
       const extInfo = useExtensionStore.getState().getExtensionForAssetType(assetType);
@@ -858,10 +1006,12 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
           ? t("asset.typeRedis")
           : assetType === "mongodb"
             ? t("asset.typeMongoDB")
-            : (() => {
-                const found = availableTypes.find((at) => at.type === assetType);
-                return found ? resolveExtDisplayName(found) : assetType;
-              })();
+            : assetType === "kafka"
+              ? t("asset.typeKafka")
+              : (() => {
+                  const found = availableTypes.find((at) => at.type === assetType);
+                  return found ? resolveExtDisplayName(found) : assetType;
+                })();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -885,6 +1035,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                   <SelectItem value="database">{t("asset.typeDatabase")}</SelectItem>
                   <SelectItem value="redis">{t("asset.typeRedis")}</SelectItem>
                   <SelectItem value="mongodb">{t("asset.typeMongoDB")}</SelectItem>
+                  <SelectItem value="kafka">{t("asset.typeKafka")}</SelectItem>
                   {availableTypes
                     .filter((at) => !!at.extensionName)
                     .map((at) => (
@@ -912,7 +1063,9 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                       ? "cache-01"
                       : assetType === "mongodb"
                         ? "mongo-01"
-                        : `my-${assetType}`
+                        : assetType === "kafka"
+                          ? "kafka-prod"
+                          : `my-${assetType}`
               }
             />
           </div>
@@ -1099,11 +1252,54 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             />
           )}
 
+          {assetType === "kafka" && (
+            <KafkaConfigSection
+              brokersText={kafkaBrokersText}
+              setBrokersText={setKafkaBrokersText}
+              clientId={kafkaClientId}
+              setClientId={setKafkaClientId}
+              saslMechanism={kafkaSaslMechanism}
+              setSaslMechanism={setKafkaSaslMechanism}
+              username={username}
+              setUsername={setUsername}
+              tls={tls}
+              setTls={setTls}
+              tlsInsecure={kafkaTlsInsecure}
+              setTlsInsecure={setKafkaTlsInsecure}
+              tlsServerName={kafkaTlsServerName}
+              setTlsServerName={setKafkaTlsServerName}
+              tlsCAFile={kafkaTlsCAFile}
+              setTlsCAFile={setKafkaTlsCAFile}
+              tlsCertFile={kafkaTlsCertFile}
+              setTlsCertFile={setKafkaTlsCertFile}
+              tlsKeyFile={kafkaTlsKeyFile}
+              setTlsKeyFile={setKafkaTlsKeyFile}
+              requestTimeoutSeconds={kafkaRequestTimeoutSeconds}
+              setRequestTimeoutSeconds={setKafkaRequestTimeoutSeconds}
+              messagePreviewBytes={kafkaMessagePreviewBytes}
+              setMessagePreviewBytes={setKafkaMessagePreviewBytes}
+              messageFetchLimit={kafkaMessageFetchLimit}
+              setMessageFetchLimit={setKafkaMessageFetchLimit}
+              sshTunnelId={sshTunnelId}
+              setSshTunnelId={setSshTunnelId}
+              password={password}
+              setPassword={setPassword}
+              encryptedPassword={encryptedPassword}
+              passwordSource={passwordSource}
+              setPasswordSource={setPasswordSource}
+              passwordCredentialId={passwordCredentialId}
+              setPasswordCredentialId={setPasswordCredentialId}
+              managedPasswords={managedPasswords}
+              editAssetId={editAsset?.ID}
+            />
+          )}
+
           {/* Extension type config */}
           {assetType !== "ssh" &&
             assetType !== "database" &&
             assetType !== "redis" &&
             assetType !== "mongodb" &&
+            assetType !== "kafka" &&
             (() => {
               const extInfo = useExtensionStore.getState().getExtensionForAssetType(assetType);
               if (!extInfo) return null;
@@ -1121,7 +1317,11 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             })()}
 
           {/* Test Connection */}
-          {(assetType === "ssh" || assetType === "database" || assetType === "redis" || assetType === "mongodb") && (
+          {(assetType === "ssh" ||
+            assetType === "database" ||
+            assetType === "redis" ||
+            assetType === "mongodb" ||
+            assetType === "kafka") && (
             <Button
               type="button"
               variant="outline"
@@ -1133,10 +1333,19 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                     ? handleTestDatabaseConnection
                     : assetType === "mongodb"
                       ? handleTestMongoDBConnection
-                      : handleTestRedisConnection
+                      : assetType === "kafka"
+                        ? handleTestKafkaConnection
+                        : handleTestRedisConnection
               }
               disabled={
-                testing || (assetType !== "mongodb" ? !host : mongoConnectionMode === "uri" ? !connectionURI : !host)
+                testing ||
+                (assetType === "kafka"
+                  ? kafkaBrokers().length === 0
+                  : assetType !== "mongodb"
+                    ? !host
+                    : mongoConnectionMode === "uri"
+                      ? !connectionURI
+                      : !host)
               }
               className="gap-1 w-fit"
             >
@@ -1168,7 +1377,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
               !name ||
               (["ssh", "database", "redis"].includes(assetType) && !host) ||
               (assetType === "mongodb" && mongoConnectionMode === "manual" && !host) ||
-              (assetType === "mongodb" && mongoConnectionMode === "uri" && !connectionURI)
+              (assetType === "mongodb" && mongoConnectionMode === "uri" && !connectionURI) ||
+              (assetType === "kafka" && kafkaBrokers().length === 0)
             }
           >
             {t("action.save")}
