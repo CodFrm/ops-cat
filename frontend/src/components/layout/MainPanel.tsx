@@ -44,6 +44,7 @@ const DatabasePanel = lazy(() =>
 );
 const RedisPanel = lazy(() => import("@/components/query/RedisPanel").then((m) => ({ default: m.RedisPanel })));
 const MongoDBPanel = lazy(() => import("@/components/query/MongoDBPanel").then((m) => ({ default: m.MongoDBPanel })));
+const KafkaPanel = lazy(() => import("@/components/query/KafkaPanel").then((m) => ({ default: m.KafkaPanel })));
 
 interface MainPanelProps {
   onEditAsset: (asset: asset_entity.Asset) => void;
@@ -307,6 +308,8 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset, commandO
                   <DatabasePanel tabId={tab.id} />
                 ) : meta.assetType === "redis" ? (
                   <RedisPanel tabId={tab.id} />
+                ) : meta.assetType === "kafka" ? (
+                  <KafkaPanel tabId={tab.id} />
                 ) : (
                   <MongoDBPanel tabId={tab.id} />
                 )}

@@ -18,7 +18,7 @@ export interface QueryTab {
   assetId: number;
   assetName: string;
   assetIcon: string;
-  assetType: "database" | "redis" | "mongodb";
+  assetType: "database" | "redis" | "mongodb" | "kafka";
   driver?: string; // "mysql" | "postgresql"
   defaultDatabase?: string;
   redisDatabase?: number;
@@ -349,7 +349,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
         assetId: asset.ID,
         assetName: asset.Name,
         assetIcon: asset.Icon || "",
-        assetType: asset.Type as "database" | "redis" | "mongodb",
+        assetType: asset.Type as "database" | "redis" | "mongodb" | "kafka",
         driver,
         defaultDatabase,
         redisDatabase,
@@ -377,7 +377,7 @@ export const useQueryStore = create<QueryState>((set, get) => ({
           get().updateMongoInnerTab(tabId, innerId, { queryText: opts.initialMongo });
         }
       }
-    } else {
+    } else if (asset.Type === "redis") {
       set((s) => ({
         redisStates: { ...s.redisStates, [tabId]: defaultRedisState({ database: redisDatabase }) },
       }));
@@ -1271,7 +1271,7 @@ registerTabRestoreHook("query", (tabs) => {
       } else {
         mongoStates[tab.id] = defaultMongoState();
       }
-    } else {
+    } else if (m.assetType === "redis") {
       redisStates[tab.id] = defaultRedisState({ database: m.redisDatabase });
     }
   }

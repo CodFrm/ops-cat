@@ -5,7 +5,7 @@ import { KafkaDetailInfoCard } from "@/components/asset/detail/KafkaDetailInfoCa
 registerAssetType({
   type: "kafka",
   icon: KafkaIcon,
-  canConnect: false,
+  canConnect: true,
   canConnectInNewTab: false,
   connectAction: "query",
   DetailInfoCard: KafkaDetailInfoCard,

@@ -26,7 +26,7 @@ export interface QueryTabMeta {
   assetId: number;
   assetName: string;
   assetIcon: string;
-  assetType: "database" | "redis" | "mongodb";
+  assetType: "database" | "redis" | "mongodb" | "kafka";
   driver?: string;
   defaultDatabase?: string;
   redisDatabase?: number;
@@ -370,7 +370,7 @@ function _migrateOldKeys(): SavedTabStore | null {
             assetId: number;
             assetName: string;
             assetIcon: string;
-            assetType: "database" | "redis" | "mongodb";
+            assetType: "database" | "redis" | "mongodb" | "kafka";
             driver?: string;
             defaultDatabase?: string;
           }) => {
