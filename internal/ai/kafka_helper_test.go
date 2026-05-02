@@ -59,6 +59,18 @@ func TestKafkaToolCommandMapping(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "consumer_group.delete billing-worker", cmd)
 
+	cmd, err = kafkaACLCommand("list")
+	require.NoError(t, err)
+	assert.Equal(t, "acl.read *", cmd)
+
+	cmd, err = kafkaACLCommand("create")
+	require.NoError(t, err)
+	assert.Equal(t, "acl.write *", cmd)
+
+	cmd, err = kafkaACLCommand("delete")
+	require.NoError(t, err)
+	assert.Equal(t, "acl.write *", cmd)
+
 	cmd, err = kafkaMessageCommand("browse", "orders")
 	require.NoError(t, err)
 	assert.Equal(t, "message.read orders", cmd)
@@ -79,6 +91,9 @@ func TestKafkaToolCommandMapping(t *testing.T) {
 
 	_, err = kafkaMessageCommand("delete", "orders")
 	assert.Error(t, err)
+
+	_, err = kafkaACLCommand("grant")
+	assert.Error(t, err)
 }
 
 func TestAllToolDefsContainsGroupedKafkaTools(t *testing.T) {
@@ -90,6 +105,7 @@ func TestAllToolDefsContainsGroupedKafkaTools(t *testing.T) {
 	assert.Contains(t, tools, "kafka_cluster")
 	assert.Contains(t, tools, "kafka_topic")
 	assert.Contains(t, tools, "kafka_consumer_group")
+	assert.Contains(t, tools, "kafka_acl")
 	assert.Contains(t, tools, "kafka_message")
 	assert.NotContains(t, tools, "kafka_topic_delete")
 
@@ -110,6 +126,11 @@ func TestAllToolDefsContainsGroupedKafkaTools(t *testing.T) {
 		"group":     "billing-worker",
 	})
 	assert.Equal(t, "consumer_group.offset.write billing-worker", cmd)
+
+	cmd = tools["kafka_acl"].CommandExtractor(map[string]any{
+		"operation": "create",
+	})
+	assert.Equal(t, "acl.write *", cmd)
 }
 
 func TestKafkaMessageArgs(t *testing.T) {
@@ -192,6 +213,47 @@ func TestKafkaConsumerGroupAdminArgs(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestKafkaACLArgs(t *testing.T) {
+	listReq := kafkaListACLsRequestFromArgs(7, map[string]any{
+		"resource_type": "topic",
+		"resource_name": "orders",
+		"pattern_type":  "match",
+		"principal":     "User:alice",
+		"host":          "*",
+		"acl_operation": "read",
+		"permission":    "allow",
+		"page":          float64(2),
+		"page_size":     float64(10),
+	})
+	assert.Equal(t, int64(7), listReq.AssetID)
+	assert.Equal(t, "topic", listReq.ResourceType)
+	assert.Equal(t, "orders", listReq.ResourceName)
+	assert.Equal(t, "read", listReq.Operation)
+	assert.Equal(t, 2, listReq.Page)
+	assert.Equal(t, 10, listReq.PageSize)
+
+	createReq := kafkaCreateACLRequestFromArgs(7, map[string]any{
+		"resource_type": "group",
+		"resource_name": "billing",
+		"principal":     "User:alice",
+		"host":          "*",
+		"acl_operation": "read",
+		"permission":    "deny",
+	})
+	assert.Equal(t, "group", createReq.ResourceType)
+	assert.Equal(t, "deny", createReq.Permission)
+
+	deleteReq := kafkaDeleteACLRequestFromArgs(7, map[string]any{
+		"resource_type": "cluster",
+		"principal":     "User:admin",
+		"host":          "*",
+		"acl_operation": "describe",
+		"permission":    "allow",
+	})
+	assert.Equal(t, "cluster", deleteReq.ResourceType)
+	assert.Equal(t, "describe", deleteReq.Operation)
+}
+
 func TestKafkaMessagePermissionStopsBeforeConnection(t *testing.T) {
 	ctx, mockAsset, _ := setupPolicyTest(t)
 	asset := &asset_entity.Asset{
@@ -210,6 +272,33 @@ func TestKafkaMessagePermissionStopsBeforeConnection(t *testing.T) {
 		"operation": "produce",
 		"topic":     "orders",
 		"value":     "hello",
+	})
+	require.NoError(t, err)
+	assert.Contains(t, result, "Kafka")
+}
+
+func TestKafkaACLPermissionStopsBeforeConnection(t *testing.T) {
+	ctx, mockAsset, _ := setupPolicyTest(t)
+	asset := &asset_entity.Asset{
+		ID:   1,
+		Name: "kafka-prod",
+		Type: asset_entity.AssetTypeKafka,
+		CmdPolicy: mustJSON(asset_entity.KafkaPolicy{
+			DenyList: []string{"acl.write *"},
+		}),
+	}
+	mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+	ctx = WithPolicyChecker(ctx, NewCommandPolicyChecker(nil))
+	result, err := handleKafkaACL(ctx, map[string]any{
+		"asset_id":      float64(1),
+		"operation":     "create",
+		"resource_type": "topic",
+		"resource_name": "orders",
+		"principal":     "User:alice",
+		"host":          "*",
+		"acl_operation": "read",
+		"permission":    "allow",
 	})
 	require.NoError(t, err)
 	assert.Contains(t, result, "Kafka")

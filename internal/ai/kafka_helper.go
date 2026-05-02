@@ -266,6 +266,47 @@ func handleKafkaConsumerGroup(ctx context.Context, args map[string]any) (string,
 	}
 }
 
+func handleKafkaACL(ctx context.Context, args map[string]any) (string, error) {
+	assetID := argInt64(args, "asset_id")
+	operation := normalizeKafkaOperation(argString(args, "operation"), "list")
+	if assetID == 0 {
+		return "", fmt.Errorf("missing required parameter: asset_id")
+	}
+	command, err := kafkaACLCommand(operation)
+	if err != nil {
+		return "", err
+	}
+	if result, ok := checkKafkaToolPermission(ctx, assetID, command); !ok {
+		return result.Message, nil
+	}
+
+	svc := kafka_svc.New(getSSHPool(ctx))
+	defer svc.Close()
+
+	switch operation {
+	case "list":
+		result, err := svc.ListACLs(ctx, kafkaListACLsRequestFromArgs(assetID, args))
+		if err != nil {
+			return "", err
+		}
+		return marshalKafkaResult(result)
+	case "create":
+		result, err := svc.CreateACL(ctx, kafkaCreateACLRequestFromArgs(assetID, args))
+		if err != nil {
+			return "", err
+		}
+		return marshalKafkaResult(result)
+	case "delete":
+		result, err := svc.DeleteACL(ctx, kafkaDeleteACLRequestFromArgs(assetID, args))
+		if err != nil {
+			return "", err
+		}
+		return marshalKafkaResult(result)
+	default:
+		return "", fmt.Errorf("unsupported kafka_acl operation: %s", operation)
+	}
+}
+
 func handleKafkaMessage(ctx context.Context, args map[string]any) (string, error) {
 	assetID := argInt64(args, "asset_id")
 	operation := normalizeKafkaOperation(argString(args, "operation"), "browse")
@@ -562,6 +603,58 @@ func kafkaInt32SliceFromJSON(raw string) ([]int32, error) {
 		return nil, fmt.Errorf("partitions must be a JSON array of integers: %w", err)
 	}
 	return values, nil
+}
+
+func kafkaACLCommand(operation string) (string, error) {
+	switch operation {
+	case "list":
+		return "acl.read *", nil
+	case "create", "delete":
+		return "acl.write *", nil
+	default:
+		return "", fmt.Errorf("unsupported kafka_acl operation: %s", operation)
+	}
+}
+
+func kafkaListACLsRequestFromArgs(assetID int64, args map[string]any) kafka_svc.ListACLsRequest {
+	return kafka_svc.ListACLsRequest{
+		AssetID:      assetID,
+		ResourceType: argString(args, "resource_type"),
+		ResourceName: argString(args, "resource_name"),
+		PatternType:  argString(args, "pattern_type"),
+		Principal:    argString(args, "principal"),
+		Host:         argString(args, "host"),
+		Operation:    argString(args, "acl_operation"),
+		Permission:   argString(args, "permission"),
+		Page:         argInt(args, "page"),
+		PageSize:     argInt(args, "page_size"),
+	}
+}
+
+func kafkaCreateACLRequestFromArgs(assetID int64, args map[string]any) kafka_svc.CreateACLRequest {
+	return kafka_svc.CreateACLRequest{
+		AssetID:      assetID,
+		ResourceType: argString(args, "resource_type"),
+		ResourceName: argString(args, "resource_name"),
+		PatternType:  argString(args, "pattern_type"),
+		Principal:    argString(args, "principal"),
+		Host:         argString(args, "host"),
+		Operation:    argString(args, "acl_operation"),
+		Permission:   argString(args, "permission"),
+	}
+}
+
+func kafkaDeleteACLRequestFromArgs(assetID int64, args map[string]any) kafka_svc.DeleteACLRequest {
+	return kafka_svc.DeleteACLRequest{
+		AssetID:      assetID,
+		ResourceType: argString(args, "resource_type"),
+		ResourceName: argString(args, "resource_name"),
+		PatternType:  argString(args, "pattern_type"),
+		Principal:    argString(args, "principal"),
+		Host:         argString(args, "host"),
+		Operation:    argString(args, "acl_operation"),
+		Permission:   argString(args, "permission"),
+	}
 }
 
 func kafkaMessageCommand(operation, topic string) (string, error) {

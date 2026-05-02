@@ -274,6 +274,28 @@ func AllToolDefs() []ToolDef {
 			},
 		},
 		{
+			Name:        "kafka_acl",
+			Description: "Read and manage Kafka ACLs for a Kafka asset. Grouped operations: list, create, delete. ACL create/delete are security-admin operations and require explicit policy approval.",
+			Params: []ParamDef{
+				{Name: "asset_id", Type: ParamNumber, Description: "Kafka asset ID. Use list_assets with asset_type='kafka' to find.", Required: true},
+				{Name: "operation", Type: ParamString, Description: "Operation: list, create, delete. Defaults to list."},
+				{Name: "resource_type", Type: ParamString, Description: "ACL resource type: topic, group, cluster, transactional_id, delegation_token, or any for list only."},
+				{Name: "resource_name", Type: ParamString, Description: "ACL resource name. Required for create/delete except resource_type=cluster."},
+				{Name: "pattern_type", Type: ParamString, Description: "ACL pattern type: literal, prefixed, match, any. create/delete only allow literal or prefixed."},
+				{Name: "principal", Type: ParamString, Description: "ACL principal, e.g. User:alice. Required for create/delete."},
+				{Name: "host", Type: ParamString, Description: "ACL host, e.g. * or 192.168.1.10. Required for delete; create defaults to * when omitted."},
+				{Name: "acl_operation", Type: ParamString, Description: "Kafka ACL operation: read, write, create, delete, alter, describe, describe_configs, alter_configs, all, etc."},
+				{Name: "permission", Type: ParamString, Description: "ACL permission: allow, deny, or any for list only."},
+				{Name: "page", Type: ParamNumber, Description: "Page number for operation=list. Defaults to 1."},
+				{Name: "page_size", Type: ParamNumber, Description: "Page size for operation=list. Defaults to 50, max 500."},
+			},
+			Handler: handleKafkaACL,
+			CommandExtractor: func(args map[string]any) string {
+				cmd, _ := kafkaACLCommand(normalizeKafkaOperation(argString(args, "operation"), "list"))
+				return cmd
+			},
+		},
+		{
 			Name:        "kafka_message",
 			Description: "Browse or produce bounded Kafka messages for a Kafka asset. Grouped operations: browse, inspect, produce. Message reads and writes are policy-controlled; returned payload previews are truncated.",
 			Params: []ParamDef{
