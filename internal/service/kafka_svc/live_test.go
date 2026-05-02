@@ -207,6 +207,100 @@ func TestKafkaLiveTopicAndConsumerGroupAdmin(t *testing.T) {
 	assert.Equal(t, topic, deletedTopic.Topic)
 }
 
+func TestKafkaLiveACLAdmin(t *testing.T) {
+	brokersText := strings.TrimSpace(os.Getenv("OPSKAT_KAFKA_TEST_BROKERS"))
+	if brokersText == "" {
+		t.Skip("set OPSKAT_KAFKA_TEST_BROKERS to run live Kafka ACL test")
+	}
+
+	ctx := context.Background()
+	cfg := &asset_entity.KafkaConfig{
+		Brokers:               splitBrokers(brokersText),
+		SASLMechanism:         asset_entity.KafkaSASLNone,
+		RequestTimeoutSeconds: 5,
+	}
+	asset := &asset_entity.Asset{ID: 9003, Name: "live-kafka-acl", Type: asset_entity.AssetTypeKafka}
+	require.NoError(t, asset.SetKafkaConfig(cfg))
+
+	mockCtrl := gomock.NewController(t)
+	t.Cleanup(mockCtrl.Finish)
+	mockRepo := mock_asset_repo.NewMockAssetRepo(mockCtrl)
+	mockRepo.EXPECT().Find(gomock.Any(), int64(9003)).Return(asset, nil).AnyTimes()
+	origRepo := asset_repo.Asset()
+	asset_repo.RegisterAsset(mockRepo)
+	t.Cleanup(func() {
+		if origRepo != nil {
+			asset_repo.RegisterAsset(origRepo)
+		}
+	})
+
+	svc := New(nil)
+	defer svc.Close()
+
+	_, err := svc.ListACLs(ctx, ListACLsRequest{AssetID: asset.ID, PageSize: 10})
+	if err != nil {
+		skipIfKafkaACLUnavailable(t, err)
+		require.NoError(t, err)
+	}
+
+	topic := fmt.Sprintf("opskat-acl-%d", time.Now().UnixNano())
+	principal := "User:opskat-live"
+	created, err := svc.CreateACL(ctx, CreateACLRequest{
+		AssetID:      asset.ID,
+		ResourceType: "topic",
+		ResourceName: topic,
+		PatternType:  "literal",
+		Principal:    principal,
+		Host:         "*",
+		Operation:    "read",
+		Permission:   "allow",
+	})
+	if err != nil {
+		skipIfKafkaACLUnavailable(t, err)
+		require.NoError(t, err)
+	}
+	require.GreaterOrEqual(t, created.Count, 1)
+	t.Cleanup(func() {
+		_, _ = svc.DeleteACL(context.Background(), DeleteACLRequest{
+			AssetID:      asset.ID,
+			ResourceType: "topic",
+			ResourceName: topic,
+			PatternType:  "literal",
+			Principal:    principal,
+			Host:         "*",
+			Operation:    "read",
+			Permission:   "allow",
+		})
+	})
+
+	listed, err := svc.ListACLs(ctx, ListACLsRequest{
+		AssetID:      asset.ID,
+		ResourceType: "topic",
+		ResourceName: topic,
+		Principal:    principal,
+		Host:         "*",
+		Operation:    "read",
+		Permission:   "allow",
+		PageSize:     10,
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, listed.ACLs)
+	assert.Equal(t, principal, listed.ACLs[0].Principal)
+
+	deleted, err := svc.DeleteACL(ctx, DeleteACLRequest{
+		AssetID:      asset.ID,
+		ResourceType: "topic",
+		ResourceName: topic,
+		PatternType:  "literal",
+		Principal:    principal,
+		Host:         "*",
+		Operation:    "read",
+		Permission:   "allow",
+	})
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, deleted.Count, 1)
+}
+
 func splitBrokers(value string) []string {
 	parts := strings.Split(value, ",")
 	out := make([]string, 0, len(parts))
@@ -217,4 +311,21 @@ func splitBrokers(value string) []string {
 		}
 	}
 	return out
+}
+
+func skipIfKafkaACLUnavailable(t *testing.T, err error) {
+	t.Helper()
+	text := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"security_disabled",
+		"securitydisabled",
+		"security disabled",
+		"authorization failed",
+		"not authorized",
+		"unsupported version",
+	} {
+		if strings.Contains(text, marker) {
+			t.Skipf("Kafka ACL admin is unavailable in this live cluster: %v", err)
+		}
+	}
 }
