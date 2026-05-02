@@ -120,3 +120,39 @@ func (a *App) KafkaRegisterSchema(req kafka_svc.RegisterSchemaRequest) (kafka_sv
 func (a *App) KafkaDeleteSchema(req kafka_svc.DeleteSchemaRequest) (kafka_svc.DeleteSchemaResponse, error) {
 	return a.kafkaSvc().DeleteSchema(a.langCtx(), req)
 }
+
+func (a *App) KafkaListConnectClusters(assetID int64) ([]kafka_svc.KafkaConnectCluster, error) {
+	return a.kafkaSvc().ListConnectClusters(a.langCtx(), assetID)
+}
+
+func (a *App) KafkaListConnectors(req kafka_svc.ListConnectorsRequest) ([]kafka_svc.KafkaConnectorSummary, error) {
+	return a.kafkaSvc().ListConnectors(a.langCtx(), req)
+}
+
+func (a *App) KafkaGetConnector(assetID int64, cluster string, name string) (kafka_svc.KafkaConnectorDetail, error) {
+	return a.kafkaSvc().GetConnector(a.langCtx(), assetID, cluster, name)
+}
+
+func (a *App) KafkaCreateConnector(req kafka_svc.ConnectorConfigRequest) (kafka_svc.ConnectorOperationResponse, error) {
+	return a.kafkaSvc().CreateConnector(a.langCtx(), req)
+}
+
+func (a *App) KafkaUpdateConnectorConfig(req kafka_svc.ConnectorConfigRequest) (kafka_svc.ConnectorOperationResponse, error) {
+	return a.kafkaSvc().UpdateConnectorConfig(a.langCtx(), req)
+}
+
+func (a *App) KafkaPauseConnector(assetID int64, cluster string, name string) (kafka_svc.ConnectorOperationResponse, error) {
+	return a.kafkaSvc().PauseConnector(a.langCtx(), assetID, cluster, name)
+}
+
+func (a *App) KafkaResumeConnector(assetID int64, cluster string, name string) (kafka_svc.ConnectorOperationResponse, error) {
+	return a.kafkaSvc().ResumeConnector(a.langCtx(), assetID, cluster, name)
+}
+
+func (a *App) KafkaRestartConnector(req kafka_svc.RestartConnectorRequest) (kafka_svc.ConnectorOperationResponse, error) {
+	return a.kafkaSvc().RestartConnector(a.langCtx(), req)
+}
+
+func (a *App) KafkaDeleteConnector(assetID int64, cluster string, name string) (kafka_svc.ConnectorOperationResponse, error) {
+	return a.kafkaSvc().DeleteConnector(a.langCtx(), assetID, cluster, name)
+}

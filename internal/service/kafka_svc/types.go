@@ -305,6 +305,74 @@ type DeleteSchemaResponse struct {
 	DeletedVersion int    `json:"deletedVersion,omitempty"`
 }
 
+type KafkaConnectCluster struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+type ListConnectorsRequest struct {
+	AssetID int64  `json:"assetId"`
+	Cluster string `json:"cluster,omitempty"`
+}
+
+type KafkaConnectorSummary struct {
+	Name string `json:"name"`
+}
+
+type KafkaConnectorDetail struct {
+	Name   string                 `json:"name"`
+	Type   string                 `json:"type,omitempty"`
+	Config map[string]string      `json:"config,omitempty"`
+	Tasks  []KafkaConnectorTask   `json:"tasks,omitempty"`
+	Status KafkaConnectorStatus   `json:"status,omitempty"`
+	Raw    map[string]interface{} `json:"raw,omitempty"`
+}
+
+type KafkaConnectorTask struct {
+	Connector string `json:"connector,omitempty"`
+	Task      int    `json:"task"`
+}
+
+type KafkaConnectorStatus struct {
+	Name      string                    `json:"name,omitempty"`
+	Connector KafkaConnectorWorkerState `json:"connector,omitempty"`
+	Tasks     []KafkaConnectorTaskState `json:"tasks,omitempty"`
+	Type      string                    `json:"type,omitempty"`
+}
+
+type KafkaConnectorWorkerState struct {
+	State    string `json:"state,omitempty"`
+	WorkerID string `json:"workerId,omitempty"`
+	Trace    string `json:"trace,omitempty"`
+}
+
+type KafkaConnectorTaskState struct {
+	ID       int    `json:"id"`
+	State    string `json:"state,omitempty"`
+	WorkerID string `json:"workerId,omitempty"`
+	Trace    string `json:"trace,omitempty"`
+}
+
+type ConnectorConfigRequest struct {
+	AssetID int64             `json:"assetId"`
+	Cluster string            `json:"cluster,omitempty"`
+	Name    string            `json:"name"`
+	Config  map[string]string `json:"config"`
+}
+
+type RestartConnectorRequest struct {
+	AssetID      int64  `json:"assetId"`
+	Cluster      string `json:"cluster,omitempty"`
+	Name         string `json:"name"`
+	IncludeTasks bool   `json:"includeTasks,omitempty"`
+	OnlyFailed   bool   `json:"onlyFailed,omitempty"`
+}
+
+type ConnectorOperationResponse struct {
+	Cluster string `json:"cluster,omitempty"`
+	Name    string `json:"name"`
+}
+
 type BrowseMessagesRequest struct {
 	AssetID         int64  `json:"assetId"`
 	Topic           string `json:"topic"`
