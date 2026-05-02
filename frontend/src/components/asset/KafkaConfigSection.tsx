@@ -369,7 +369,7 @@ function KafkaCompanionAuthFields({
     <div className="grid gap-3">
       <div className="grid gap-2">
         <Label>{t("asset.kafkaCompanionAuthType")}</Label>
-        <Select value={value.authType} onValueChange={(authType) => onChange({ authType })}>
+        <Select value={value.authType} onValueChange={(authType) => onChange(kafkaCompanionAuthTypePatch(value, authType))}>
           <SelectTrigger>
             <SelectValue />
           </SelectTrigger>
@@ -382,10 +382,12 @@ function KafkaCompanionAuthFields({
       </div>
       {authEnabled && (
         <>
-          <div className="grid gap-2">
-            <Label>{value.authType === "bearer" ? t("asset.kafkaBearerToken") : t("asset.username")}</Label>
-            <Input value={value.username} onChange={(e) => onChange({ username: e.target.value })} />
-          </div>
+          {value.authType !== "bearer" && (
+            <div className="grid gap-2">
+              <Label>{t("asset.username")}</Label>
+              <Input value={value.username} onChange={(e) => onChange({ username: e.target.value })} />
+            </div>
+          )}
           <PasswordSourceField
             source={value.passwordSource}
             onSourceChange={(passwordSource) => onChange({ passwordSource })}
@@ -395,6 +397,8 @@ function KafkaCompanionAuthFields({
             onCredentialIdChange={(credentialId) => onChange({ credentialId })}
             managedPasswords={managedPasswords}
             hasExistingPassword={!!value.encryptedPassword}
+            secretLabel={value.authType === "bearer" ? t("asset.kafkaBearerToken") : undefined}
+            selectSecretLabel={value.authType === "bearer" ? t("asset.kafkaBearerToken") : undefined}
           />
         </>
       )}
@@ -422,6 +426,20 @@ function KafkaCompanionAuthFields({
       </div>
     </div>
   );
+}
+
+function kafkaCompanionAuthTypePatch(
+  value: KafkaCompanionAuthForm,
+  authType: string
+): Partial<KafkaCompanionAuthForm> {
+  const patch: Partial<KafkaCompanionAuthForm> = { authType };
+  if (authType === "bearer") {
+    if (value.username && !value.password && !value.encryptedPassword && !value.credentialId) {
+      patch.password = value.username;
+    }
+    patch.username = "";
+  }
+  return patch;
 }
 
 function KafkaConnectClusterEditor({

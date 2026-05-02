@@ -251,6 +251,7 @@
     "kafkaSchemaRegistryURLRequired": "Schema Registry URL is required",
     "kafkaCompanionAuthType": "Auth Type",
     "kafkaBearerToken": "Bearer Token",
+    "kafkaBearerTokenRequired": "Bearer Token is required",
     "kafkaConnect": "Kafka Connect",
     "kafkaConnectAddCluster": "Add Connect Cluster",
     "kafkaConnectClusterNumber": "Connect Cluster {{index}}",

@@ -227,8 +227,8 @@ function kafkaSchemaRegistryFromConfig(cfg?: KafkaSchemaRegistryConfig): KafkaSc
     enabled: !!cfg?.enabled,
     url: cfg?.url || "",
     authType: cfg?.auth_type || "none",
-    username: cfg?.username || "",
-    password: "",
+    username: kafkaCompanionUsernameFromConfig(cfg),
+    password: kafkaCompanionPlainSecretFromConfig(cfg),
     encryptedPassword: cfg?.password || "",
     passwordSource: cfg?.credential_id ? "managed" : "inline",
     credentialId: cfg?.credential_id || 0,
@@ -246,8 +246,8 @@ function newKafkaConnectCluster(cfg?: KafkaConnectClusterConfig, index = 0): Kaf
     name: cfg?.name || "",
     url: cfg?.url || "",
     authType: cfg?.auth_type || "none",
-    username: cfg?.username || "",
-    password: "",
+    username: kafkaCompanionUsernameFromConfig(cfg),
+    password: kafkaCompanionPlainSecretFromConfig(cfg),
     encryptedPassword: cfg?.password || "",
     passwordSource: cfg?.credential_id ? "managed" : "inline",
     credentialId: cfg?.credential_id || 0,
@@ -257,6 +257,16 @@ function newKafkaConnectCluster(cfg?: KafkaConnectClusterConfig, index = 0): Kaf
     tlsCertFile: cfg?.tls_cert_file || "",
     tlsKeyFile: cfg?.tls_key_file || "",
   };
+}
+
+function kafkaCompanionUsernameFromConfig(cfg?: KafkaSchemaRegistryConfig | KafkaConnectClusterConfig): string {
+  if (cfg?.auth_type === "bearer") return "";
+  return cfg?.username || "";
+}
+
+function kafkaCompanionPlainSecretFromConfig(cfg?: KafkaSchemaRegistryConfig | KafkaConnectClusterConfig): string {
+  if (cfg?.auth_type !== "bearer" || cfg.password || cfg.credential_id) return "";
+  return cfg.username || "";
 }
 
 export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }: AssetFormProps) {
@@ -946,7 +956,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     const authType = form.authType || "none";
     if (authType === "none") return true;
     cfg.auth_type = authType;
-    if (form.username.trim()) cfg.username = form.username.trim();
+    if (authType !== "bearer" && form.username.trim()) cfg.username = form.username.trim();
     if (form.passwordSource === "managed" && form.credentialId > 0) {
       cfg.credential_id = form.credentialId;
       return true;
@@ -973,6 +983,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       toast.error(t("asset.kafkaSchemaRegistryURLRequired"));
       return false;
     }
+    if (kafkaSchemaRegistry.enabled && !validateKafkaCompanionAuth(kafkaSchemaRegistry)) return false;
     if (kafkaConnectEnabled) {
       const clusters = kafkaConnectClusters.filter((cluster) => cluster.name.trim() || cluster.url.trim());
       if (clusters.length === 0) {
@@ -983,6 +994,18 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         toast.error(t("asset.kafkaConnectClusterInvalid"));
         return false;
       }
+      if (clusters.some((cluster) => !validateKafkaCompanionAuth(cluster))) return false;
+    }
+    return true;
+  };
+
+  const validateKafkaCompanionAuth = (form: KafkaCompanionAuthForm): boolean => {
+    if (form.authType !== "bearer") return true;
+    const hasToken =
+      form.passwordSource === "managed" ? form.credentialId > 0 : !!form.password.trim() || !!form.encryptedPassword;
+    if (!hasToken) {
+      toast.error(t("asset.kafkaBearerTokenRequired"));
+      return false;
     }
     return true;
   };

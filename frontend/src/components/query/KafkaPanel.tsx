@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import {
   Button,
+  Checkbox,
   ConfirmDialog,
   Dialog,
   DialogContent,
@@ -1882,6 +1883,8 @@ function ConnectorTable({
       <thead className="sticky top-0 bg-muted/90 text-xs text-muted-foreground backdrop-blur">
         <tr>
           <th className="px-3 py-2 text-left font-medium">{t("query.kafkaConnector")}</th>
+          <th className="px-3 py-2 text-left font-medium">{t("query.kafkaState")}</th>
+          <th className="px-3 py-2 text-right font-medium">{t("query.kafkaConnectorTasks")}</th>
         </tr>
       </thead>
       <tbody>
@@ -1891,7 +1894,16 @@ function ConnectorTable({
             className={`cursor-pointer border-t hover:bg-muted/40 ${selected === connector.name ? "bg-muted/60" : ""}`}
             onClick={() => onSelect(connector.name)}
           >
-            <td className="max-w-[420px] truncate px-3 py-2 font-mono text-xs">{connector.name}</td>
+            <td className="max-w-[320px] truncate px-3 py-2 font-mono text-xs">{connector.name}</td>
+            <td className="px-3 py-2">
+              <div className="flex items-center gap-1.5">
+                <StatusPill value={connector.status} />
+                {connector.type && <StatusPill value={connector.type} />}
+              </div>
+            </td>
+            <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground">
+              {formatConnectorTaskSummary(connector)}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -2090,26 +2102,42 @@ function ConnectorConfigDialog({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [name, setName] = useState(detail?.name || "");
   const [config, setConfig] = useState(formatConnectorConfig(detail?.config));
+  const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setName(detail?.name || "");
     setConfig(formatConnectorConfig(detail?.config));
+    setFormError(null);
   }, [detail, open]);
 
   const canSubmit = name.trim() && config.trim();
 
   const submit = async () => {
+    setFormError(null);
+    let parsedConfig: Record<string, string>;
+    try {
+      parsedConfig = parseConnectorConfigObject(config);
+    } catch (err) {
+      setConfirmOpen(false);
+      setFormError(errorMessage(err));
+      return;
+    }
     const req: KafkaConnectorConfigRequest = {
       name: name.trim(),
-      config: parseConnectorConfigObject(config),
+      config: parsedConfig,
     };
-    if (mode === "create") {
-      await createConnector(tabId, req);
-    } else {
-      await updateConnectorConfig(tabId, req);
+    try {
+      if (mode === "create") {
+        await createConnector(tabId, req);
+      } else {
+        await updateConnectorConfig(tabId, req);
+      }
+      onOpenChange(false);
+    } catch (err) {
+      setConfirmOpen(false);
+      setFormError(errorMessage(err));
     }
-    onOpenChange(false);
   };
 
   return (
@@ -2134,6 +2162,12 @@ function ConnectorConfigDialog({
             onChange={(e) => setConfig(e.target.value)}
             placeholder={t("query.kafkaConnectorConfigPlaceholder")}
           />
+          {formError && (
+            <div className="flex items-center gap-1.5 text-xs text-destructive">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span className="break-all">{formError}</span>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -2193,22 +2227,21 @@ function RestartConnectorDialog({
         <div className="space-y-3">
           <div className="rounded-md bg-muted/40 px-3 py-2 font-mono text-xs">{name}</div>
           <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={includeTasks}
-              onChange={(e) => {
-                setIncludeTasks(e.target.checked);
-                if (!e.target.checked) setOnlyFailed(false);
+              onCheckedChange={(checked) => {
+                const next = checked === true;
+                setIncludeTasks(next);
+                if (!next) setOnlyFailed(false);
               }}
             />
             {t("query.kafkaRestartConnectorTasks")}
           </label>
           <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={onlyFailed}
               disabled={!includeTasks}
-              onChange={(e) => setOnlyFailed(e.target.checked)}
+              onCheckedChange={(checked) => setOnlyFailed(checked === true)}
             />
             {t("query.kafkaRestartConnectorOnlyFailed")}
           </label>
@@ -2265,6 +2298,18 @@ function parseConnectorConfigObject(value: string): Record<string, string> {
     throw new Error("connector config must be a JSON object");
   }
   return Object.fromEntries(Object.entries(parsed).map(([key, item]) => [key, String(item)]));
+}
+
+function formatConnectorTaskSummary(connector: KafkaConnectorSummary): string {
+  const total = connector.taskCount || 0;
+  const failed = connector.failedTaskCount || 0;
+  if (!total) return "-";
+  if (!failed) return String(total);
+  return `${total} / ${failed}`;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 function parseOptionalJsonObject(value: string): Record<string, string> | undefined {

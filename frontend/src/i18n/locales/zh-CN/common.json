@@ -251,6 +251,7 @@
     "kafkaSchemaRegistryURLRequired": "请填写 Schema Registry URL",
     "kafkaCompanionAuthType": "认证类型",
     "kafkaBearerToken": "Bearer Token",
+    "kafkaBearerTokenRequired": "请填写 Bearer Token",
     "kafkaConnect": "Kafka Connect",
     "kafkaConnectAddCluster": "添加 Connect 集群",
     "kafkaConnectClusterNumber": "Connect 集群 {{index}}",

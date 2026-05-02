@@ -222,6 +222,10 @@ export interface KafkaConnectCluster {
 
 export interface KafkaConnectorSummary {
   name: string;
+  type?: string;
+  status?: string;
+  taskCount?: number;
+  failedTaskCount?: number;
 }
 
 export interface KafkaConnectorTask {
