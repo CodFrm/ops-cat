@@ -3,26 +3,32 @@ import {
   KafkaAlterTopicConfig,
   KafkaBrowseMessages,
   KafkaClusterOverview,
+  KafkaCheckSchemaCompatibility,
   KafkaCreateACL,
   KafkaCreateTopic,
   KafkaDeleteACL,
   KafkaDeleteRecords,
+  KafkaDeleteSchema,
   KafkaDeleteTopic,
   KafkaDeleteConsumerGroup,
+  KafkaGetSchema,
+  KafkaGetSchemaSubjectVersions,
   KafkaGetConsumerGroup,
   KafkaGetTopic,
   KafkaIncreasePartitions,
   KafkaListACLs,
   KafkaListBrokers,
   KafkaListConsumerGroups,
+  KafkaListSchemaSubjects,
   KafkaListTopics,
   KafkaProduceMessage,
+  KafkaRegisterSchema,
   KafkaResetConsumerGroupOffset,
 } from "../../wailsjs/go/app/App";
 import { registerTabCloseHook, type QueryTabMeta } from "./tabStore";
 import { useTabStore } from "./tabStore";
 
-export type KafkaView = "overview" | "brokers" | "topics" | "consumerGroups" | "acls";
+export type KafkaView = "overview" | "brokers" | "topics" | "consumerGroups" | "acls" | "schemas";
 export type KafkaMessageStartMode = "newest" | "oldest" | "offset" | "timestamp";
 export type KafkaPayloadEncoding = "text" | "json" | "hex" | "base64";
 export type KafkaOffsetResetMode = "earliest" | "latest" | "offset" | "timestamp";
@@ -155,6 +161,50 @@ export interface KafkaACLMutationRequest {
   permission: string;
 }
 
+export interface KafkaSchemaReference {
+  name: string;
+  subject: string;
+  version: number;
+}
+
+export interface KafkaSchemaSubjectVersions {
+  subject: string;
+  versions: number[];
+}
+
+export interface KafkaSchemaVersionDetail {
+  subject: string;
+  id: number;
+  version: number;
+  schema: string;
+  schemaType?: string;
+  references?: KafkaSchemaReference[];
+}
+
+export interface KafkaRegisterSchemaRequest {
+  subject: string;
+  schema: string;
+  schemaType?: string;
+  references?: KafkaSchemaReference[];
+}
+
+export interface KafkaSchemaCompatibilityRequest extends KafkaRegisterSchemaRequest {
+  version?: string;
+}
+
+export interface KafkaSchemaCompatibilityResponse {
+  subject: string;
+  version: string;
+  compatible: boolean;
+  messages?: string[];
+}
+
+export interface KafkaDeleteSchemaRequest {
+  subject: string;
+  version?: string;
+  permanent?: boolean;
+}
+
 export interface KafkaRecordHeader {
   key: string;
   value?: string;
@@ -248,6 +298,10 @@ export interface KafkaTabState {
   acls: KafkaACL[];
   aclsTotal: number;
   aclFilters: KafkaACLFilters;
+  schemaSubjects: string[];
+  selectedSchemaSubject?: string;
+  schemaVersions?: KafkaSchemaSubjectVersions;
+  schemaDetail?: KafkaSchemaVersionDetail;
   messageBrowser: KafkaMessageBrowserState;
   produceMessage: KafkaProduceState;
   loadingOverview: boolean;
@@ -262,6 +316,9 @@ export interface KafkaTabState {
   loadingGroupDetail: boolean;
   loadingACLs: boolean;
   aclAdminLoading: boolean;
+  loadingSchemaSubjects: boolean;
+  loadingSchemaDetail: boolean;
+  schemaAdminLoading: boolean;
   error: string | null;
 }
 
@@ -288,6 +345,15 @@ interface KafkaStoreState {
   loadACLs: (tabId: string) => Promise<void>;
   createACL: (tabId: string, req: KafkaACLMutationRequest) => Promise<void>;
   deleteACL: (tabId: string, acl: KafkaACL) => Promise<void>;
+  loadSchemaSubjects: (tabId: string) => Promise<void>;
+  loadSchemaVersions: (tabId: string, subject: string) => Promise<void>;
+  loadSchema: (tabId: string, subject: string, version?: string) => Promise<void>;
+  checkSchemaCompatibility: (
+    tabId: string,
+    req: KafkaSchemaCompatibilityRequest
+  ) => Promise<KafkaSchemaCompatibilityResponse | undefined>;
+  registerSchema: (tabId: string, req: KafkaRegisterSchemaRequest) => Promise<void>;
+  deleteSchema: (tabId: string, req: KafkaDeleteSchemaRequest) => Promise<void>;
   browseMessages: (tabId: string) => Promise<void>;
   produceKafkaMessage: (tabId: string) => Promise<void>;
   loadConsumerGroups: (tabId: string) => Promise<void>;
@@ -307,6 +373,7 @@ function defaultKafkaState(): KafkaTabState {
     acls: [],
     aclsTotal: 0,
     aclFilters: defaultACLFilters(),
+    schemaSubjects: [],
     messageBrowser: defaultMessageBrowserState(),
     produceMessage: defaultProduceState(),
     loadingOverview: false,
@@ -321,6 +388,9 @@ function defaultKafkaState(): KafkaTabState {
     loadingGroupDetail: false,
     loadingACLs: false,
     aclAdminLoading: false,
+    loadingSchemaSubjects: false,
+    loadingSchemaDetail: false,
+    schemaAdminLoading: false,
     error: null,
   };
 }
@@ -766,6 +836,153 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
     }
   },
 
+  loadSchemaSubjects: async (tabId) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], loadingSchemaSubjects: true } } }));
+    try {
+      const schemaSubjects = ((await KafkaListSchemaSubjects(assetId)) || []) as string[];
+      set((s) => ({
+        states: {
+          ...s.states,
+          [tabId]: {
+            ...s.states[tabId],
+            schemaSubjects,
+            loadingSchemaSubjects: false,
+            error: null,
+          },
+        },
+      }));
+    } catch (err) {
+      set((s) => ({
+        states: {
+          ...s.states,
+          [tabId]: { ...s.states[tabId], loadingSchemaSubjects: false, error: String(err) },
+        },
+      }));
+    }
+  },
+
+  loadSchemaVersions: async (tabId, subject) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId || !subject) return;
+    get().ensureTab(tabId);
+    set((s) => ({
+      states: {
+        ...s.states,
+        [tabId]: {
+          ...s.states[tabId],
+          selectedSchemaSubject: subject,
+          schemaVersions: undefined,
+          schemaDetail: undefined,
+          loadingSchemaDetail: true,
+        },
+      },
+    }));
+    try {
+      const schemaVersions = (await KafkaGetSchemaSubjectVersions(assetId, subject)) as KafkaSchemaSubjectVersions;
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], schemaVersions, loadingSchemaDetail: false, error: null } },
+      }));
+      const latest = schemaVersions.versions?.[schemaVersions.versions.length - 1];
+      if (latest !== undefined) {
+        await get().loadSchema(tabId, subject, String(latest));
+      }
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], loadingSchemaDetail: false, error: String(err) } },
+      }));
+    }
+  },
+
+  loadSchema: async (tabId, subject, version) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId || !subject) return;
+    get().ensureTab(tabId);
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], loadingSchemaDetail: true } } }));
+    try {
+      const schemaDetail = (await KafkaGetSchema(assetId, subject, version || "latest")) as KafkaSchemaVersionDetail;
+      set((s) => ({
+        states: {
+          ...s.states,
+          [tabId]: { ...s.states[tabId], selectedSchemaSubject: subject, schemaDetail, loadingSchemaDetail: false, error: null },
+        },
+      }));
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], loadingSchemaDetail: false, error: String(err) } },
+      }));
+    }
+  },
+
+  checkSchemaCompatibility: async (tabId, req) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return undefined;
+    get().ensureTab(tabId);
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], schemaAdminLoading: true } } }));
+    try {
+      const result = (await KafkaCheckSchemaCompatibility({ assetId, ...req })) as KafkaSchemaCompatibilityResponse;
+      set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], schemaAdminLoading: false, error: null } } }));
+      return result;
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], schemaAdminLoading: false, error: String(err) } },
+      }));
+      throw err;
+    }
+  },
+
+  registerSchema: async (tabId, req) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], schemaAdminLoading: true } } }));
+    try {
+      await KafkaRegisterSchema({ assetId, ...req });
+      set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], schemaAdminLoading: false, error: null } } }));
+      await get().loadSchemaSubjects(tabId);
+      await get().loadSchemaVersions(tabId, req.subject);
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], schemaAdminLoading: false, error: String(err) } },
+      }));
+      throw err;
+    }
+  },
+
+  deleteSchema: async (tabId, req) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], schemaAdminLoading: true } } }));
+    try {
+      await KafkaDeleteSchema({ assetId, ...req });
+      set((s) => ({
+        states: {
+          ...s.states,
+          [tabId]: {
+            ...s.states[tabId],
+            selectedSchemaSubject: req.version ? s.states[tabId].selectedSchemaSubject : undefined,
+            schemaVersions: undefined,
+            schemaDetail: undefined,
+            schemaAdminLoading: false,
+            error: null,
+          },
+        },
+      }));
+      await get().loadSchemaSubjects(tabId);
+      if (req.version) {
+        await get().loadSchemaVersions(tabId, req.subject);
+      }
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], schemaAdminLoading: false, error: String(err) } },
+      }));
+      throw err;
+    }
+  },
+
   browseMessages: async (tabId) => {
     const assetId = getKafkaAssetId(tabId);
     if (!assetId) return;
@@ -905,6 +1122,8 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
       await get().loadTopics(tabId);
     } else if (view === "acls") {
       await get().loadACLs(tabId);
+    } else if (view === "schemas") {
+      await get().loadSchemaSubjects(tabId);
     } else {
       await get().loadConsumerGroups(tabId);
     }
