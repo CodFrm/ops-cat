@@ -6,6 +6,7 @@ import {
   KafkaCreateTopic,
   KafkaDeleteRecords,
   KafkaDeleteTopic,
+  KafkaDeleteConsumerGroup,
   KafkaGetConsumerGroup,
   KafkaGetTopic,
   KafkaIncreasePartitions,
@@ -13,6 +14,7 @@ import {
   KafkaListConsumerGroups,
   KafkaListTopics,
   KafkaProduceMessage,
+  KafkaResetConsumerGroupOffset,
 } from "../../wailsjs/go/app/App";
 import { registerTabCloseHook, type QueryTabMeta } from "./tabStore";
 import { useTabStore } from "./tabStore";
@@ -20,6 +22,7 @@ import { useTabStore } from "./tabStore";
 export type KafkaView = "overview" | "brokers" | "topics" | "consumerGroups";
 export type KafkaMessageStartMode = "newest" | "oldest" | "offset" | "timestamp";
 export type KafkaPayloadEncoding = "text" | "json" | "hex" | "base64";
+export type KafkaOffsetResetMode = "earliest" | "latest" | "offset" | "timestamp";
 
 export interface KafkaClusterOverviewInfo {
   assetId: number;
@@ -179,6 +182,15 @@ export interface KafkaDeleteRecordsPartition {
   offset: number;
 }
 
+export interface KafkaResetConsumerGroupOffsetRequest {
+  group: string;
+  topic: string;
+  partitions?: number[];
+  mode: KafkaOffsetResetMode;
+  offset?: number;
+  timestampMillis?: number;
+}
+
 export interface KafkaTabState {
   activeView: KafkaView;
   overview?: KafkaClusterOverviewInfo;
@@ -201,6 +213,7 @@ export interface KafkaTabState {
   loadingMessages: boolean;
   producingMessage: boolean;
   topicAdminLoading: boolean;
+  groupAdminLoading: boolean;
   loadingGroups: boolean;
   loadingGroupDetail: boolean;
   error: string | null;
@@ -223,6 +236,8 @@ interface KafkaStoreState {
   alterTopicConfig: (tabId: string, topic: string, configs: KafkaTopicConfigMutation[]) => Promise<void>;
   increasePartitions: (tabId: string, topic: string, partitions: number) => Promise<void>;
   deleteTopicRecords: (tabId: string, topic: string, partitions: KafkaDeleteRecordsPartition[]) => Promise<void>;
+  resetConsumerGroupOffset: (tabId: string, req: KafkaResetConsumerGroupOffsetRequest) => Promise<void>;
+  deleteConsumerGroup: (tabId: string, group: string) => Promise<void>;
   browseMessages: (tabId: string) => Promise<void>;
   produceKafkaMessage: (tabId: string) => Promise<void>;
   loadConsumerGroups: (tabId: string) => Promise<void>;
@@ -248,6 +263,7 @@ function defaultKafkaState(): KafkaTabState {
     loadingMessages: false,
     producingMessage: false,
     topicAdminLoading: false,
+    groupAdminLoading: false,
     loadingGroups: false,
     loadingGroupDetail: false,
     error: null,
@@ -538,6 +554,51 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
     } catch (err) {
       set((s) => ({
         states: { ...s.states, [tabId]: { ...s.states[tabId], topicAdminLoading: false, error: String(err) } },
+      }));
+      throw err;
+    }
+  },
+
+  resetConsumerGroupOffset: async (tabId, req) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], groupAdminLoading: true } } }));
+    try {
+      await KafkaResetConsumerGroupOffset({ assetId, ...req });
+      set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], groupAdminLoading: false, error: null } } }));
+      await get().loadConsumerGroupDetail(tabId, req.group);
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], groupAdminLoading: false, error: String(err) } },
+      }));
+      throw err;
+    }
+  },
+
+  deleteConsumerGroup: async (tabId, group) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], groupAdminLoading: true } } }));
+    try {
+      await KafkaDeleteConsumerGroup(assetId, group);
+      set((s) => ({
+        states: {
+          ...s.states,
+          [tabId]: {
+            ...s.states[tabId],
+            selectedGroup: undefined,
+            groupDetail: undefined,
+            groupAdminLoading: false,
+            error: null,
+          },
+        },
+      }));
+      await get().loadConsumerGroups(tabId);
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], groupAdminLoading: false, error: String(err) } },
       }));
       throw err;
     }
