@@ -5,30 +5,39 @@ import {
   KafkaClusterOverview,
   KafkaCheckSchemaCompatibility,
   KafkaCreateACL,
+  KafkaCreateConnector,
   KafkaCreateTopic,
   KafkaDeleteACL,
+  KafkaDeleteConnector,
   KafkaDeleteRecords,
   KafkaDeleteSchema,
   KafkaDeleteTopic,
   KafkaDeleteConsumerGroup,
   KafkaGetSchema,
   KafkaGetSchemaSubjectVersions,
+  KafkaGetConnector,
   KafkaGetConsumerGroup,
   KafkaGetTopic,
   KafkaIncreasePartitions,
   KafkaListACLs,
   KafkaListBrokers,
+  KafkaListConnectClusters,
+  KafkaListConnectors,
   KafkaListConsumerGroups,
   KafkaListSchemaSubjects,
   KafkaListTopics,
   KafkaProduceMessage,
   KafkaRegisterSchema,
+  KafkaPauseConnector,
+  KafkaRestartConnector,
+  KafkaResumeConnector,
   KafkaResetConsumerGroupOffset,
+  KafkaUpdateConnectorConfig,
 } from "../../wailsjs/go/app/App";
 import { registerTabCloseHook, type QueryTabMeta } from "./tabStore";
 import { useTabStore } from "./tabStore";
 
-export type KafkaView = "overview" | "brokers" | "topics" | "consumerGroups" | "acls" | "schemas";
+export type KafkaView = "overview" | "brokers" | "topics" | "consumerGroups" | "acls" | "schemas" | "connect";
 export type KafkaMessageStartMode = "newest" | "oldest" | "offset" | "timestamp";
 export type KafkaPayloadEncoding = "text" | "json" | "hex" | "base64";
 export type KafkaOffsetResetMode = "earliest" | "latest" | "offset" | "timestamp";
@@ -205,6 +214,54 @@ export interface KafkaDeleteSchemaRequest {
   permanent?: boolean;
 }
 
+export interface KafkaConnectCluster {
+  name: string;
+  url: string;
+}
+
+export interface KafkaConnectorSummary {
+  name: string;
+}
+
+export interface KafkaConnectorTask {
+  connector?: string;
+  task: number;
+}
+
+export interface KafkaConnectorWorkerState {
+  state?: string;
+  workerId?: string;
+  trace?: string;
+}
+
+export interface KafkaConnectorTaskState {
+  id: number;
+  state?: string;
+  workerId?: string;
+  trace?: string;
+}
+
+export interface KafkaConnectorStatus {
+  name?: string;
+  connector?: KafkaConnectorWorkerState;
+  tasks?: KafkaConnectorTaskState[];
+  type?: string;
+}
+
+export interface KafkaConnectorDetail {
+  name: string;
+  type?: string;
+  config?: Record<string, string>;
+  tasks?: KafkaConnectorTask[];
+  status?: KafkaConnectorStatus;
+}
+
+export interface KafkaConnectorConfigRequest {
+  cluster?: string;
+  name: string;
+  config: Record<string, string>;
+}
+
 export interface KafkaRecordHeader {
   key: string;
   value?: string;
@@ -302,6 +359,11 @@ export interface KafkaTabState {
   selectedSchemaSubject?: string;
   schemaVersions?: KafkaSchemaSubjectVersions;
   schemaDetail?: KafkaSchemaVersionDetail;
+  connectClusters: KafkaConnectCluster[];
+  selectedConnectCluster?: string;
+  connectors: KafkaConnectorSummary[];
+  selectedConnector?: string;
+  connectorDetail?: KafkaConnectorDetail;
   messageBrowser: KafkaMessageBrowserState;
   produceMessage: KafkaProduceState;
   loadingOverview: boolean;
@@ -319,6 +381,10 @@ export interface KafkaTabState {
   loadingSchemaSubjects: boolean;
   loadingSchemaDetail: boolean;
   schemaAdminLoading: boolean;
+  loadingConnectClusters: boolean;
+  loadingConnectors: boolean;
+  loadingConnectorDetail: boolean;
+  connectAdminLoading: boolean;
   error: string | null;
 }
 
@@ -354,6 +420,15 @@ interface KafkaStoreState {
   ) => Promise<KafkaSchemaCompatibilityResponse | undefined>;
   registerSchema: (tabId: string, req: KafkaRegisterSchemaRequest) => Promise<void>;
   deleteSchema: (tabId: string, req: KafkaDeleteSchemaRequest) => Promise<void>;
+  loadConnectClusters: (tabId: string) => Promise<void>;
+  loadConnectors: (tabId: string, cluster?: string) => Promise<void>;
+  loadConnectorDetail: (tabId: string, name: string) => Promise<void>;
+  createConnector: (tabId: string, req: KafkaConnectorConfigRequest) => Promise<void>;
+  updateConnectorConfig: (tabId: string, req: KafkaConnectorConfigRequest) => Promise<void>;
+  pauseConnector: (tabId: string, name: string) => Promise<void>;
+  resumeConnector: (tabId: string, name: string) => Promise<void>;
+  restartConnector: (tabId: string, name: string, includeTasks?: boolean, onlyFailed?: boolean) => Promise<void>;
+  deleteConnector: (tabId: string, name: string) => Promise<void>;
   browseMessages: (tabId: string) => Promise<void>;
   produceKafkaMessage: (tabId: string) => Promise<void>;
   loadConsumerGroups: (tabId: string) => Promise<void>;
@@ -374,6 +449,8 @@ function defaultKafkaState(): KafkaTabState {
     aclsTotal: 0,
     aclFilters: defaultACLFilters(),
     schemaSubjects: [],
+    connectClusters: [],
+    connectors: [],
     messageBrowser: defaultMessageBrowserState(),
     produceMessage: defaultProduceState(),
     loadingOverview: false,
@@ -391,6 +468,10 @@ function defaultKafkaState(): KafkaTabState {
     loadingSchemaSubjects: false,
     loadingSchemaDetail: false,
     schemaAdminLoading: false,
+    loadingConnectClusters: false,
+    loadingConnectors: false,
+    loadingConnectorDetail: false,
+    connectAdminLoading: false,
     error: null,
   };
 }
@@ -983,6 +1064,176 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
     }
   },
 
+  loadConnectClusters: async (tabId) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], loadingConnectClusters: true } } }));
+    try {
+      const connectClusters = ((await KafkaListConnectClusters(assetId)) || []) as KafkaConnectCluster[];
+      const selectedConnectCluster = get().states[tabId]?.selectedConnectCluster || connectClusters[0]?.name;
+      set((s) => ({
+        states: {
+          ...s.states,
+          [tabId]: {
+            ...s.states[tabId],
+            connectClusters,
+            selectedConnectCluster,
+            loadingConnectClusters: false,
+            error: null,
+          },
+        },
+      }));
+      if (selectedConnectCluster) {
+        await get().loadConnectors(tabId, selectedConnectCluster);
+      }
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], loadingConnectClusters: false, error: String(err) } },
+      }));
+    }
+  },
+
+  loadConnectors: async (tabId, cluster) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    const selectedConnectCluster = cluster || get().states[tabId]?.selectedConnectCluster || "";
+    set((s) => ({
+      states: {
+        ...s.states,
+        [tabId]: {
+          ...s.states[tabId],
+          selectedConnectCluster,
+          connectors: [],
+          selectedConnector: undefined,
+          connectorDetail: undefined,
+          loadingConnectors: true,
+        },
+      },
+    }));
+    try {
+      const connectors = ((await KafkaListConnectors({ assetId, cluster: selectedConnectCluster })) || []) as KafkaConnectorSummary[];
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], connectors, loadingConnectors: false, error: null } },
+      }));
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], loadingConnectors: false, error: String(err) } },
+      }));
+    }
+  },
+
+  loadConnectorDetail: async (tabId, name) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId || !name) return;
+    get().ensureTab(tabId);
+    const cluster = get().states[tabId]?.selectedConnectCluster || "";
+    set((s) => ({
+      states: {
+        ...s.states,
+        [tabId]: { ...s.states[tabId], selectedConnector: name, connectorDetail: undefined, loadingConnectorDetail: true },
+      },
+    }));
+    try {
+      const connectorDetail = (await KafkaGetConnector(assetId, cluster, name)) as KafkaConnectorDetail;
+      set((s) => ({
+        states: {
+          ...s.states,
+          [tabId]: { ...s.states[tabId], connectorDetail, loadingConnectorDetail: false, error: null },
+        },
+      }));
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], loadingConnectorDetail: false, error: String(err) } },
+      }));
+    }
+  },
+
+  createConnector: async (tabId, req) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    const cluster = req.cluster || get().states[tabId]?.selectedConnectCluster || "";
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: true } } }));
+    try {
+      await KafkaCreateConnector({ assetId, ...req, cluster });
+      set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: false, error: null } } }));
+      await get().loadConnectors(tabId, cluster);
+      await get().loadConnectorDetail(tabId, req.name);
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: false, error: String(err) } },
+      }));
+      throw err;
+    }
+  },
+
+  updateConnectorConfig: async (tabId, req) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    const cluster = req.cluster || get().states[tabId]?.selectedConnectCluster || "";
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: true } } }));
+    try {
+      await KafkaUpdateConnectorConfig({ assetId, ...req, cluster });
+      set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: false, error: null } } }));
+      await get().loadConnectorDetail(tabId, req.name);
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: false, error: String(err) } },
+      }));
+      throw err;
+    }
+  },
+
+  pauseConnector: async (tabId, name) => {
+    await mutateConnectorState(tabId, name, (assetId, cluster) => KafkaPauseConnector(assetId, cluster, name), get, set);
+  },
+
+  resumeConnector: async (tabId, name) => {
+    await mutateConnectorState(tabId, name, (assetId, cluster) => KafkaResumeConnector(assetId, cluster, name), get, set);
+  },
+
+  restartConnector: async (tabId, name, includeTasks, onlyFailed) => {
+    await mutateConnectorState(
+      tabId,
+      name,
+      (assetId, cluster) => KafkaRestartConnector({ assetId, cluster, name, includeTasks, onlyFailed }),
+      get,
+      set
+    );
+  },
+
+  deleteConnector: async (tabId, name) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    const cluster = get().states[tabId]?.selectedConnectCluster || "";
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: true } } }));
+    try {
+      await KafkaDeleteConnector(assetId, cluster, name);
+      set((s) => ({
+        states: {
+          ...s.states,
+          [tabId]: {
+            ...s.states[tabId],
+            selectedConnector: undefined,
+            connectorDetail: undefined,
+            connectAdminLoading: false,
+            error: null,
+          },
+        },
+      }));
+      await get().loadConnectors(tabId, cluster);
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: false, error: String(err) } },
+      }));
+      throw err;
+    }
+  },
+
   browseMessages: async (tabId) => {
     const assetId = getKafkaAssetId(tabId);
     if (!assetId) return;
@@ -1124,11 +1375,37 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
       await get().loadACLs(tabId);
     } else if (view === "schemas") {
       await get().loadSchemaSubjects(tabId);
+    } else if (view === "connect") {
+      await get().loadConnectClusters(tabId);
     } else {
       await get().loadConsumerGroups(tabId);
     }
   },
 }));
+
+async function mutateConnectorState(
+  tabId: string,
+  name: string,
+  fn: (assetId: number, cluster: string) => Promise<unknown>,
+  get: () => KafkaStoreState,
+  set: (partial: KafkaStoreState | Partial<KafkaStoreState> | ((state: KafkaStoreState) => KafkaStoreState | Partial<KafkaStoreState>)) => void
+) {
+  const assetId = getKafkaAssetId(tabId);
+  if (!assetId) return;
+  get().ensureTab(tabId);
+  const cluster = get().states[tabId]?.selectedConnectCluster || "";
+  set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: true } } }));
+  try {
+    await fn(assetId, cluster);
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: false, error: null } } }));
+    await get().loadConnectorDetail(tabId, name);
+  } catch (err) {
+    set((s) => ({
+      states: { ...s.states, [tabId]: { ...s.states[tabId], connectAdminLoading: false, error: String(err) } },
+    }));
+    throw err;
+  }
+}
 
 function parseOptionalInteger(value: string, field: string): number | undefined {
   const text = value.trim();

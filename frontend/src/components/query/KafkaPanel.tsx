@@ -39,6 +39,9 @@ import {
   type KafkaACLMutationRequest,
   type KafkaConsumerGroup,
   type KafkaConsumerGroupDetail,
+  type KafkaConnectorConfigRequest,
+  type KafkaConnectorDetail,
+  type KafkaConnectorSummary,
   type KafkaDeleteRecordsPartition,
   type KafkaMessageStartMode,
   type KafkaOffsetResetMode,
@@ -65,6 +68,7 @@ const VIEWS: { id: KafkaView; icon: typeof Activity; labelKey: string }[] = [
   { id: "consumerGroups", icon: Users, labelKey: "query.kafkaConsumerGroups" },
   { id: "acls", icon: ShieldCheck, labelKey: "query.kafkaACLs" },
   { id: "schemas", icon: FileJson, labelKey: "query.kafkaSchemas" },
+  { id: "connect", icon: Settings, labelKey: "query.kafkaConnect" },
 ];
 
 const ACL_RESOURCE_TYPES = ["any", "topic", "group", "cluster", "transactional_id", "delegation_token"];
@@ -131,6 +135,7 @@ export function KafkaPanel({ tabId }: KafkaPanelProps) {
   const loadConsumerGroups = useKafkaStore((s) => s.loadConsumerGroups);
   const loadACLs = useKafkaStore((s) => s.loadACLs);
   const loadSchemaSubjects = useKafkaStore((s) => s.loadSchemaSubjects);
+  const loadConnectClusters = useKafkaStore((s) => s.loadConnectClusters);
 
   useEffect(() => {
     ensureTab(tabId);
@@ -147,7 +152,10 @@ export function KafkaPanel({ tabId }: KafkaPanelProps) {
     if (state?.activeView === "schemas") {
       loadSchemaSubjects(tabId);
     }
-  }, [loadACLs, loadSchemaSubjects, state?.activeView, tabId]);
+    if (state?.activeView === "connect") {
+      loadConnectClusters(tabId);
+    }
+  }, [loadACLs, loadConnectClusters, loadSchemaSubjects, state?.activeView, tabId]);
 
   const current = state || defaultPanelState();
   const busy =
@@ -157,6 +165,8 @@ export function KafkaPanel({ tabId }: KafkaPanelProps) {
     current.loadingGroups ||
     current.loadingACLs ||
     current.loadingSchemaSubjects ||
+    current.loadingConnectClusters ||
+    current.loadingConnectors ||
     false;
   const activeLabel = t(VIEWS.find((view) => view.id === current.activeView)?.labelKey || "query.kafkaOverview");
 
@@ -211,6 +221,7 @@ export function KafkaPanel({ tabId }: KafkaPanelProps) {
           {current.activeView === "consumerGroups" && <ConsumerGroupsView tabId={tabId} state={current} />}
           {current.activeView === "acls" && <ACLsView tabId={tabId} state={current} />}
           {current.activeView === "schemas" && <SchemaRegistryView tabId={tabId} state={current} />}
+          {current.activeView === "connect" && <KafkaConnectView tabId={tabId} state={current} />}
         </div>
       </main>
     </div>
@@ -238,6 +249,8 @@ function defaultPanelState(): KafkaTabState {
       permission: "any",
     },
     schemaSubjects: [],
+    connectClusters: [],
+    connectors: [],
     messageBrowser: {
       partition: "",
       startMode: "newest",
@@ -271,6 +284,10 @@ function defaultPanelState(): KafkaTabState {
     loadingSchemaSubjects: false,
     loadingSchemaDetail: false,
     schemaAdminLoading: false,
+    loadingConnectClusters: false,
+    loadingConnectors: false,
+    loadingConnectorDetail: false,
+    connectAdminLoading: false,
     error: null,
   };
 }
@@ -575,9 +592,9 @@ function TopicDetailPanel({ tabId, state }: { tabId: string; state: KafkaTabStat
   if (!detail) return <EmptyState text={t("query.kafkaNoTopicDetail")} />;
   return (
     <div className="space-y-4 p-4">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Database className="h-4 w-4 text-muted-foreground" />
-        <div className="min-w-0 flex-1 truncate font-mono text-sm font-semibold">{detail.name}</div>
+        <div className="min-w-[220px] flex-1 truncate font-mono text-sm font-semibold">{detail.name}</div>
         {detail.internal && <StatusPill value="internal" />}
         <Button variant="outline" size="sm" className="h-7 gap-1.5" onClick={() => setConfigOpen(true)}>
           <Settings className="h-3.5 w-3.5" />
@@ -1774,6 +1791,442 @@ function RegisterSchemaDialog({
   );
 }
 
+function KafkaConnectView({ tabId, state }: { tabId: string; state: KafkaTabState }) {
+  const { t } = useTranslation();
+  const [createOpen, setCreateOpen] = useState(false);
+  const loadConnectClusters = useKafkaStore((s) => s.loadConnectClusters);
+  const loadConnectors = useKafkaStore((s) => s.loadConnectors);
+  const loadConnectorDetail = useKafkaStore((s) => s.loadConnectorDetail);
+  const selectedCluster = state.selectedConnectCluster || state.connectClusters[0]?.name || "";
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
+        <div className="w-60">
+          <Select
+            value={selectedCluster}
+            onValueChange={(next) => {
+              if (next) loadConnectors(tabId, next);
+            }}
+            disabled={!state.connectClusters.length}
+          >
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue placeholder={t("query.kafkaConnectCluster")} />
+            </SelectTrigger>
+            <SelectContent>
+              {state.connectClusters.map((cluster) => (
+                <SelectItem key={cluster.name} value={cluster.name}>
+                  {cluster.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button variant="outline" size="sm" className="h-8" onClick={() => loadConnectClusters(tabId)}>
+          {state.loadingConnectClusters ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+          {t("query.refreshTree")}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1.5"
+          disabled={!selectedCluster}
+          onClick={() => setCreateOpen(true)}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {t("query.kafkaCreateConnector")}
+        </Button>
+        <span className="ml-auto text-xs text-muted-foreground">
+          {t("query.kafkaConnectorTotal", { count: state.connectors.length })}
+        </span>
+      </div>
+      {!state.connectClusters.length && !state.loadingConnectClusters ? (
+        <EmptyState text={t("query.kafkaNoConnectClusters")} />
+      ) : (
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(340px,0.8fr)_minmax(480px,1.2fr)]">
+          <div className="min-h-0 overflow-auto border-r">
+            {state.loadingConnectors && !state.connectors.length ? (
+              <LoadingBlock />
+            ) : state.connectors.length === 0 ? (
+              <EmptyState text={t("query.kafkaNoConnectors")} />
+            ) : (
+              <ConnectorTable
+                connectors={state.connectors}
+                selected={state.selectedConnector}
+                onSelect={(name) => loadConnectorDetail(tabId, name)}
+              />
+            )}
+          </div>
+          <div className="min-h-0 overflow-auto">
+            <ConnectorDetailPanel tabId={tabId} state={state} />
+          </div>
+        </div>
+      )}
+      <CreateConnectorDialog tabId={tabId} open={createOpen} onOpenChange={setCreateOpen} />
+    </div>
+  );
+}
+
+function ConnectorTable({
+  connectors,
+  selected,
+  onSelect,
+}: {
+  connectors: KafkaConnectorSummary[];
+  selected?: string;
+  onSelect: (name: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <table className="w-full text-sm">
+      <thead className="sticky top-0 bg-muted/90 text-xs text-muted-foreground backdrop-blur">
+        <tr>
+          <th className="px-3 py-2 text-left font-medium">{t("query.kafkaConnector")}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {connectors.map((connector) => (
+          <tr
+            key={connector.name}
+            className={`cursor-pointer border-t hover:bg-muted/40 ${selected === connector.name ? "bg-muted/60" : ""}`}
+            onClick={() => onSelect(connector.name)}
+          >
+            <td className="max-w-[420px] truncate px-3 py-2 font-mono text-xs">{connector.name}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function ConnectorDetailPanel({ tabId, state }: { tabId: string; state: KafkaTabState }) {
+  const { t } = useTranslation();
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const [restartOpen, setRestartOpen] = useState(false);
+  const [pauseOpen, setPauseOpen] = useState(false);
+  const [resumeOpen, setResumeOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const pauseConnector = useKafkaStore((s) => s.pauseConnector);
+  const resumeConnector = useKafkaStore((s) => s.resumeConnector);
+  const deleteConnector = useKafkaStore((s) => s.deleteConnector);
+
+  if (state.loadingConnectorDetail) return <LoadingBlock />;
+  if (!state.selectedConnector) return <EmptyState text={t("query.kafkaSelectConnector")} />;
+  const detail = state.connectorDetail;
+  if (!detail) return <EmptyState text={t("query.kafkaNoConnectorDetail")} />;
+
+  const connectorState = detail.status?.connector?.state;
+  const tasks = detail.status?.tasks || [];
+
+  return (
+    <div className="space-y-4 p-4">
+      <div className="flex items-center gap-2">
+        <Settings className="h-4 w-4 text-muted-foreground" />
+        <div className="min-w-0 flex-1 truncate font-mono text-sm font-semibold">{detail.name}</div>
+        <StatusPill value={detail.type || detail.status?.type} />
+        <StatusPill value={connectorState} />
+        <Button variant="outline" size="sm" className="h-7" onClick={() => setUpdateOpen(true)}>
+          {t("query.kafkaUpdateConnectorConfig")}
+        </Button>
+        <Button variant="outline" size="sm" className="h-7" onClick={() => setPauseOpen(true)}>
+          {t("query.kafkaPauseConnector")}
+        </Button>
+        <Button variant="outline" size="sm" className="h-7" onClick={() => setResumeOpen(true)}>
+          {t("query.kafkaResumeConnector")}
+        </Button>
+        <Button variant="outline" size="sm" className="h-7" onClick={() => setRestartOpen(true)}>
+          {t("query.kafkaRestartConnector")}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-destructive hover:text-destructive"
+          onClick={() => setDeleteOpen(true)}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <Metric label={t("query.kafkaConnectCluster")} value={state.selectedConnectCluster || "-"} />
+        <Metric label={t("query.kafkaConnectorTasks")} value={tasks.length || detail.tasks?.length || 0} />
+        <Metric label={t("query.kafkaConnectorState")} value={connectorState || "-"} />
+      </div>
+      <ConnectorTasksTable detail={detail} />
+      <ConnectorConfigTable config={detail.config || {}} />
+      <ConnectorConfigDialog
+        tabId={tabId}
+        detail={detail}
+        mode="update"
+        open={updateOpen}
+        onOpenChange={setUpdateOpen}
+      />
+      <RestartConnectorDialog tabId={tabId} name={detail.name} open={restartOpen} onOpenChange={setRestartOpen} />
+      <ConfirmDialog
+        open={pauseOpen}
+        onOpenChange={setPauseOpen}
+        title={t("query.kafkaPauseConnector")}
+        description={t("query.kafkaPauseConnectorConfirmDesc", { name: detail.name })}
+        cancelText={t("action.cancel")}
+        confirmText={t("query.kafkaPauseConnector")}
+        onConfirm={async () => {
+          await pauseConnector(tabId, detail.name);
+          setPauseOpen(false);
+        }}
+      />
+      <ConfirmDialog
+        open={resumeOpen}
+        onOpenChange={setResumeOpen}
+        title={t("query.kafkaResumeConnector")}
+        description={t("query.kafkaResumeConnectorConfirmDesc", { name: detail.name })}
+        cancelText={t("action.cancel")}
+        confirmText={t("query.kafkaResumeConnector")}
+        onConfirm={async () => {
+          await resumeConnector(tabId, detail.name);
+          setResumeOpen(false);
+        }}
+      />
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title={t("query.kafkaDeleteConnector")}
+        description={t("query.kafkaDeleteConnectorConfirmDesc", { name: detail.name })}
+        cancelText={t("action.cancel")}
+        confirmText={t("action.delete")}
+        onConfirm={async () => {
+          await deleteConnector(tabId, detail.name);
+          setDeleteOpen(false);
+        }}
+      />
+    </div>
+  );
+}
+
+function ConnectorTasksTable({ detail }: { detail: KafkaConnectorDetail }) {
+  const { t } = useTranslation();
+  const rows = detail.status?.tasks || [];
+  if (!rows.length) return <EmptyState text={t("query.kafkaNoConnectorTasks")} />;
+  return (
+    <div className="overflow-hidden rounded-md border">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/40 text-xs text-muted-foreground">
+          <tr>
+            <th className="px-3 py-2 text-right font-medium">ID</th>
+            <th className="px-3 py-2 text-left font-medium">{t("query.kafkaState")}</th>
+            <th className="px-3 py-2 text-left font-medium">{t("query.kafkaConnectorWorker")}</th>
+            <th className="px-3 py-2 text-left font-medium">{t("query.kafkaConnectorTrace")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((task) => (
+            <tr key={task.id} className="border-t">
+              <td className="px-3 py-2 text-right font-mono text-xs">{task.id}</td>
+              <td className="px-3 py-2">
+                <StatusPill value={task.state} />
+              </td>
+              <td className="max-w-[220px] truncate px-3 py-2 font-mono text-xs">{task.workerId || "-"}</td>
+              <td className="max-w-[360px] truncate px-3 py-2 font-mono text-xs text-muted-foreground">
+                {task.trace || "-"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ConnectorConfigTable({ config }: { config: Record<string, string> }) {
+  const { t } = useTranslation();
+  const entries = Object.entries(config).sort(([a], [b]) => a.localeCompare(b));
+  if (!entries.length) return <EmptyState text={t("query.kafkaNoConnectorConfig")} />;
+  return (
+    <div className="overflow-hidden rounded-md border">
+      <div className="border-b px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {t("query.kafkaConnectorConfig")}
+      </div>
+      <table className="w-full text-sm">
+        <tbody>
+          {entries.map(([key, value]) => (
+            <tr key={key} className="border-t first:border-t-0">
+              <td className="w-64 max-w-[260px] truncate bg-muted/30 px-3 py-2 font-mono text-xs">{key}</td>
+              <td className="break-all px-3 py-2 font-mono text-xs">{value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CreateConnectorDialog({
+  tabId,
+  open,
+  onOpenChange,
+}: {
+  tabId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return <ConnectorConfigDialog tabId={tabId} mode="create" open={open} onOpenChange={onOpenChange} />;
+}
+
+function ConnectorConfigDialog({
+  tabId,
+  detail,
+  mode,
+  open,
+  onOpenChange,
+}: {
+  tabId: string;
+  detail?: KafkaConnectorDetail;
+  mode: "create" | "update";
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const createConnector = useKafkaStore((s) => s.createConnector);
+  const updateConnectorConfig = useKafkaStore((s) => s.updateConnectorConfig);
+  const state = useKafkaStore((s) => s.states[tabId]);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [name, setName] = useState(detail?.name || "");
+  const [config, setConfig] = useState(formatConnectorConfig(detail?.config));
+
+  useEffect(() => {
+    if (!open) return;
+    setName(detail?.name || "");
+    setConfig(formatConnectorConfig(detail?.config));
+  }, [detail, open]);
+
+  const canSubmit = name.trim() && config.trim();
+
+  const submit = async () => {
+    const req: KafkaConnectorConfigRequest = {
+      name: name.trim(),
+      config: parseConnectorConfigObject(config),
+    };
+    if (mode === "create") {
+      await createConnector(tabId, req);
+    } else {
+      await updateConnectorConfig(tabId, req);
+    }
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>
+            {mode === "create" ? t("query.kafkaCreateConnector") : t("query.kafkaUpdateConnectorConfig")}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <Input
+            className="h-8 font-mono text-xs"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={mode === "update"}
+            placeholder={t("query.kafkaConnector")}
+          />
+          <Textarea
+            className="min-h-80 font-mono text-xs"
+            value={config}
+            onChange={(e) => setConfig(e.target.value)}
+            placeholder={t("query.kafkaConnectorConfigPlaceholder")}
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {t("action.cancel")}
+          </Button>
+          <Button disabled={state?.connectAdminLoading || !canSubmit} onClick={() => setConfirmOpen(true)}>
+            {state?.connectAdminLoading && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            {mode === "create" ? t("query.kafkaCreateConnector") : t("query.kafkaUpdateConnectorConfig")}
+          </Button>
+        </DialogFooter>
+        <ConfirmDialog
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          title={mode === "create" ? t("query.kafkaCreateConnector") : t("query.kafkaUpdateConnectorConfig")}
+          description={
+            mode === "create"
+              ? t("query.kafkaCreateConnectorConfirmDesc", { name: name.trim() })
+              : t("query.kafkaUpdateConnectorConfigConfirmDesc", { name: name.trim() })
+          }
+          cancelText={t("action.cancel")}
+          confirmText={mode === "create" ? t("query.kafkaCreateConnector") : t("query.kafkaUpdateConnectorConfig")}
+          onConfirm={submit}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RestartConnectorDialog({
+  tabId,
+  name,
+  open,
+  onOpenChange,
+}: {
+  tabId: string;
+  name: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const restartConnector = useKafkaStore((s) => s.restartConnector);
+  const state = useKafkaStore((s) => s.states[tabId]);
+  const [includeTasks, setIncludeTasks] = useState(false);
+  const [onlyFailed, setOnlyFailed] = useState(false);
+
+  const submit = async () => {
+    await restartConnector(tabId, name, includeTasks, onlyFailed);
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t("query.kafkaRestartConnector")}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="rounded-md bg-muted/40 px-3 py-2 font-mono text-xs">{name}</div>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={includeTasks}
+              onChange={(e) => {
+                setIncludeTasks(e.target.checked);
+                if (!e.target.checked) setOnlyFailed(false);
+              }}
+            />
+            {t("query.kafkaRestartConnectorTasks")}
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={onlyFailed}
+              disabled={!includeTasks}
+              onChange={(e) => setOnlyFailed(e.target.checked)}
+            />
+            {t("query.kafkaRestartConnectorOnlyFailed")}
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {t("action.cancel")}
+          </Button>
+          <Button disabled={state?.connectAdminLoading} onClick={submit}>
+            {state?.connectAdminLoading && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            {t("query.kafkaRestartConnector")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function parseSchemaReferences(value: string): KafkaSchemaReference[] | undefined {
   const text = value.trim();
   if (!text) return undefined;
@@ -1790,6 +2243,28 @@ function formatSchema(value: string): string {
   } catch {
     return value || "-";
   }
+}
+
+function formatConnectorConfig(config?: Record<string, string>): string {
+  if (config && Object.keys(config).length > 0) {
+    return JSON.stringify(config, null, 2);
+  }
+  return JSON.stringify(
+    {
+      "connector.class": "",
+      "tasks.max": "1",
+    },
+    null,
+    2
+  );
+}
+
+function parseConnectorConfigObject(value: string): Record<string, string> {
+  const parsed = parseOptionalJsonObject(value);
+  if (!parsed) {
+    throw new Error("connector config must be a JSON object");
+  }
+  return Object.fromEntries(Object.entries(parsed).map(([key, item]) => [key, String(item)]));
 }
 
 function parseOptionalJsonObject(value: string): Record<string, string> | undefined {
