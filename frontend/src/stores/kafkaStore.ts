@@ -3,13 +3,16 @@ import {
   KafkaAlterTopicConfig,
   KafkaBrowseMessages,
   KafkaClusterOverview,
+  KafkaCreateACL,
   KafkaCreateTopic,
+  KafkaDeleteACL,
   KafkaDeleteRecords,
   KafkaDeleteTopic,
   KafkaDeleteConsumerGroup,
   KafkaGetConsumerGroup,
   KafkaGetTopic,
   KafkaIncreasePartitions,
+  KafkaListACLs,
   KafkaListBrokers,
   KafkaListConsumerGroups,
   KafkaListTopics,
@@ -19,7 +22,7 @@ import {
 import { registerTabCloseHook, type QueryTabMeta } from "./tabStore";
 import { useTabStore } from "./tabStore";
 
-export type KafkaView = "overview" | "brokers" | "topics" | "consumerGroups";
+export type KafkaView = "overview" | "brokers" | "topics" | "consumerGroups" | "acls";
 export type KafkaMessageStartMode = "newest" | "oldest" | "offset" | "timestamp";
 export type KafkaPayloadEncoding = "text" | "json" | "hex" | "base64";
 export type KafkaOffsetResetMode = "earliest" | "latest" | "offset" | "timestamp";
@@ -114,6 +117,44 @@ export interface KafkaTopicListResponse {
   pageSize: number;
 }
 
+export interface KafkaACL {
+  resourceType: string;
+  resourceName: string;
+  patternType: string;
+  principal: string;
+  host: string;
+  operation: string;
+  permission: string;
+  error?: string;
+}
+
+export interface KafkaACLListResponse {
+  acls: KafkaACL[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface KafkaACLFilters {
+  resourceType: string;
+  resourceName: string;
+  patternType: string;
+  principal: string;
+  host: string;
+  operation: string;
+  permission: string;
+}
+
+export interface KafkaACLMutationRequest {
+  resourceType: string;
+  resourceName?: string;
+  patternType?: string;
+  principal: string;
+  host?: string;
+  operation: string;
+  permission: string;
+}
+
 export interface KafkaRecordHeader {
   key: string;
   value?: string;
@@ -204,6 +245,9 @@ export interface KafkaTabState {
   consumerGroups: KafkaConsumerGroup[];
   selectedGroup?: string;
   groupDetail?: KafkaConsumerGroupDetail;
+  acls: KafkaACL[];
+  aclsTotal: number;
+  aclFilters: KafkaACLFilters;
   messageBrowser: KafkaMessageBrowserState;
   produceMessage: KafkaProduceState;
   loadingOverview: boolean;
@@ -216,6 +260,8 @@ export interface KafkaTabState {
   groupAdminLoading: boolean;
   loadingGroups: boolean;
   loadingGroupDetail: boolean;
+  loadingACLs: boolean;
+  aclAdminLoading: boolean;
   error: string | null;
 }
 
@@ -225,6 +271,7 @@ interface KafkaStoreState {
   setActiveView: (tabId: string, view: KafkaView) => void;
   setTopicSearch: (tabId: string, value: string) => void;
   setIncludeInternal: (tabId: string, value: boolean) => void;
+  setACLFilters: (tabId: string, patch: Partial<KafkaACLFilters>) => void;
   setMessageBrowser: (tabId: string, patch: Partial<KafkaMessageBrowserState>) => void;
   setProduceMessage: (tabId: string, patch: Partial<KafkaProduceState>) => void;
   loadOverview: (tabId: string) => Promise<void>;
@@ -238,6 +285,9 @@ interface KafkaStoreState {
   deleteTopicRecords: (tabId: string, topic: string, partitions: KafkaDeleteRecordsPartition[]) => Promise<void>;
   resetConsumerGroupOffset: (tabId: string, req: KafkaResetConsumerGroupOffsetRequest) => Promise<void>;
   deleteConsumerGroup: (tabId: string, group: string) => Promise<void>;
+  loadACLs: (tabId: string) => Promise<void>;
+  createACL: (tabId: string, req: KafkaACLMutationRequest) => Promise<void>;
+  deleteACL: (tabId: string, acl: KafkaACL) => Promise<void>;
   browseMessages: (tabId: string) => Promise<void>;
   produceKafkaMessage: (tabId: string) => Promise<void>;
   loadConsumerGroups: (tabId: string) => Promise<void>;
@@ -254,6 +304,9 @@ function defaultKafkaState(): KafkaTabState {
     topicSearch: "",
     includeInternal: false,
     consumerGroups: [],
+    acls: [],
+    aclsTotal: 0,
+    aclFilters: defaultACLFilters(),
     messageBrowser: defaultMessageBrowserState(),
     produceMessage: defaultProduceState(),
     loadingOverview: false,
@@ -266,7 +319,21 @@ function defaultKafkaState(): KafkaTabState {
     groupAdminLoading: false,
     loadingGroups: false,
     loadingGroupDetail: false,
+    loadingACLs: false,
+    aclAdminLoading: false,
     error: null,
+  };
+}
+
+function defaultACLFilters(): KafkaACLFilters {
+  return {
+    resourceType: "any",
+    resourceName: "",
+    patternType: "any",
+    principal: "",
+    host: "",
+    operation: "any",
+    permission: "any",
   };
 }
 
@@ -323,6 +390,19 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
   setIncludeInternal: (tabId, value) => {
     get().ensureTab(tabId);
     set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], includeInternal: value } } }));
+  },
+
+  setACLFilters: (tabId, patch) => {
+    get().ensureTab(tabId);
+    set((s) => ({
+      states: {
+        ...s.states,
+        [tabId]: {
+          ...s.states[tabId],
+          aclFilters: { ...defaultACLFilters(), ...s.states[tabId].aclFilters, ...patch },
+        },
+      },
+    }));
   },
 
   setMessageBrowser: (tabId, patch) => {
@@ -604,6 +684,88 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
     }
   },
 
+  loadACLs: async (tabId) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    const state = get().states[tabId] || defaultKafkaState();
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], loadingACLs: true } } }));
+    try {
+      const filters = state.aclFilters || defaultACLFilters();
+      const response = (await KafkaListACLs({
+        assetId,
+        resourceType: filters.resourceType === "any" ? "" : filters.resourceType,
+        resourceName: filters.resourceName,
+        patternType: filters.patternType === "any" ? "" : filters.patternType,
+        principal: filters.principal,
+        host: filters.host,
+        operation: filters.operation === "any" ? "" : filters.operation,
+        permission: filters.permission === "any" ? "" : filters.permission,
+        page: 1,
+        pageSize: 200,
+      })) as KafkaACLListResponse;
+      set((s) => ({
+        states: {
+          ...s.states,
+          [tabId]: {
+            ...s.states[tabId],
+            acls: response.acls || [],
+            aclsTotal: response.total || 0,
+            loadingACLs: false,
+            error: null,
+          },
+        },
+      }));
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], loadingACLs: false, error: String(err) } },
+      }));
+    }
+  },
+
+  createACL: async (tabId, req) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], aclAdminLoading: true } } }));
+    try {
+      await KafkaCreateACL({ assetId, ...req });
+      set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], aclAdminLoading: false, error: null } } }));
+      await get().loadACLs(tabId);
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], aclAdminLoading: false, error: String(err) } },
+      }));
+      throw err;
+    }
+  },
+
+  deleteACL: async (tabId, acl) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], aclAdminLoading: true } } }));
+    try {
+      await KafkaDeleteACL({
+        assetId,
+        resourceType: acl.resourceType,
+        resourceName: acl.resourceName,
+        patternType: acl.patternType,
+        principal: acl.principal,
+        host: acl.host,
+        operation: acl.operation,
+        permission: acl.permission,
+      });
+      set((s) => ({ states: { ...s.states, [tabId]: { ...s.states[tabId], aclAdminLoading: false, error: null } } }));
+      await get().loadACLs(tabId);
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], aclAdminLoading: false, error: String(err) } },
+      }));
+      throw err;
+    }
+  },
+
   browseMessages: async (tabId) => {
     const assetId = getKafkaAssetId(tabId);
     if (!assetId) return;
@@ -741,6 +903,8 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
       await get().loadBrokers(tabId);
     } else if (view === "topics") {
       await get().loadTopics(tabId);
+    } else if (view === "acls") {
+      await get().loadACLs(tabId);
     } else {
       await get().loadConsumerGroups(tabId);
     }
