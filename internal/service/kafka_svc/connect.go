@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -53,6 +54,10 @@ type connectStatusResponse struct {
 	Type string `json:"type"`
 }
 
+type connectExpandedStatusItem struct {
+	Status connectStatusResponse `json:"status"`
+}
+
 type connectErrorResponse struct {
 	ErrorCode int    `json:"error_code"`
 	Message   string `json:"message"`
@@ -86,6 +91,13 @@ func (s *Service) ListConnectClusters(ctx context.Context, assetID int64) ([]Kaf
 func (s *Service) ListConnectors(ctx context.Context, req ListConnectorsRequest) ([]KafkaConnectorSummary, error) {
 	var out []KafkaConnectorSummary
 	err := s.withKafkaConnect(ctx, req.AssetID, req.Cluster, func(ctx context.Context, client *kafkaConnectClient, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
+		var expanded map[string]connectExpandedStatusItem
+		query := url.Values{"expand": []string{"status"}}
+		if err := client.do(ctx, http.MethodGet, "/connectors", query, nil, &expanded); err == nil {
+			out = connectorSummariesFromExpandedStatus(expanded)
+			return nil
+		}
+
 		var names []string
 		if err := client.do(ctx, http.MethodGet, "/connectors", nil, nil, &names); err != nil {
 			return fmt.Errorf("读取 Kafka Connect connectors 失败: %w", err)
@@ -249,7 +261,7 @@ func selectKafkaConnectCluster(cfg *asset_entity.KafkaConfig, name string) (asse
 		}
 	}
 	if name == "" {
-		return asset_entity.KafkaConnectClusterConfig{}, "", fmt.Errorf("Kafka Connect Cluster不能为空")
+		return asset_entity.KafkaConnectClusterConfig{}, "", fmt.Errorf("存在多个 Kafka Connect Cluster，请指定 cluster 名称")
 	}
 	return asset_entity.KafkaConnectClusterConfig{}, "", fmt.Errorf("Kafka Connect Cluster不存在: %s", name)
 }
@@ -460,4 +472,41 @@ func connectorDetailFromResponses(info connectConnectorInfo, status connectStatu
 		})
 	}
 	return out
+}
+
+func connectorSummariesFromExpandedStatus(expanded map[string]connectExpandedStatusItem) []KafkaConnectorSummary {
+	out := make([]KafkaConnectorSummary, 0, len(expanded))
+	for name, item := range expanded {
+		status := item.Status
+		summary := KafkaConnectorSummary{
+			Name:            name,
+			Type:            status.Type,
+			Status:          status.Connector.State,
+			TaskCount:       len(status.Tasks),
+			FailedTaskCount: failedConnectTaskCount(status.Tasks),
+		}
+		if status.Name != "" {
+			summary.Name = status.Name
+		}
+		out = append(out, summary)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+func failedConnectTaskCount(tasks []struct {
+	ID       int    `json:"id"`
+	State    string `json:"state"`
+	WorkerID string `json:"worker_id"`
+	Trace    string `json:"trace"`
+}) int {
+	var count int
+	for _, task := range tasks {
+		if strings.EqualFold(task.State, "FAILED") {
+			count++
+		}
+	}
+	return count
 }

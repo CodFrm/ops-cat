@@ -109,46 +109,50 @@ func handleKafkaTopic(ctx context.Context, args map[string]any) (string, error) 
 		return result.Message, nil
 	}
 
-	client, closeFn, err := openKafkaClient(ctx, assetID)
-	if err != nil {
-		return "", err
-	}
-	defer closeFn()
+	if operation == "list" || operation == "get" || operation == "describe" {
+		client, closeFn, err := openKafkaClient(ctx, assetID)
+		if err != nil {
+			return "", err
+		}
+		defer closeFn()
 
-	admin := kadm.NewClient(client)
+		admin := kadm.NewClient(client)
+		switch operation {
+		case "list":
+			topics, err := listKafkaTopics(ctx, admin, argBool(args, "include_internal"))
+			if err != nil {
+				return "", fmt.Errorf("list Kafka topics: %w", err)
+			}
+			return marshalResult(kafkaTopicListResult(topics, args))
+		case "get", "describe":
+			topic := strings.TrimSpace(argString(args, "topic"))
+			topics, err := admin.ListTopicsWithInternal(ctx, topic)
+			if err != nil {
+				return "", fmt.Errorf("describe Kafka topic: %w", err)
+			}
+			detail, ok := topics[topic]
+			if !ok {
+				return "", fmt.Errorf("Kafka topic not found: %s", topic)
+			}
+			return marshalResult(map[string]any{"topic": kafkaTopicDetailResult(detail)})
+		}
+	}
+
+	svc := kafka_svc.New(getSSHPool(ctx))
+	defer svc.Close()
+
 	switch operation {
-	case "list":
-		topics, err := listKafkaTopics(ctx, admin, argBool(args, "include_internal"))
-		if err != nil {
-			return "", fmt.Errorf("list Kafka topics: %w", err)
-		}
-		return marshalResult(kafkaTopicListResult(topics, args))
-	case "get", "describe":
-		topic := strings.TrimSpace(argString(args, "topic"))
-		topics, err := admin.ListTopicsWithInternal(ctx, topic)
-		if err != nil {
-			return "", fmt.Errorf("describe Kafka topic: %w", err)
-		}
-		detail, ok := topics[topic]
-		if !ok {
-			return "", fmt.Errorf("Kafka topic not found: %s", topic)
-		}
-		return marshalResult(map[string]any{"topic": kafkaTopicDetailResult(detail)})
 	case "create":
 		req, err := kafkaCreateTopicRequestFromArgs(assetID, args)
 		if err != nil {
 			return "", err
 		}
-		svc := kafka_svc.New(getSSHPool(ctx))
-		defer svc.Close()
 		result, err := svc.CreateTopic(ctx, req)
 		if err != nil {
 			return "", err
 		}
 		return marshalKafkaResult(result)
 	case "delete":
-		svc := kafka_svc.New(getSSHPool(ctx))
-		defer svc.Close()
 		result, err := svc.DeleteTopic(ctx, assetID, strings.TrimSpace(argString(args, "topic")))
 		if err != nil {
 			return "", err
@@ -159,8 +163,6 @@ func handleKafkaTopic(ctx context.Context, args map[string]any) (string, error) 
 		if err != nil {
 			return "", err
 		}
-		svc := kafka_svc.New(getSSHPool(ctx))
-		defer svc.Close()
 		result, err := svc.AlterTopicConfig(ctx, req)
 		if err != nil {
 			return "", err
@@ -171,8 +173,6 @@ func handleKafkaTopic(ctx context.Context, args map[string]any) (string, error) 
 		if err != nil {
 			return "", err
 		}
-		svc := kafka_svc.New(getSSHPool(ctx))
-		defer svc.Close()
 		result, err := svc.IncreasePartitions(ctx, req)
 		if err != nil {
 			return "", err
@@ -183,8 +183,6 @@ func handleKafkaTopic(ctx context.Context, args map[string]any) (string, error) 
 		if err != nil {
 			return "", err
 		}
-		svc := kafka_svc.New(getSSHPool(ctx))
-		defer svc.Close()
 		result, err := svc.DeleteRecords(ctx, req)
 		if err != nil {
 			return "", err
@@ -209,53 +207,57 @@ func handleKafkaConsumerGroup(ctx context.Context, args map[string]any) (string,
 		return result.Message, nil
 	}
 
-	client, closeFn, err := openKafkaClient(ctx, assetID)
-	if err != nil {
-		return "", err
-	}
-	defer closeFn()
+	if operation == "list" || operation == "get" || operation == "describe" {
+		client, closeFn, err := openKafkaClient(ctx, assetID)
+		if err != nil {
+			return "", err
+		}
+		defer closeFn()
 
-	admin := kadm.NewClient(client)
+		admin := kadm.NewClient(client)
+		switch operation {
+		case "list":
+			groups, err := admin.ListGroups(ctx)
+			if err != nil {
+				return "", fmt.Errorf("list Kafka consumer groups: %w", err)
+			}
+			return marshalResult(map[string]any{"groups": kafkaConsumerGroupsResult(groups), "count": len(groups)})
+		case "get", "describe":
+			group := strings.TrimSpace(argString(args, "group"))
+			groups, err := admin.DescribeGroups(ctx, group)
+			if err != nil {
+				return "", fmt.Errorf("describe Kafka consumer group: %w", err)
+			}
+			detail, ok := groups[group]
+			if !ok {
+				return "", fmt.Errorf("Kafka consumer group not found: %s", group)
+			}
+			result := kafkaConsumerGroupDetailResult(detail)
+			if lags, lagErr := admin.Lag(ctx, group); lagErr != nil {
+				result["lag_error"] = lagErr.Error()
+			} else if lag, ok := lags[group]; ok {
+				result["lag"] = kafkaConsumerGroupLagResult(lag)
+				result["total_lag"] = lag.Lag.Total()
+			}
+			return marshalResult(map[string]any{"group": result})
+		}
+	}
+
+	svc := kafka_svc.New(getSSHPool(ctx))
+	defer svc.Close()
+
 	switch operation {
-	case "list":
-		groups, err := admin.ListGroups(ctx)
-		if err != nil {
-			return "", fmt.Errorf("list Kafka consumer groups: %w", err)
-		}
-		return marshalResult(map[string]any{"groups": kafkaConsumerGroupsResult(groups), "count": len(groups)})
-	case "get", "describe":
-		group := strings.TrimSpace(argString(args, "group"))
-		groups, err := admin.DescribeGroups(ctx, group)
-		if err != nil {
-			return "", fmt.Errorf("describe Kafka consumer group: %w", err)
-		}
-		detail, ok := groups[group]
-		if !ok {
-			return "", fmt.Errorf("Kafka consumer group not found: %s", group)
-		}
-		result := kafkaConsumerGroupDetailResult(detail)
-		if lags, lagErr := admin.Lag(ctx, group); lagErr != nil {
-			result["lag_error"] = lagErr.Error()
-		} else if lag, ok := lags[group]; ok {
-			result["lag"] = kafkaConsumerGroupLagResult(lag)
-			result["total_lag"] = lag.Lag.Total()
-		}
-		return marshalResult(map[string]any{"group": result})
 	case "reset_offset":
 		req, err := kafkaResetConsumerGroupOffsetRequestFromArgs(assetID, args)
 		if err != nil {
 			return "", err
 		}
-		svc := kafka_svc.New(getSSHPool(ctx))
-		defer svc.Close()
 		result, err := svc.ResetConsumerGroupOffset(ctx, req)
 		if err != nil {
 			return "", err
 		}
 		return marshalKafkaResult(result)
 	case "delete":
-		svc := kafka_svc.New(getSSHPool(ctx))
-		defer svc.Close()
 		result, err := svc.DeleteConsumerGroup(ctx, assetID, strings.TrimSpace(argString(args, "group")))
 		if err != nil {
 			return "", err

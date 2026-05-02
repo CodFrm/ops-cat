@@ -9,6 +9,8 @@ import (
 )
 
 func (a *App) kafkaSvc() *kafka_svc.Service {
+	a.kafkaServiceMu.Lock()
+	defer a.kafkaServiceMu.Unlock()
 	if a.kafkaService == nil {
 		a.kafkaService = kafka_svc.New(a.sshPool)
 	}

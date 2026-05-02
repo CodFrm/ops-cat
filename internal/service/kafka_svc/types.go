@@ -316,7 +316,11 @@ type ListConnectorsRequest struct {
 }
 
 type KafkaConnectorSummary struct {
-	Name string `json:"name"`
+	Name            string `json:"name"`
+	Type            string `json:"type,omitempty"`
+	Status          string `json:"status,omitempty"`
+	TaskCount       int    `json:"taskCount,omitempty"`
+	FailedTaskCount int    `json:"failedTaskCount,omitempty"`
 }
 
 type KafkaConnectorDetail struct {

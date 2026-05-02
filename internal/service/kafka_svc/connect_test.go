@@ -21,6 +21,20 @@ func TestKafkaConnectService(t *testing.T) {
 		assert.Equal(t, "Bearer connect-token", r.Header.Get("Authorization"))
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/connectors" && r.URL.Query().Get("expand") == "status":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"sink-orders": map[string]any{
+					"status": map[string]any{
+						"name": "sink-orders",
+						"type": "sink",
+						"connector": map[string]string{
+							"state":     "RUNNING",
+							"worker_id": "worker-1",
+						},
+						"tasks": []map[string]any{{"id": 0, "state": "RUNNING", "worker_id": "worker-1"}},
+					},
+				},
+			})
 		case r.Method == http.MethodGet && r.URL.Path == "/connectors":
 			_ = json.NewEncoder(w).Encode([]string{"sink-orders"})
 		case r.Method == http.MethodGet && r.URL.Path == "/connectors/sink-orders":
@@ -104,6 +118,9 @@ func TestKafkaConnectService(t *testing.T) {
 	connectors, err := svc.ListConnectors(ctx, ListConnectorsRequest{AssetID: asset.ID, Cluster: "local"})
 	require.NoError(t, err)
 	assert.Equal(t, "sink-orders", connectors[0].Name)
+	assert.Equal(t, "RUNNING", connectors[0].Status)
+	assert.Equal(t, "sink", connectors[0].Type)
+	assert.Equal(t, 1, connectors[0].TaskCount)
 
 	detail, err := svc.GetConnector(ctx, asset.ID, "local", "sink-orders")
 	require.NoError(t, err)
@@ -139,4 +156,16 @@ func TestKafkaConnectHelpers(t *testing.T) {
 
 	_, _, err = normalizeConnectorConfig("", map[string]string{"connector.class": "FileStreamSink"})
 	assert.Error(t, err)
+
+	_, _, err = selectKafkaConnectCluster(&asset_entity.KafkaConfig{
+		Connect: asset_entity.KafkaConnectConfig{
+			Enabled: true,
+			Clusters: []asset_entity.KafkaConnectClusterConfig{
+				{Name: "primary", URL: "http://connect-a:8083"},
+				{Name: "backup", URL: "http://connect-b:8083"},
+			},
+		},
+	}, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "请指定 cluster 名称")
 }
