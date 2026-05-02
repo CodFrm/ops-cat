@@ -66,6 +66,30 @@ func TestCheckKafkaPolicy(t *testing.T) {
 	assert.Equal(t, NeedConfirm, needConfirm.Decision)
 }
 
+func TestCheckKafkaPolicy_TopicAdminDenyWins(t *testing.T) {
+	ctx := context.Background()
+	p := &asset_entity.KafkaPolicy{
+		AllowList: []string{"topic.create *", "topic.config.write *", "topic.partitions.write *", "topic.records.delete *"},
+		DenyList:  []string{"topic.delete *", "topic.records.delete *"},
+	}
+
+	created := CheckKafkaPolicy(ctx, p, "topic.create orders")
+	assert.Equal(t, Allow, created.Decision)
+
+	config := CheckKafkaPolicy(ctx, p, "topic.config.write orders")
+	assert.Equal(t, Allow, config.Decision)
+
+	partitions := CheckKafkaPolicy(ctx, p, "topic.partitions.write orders")
+	assert.Equal(t, Allow, partitions.Decision)
+
+	deleted := CheckKafkaPolicy(ctx, p, "topic.delete orders")
+	assert.Equal(t, Deny, deleted.Decision)
+
+	records := CheckKafkaPolicy(ctx, p, "topic.records.delete orders")
+	assert.Equal(t, Deny, records.Decision)
+	assert.Equal(t, "topic.records.delete *", records.MatchedPattern)
+}
+
 func TestCheckPermission_Kafka(t *testing.T) {
 	ctx, mockAsset, _ := setupPolicyTest(t)
 	asset := &asset_entity.Asset{

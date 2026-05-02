@@ -134,6 +134,62 @@ func handleKafkaTopic(ctx context.Context, args map[string]any) (string, error) 
 			return "", fmt.Errorf("Kafka topic not found: %s", topic)
 		}
 		return marshalResult(map[string]any{"topic": kafkaTopicDetailResult(detail)})
+	case "create":
+		req, err := kafkaCreateTopicRequestFromArgs(assetID, args)
+		if err != nil {
+			return "", err
+		}
+		svc := kafka_svc.New(getSSHPool(ctx))
+		defer svc.Close()
+		result, err := svc.CreateTopic(ctx, req)
+		if err != nil {
+			return "", err
+		}
+		return marshalKafkaResult(result)
+	case "delete":
+		svc := kafka_svc.New(getSSHPool(ctx))
+		defer svc.Close()
+		result, err := svc.DeleteTopic(ctx, assetID, strings.TrimSpace(argString(args, "topic")))
+		if err != nil {
+			return "", err
+		}
+		return marshalKafkaResult(result)
+	case "update_config":
+		req, err := kafkaAlterTopicConfigRequestFromArgs(assetID, args)
+		if err != nil {
+			return "", err
+		}
+		svc := kafka_svc.New(getSSHPool(ctx))
+		defer svc.Close()
+		result, err := svc.AlterTopicConfig(ctx, req)
+		if err != nil {
+			return "", err
+		}
+		return marshalKafkaResult(result)
+	case "increase_partitions":
+		req, err := kafkaIncreasePartitionsRequestFromArgs(assetID, args)
+		if err != nil {
+			return "", err
+		}
+		svc := kafka_svc.New(getSSHPool(ctx))
+		defer svc.Close()
+		result, err := svc.IncreasePartitions(ctx, req)
+		if err != nil {
+			return "", err
+		}
+		return marshalKafkaResult(result)
+	case "delete_records":
+		req, err := kafkaDeleteRecordsRequestFromArgs(assetID, args)
+		if err != nil {
+			return "", err
+		}
+		svc := kafka_svc.New(getSSHPool(ctx))
+		defer svc.Close()
+		result, err := svc.DeleteRecords(ctx, req)
+		if err != nil {
+			return "", err
+		}
+		return marshalKafkaResult(result)
 	default:
 		return "", fmt.Errorf("unsupported kafka_topic operation: %s", operation)
 	}
@@ -332,9 +388,105 @@ func kafkaTopicCommand(operation, topic string) (string, error) {
 			return "", fmt.Errorf("topic is required for kafka_topic %s", operation)
 		}
 		return "topic.read " + topic, nil
+	case "create":
+		topic = strings.TrimSpace(topic)
+		if topic == "" {
+			return "", fmt.Errorf("topic is required for kafka_topic %s", operation)
+		}
+		return "topic.create " + topic, nil
+	case "delete":
+		topic = strings.TrimSpace(topic)
+		if topic == "" {
+			return "", fmt.Errorf("topic is required for kafka_topic %s", operation)
+		}
+		return "topic.delete " + topic, nil
+	case "update_config":
+		topic = strings.TrimSpace(topic)
+		if topic == "" {
+			return "", fmt.Errorf("topic is required for kafka_topic %s", operation)
+		}
+		return "topic.config.write " + topic, nil
+	case "increase_partitions":
+		topic = strings.TrimSpace(topic)
+		if topic == "" {
+			return "", fmt.Errorf("topic is required for kafka_topic %s", operation)
+		}
+		return "topic.partitions.write " + topic, nil
+	case "delete_records":
+		topic = strings.TrimSpace(topic)
+		if topic == "" {
+			return "", fmt.Errorf("topic is required for kafka_topic %s", operation)
+		}
+		return "topic.records.delete " + topic, nil
 	default:
 		return "", fmt.Errorf("unsupported kafka_topic operation: %s", operation)
 	}
+}
+
+func kafkaCreateTopicRequestFromArgs(assetID int64, args map[string]any) (kafka_svc.CreateTopicRequest, error) {
+	configs, err := kafkaStringMapFromJSON(argString(args, "configs"))
+	if err != nil {
+		return kafka_svc.CreateTopicRequest{}, err
+	}
+	return kafka_svc.CreateTopicRequest{
+		AssetID:           assetID,
+		Topic:             argString(args, "topic"),
+		Partitions:        int32(argInt(args, "partitions")),
+		ReplicationFactor: int16(argInt(args, "replication_factor")),
+		Configs:           configs,
+	}, nil
+}
+
+func kafkaAlterTopicConfigRequestFromArgs(assetID int64, args map[string]any) (kafka_svc.AlterTopicConfigRequest, error) {
+	var updates []kafka_svc.TopicConfigMutation
+	raw := strings.TrimSpace(argString(args, "config_updates"))
+	if raw == "" {
+		return kafka_svc.AlterTopicConfigRequest{}, fmt.Errorf("config_updates is required for kafka_topic update_config")
+	}
+	if err := json.Unmarshal([]byte(raw), &updates); err != nil {
+		return kafka_svc.AlterTopicConfigRequest{}, fmt.Errorf("config_updates must be a JSON array: %w", err)
+	}
+	return kafka_svc.AlterTopicConfigRequest{
+		AssetID: assetID,
+		Topic:   argString(args, "topic"),
+		Configs: updates,
+	}, nil
+}
+
+func kafkaIncreasePartitionsRequestFromArgs(assetID int64, args map[string]any) (kafka_svc.IncreasePartitionsRequest, error) {
+	return kafka_svc.IncreasePartitionsRequest{
+		AssetID:    assetID,
+		Topic:      argString(args, "topic"),
+		Partitions: argInt(args, "partition_count"),
+	}, nil
+}
+
+func kafkaDeleteRecordsRequestFromArgs(assetID int64, args map[string]any) (kafka_svc.DeleteRecordsRequest, error) {
+	raw := strings.TrimSpace(argString(args, "records"))
+	if raw == "" {
+		return kafka_svc.DeleteRecordsRequest{}, fmt.Errorf("records is required for kafka_topic delete_records")
+	}
+	var partitions []kafka_svc.DeleteRecordsPartition
+	if err := json.Unmarshal([]byte(raw), &partitions); err != nil {
+		return kafka_svc.DeleteRecordsRequest{}, fmt.Errorf("records must be a JSON array: %w", err)
+	}
+	return kafka_svc.DeleteRecordsRequest{
+		AssetID:    assetID,
+		Topic:      argString(args, "topic"),
+		Partitions: partitions,
+	}, nil
+}
+
+func kafkaStringMapFromJSON(raw string) (map[string]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	configs := map[string]string{}
+	if err := json.Unmarshal([]byte(raw), &configs); err != nil {
+		return nil, fmt.Errorf("configs must be a JSON object: %w", err)
+	}
+	return configs, nil
 }
 
 func kafkaConsumerGroupCommand(operation, group string) (string, error) {

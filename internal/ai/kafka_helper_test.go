@@ -27,6 +27,26 @@ func TestKafkaToolCommandMapping(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "topic.read orders", cmd)
 
+	cmd, err = kafkaTopicCommand("create", "orders")
+	require.NoError(t, err)
+	assert.Equal(t, "topic.create orders", cmd)
+
+	cmd, err = kafkaTopicCommand("delete", "orders")
+	require.NoError(t, err)
+	assert.Equal(t, "topic.delete orders", cmd)
+
+	cmd, err = kafkaTopicCommand("update_config", "orders")
+	require.NoError(t, err)
+	assert.Equal(t, "topic.config.write orders", cmd)
+
+	cmd, err = kafkaTopicCommand("increase_partitions", "orders")
+	require.NoError(t, err)
+	assert.Equal(t, "topic.partitions.write orders", cmd)
+
+	cmd, err = kafkaTopicCommand("delete_records", "orders")
+	require.NoError(t, err)
+	assert.Equal(t, "topic.records.delete orders", cmd)
+
 	cmd, err = kafkaConsumerGroupCommand("get", "billing-worker")
 	require.NoError(t, err)
 	assert.Equal(t, "consumer_group.read billing-worker", cmd)
@@ -70,6 +90,12 @@ func TestAllToolDefsContainsGroupedKafkaTools(t *testing.T) {
 		"topic":     "orders",
 	})
 	assert.Equal(t, "message.write orders", cmd)
+
+	cmd = tools["kafka_topic"].CommandExtractor(map[string]any{
+		"operation": "delete_records",
+		"topic":     "orders",
+	})
+	assert.Equal(t, "topic.records.delete orders", cmd)
 }
 
 func TestKafkaMessageArgs(t *testing.T) {
@@ -86,6 +112,46 @@ func TestKafkaMessageArgs(t *testing.T) {
 	assert.Equal(t, "trace", headers[0].Key)
 
 	_, err = kafkaProduceHeadersFromArgs(map[string]any{"headers": `{"key":"trace"}`})
+	assert.Error(t, err)
+}
+
+func TestKafkaTopicAdminArgs(t *testing.T) {
+	createReq, err := kafkaCreateTopicRequestFromArgs(7, map[string]any{
+		"topic":              "orders",
+		"partitions":         float64(3),
+		"replication_factor": float64(1),
+		"configs":            `{"cleanup.policy":"compact"}`,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(7), createReq.AssetID)
+	assert.Equal(t, int32(3), createReq.Partitions)
+	assert.Equal(t, int16(1), createReq.ReplicationFactor)
+	assert.Equal(t, "compact", createReq.Configs["cleanup.policy"])
+
+	updateReq, err := kafkaAlterTopicConfigRequestFromArgs(7, map[string]any{
+		"topic":          "orders",
+		"config_updates": `[{"name":"retention.ms","value":"60000","op":"set"}]`,
+	})
+	require.NoError(t, err)
+	require.Len(t, updateReq.Configs, 1)
+	assert.Equal(t, "retention.ms", updateReq.Configs[0].Name)
+
+	recordsReq, err := kafkaDeleteRecordsRequestFromArgs(7, map[string]any{
+		"topic":   "orders",
+		"records": `[{"partition":0,"offset":123}]`,
+	})
+	require.NoError(t, err)
+	require.Len(t, recordsReq.Partitions, 1)
+	assert.Equal(t, int32(0), recordsReq.Partitions[0].Partition)
+	assert.Equal(t, int64(123), recordsReq.Partitions[0].Offset)
+
+	_, err = kafkaStringMapFromJSON(`[{"bad":true}]`)
+	assert.Error(t, err)
+
+	_, err = kafkaAlterTopicConfigRequestFromArgs(7, map[string]any{"topic": "orders"})
+	assert.Error(t, err)
+
+	_, err = kafkaDeleteRecordsRequestFromArgs(7, map[string]any{"topic": "orders", "records": `{"partition":0}`})
 	assert.Error(t, err)
 }
 
@@ -107,6 +173,28 @@ func TestKafkaMessagePermissionStopsBeforeConnection(t *testing.T) {
 		"operation": "produce",
 		"topic":     "orders",
 		"value":     "hello",
+	})
+	require.NoError(t, err)
+	assert.Contains(t, result, "Kafka")
+}
+
+func TestKafkaTopicAdminPermissionStopsBeforeConnection(t *testing.T) {
+	ctx, mockAsset, _ := setupPolicyTest(t)
+	asset := &asset_entity.Asset{
+		ID:   1,
+		Name: "kafka-prod",
+		Type: asset_entity.AssetTypeKafka,
+		CmdPolicy: mustJSON(asset_entity.KafkaPolicy{
+			DenyList: []string{"topic.delete *"},
+		}),
+	}
+	mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+	ctx = WithPolicyChecker(ctx, NewCommandPolicyChecker(nil))
+	result, err := handleKafkaTopic(ctx, map[string]any{
+		"asset_id":  float64(1),
+		"operation": "delete",
+		"topic":     "orders",
 	})
 	require.NoError(t, err)
 	assert.Contains(t, result, "Kafka")
