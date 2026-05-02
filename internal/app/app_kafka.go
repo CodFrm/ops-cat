@@ -79,6 +79,14 @@ func (a *App) KafkaDeleteRecords(req kafka_svc.DeleteRecordsRequest) (kafka_svc.
 	return a.kafkaSvc().DeleteRecords(a.langCtx(), req)
 }
 
+func (a *App) KafkaGetBrokerConfig(assetID int64, brokerID int32) (kafka_svc.BrokerConfigResponse, error) {
+	return a.kafkaSvc().GetBrokerConfig(a.langCtx(), assetID, brokerID)
+}
+
+func (a *App) KafkaListClusterConfigs(assetID int64) (kafka_svc.ClusterConfigsResponse, error) {
+	return a.kafkaSvc().ListClusterConfigs(a.langCtx(), assetID)
+}
+
 func (a *App) KafkaResetConsumerGroupOffset(req kafka_svc.ResetConsumerGroupOffsetRequest) (kafka_svc.ResetConsumerGroupOffsetResponse, error) {
 	return a.kafkaSvc().ResetConsumerGroupOffset(a.langCtx(), req)
 }

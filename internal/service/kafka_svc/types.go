@@ -377,6 +377,24 @@ type ConnectorOperationResponse struct {
 	Name    string `json:"name"`
 }
 
+type ConfigEntry struct {
+	Name        string `json:"name"`
+	Value       string `json:"value,omitempty"`
+	IsSensitive bool   `json:"isSensitive"`
+	Source      string `json:"source,omitempty"`
+}
+
+type BrokerConfigResponse struct {
+	BrokerID int32         `json:"brokerId"`
+	Configs  []ConfigEntry `json:"configs"`
+	Error    string        `json:"error,omitempty"`
+}
+
+type ClusterConfigsResponse struct {
+	Configs []ConfigEntry `json:"configs"`
+	Error   string        `json:"error,omitempty"`
+}
+
 type BrowseMessagesRequest struct {
 	AssetID         int64  `json:"assetId"`
 	Topic           string `json:"topic"`

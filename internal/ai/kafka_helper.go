@@ -90,6 +90,37 @@ func handleKafkaCluster(ctx context.Context, args map[string]any) (string, error
 			return "", fmt.Errorf("list Kafka brokers: %w", err)
 		}
 		return marshalResult(map[string]any{"brokers": kafkaBrokersResult(brokers), "count": len(brokers)})
+	case "get_broker_config":
+		brokerID := int32(argInt64(args, "broker_id"))
+		resources, err := admin.DescribeBrokerConfigs(ctx, brokerID)
+		if err != nil {
+			return "", fmt.Errorf("get broker config: %w", err)
+		}
+		if len(resources) == 0 {
+			return "", fmt.Errorf("broker config not found: %d", brokerID)
+		}
+		rc := resources[0]
+		if rc.Err != nil {
+			return marshalResult(map[string]any{"brokerId": brokerID, "error": rc.Err.Error()})
+		}
+		return marshalResult(map[string]any{"brokerId": brokerID, "configs": kafkaConfigEntriesResult(rc.Configs)})
+	case "list_cluster_configs":
+		metadata, err := admin.Metadata(ctx)
+		if err != nil {
+			return "", fmt.Errorf("read cluster metadata: %w", err)
+		}
+		resources, err := admin.DescribeBrokerConfigs(ctx, metadata.Controller)
+		if err != nil {
+			return "", fmt.Errorf("list cluster configs: %w", err)
+		}
+		if len(resources) == 0 {
+			return "", fmt.Errorf("cluster config response empty")
+		}
+		rc := resources[0]
+		if rc.Err != nil {
+			return marshalResult(map[string]any{"error": rc.Err.Error()})
+		}
+		return marshalResult(map[string]any{"configs": kafkaConfigEntriesResult(rc.Configs)})
 	default:
 		return "", fmt.Errorf("unsupported kafka_cluster operation: %s", operation)
 	}
@@ -589,9 +620,29 @@ func kafkaClusterCommand(operation string) (string, error) {
 		return "cluster.read *", nil
 	case "brokers", "list_brokers":
 		return "broker.read *", nil
+	case "get_broker_config":
+		return "broker.config.read *", nil
+	case "list_cluster_configs":
+		return "cluster.config.read *", nil
 	default:
 		return "", fmt.Errorf("unsupported kafka_cluster operation: %s", operation)
 	}
+}
+
+func kafkaConfigEntriesResult(configs []kadm.Config) []map[string]any {
+	out := make([]map[string]any, 0, len(configs))
+	for _, c := range configs {
+		if c.Sensitive {
+			out = append(out, map[string]any{"name": c.Key, "sensitive": true, "source": c.Source.String()})
+			continue
+		}
+		entry := map[string]any{"name": c.Key, "source": c.Source.String()}
+		if c.Value != nil {
+			entry["value"] = *c.Value
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func kafkaTopicCommand(operation, topic string) (string, error) {

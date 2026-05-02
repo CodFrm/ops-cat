@@ -13,6 +13,7 @@ import {
   KafkaDeleteSchema,
   KafkaDeleteTopic,
   KafkaDeleteConsumerGroup,
+  KafkaGetBrokerConfig,
   KafkaGetSchema,
   KafkaGetSchemaSubjectVersions,
   KafkaGetConnector,
@@ -21,6 +22,7 @@ import {
   KafkaIncreasePartitions,
   KafkaListACLs,
   KafkaListBrokers,
+  KafkaListClusterConfigs,
   KafkaListConnectClusters,
   KafkaListConnectors,
   KafkaListConsumerGroups,
@@ -60,6 +62,24 @@ export interface KafkaBroker {
   host: string;
   port: number;
   rack?: string;
+}
+
+export interface KafkaConfigEntry {
+  name: string;
+  value?: string;
+  isSensitive: boolean;
+  source?: string;
+}
+
+export interface KafkaBrokerConfig {
+  brokerId: number;
+  configs?: KafkaConfigEntry[];
+  error?: string;
+}
+
+export interface KafkaClusterConfigs {
+  configs?: KafkaConfigEntry[];
+  error?: string;
 }
 
 export interface KafkaTopicSummary {
@@ -348,6 +368,9 @@ export interface KafkaTabState {
   activeView: KafkaView;
   overview?: KafkaClusterOverviewInfo;
   brokers: KafkaBroker[];
+  selectedBroker?: number;
+  brokerConfig?: KafkaBrokerConfig;
+  clusterConfigs?: KafkaClusterConfigs;
   topics: KafkaTopicSummary[];
   topicsTotal: number;
   topicSearch: string;
@@ -373,6 +396,8 @@ export interface KafkaTabState {
   produceMessage: KafkaProduceState;
   loadingOverview: boolean;
   loadingBrokers: boolean;
+  loadingBrokerConfig: boolean;
+  loadingClusterConfigs: boolean;
   loadingTopics: boolean;
   loadingTopicDetail: boolean;
   loadingMessages: boolean;
@@ -404,6 +429,8 @@ interface KafkaStoreState {
   setProduceMessage: (tabId: string, patch: Partial<KafkaProduceState>) => void;
   loadOverview: (tabId: string) => Promise<void>;
   loadBrokers: (tabId: string) => Promise<void>;
+  loadBrokerConfig: (tabId: string, brokerId: number) => Promise<void>;
+  loadClusterConfigs: (tabId: string) => Promise<void>;
   loadTopics: (tabId: string) => Promise<void>;
   loadTopicDetail: (tabId: string, topic: string) => Promise<void>;
   createTopic: (tabId: string, req: { topic: string; partitions: number; replicationFactor: number; configs?: Record<string, string> }) => Promise<void>;
@@ -460,6 +487,8 @@ function defaultKafkaState(): KafkaTabState {
     produceMessage: defaultProduceState(),
     loadingOverview: false,
     loadingBrokers: false,
+    loadingBrokerConfig: false,
+    loadingClusterConfigs: false,
     loadingTopics: false,
     loadingTopicDetail: false,
     loadingMessages: false,
@@ -617,6 +646,44 @@ export const useKafkaStore = create<KafkaStoreState>((set, get) => ({
     } catch (err) {
       set((s) => ({
         states: { ...s.states, [tabId]: { ...s.states[tabId], loadingBrokers: false, error: String(err) } },
+      }));
+    }
+  },
+
+  loadBrokerConfig: async (tabId, brokerId) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    set((s) => ({
+      states: { ...s.states, [tabId]: { ...s.states[tabId], selectedBroker: brokerId, brokerConfig: undefined, loadingBrokerConfig: true } },
+    }));
+    try {
+      const result = (await KafkaGetBrokerConfig(assetId, brokerId)) as KafkaBrokerConfig;
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], brokerConfig: result, loadingBrokerConfig: false, error: null } },
+      }));
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], loadingBrokerConfig: false, error: String(err) } },
+      }));
+    }
+  },
+
+  loadClusterConfigs: async (tabId) => {
+    const assetId = getKafkaAssetId(tabId);
+    if (!assetId) return;
+    get().ensureTab(tabId);
+    set((s) => ({
+      states: { ...s.states, [tabId]: { ...s.states[tabId], clusterConfigs: undefined, loadingClusterConfigs: true } },
+    }));
+    try {
+      const result = (await KafkaListClusterConfigs(assetId)) as KafkaClusterConfigs;
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], clusterConfigs: result, loadingClusterConfigs: false, error: null } },
+      }));
+    } catch (err) {
+      set((s) => ({
+        states: { ...s.states, [tabId]: { ...s.states[tabId], loadingClusterConfigs: false, error: String(err) } },
       }));
     }
   },

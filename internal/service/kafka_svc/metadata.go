@@ -12,6 +12,70 @@ import (
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 )
 
+func (s *Service) GetBrokerConfig(ctx context.Context, assetID int64, brokerID int32) (BrokerConfigResponse, error) {
+	var out BrokerConfigResponse
+	err := s.withClient(ctx, assetID, func(ctx context.Context, _ *kgo.Client, admin *kadm.Client, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
+		out.BrokerID = brokerID
+		resources, err := admin.DescribeBrokerConfigs(ctx, brokerID)
+		if err != nil {
+			return fmt.Errorf("读取 Broker 配置失败: %w", err)
+		}
+		if len(resources) == 0 {
+			return fmt.Errorf("Broker 配置响应为空: %d", brokerID)
+		}
+		rc := resources[0]
+		if rc.Err != nil {
+			out.Error = rc.Err.Error()
+			return nil
+		}
+		out.Configs = configEntriesFromKadm(rc.Configs)
+		return nil
+	})
+	return out, err
+}
+
+func (s *Service) ListClusterConfigs(ctx context.Context, assetID int64) (ClusterConfigsResponse, error) {
+	var out ClusterConfigsResponse
+	err := s.withClient(ctx, assetID, func(ctx context.Context, _ *kgo.Client, admin *kadm.Client, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {
+		metadata, err := admin.Metadata(ctx)
+		if err != nil {
+			return fmt.Errorf("读取集群元数据失败: %w", err)
+		}
+		resources, err := admin.DescribeBrokerConfigs(ctx, metadata.Controller)
+		if err != nil {
+			return fmt.Errorf("读取集群配置失败: %w", err)
+		}
+		if len(resources) == 0 {
+			return fmt.Errorf("集群配置响应为空")
+		}
+		rc := resources[0]
+		if rc.Err != nil {
+			out.Error = rc.Err.Error()
+			return nil
+		}
+		out.Configs = configEntriesFromKadm(rc.Configs)
+		return nil
+	})
+	return out, err
+}
+
+func configEntriesFromKadm(configs []kadm.Config) []ConfigEntry {
+	out := make([]ConfigEntry, 0, len(configs))
+	for _, c := range configs {
+		entry := ConfigEntry{
+			Name:        c.Key,
+			IsSensitive: c.Sensitive,
+			Source:      c.Source.String(),
+		}
+		if c.Value != nil {
+			entry.Value = *c.Value
+		}
+		out = append(out, entry)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
 func (s *Service) ClusterOverview(ctx context.Context, assetID int64) (ClusterOverview, error) {
 	var out ClusterOverview
 	err := s.withClient(ctx, assetID, func(ctx context.Context, _ *kgo.Client, admin *kadm.Client, _ *asset_entity.Asset, _ *asset_entity.KafkaConfig) error {

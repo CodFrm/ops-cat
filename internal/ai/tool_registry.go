@@ -219,10 +219,11 @@ func AllToolDefs() []ToolDef {
 		},
 		{
 			Name:        "kafka_cluster",
-			Description: "Read Kafka cluster metadata for a Kafka asset. Grouped operations: overview, brokers. Credentials are resolved automatically.",
+			Description: "Read Kafka cluster metadata and configuration for a Kafka asset. Grouped operations: overview, brokers, get_broker_config, list_cluster_configs. Credentials are resolved automatically.",
 			Params: []ParamDef{
 				{Name: "asset_id", Type: ParamNumber, Description: "Kafka asset ID. Use list_assets with asset_type='kafka' to find.", Required: true},
-				{Name: "operation", Type: ParamString, Description: "Operation: overview, brokers. Defaults to overview."},
+				{Name: "operation", Type: ParamString, Description: "Operation: overview, brokers, get_broker_config, list_cluster_configs. Defaults to overview."},
+				{Name: "broker_id", Type: ParamNumber, Description: "Broker node ID for operation=get_broker_config."},
 			},
 			Handler: handleKafkaCluster,
 			CommandExtractor: func(args map[string]any) string {
