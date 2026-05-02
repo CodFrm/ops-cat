@@ -146,6 +146,58 @@ func TestKafkaConnectService(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestKafkaConnectListConnectorsFallsBackOn4xx(t *testing.T) {
+	var sawExpanded bool
+	var sawFallback bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/connectors" && r.URL.Query().Get("expand") == "status":
+			sawExpanded = true
+			http.Error(w, "expand unsupported", http.StatusMethodNotAllowed)
+		case r.Method == http.MethodGet && r.URL.Path == "/connectors":
+			sawFallback = true
+			_ = json.NewEncoder(w).Encode([]string{"legacy-sink"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	asset := &asset_entity.Asset{ID: 9202, Name: "connect-legacy", Type: asset_entity.AssetTypeKafka}
+	require.NoError(t, asset.SetKafkaConfig(&asset_entity.KafkaConfig{
+		Brokers: []string{"localhost:9092"},
+		Connect: asset_entity.KafkaConnectConfig{
+			Enabled: true,
+			Clusters: []asset_entity.KafkaConnectClusterConfig{
+				{Name: "local", URL: server.URL},
+			},
+		},
+	}))
+
+	mockCtrl := gomock.NewController(t)
+	t.Cleanup(mockCtrl.Finish)
+	mockRepo := mock_asset_repo.NewMockAssetRepo(mockCtrl)
+	mockRepo.EXPECT().Find(gomock.Any(), int64(9202)).Return(asset, nil).AnyTimes()
+	origRepo := asset_repo.Asset()
+	asset_repo.RegisterAsset(mockRepo)
+	t.Cleanup(func() {
+		if origRepo != nil {
+			asset_repo.RegisterAsset(origRepo)
+		}
+	})
+
+	svc := New(nil)
+	defer svc.Close()
+	connectors, err := svc.ListConnectors(context.Background(), ListConnectorsRequest{AssetID: asset.ID, Cluster: "local"})
+	require.NoError(t, err)
+	require.Len(t, connectors, 1)
+	assert.True(t, sawExpanded)
+	assert.True(t, sawFallback)
+	assert.Equal(t, "legacy-sink", connectors[0].Name)
+	assert.Empty(t, connectors[0].Status)
+}
+
 func TestKafkaConnectHelpers(t *testing.T) {
 	assert.Equal(t, "/connectors/a%2Fb/status", connectPath("connectors", "a/b", "status"))
 

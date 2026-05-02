@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -63,6 +64,30 @@ type connectErrorResponse struct {
 	Message   string `json:"message"`
 }
 
+type kafkaConnectHTTPStatusError struct {
+	StatusCode  int
+	ConnectCode int
+	Message     string
+}
+
+func (e *kafkaConnectHTTPStatusError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.ConnectCode != 0 && e.Message != "" {
+		return fmt.Sprintf("HTTP %d connect_code=%d: %s", e.StatusCode, e.ConnectCode, e.Message)
+	}
+	if e.Message != "" {
+		return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Message)
+	}
+	return fmt.Sprintf("HTTP %d", e.StatusCode)
+}
+
+func isKafkaConnectHTTPClientError(err error) bool {
+	var statusErr *kafkaConnectHTTPStatusError
+	return errors.As(err, &statusErr) && statusErr.StatusCode >= 400 && statusErr.StatusCode < 500
+}
+
 func (s *Service) ListConnectClusters(ctx context.Context, assetID int64) ([]KafkaConnectCluster, error) {
 	_, cfg, err := resolveKafkaAssetConfig(ctx, assetID)
 	if err != nil {
@@ -96,6 +121,8 @@ func (s *Service) ListConnectors(ctx context.Context, req ListConnectorsRequest)
 		if err := client.do(ctx, http.MethodGet, "/connectors", query, nil, &expanded); err == nil {
 			out = connectorSummariesFromExpandedStatus(expanded)
 			return nil
+		} else if !isKafkaConnectHTTPClientError(err) {
+			return fmt.Errorf("读取 Kafka Connect connector status 列表失败: %w", err)
 		}
 
 		var names []string
@@ -404,13 +431,20 @@ func kafkaConnectHTTPError(resp *http.Response) error {
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	var body connectErrorResponse
 	if err := json.Unmarshal(data, &body); err == nil && body.Message != "" {
-		return fmt.Errorf("HTTP %d connect_code=%d: %s", resp.StatusCode, body.ErrorCode, body.Message)
+		return &kafkaConnectHTTPStatusError{
+			StatusCode:  resp.StatusCode,
+			ConnectCode: body.ErrorCode,
+			Message:     body.Message,
+		}
 	}
 	text := strings.TrimSpace(string(data))
 	if text == "" {
 		text = http.StatusText(resp.StatusCode)
 	}
-	return fmt.Errorf("HTTP %d: %s", resp.StatusCode, text)
+	return &kafkaConnectHTTPStatusError{
+		StatusCode: resp.StatusCode,
+		Message:    text,
+	}
 }
 
 func connectPath(parts ...string) string {
