@@ -472,8 +472,8 @@ export function AIChatContent({
               <div className="flex items-center justify-between px-3 pb-2">
                 <span className="text-xs text-muted-foreground/40 select-none">
                   {sendOnEnter
-                    ? `Enter ${t("ai.sendShortcutHint")}`
-                    : `${formatModKey("Enter")} ${t("ai.sendShortcutHint")}`}
+                    ? `Enter ${t("ai.sendShortcutHint")} · ${formatModKey("Enter")} ${t("ai.newlineShortcutHint")}`
+                    : `${formatModKey("Enter")} ${t("ai.sendShortcutHint")} · Enter ${t("ai.newlineShortcutHint")}`}
                 </span>
                 {sending ? (
                   <Button

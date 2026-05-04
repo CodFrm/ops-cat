@@ -607,6 +607,7 @@
     "placeholder": "输入消息...",
     "sendPlaceholder": "输入消息...",
     "sendShortcutHint": "发送",
+    "newlineShortcutHint": "换行",
     "send": "发送",
     "notConfigured": "请在设置中配置 AI Provider",
     "permissionTitle": "工具执行确认",

@@ -607,6 +607,7 @@
     "placeholder": "Type a message...",
     "sendPlaceholder": "Type a message...",
     "sendShortcutHint": "to send",
+    "newlineShortcutHint": "for new line",
     "send": "Send",
     "notConfigured": "Please configure AI Provider in Settings",
     "permissionTitle": "Tool Execution Approval",

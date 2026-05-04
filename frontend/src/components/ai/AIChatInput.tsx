@@ -517,6 +517,13 @@ export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(funct
           triggerSubmitRef.current();
           return true;
         }
+        // Ctrl/Cmd+Enter 在默认 Enter 发送模式下显式插入换行段落，
+        // 避免不同 WebView 对 modifier+Enter 的默认行为不一致。
+        if (isEnter && shouldSendOnEnter && mod) {
+          event.preventDefault();
+          editor.commands.splitBlock();
+          return true;
+        }
         if (isEnter && !shouldSendOnEnter && mod) {
           event.preventDefault();
           triggerSubmitRef.current();

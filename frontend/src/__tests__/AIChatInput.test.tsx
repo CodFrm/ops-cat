@@ -338,4 +338,63 @@ describe("AIChatInput", () => {
     await userEvent.keyboard("{ArrowUp}");
     await waitFor(() => expect(editorRef.current!.getText()).toBe("最新"));
   });
+
+  it("Ctrl+Enter 在 sendOnEnter=true 模式下插入换行而不触发发送", async () => {
+    const onSubmit = vi.fn();
+    const editorRef = { current: null as Editor | null };
+    const handleRef = createRef<AIChatInputHandle>();
+    render(
+      <AIChatInput ref={handleRef} onSubmit={onSubmit} sendOnEnter={true} editorRef={editorRef} />
+    );
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+
+    const editor = screen.getByRole("textbox");
+    await userEvent.click(editor);
+    await userEvent.keyboard("hello");
+    await userEvent.keyboard("{Control>}{Enter}{/Control}");
+    // Ctrl+Enter 应插入换行段落，不应触发 onSubmit
+    expect(onSubmit).not.toHaveBeenCalled();
+    const text = editorRef.current!.getText({ blockSeparator: "\n" });
+    expect(text).toContain("\n");
+  });
+
+  it("Ctrl+Enter 换行后 Enter 可正常提交包含换行的文本", async () => {
+    const onSubmit = vi.fn();
+    const editorRef = { current: null as Editor | null };
+    const handleRef = createRef<AIChatInputHandle>();
+    render(
+      <AIChatInput ref={handleRef} onSubmit={onSubmit} sendOnEnter={true} editorRef={editorRef} />
+    );
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+
+    const editor = screen.getByRole("textbox");
+    await userEvent.click(editor);
+    await userEvent.keyboard("first line");
+    await userEvent.keyboard("{Control>}{Enter}{/Control}");
+    await userEvent.keyboard("second line");
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const [text, mentions] = onSubmit.mock.calls[0];
+    expect(text).toBe("first line\nsecond line");
+    expect(mentions).toEqual([]);
+  });
+
+  it("Ctrl+Enter 在提及弹窗激活时不拦截，仍由 suggestion 处理", async () => {
+    const onSubmit = vi.fn();
+    render(<AIChatInput onSubmit={onSubmit} sendOnEnter={true} />);
+    const editor = screen.getByRole("textbox");
+    await userEvent.click(editor);
+    await userEvent.keyboard("@prod");
+    await waitFor(() => expect(screen.getByRole("listbox")).toBeInTheDocument());
+    // Ctrl+Enter 在 suggestion 激活时不应被拦截——
+    // suggestion 插件会消费 Enter，Ctrl 修饰键不影响这个路径。
+    await userEvent.keyboard("{Control>}{Enter}{/Control}");
+    // 提及弹窗应被 Enter 选中关闭
+    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
+    // 再次 Enter 发送包含 mention 的内容
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const [text] = onSubmit.mock.calls[0];
+    expect(text).toMatch(/@prod-db/);
+  });
 });
