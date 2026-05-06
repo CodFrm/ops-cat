@@ -62,18 +62,29 @@ export function K8sLogsPanel({
   const { t } = useTranslation();
   const terminalRef = useRef<K8sLogTerminalHandle>(null);
   const myStreamIDRef = useRef<string | null>(null);
+  const eventNamesRef = useRef<{ data: string; err: string; end: string } | null>(null);
   const onStateChangeRef = useRef(onStateChange);
   const activeContainer = state.logContainer || containers[0]?.name || "";
   // eslint-disable-next-line react-hooks/refs
   onStateChangeRef.current = onStateChange;
+
+  const offEvents = useCallback(() => {
+    const names = eventNamesRef.current;
+    if (!names) return;
+    EventsOff(names.data);
+    EventsOff(names.err);
+    EventsOff(names.end);
+    eventNamesRef.current = null;
+  }, []);
 
   const stop = useCallback(() => {
     if (myStreamIDRef.current) {
       StopK8sPodLogs(myStreamIDRef.current);
       myStreamIDRef.current = null;
     }
+    offEvents();
     onStateChangeRef.current({ logStreamID: null });
-  }, []);
+  }, [offEvents]);
 
   const start = useCallback(() => {
     stop();
@@ -100,6 +111,7 @@ export function K8sLogsPanel({
         const dataEvent = "k8s:log:" + streamID;
         const errEvent = "k8s:logerr:" + streamID;
         const endEvent = "k8s:logend:" + streamID;
+        eventNamesRef.current = { data: dataEvent, err: errEvent, end: endEvent };
 
         EventsOn(dataEvent, (data: string) => {
           if (myStreamIDRef.current !== streamID) return;
@@ -132,15 +144,13 @@ export function K8sLogsPanel({
           if (myStreamIDRef.current !== streamID) return;
           myStreamIDRef.current = null;
           onStateChangeRef.current({ logStreamID: null });
-          EventsOff(dataEvent);
-          EventsOff(errEvent);
-          EventsOff(endEvent);
+          offEvents();
         });
       })
       .catch((e: unknown) => {
         onStateChangeRef.current({ logError: String(e) });
       });
-  }, [activeContainer, assetId, namespace, podName, state.logTailLines, stop]);
+  }, [activeContainer, assetId, namespace, podName, state.logTailLines, stop, offEvents]);
 
   useEffect(() => {
     return () => {
@@ -148,8 +158,9 @@ export function K8sLogsPanel({
         StopK8sPodLogs(myStreamIDRef.current);
         myStreamIDRef.current = null;
       }
+      offEvents();
     };
-  }, []);
+  }, [offEvents]);
 
   useEffect(() => {
     if (myStreamIDRef.current) {
