@@ -28,6 +28,9 @@ vi.mock("../../wailsjs/go/app/App", async () => {
   for (const key of Object.keys(actual)) {
     mocked[key] = vi.fn().mockResolvedValue(undefined);
   }
+  for (const key of ["SelectTableExportFile", "WriteTableExportFile"]) {
+    mocked[key] ??= vi.fn().mockResolvedValue(undefined);
+  }
   return mocked;
 });
 

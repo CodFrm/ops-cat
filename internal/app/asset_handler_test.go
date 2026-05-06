@@ -10,11 +10,12 @@ import (
 )
 
 func TestExtensionAssetHandler(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "extensions")
+	parentDir := t.TempDir()
+	dir := filepath.Join(parentDir, "extensions")
 	extDir := filepath.Join(dir, "test-ext", "frontend")
 	_ = os.MkdirAll(extDir, 0755)
 	_ = os.WriteFile(filepath.Join(extDir, "index.js"), []byte("export function Page(){}"), 0644)
-	_ = os.WriteFile(filepath.Join(filepath.Dir(dir), "secret.txt"), []byte("secret"), 0644)
+	_ = os.WriteFile(filepath.Join(parentDir, "secret.js"), []byte("secret"), 0644)
 
 	fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -59,8 +60,8 @@ func TestExtensionAssetHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("blocks traversal outside extension directory", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/extensions/%2e%2e/secret.txt", nil)
+	t.Run("rejects directory traversal", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/extensions/../secret.js", nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -68,7 +69,20 @@ func TestExtensionAssetHandler(t *testing.T) {
 			t.Fatalf("expected 404, got %d", rec.Code)
 		}
 		if body := rec.Body.String(); strings.Contains(body, "secret") {
-			t.Fatalf("served file outside extension directory: %s", body)
+			t.Fatalf("unexpected body: %s", body)
+		}
+	})
+
+	t.Run("rejects encoded directory traversal", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/extensions/%2e%2e/secret.js", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d", rec.Code)
+		}
+		if body := rec.Body.String(); strings.Contains(body, "secret") {
+			t.Fatalf("unexpected body: %s", body)
 		}
 	})
 }

@@ -21,7 +21,7 @@ func (s *stubHandler) SafeView(_ *asset_entity.Asset) map[string]any {
 func (s *stubHandler) ResolvePassword(_ context.Context, _ *asset_entity.Asset) (string, error) {
 	return "", nil
 }
-func (s *stubHandler) DefaultPolicy() any                       { return nil }
+func (s *stubHandler) DefaultPolicy() any                        { return nil }
 func (s *stubHandler) ValidateCreateArgs(_ map[string]any) error { return nil }
 func (s *stubHandler) ApplyCreateArgs(_ context.Context, _ *asset_entity.Asset, _ map[string]any) error {
 	return nil

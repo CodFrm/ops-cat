@@ -17,6 +17,7 @@ import {
 import { ExecuteSQL } from "../../../wailsjs/go/app/App";
 import { toast } from "sonner";
 import { SqlPreviewDialog } from "./SqlPreviewDialog";
+import { quoteIdent, quoteTableRef, sqlQuote } from "@/lib/tableSql";
 
 interface CreateTableDialogProps {
   open: boolean;
@@ -33,16 +34,6 @@ interface ColumnDraft {
   type: string;
   nullable: boolean;
   defaultValue: string;
-}
-
-function quoteIdent(name: string, driver?: string): string {
-  if (driver === "postgresql") return `"${name.replace(/"/g, '""')}"`;
-  return `\`${name.replace(/`/g, "``")}\``;
-}
-
-function sqlQuote(value: string): string {
-  const escaped = value.replace(/'/g, "''");
-  return `'${escaped}'`;
 }
 
 function formatDefaultValue(value: string): string {
@@ -62,8 +53,7 @@ export interface BuildCreateTableSqlInput {
 }
 
 export function buildCreateTableSql({ driver, database, name, columns }: BuildCreateTableSqlInput): string {
-  const tableRef =
-    driver === "postgresql" ? quoteIdent(name, driver) : `${quoteIdent(database, driver)}.${quoteIdent(name, driver)}`;
+  const tableRef = quoteTableRef(database, name, driver);
 
   const defs = columns.map((col) => {
     const nullable = col.nullable ? "" : " NOT NULL";

@@ -31,9 +31,7 @@ export function K8sConfigSection({
   isEditing,
 }: K8sConfigSectionProps) {
   const { t } = useTranslation();
-  const placeholder = isEditing
-    ? t("asset.k8sKubeconfigEditPlaceholder")
-    : t("asset.k8sKubeconfigPlaceholder");
+  const placeholder = isEditing ? t("asset.k8sKubeconfigEditPlaceholder") : t("asset.k8sKubeconfigPlaceholder");
   return (
     <div className="grid gap-3 border rounded-lg p-4">
       <div className="grid gap-2">

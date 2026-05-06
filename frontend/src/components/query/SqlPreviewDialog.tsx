@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import type { ReactNode } from "react";
 import { Copy, Loader2 } from "lucide-react";
 import {
   AlertDialog,
@@ -23,9 +24,17 @@ interface SqlPreviewDialogProps {
   // and the cancel slot renders as "Close".
   onConfirm?: () => void;
   submitting?: boolean;
+  warning?: ReactNode;
 }
 
-export function SqlPreviewDialog({ open, onOpenChange, statements, onConfirm, submitting }: SqlPreviewDialogProps) {
+export function SqlPreviewDialog({
+  open,
+  onOpenChange,
+  statements,
+  onConfirm,
+  submitting,
+  warning,
+}: SqlPreviewDialogProps) {
   const { t } = useTranslation();
   const isConfirm = !!onConfirm;
 
@@ -46,6 +55,7 @@ export function SqlPreviewDialog({ open, onOpenChange, statements, onConfirm, su
         <div className="h-[360px] rounded-md border border-border overflow-hidden bg-muted/30">
           <CodeEditor value={statements.join("\n\n")} language="sql" readOnly />
         </div>
+        {warning}
         <AlertDialogFooter>
           <Button
             variant="outline"

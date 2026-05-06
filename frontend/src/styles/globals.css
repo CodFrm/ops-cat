@@ -177,6 +177,39 @@
 }
 
 @layer components {
+  .query-table-frozen-header-selected {
+    background-color: var(--muted);
+    background-image: linear-gradient(
+      color-mix(in oklab, var(--primary) 25%, transparent),
+      color-mix(in oklab, var(--primary) 25%, transparent)
+    );
+  }
+
+  .query-table-frozen-cell-selected {
+    background-color: var(--background);
+    background-image: linear-gradient(
+      color-mix(in oklab, var(--primary) 15%, transparent),
+      color-mix(in oklab, var(--primary) 15%, transparent)
+    );
+  }
+
+  .query-table-frozen-cell-focus {
+    background-color: var(--background);
+    background-image: linear-gradient(
+      color-mix(in oklab, var(--primary) 5%, transparent),
+      color-mix(in oklab, var(--primary) 5%, transparent)
+    );
+  }
+
+  .query-table-frozen-cell-edited {
+    background-color: var(--background);
+    background-image: linear-gradient(oklch(0.94 0.08 95 / 75%), oklch(0.94 0.08 95 / 75%));
+  }
+
+  .dark .query-table-frozen-cell-edited {
+    background-image: linear-gradient(oklch(0.55 0.09 85 / 35%), oklch(0.55 0.09 85 / 35%));
+  }
+
   .tree-group-content {
     display: grid;
     grid-template-rows: 1fr;

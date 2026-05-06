@@ -2,6 +2,8 @@ package app
 
 import (
 	"net/http"
+	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -14,8 +16,6 @@ const extensionPathPrefix = "/extensions/"
 type ExtensionAssetHandler struct {
 	extensionsDir  string
 	defaultHandler http.Handler
-	fileSystem     http.FileSystem
-	fileHandler    http.Handler
 }
 
 // NewExtensionAssetHandler creates a handler that serves extension files.
@@ -25,12 +25,9 @@ func NewExtensionAssetHandler(extensionsDir string, defaultHandler http.Handler)
 		cleanDir = filepath.Clean(extensionsDir)
 	}
 
-	fileSystem := http.Dir(cleanDir)
 	return &ExtensionAssetHandler{
 		extensionsDir:  cleanDir,
 		defaultHandler: defaultHandler,
-		fileSystem:     fileSystem,
-		fileHandler:    http.StripPrefix(extensionPathPrefix, http.FileServer(fileSystem)),
 	}
 }
 
@@ -45,19 +42,17 @@ func (h *ExtensionAssetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 
 	rel := strings.TrimPrefix(r.URL.Path, extensionPathPrefix)
-	if !h.isLocalExtensionPath(rel) {
+	if rel == "" || strings.HasPrefix(rel, "/") {
 		http.NotFound(w, r)
 		return
 	}
 
-	file, err := h.fileSystem.Open(rel)
+	file, err := os.OpenInRoot(h.extensionsDir, filepath.FromSlash(rel))
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	defer func() {
-		_ = file.Close()
-	}()
+	defer func() { _ = file.Close() }()
 
 	info, err := file.Stat()
 	if err != nil || info.IsDir() {
@@ -65,19 +60,5 @@ func (h *ExtensionAssetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	h.fileHandler.ServeHTTP(w, r)
-}
-
-func (h *ExtensionAssetHandler) isLocalExtensionPath(rel string) bool {
-	localRel := filepath.FromSlash(rel)
-	if !filepath.IsLocal(localRel) {
-		return false
-	}
-
-	filePath := filepath.Join(h.extensionsDir, localRel)
-	relToRoot, err := filepath.Rel(h.extensionsDir, filePath)
-	if err != nil || relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) {
-		return false
-	}
-	return true
+	http.ServeContent(w, r, path.Base(rel), info.ModTime(), file)
 }
