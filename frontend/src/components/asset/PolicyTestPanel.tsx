@@ -21,6 +21,7 @@ interface TestResult {
 
 const PLACEHOLDER_MAP: Record<string, string> = {
   ssh: "asset.policyTestPlaceholder",
+  k8s: "asset.k8sPolicyTestPlaceholder",
   database: "asset.policyTestSqlPlaceholder",
   redis: "asset.policyTestRedisPlaceholder",
   mongodb: "asset.policyTestMongoPlaceholder",

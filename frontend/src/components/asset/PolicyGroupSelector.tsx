@@ -15,6 +15,7 @@ interface PolicyGroupSelectorProps {
 
 const policyTypeMap: Record<string, string> = {
   ssh: "command",
+  k8s: "command",
   database: "query",
   redis: "redis",
   mongodb: "mongo",

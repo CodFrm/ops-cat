@@ -45,6 +45,7 @@ import {
   type KafkaConnectClusterForm,
   type KafkaSchemaRegistryForm,
 } from "@/components/asset/KafkaConfigSection";
+import { K8sConfigSection } from "@/components/asset/K8sConfigSection";
 import { useExtensionStore } from "@/extension";
 import { ExtensionConfigForm } from "@/components/asset/ExtensionConfigForm";
 
@@ -178,7 +179,7 @@ interface KafkaConnectClusterConfig {
   tls_key_file?: string;
 }
 
-type AssetType = "ssh" | "database" | "redis" | "mongodb" | "kafka" | (string & {});
+type AssetType = "ssh" | "database" | "redis" | "mongodb" | "kafka" | "k8s" | (string & {});
 
 const DEFAULT_PORTS: Record<string, number> = {
   ssh: 22,
@@ -187,6 +188,7 @@ const DEFAULT_PORTS: Record<string, number> = {
   redis: 6379,
   mongodb: 27017,
   kafka: 9092,
+  k8s: 6443,
 };
 
 const DEFAULT_ICONS: Record<string, string> = {
@@ -196,6 +198,7 @@ const DEFAULT_ICONS: Record<string, string> = {
   redis: "redis",
   mongodb: "mongodb",
   kafka: "kafka",
+  k8s: "kubernetes",
 };
 
 function defaultKafkaCompanionAuth(): KafkaCompanionAuthForm {
@@ -369,6 +372,12 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setKafkaSchemaRegistryState((current) => ({ ...current, ...patch }));
   }, []);
 
+  // K8S fields
+  const [kubeconfig, setKubeconfig] = useState("");
+  const [k8sNamespace, setK8sNamespace] = useState("");
+  const [k8sContext, setK8sContext] = useState("");
+  const [showKubeconfig, setShowKubeconfig] = useState(false);
+
   // Extension config
   const [extConfig, setExtConfig] = useState<Record<string, unknown>>({});
 
@@ -415,6 +424,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
           loadMongoDBConfig(editAsset);
         } else if (editType === "kafka") {
           loadKafkaConfig(editAsset);
+        } else if (editType === "k8s") {
+          loadK8sConfig(editAsset);
         } else {
           // Extension type: load decrypted config
           const extInfo = useExtensionStore.getState().getExtensionForAssetType(editType);
@@ -438,6 +449,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         resetRedisFields();
         resetMongoDBFields();
         resetKafkaFields();
+        resetK8sFields();
         setExtConfig({});
       }
     }
@@ -637,6 +649,26 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     }
   };
 
+  const loadK8sConfig = (asset: asset_entity.Asset) => {
+    try {
+      const cfg = JSON.parse(asset.Config || "{}");
+      // kubeconfig 已加密落库，编辑时不预填密文；用户重新输入即视为替换。
+      setKubeconfig("");
+      setK8sNamespace(cfg.namespace || "");
+      setK8sContext(cfg.context || "");
+      setShowKubeconfig(false);
+      setSshTunnelId(asset.sshTunnelId || 0);
+      setHost(""); // K8S uses kubeconfig, not host
+      setPort(6443);
+      setUsername("");
+      setPassword("");
+      setEncryptedPassword("");
+    } catch {
+      resetSharedFields("k8s");
+      resetK8sFields();
+    }
+  };
+
   // Reset shared connection fields with type-appropriate defaults
   const resetSharedFields = (type: AssetType, dbDriver = "mysql") => {
     setHost("");
@@ -723,6 +755,14 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setKafkaConnectClusters([]);
   };
 
+  // K8S-exclusive fields only
+  const resetK8sFields = () => {
+    setKubeconfig("");
+    setK8sNamespace("");
+    setK8sContext("");
+    setShowKubeconfig(false);
+  };
+
   const handleTypeChange = (newType: AssetType) => {
     if (newType === assetType) return;
     setAssetType(newType);
@@ -736,6 +776,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setPasswordSource("inline");
     setPasswordCredentialId(0);
     setIcon(newType === "database" ? DEFAULT_ICONS[driver] || "mysql" : DEFAULT_ICONS[newType] || "server");
+    if (newType === "k8s") setHost("");
   };
 
   const handleDriverChange = (newDriver: string) => {
@@ -1186,6 +1227,28 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         kafkaConfig.connect = connectConfig;
       }
       config = JSON.stringify(kafkaConfig);
+    } else if (assetType === "k8s") {
+      const k8sConfig: Record<string, unknown> = {};
+      if (kubeconfig) {
+        // 用户输入了新的 kubeconfig（明文 YAML），加密后落库。
+        try {
+          k8sConfig.kubeconfig = await EncryptPassword(kubeconfig);
+        } catch {
+          toast.error("Failed to encrypt kubeconfig");
+          return;
+        }
+      } else if (editAsset) {
+        // 编辑模式且未输入新值：保留原 ciphertext。
+        try {
+          const oldCfg = JSON.parse(editAsset.Config || "{}") as { kubeconfig?: string };
+          if (oldCfg.kubeconfig) k8sConfig.kubeconfig = oldCfg.kubeconfig;
+        } catch {
+          // 旧 config 解析失败：让 ciphertext 缺失冒到后端校验
+        }
+      }
+      if (k8sNamespace) k8sConfig.namespace = k8sNamespace;
+      if (k8sContext) k8sConfig.context = k8sContext;
+      config = JSON.stringify(k8sConfig);
     } else {
       // Extension type: encrypt password fields from configSchema before saving
       const extInfo = useExtensionStore.getState().getExtensionForAssetType(assetType);
@@ -1218,9 +1281,13 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
           ? connectionType === "jumphost" && sshTunnelId > 0
             ? sshTunnelId
             : 0
-          : sshTunnelId > 0
-            ? sshTunnelId
-            : 0,
+          : assetType === "k8s"
+            ? sshTunnelId > 0
+              ? sshTunnelId
+              : 0
+            : sshTunnelId > 0
+              ? sshTunnelId
+              : 0,
     });
 
     setSaving(true);
@@ -1250,10 +1317,12 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             ? t("asset.typeMongoDB")
             : assetType === "kafka"
               ? t("asset.typeKafka")
-              : (() => {
-                  const found = availableTypes.find((at) => at.type === assetType);
-                  return found ? resolveExtDisplayName(found) : assetType;
-                })();
+              : assetType === "k8s"
+                ? t("asset.typeK8s")
+                : (() => {
+                    const found = availableTypes.find((at) => at.type === assetType);
+                    return found ? resolveExtDisplayName(found) : assetType;
+                  })();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1278,6 +1347,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                   <SelectItem value="redis">{t("asset.typeRedis")}</SelectItem>
                   <SelectItem value="mongodb">{t("asset.typeMongoDB")}</SelectItem>
                   <SelectItem value="kafka">{t("asset.typeKafka")}</SelectItem>
+                  <SelectItem value="k8s">{t("asset.typeK8s")}</SelectItem>
                   {availableTypes
                     .filter((at) => !!at.extensionName)
                     .map((at) => (
@@ -1307,7 +1377,9 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                         ? "mongo-01"
                         : assetType === "kafka"
                           ? "kafka-prod"
-                          : `my-${assetType}`
+                          : assetType === "k8s"
+                            ? "prod-cluster"
+                            : `my-${assetType}`
               }
             />
           </div>
@@ -1542,12 +1614,30 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             />
           )}
 
+          {/* K8S config */}
+          {assetType === "k8s" && (
+            <K8sConfigSection
+              kubeconfig={kubeconfig}
+              setKubeconfig={setKubeconfig}
+              showKubeconfig={showKubeconfig}
+              setShowKubeconfig={setShowKubeconfig}
+              namespace={k8sNamespace}
+              setNamespace={setK8sNamespace}
+              contextName={k8sContext}
+              setContextName={setK8sContext}
+              sshTunnelId={sshTunnelId}
+              setSshTunnelId={setSshTunnelId}
+              isEditing={!!editAsset}
+            />
+          )}
+
           {/* Extension type config */}
           {assetType !== "ssh" &&
             assetType !== "database" &&
             assetType !== "redis" &&
             assetType !== "mongodb" &&
             assetType !== "kafka" &&
+            assetType !== "k8s" &&
             (() => {
               const extInfo = useExtensionStore.getState().getExtensionForAssetType(assetType);
               if (!extInfo) return null;
@@ -1626,7 +1716,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
               (["ssh", "database", "redis"].includes(assetType) && !host) ||
               (assetType === "mongodb" && mongoConnectionMode === "manual" && !host) ||
               (assetType === "mongodb" && mongoConnectionMode === "uri" && !connectionURI) ||
-              (assetType === "kafka" && kafkaBrokers().length === 0)
+              (assetType === "kafka" && kafkaBrokers().length === 0) ||
+              (assetType === "k8s" && !kubeconfig && !editAsset)
             }
           >
             {t("action.save")}

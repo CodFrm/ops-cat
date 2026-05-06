@@ -5,6 +5,7 @@ import { SSHDetailInfoCard } from "../SSHDetailInfoCard";
 import { DatabaseDetailInfoCard } from "../DatabaseDetailInfoCard";
 import { RedisDetailInfoCard } from "../RedisDetailInfoCard";
 import { MongoDBDetailInfoCard } from "../MongoDBDetailInfoCard";
+import { K8sDetailInfoCard } from "../K8sDetailInfoCard";
 
 afterEach(() => {
   cleanup();
@@ -27,6 +28,12 @@ function makeAsset(type: string, config: Record<string, unknown>): asset_entity.
     Createtime: 0,
     Updatetime: 0,
   });
+}
+
+function makeAssetWithTunnel(type: string, config: Record<string, unknown>, sshTunnelId: number): asset_entity.Asset {
+  const asset = makeAsset(type, config);
+  asset.sshTunnelId = sshTunnelId;
+  return asset;
 }
 
 const noopTunnel = vi.fn(() => null);
@@ -206,5 +213,14 @@ describe("MongoDBDetailInfoCard", () => {
     const asset = makeAsset("mongodb", {});
     const { container } = render(<MongoDBDetailInfoCard asset={asset} sshTunnelName={noopTunnel} />);
     expect(container).toBeDefined();
+  });
+});
+
+describe("K8sDetailInfoCard", () => {
+  it("shows SSH tunnel from asset field", () => {
+    const tunnelFn = vi.fn((id?: number) => (id === 7 ? "k8s-bastion" : null));
+    const asset = makeAssetWithTunnel("k8s", { kubeconfig: "apiVersion: v1" }, 7);
+    const { getByText } = render(<K8sDetailInfoCard asset={asset} sshTunnelName={tunnelFn} />);
+    expect(getByText("k8s-bastion")).toBeInTheDocument();
   });
 });

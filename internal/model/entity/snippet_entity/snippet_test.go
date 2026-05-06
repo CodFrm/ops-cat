@@ -55,11 +55,12 @@ func TestSnippet_TableName(t *testing.T) {
 
 func TestAllCategories(t *testing.T) {
 	cats := AllCategories()
-	assert.Len(t, cats, 5)
+	assert.Len(t, cats, 6)
 	assert.Contains(t, cats, CategoryShell)
 	assert.Contains(t, cats, CategorySQL)
 	assert.Contains(t, cats, CategoryRedis)
 	assert.Contains(t, cats, CategoryMongo)
+	assert.Contains(t, cats, CategoryK8s)
 	assert.Contains(t, cats, CategoryPrompt)
 }
 
@@ -75,6 +76,7 @@ func TestCategoryAssetType(t *testing.T) {
 	assert.Equal(t, "database", CategoryAssetType(CategorySQL))
 	assert.Equal(t, "redis", CategoryAssetType(CategoryRedis))
 	assert.Equal(t, "mongodb", CategoryAssetType(CategoryMongo))
+	assert.Equal(t, "k8s", CategoryAssetType(CategoryK8s))
 	assert.Equal(t, "", CategoryAssetType(CategoryPrompt))
 	assert.Equal(t, "", CategoryAssetType("bogus"))
 }

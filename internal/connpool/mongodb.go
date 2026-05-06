@@ -165,21 +165,60 @@ func injectPassword(uri, password string) string {
 
 // parseHostFromURI 从 MongoDB URI 中提取 host 和 port（仅取第一个主机）
 func parseHostFromURI(uri string) (string, int, error) {
-	parsed, err := url.Parse(uri)
-	if err != nil {
-		return "", 0, fmt.Errorf("无效的 MongoDB URI: %w", err)
+	rest := uri
+	if idx := strings.Index(rest, "://"); idx >= 0 {
+		rest = rest[idx+3:]
 	}
 
-	hostPort := parsed.Host
-	// 对于 mongodb+srv 或 replica set，只取第一个主机
-	if idx := strings.IndexByte(hostPort, ','); idx >= 0 {
-		hostPort = hostPort[:idx]
+	end := len(rest)
+	for _, sep := range []byte{'/', '?'} {
+		if idx := strings.IndexByte(rest, sep); idx >= 0 && idx < end {
+			end = idx
+		}
 	}
 
-	hostStr, portStr, splitErr := net.SplitHostPort(hostPort)
-	if splitErr != nil {
-		// SplitHostPort 失败说明没有端口部分，使用默认 27017
-		return hostPort, 27017, nil //nolint:nilerr // no port in host is expected, not an error
+	authority := rest[:end]
+	if authority == "" {
+		return "", 0, fmt.Errorf("无效的 MongoDB URI: 缺少主机")
+	}
+
+	if idx := strings.LastIndexByte(authority, '@'); idx >= 0 {
+		authority = authority[idx+1:]
+	}
+
+	// 对于 mongodb+srv 或 replica set，只取第一个主机。
+	hostPort := strings.TrimSpace(strings.Split(authority, ",")[0])
+	if hostPort == "" {
+		return "", 0, fmt.Errorf("无效的 MongoDB URI: 缺少主机")
+	}
+
+	if strings.HasPrefix(hostPort, "[") {
+		if strings.HasSuffix(hostPort, "]") {
+			return strings.Trim(hostPort, "[]"), 27017, nil
+		}
+		hostStr, portStr, err := net.SplitHostPort(hostPort)
+		if err != nil {
+			return "", 0, fmt.Errorf("无效的 MongoDB URI: %w", err)
+		}
+		portNum, err := strconv.Atoi(portStr)
+		if err != nil {
+			return "", 0, fmt.Errorf("无效的端口号 %q: %w", portStr, err)
+		}
+		return hostStr, portNum, nil
+	}
+
+	if strings.Count(hostPort, ":") == 0 {
+		return hostPort, 27017, nil
+	}
+
+	if strings.Count(hostPort, ":") > 1 {
+		// 未加方括号的 IPv6 地址不带端口时，按默认端口处理。
+		return hostPort, 27017, nil
+	}
+
+	hostStr, portStr, ok := strings.Cut(hostPort, ":")
+	if !ok || hostStr == "" {
+		return "", 0, fmt.Errorf("无效的 MongoDB URI: 缺少主机")
 	}
 
 	portNum, err := strconv.Atoi(portStr)

@@ -1,6 +1,6 @@
 // frontend/src/lib/assetTypes/options.ts
 import type { ComponentType } from "react";
-import { Monitor, Database, Cylinder, Leaf, Server } from "lucide-react";
+import { Monitor, Database, Cylinder, Leaf, Container, Server } from "lucide-react";
 import { getIconComponent } from "@/components/asset/IconPicker";
 import { KafkaIcon } from "@/components/asset/brand-icons";
 import type { ExtManifest } from "@/extension/types";
@@ -63,6 +63,14 @@ const BUILTIN_OPTIONS: AssetTypeOption[] = [
     label: "nav.kafka",
     labelIsI18nKey: true,
     icon: KafkaIcon,
+    group: "builtin",
+  },
+  {
+    value: "k8s",
+    aliases: ["k8s", "kubernetes"],
+    label: "nav.k8s",
+    labelIsI18nKey: true,
+    icon: Container,
     group: "builtin",
   },
 ];

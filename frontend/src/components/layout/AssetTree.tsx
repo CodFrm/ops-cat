@@ -264,7 +264,7 @@ export function AssetTree({
             <input
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder={t("asset.search") || "Search..."}
+              placeholder={t("asset.search")}
               className="h-7 w-full rounded-md border border-sidebar-border bg-sidebar pl-7 pr-2 text-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/50 placeholder:text-muted-foreground/60 transition-colors duration-150"
             />
           </div>

@@ -275,7 +275,7 @@ func TestSnippetSvc_SetGetLastAssets(t *testing.T) {
 
 func TestSnippetSvc_ListCategories(t *testing.T) {
 	svc := NewSnippetSvc(NewCategoryRegistry())
-	assert.Len(t, svc.ListCategories(), 5)
+	assert.Len(t, svc.ListCategories(), 6)
 }
 
 func TestSnippetSvc_KnownCategoryIDs(t *testing.T) {
@@ -299,15 +299,15 @@ func TestSnippetSvc_RefreshCategories(t *testing.T) {
 		return supplied
 	}))
 	svc := NewSnippetSvc(reg)
-	assert.Len(t, svc.ListCategories(), 5)
+	assert.Len(t, svc.ListCategories(), 6)
 
 	supplied = []ExtensionCategory{{ID: "kafka", AssetType: "kafka", Label: "Kafka", ExtensionRef: "kx"}}
 	svc.RefreshCategories()
-	assert.Len(t, svc.ListCategories(), 6)
+	assert.Len(t, svc.ListCategories(), 7)
 
 	supplied = nil
 	svc.RefreshCategories()
-	assert.Len(t, svc.ListCategories(), 5)
+	assert.Len(t, svc.ListCategories(), 6)
 }
 
 func TestSnippetSvc_SyncExtensionSeeds(t *testing.T) {

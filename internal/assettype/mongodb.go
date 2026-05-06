@@ -39,6 +39,10 @@ func (h *mongodbHandler) ResolvePassword(ctx context.Context, a *asset_entity.As
 	return credential_resolver.Default().ResolvePasswordGeneric(ctx, cfg)
 }
 
+func (h *mongodbHandler) ValidateCreateArgs(args map[string]any) error {
+	return validateRemoteServerArgs(args)
+}
+
 func (h *mongodbHandler) DefaultPolicy() any { return asset_entity.DefaultMongoPolicy() }
 
 func (h *mongodbHandler) ApplyCreateArgs(_ context.Context, a *asset_entity.Asset, args map[string]any) error {

@@ -57,6 +57,7 @@ describe("AssetTypeFilterButton", () => {
     expect(screen.getByText("nav.redis")).toBeTruthy();
     expect(screen.getByText("nav.mongodb")).toBeTruthy();
     expect(screen.getByText("nav.kafka")).toBeTruthy();
+    expect(screen.getByText("nav.k8s")).toBeTruthy();
   });
 
   it('clicking "All types" from empty selects every option', async () => {

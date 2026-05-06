@@ -45,6 +45,17 @@ func (h *kafkaHandler) ResolvePassword(ctx context.Context, a *asset_entity.Asse
 
 func (h *kafkaHandler) DefaultPolicy() any { return asset_entity.DefaultKafkaPolicy() }
 
+func (h *kafkaHandler) ValidateCreateArgs(args map[string]any) error {
+	if len(argStringSlice(args, "brokers")) == 0 {
+		host := ArgString(args, "host")
+		port := ArgInt(args, "port")
+		if host == "" || port <= 0 {
+			return fmt.Errorf("missing required parameter: brokers (or host+port) for kafka type")
+		}
+	}
+	return nil
+}
+
 func (h *kafkaHandler) ApplyCreateArgs(_ context.Context, a *asset_entity.Asset, args map[string]any) error {
 	a.SSHTunnelID = ArgInt64(args, "ssh_asset_id")
 	cfg := &asset_entity.KafkaConfig{

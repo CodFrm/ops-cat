@@ -42,4 +42,5 @@ func init() {
 	RegisterDefaultPolicy("redis", func() any { return DefaultRedisPolicy() })
 	RegisterDefaultPolicy("mongodb", func() any { return DefaultMongoPolicy() })
 	RegisterDefaultPolicy("kafka", func() any { return DefaultKafkaPolicy() })
+	RegisterDefaultPolicy("k8s", func() any { return DefaultK8sPolicy() })
 }

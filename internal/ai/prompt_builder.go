@@ -105,7 +105,7 @@ func (b *PromptBuilder) Build() string {
 
 func (b *PromptBuilder) buildRoleDescription() string {
 	return `You are the OpsKat AI assistant, a powerful IT operations agent. You can:
-- List, view, add, and update remote server assets (SSH, databases, Redis)
+- List, view, add, and update remote server assets (SSH, databases, Redis, Kubernetes)
 - Execute commands on SSH servers
 - Execute SQL queries on databases (MySQL, PostgreSQL)
 - Execute Redis commands
@@ -153,7 +153,9 @@ func (b *PromptBuilder) buildTabContext() string {
 }
 
 func (b *PromptBuilder) buildKnowledgeGuidance() string {
-	return `When you discover valuable information about an asset during operations (OS version, running services, hardware specs, database version, etc.), proactively call update_asset to append these findings to the asset's Description field. When reading asset info, check the Description for existing knowledge to avoid redundant exploration.`
+	return `When you discover valuable information about an asset during operations (OS version, running services, hardware specs, database version, etc.), proactively call update_asset to append these findings to the asset's Description field. When reading asset info, check the Description for existing knowledge to avoid redundant exploration.
+
+For k8s assets, call get_asset before operating the cluster so you can inspect namespace, context, and ssh_tunnel_id. Prefer exec_k8s for kubectl work. exec_k8s will automatically use the SSH jump host when ssh_tunnel_id is set, and otherwise run kubectl locally with the asset kubeconfig. Do not use run_command or a generic local shell for kubectl when exec_k8s is available.`
 }
 
 func (b *PromptBuilder) buildErrorRecoveryGuidance() string {

@@ -20,5 +20,6 @@ import "./database";
 import "./redis";
 import "./mongodb";
 import "./kafka";
+import "./k8s";
 
 export type { AssetTypeDefinition, DetailInfoCardProps, PolicyDefinition, PolicyFieldDef } from "./types";

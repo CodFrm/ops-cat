@@ -1,22 +1,6 @@
-import { memo, useEffect, useState, useCallback, useMemo } from "react";
+import { memo, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Save,
-  Undo2,
-  Loader2,
-  RefreshCw,
-  ChevronsLeft,
-  ChevronsRight,
-  Filter,
-  FileCode2,
-  Copy,
-  Plus,
-  Eye,
-  TriangleAlert,
-  Download,
-} from "lucide-react";
+import { FileCode2, Copy, TriangleAlert, Download } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -26,22 +10,46 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   Button,
-  Input,
   ScrollArea,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
 } from "@opskat/ui";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { isMac, formatModKey } from "@/stores/shortcutStore";
 import { ExecuteSQL } from "../../../wailsjs/go/app/App";
-import { QueryResultTable, CellEdit, SortDir } from "./QueryResultTable";
+import {
+  QueryResultTable,
+  CellEdit,
+  SortDir,
+  type CopyAsFormat,
+  type FocusCellRequest,
+  type RowDensity,
+} from "./QueryResultTable";
 import { SqlPreviewDialog } from "./SqlPreviewDialog";
-import { InsertRowDialog } from "./InsertRowDialog";
+import { ImportTableDataDialog } from "./ImportTableDataDialog";
+import { ExportTableDataDialog } from "./ExportTableDataDialog";
+import { TableFilterBuilder } from "./TableFilterBuilder";
+import { TableDataStatusBar, TableEditorToolbar, type TableExportFormat } from "./TableEditorToolbar";
 import { toast } from "sonner";
+import { toInsertSql, toTsv, toTsvData, toTsvFields, toUpdateSql } from "@/lib/tableExport";
+import { buildInsertStatement, validateInsertRow, type TableColumnRule } from "@/lib/tableEdit";
+import {
+  buildDeleteStatement,
+  buildFilterByCellValueClause,
+  quoteIdent,
+  quoteTableRef,
+  sqlQuote,
+  type CellValueFilterOperator,
+} from "@/lib/tableSql";
+import {
+  buildFilterWhereClause,
+  buildSortOrderByClause,
+  createFilterCondition,
+  removeFilterItemsByColumn,
+  type TableFilterItem,
+  type TableSortItem,
+} from "@/lib/tableFilter";
+import { filterOperatorNeedsRange } from "@/lib/tableFilterOperators";
+import { cellValueToText } from "@/lib/cellValue";
 
 interface TableDataTabProps {
   tabId: string;
@@ -50,27 +58,13 @@ interface TableDataTabProps {
   table: string;
 }
 
-const PAGE_SIZES = [50, 100, 200, 500];
-const DEFAULT_PAGE_SIZE = 100;
+const DEFAULT_PAGE_SIZE = 1000;
 
 interface SQLResult {
   columns?: string[];
   rows?: Record<string, unknown>[];
   count?: number;
   affected_rows?: number;
-}
-
-// Escape value for SQL — basic quoting
-function sqlQuote(value: unknown): string {
-  if (value == null) return "NULL";
-  const s = String(value);
-  const escaped = s.replace(/'/g, "''");
-  return `'${escaped}'`;
-}
-
-function quoteIdent(name: string, driver?: string): string {
-  if (driver === "postgresql") return `"${name}"`;
-  return `\`${name}\``;
 }
 
 const REFRESH_SHORTCUT_LABEL = formatModKey("KeyR");
@@ -127,7 +121,10 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   const isInnerActive = useQueryStore((s) => s.dbStates[tabId]?.activeInnerTabId === innerTabId);
 
   const [columns, setColumns] = useState<string[]>([]);
+  const [columnTypes, setColumnTypes] = useState<Record<string, string>>({});
+  const [columnRules, setColumnRules] = useState<TableColumnRule[]>([]);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [newRows, setNewRows] = useState<Record<string, unknown>[]>([]);
   const [totalRows, setTotalRows] = useState<number | null>(null);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -140,11 +137,11 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   // `confirm` = confirmation before submit (opened by the "Submit" button).
   const [dialogMode, setDialogMode] = useState<"preview" | "confirm" | null>(null);
   const [showDDLDialog, setShowDDLDialog] = useState(false);
-  const [showInsertDialog, setShowInsertDialog] = useState(false);
   const [ddlLoading, setDdlLoading] = useState(false);
   const [ddlSQL, setDdlSQL] = useState("");
-  const [whereInput, setWhereInput] = useState("");
-  const [orderByInput, setOrderByInput] = useState("");
+  const [filters, setFilters] = useState<TableFilterItem[]>([]);
+  const [sorts, setSorts] = useState<TableSortItem[]>([]);
+  const [showFilterSort, setShowFilterSort] = useState(false);
   const [whereClause, setWhereClause] = useState("");
   const [orderByClause, setOrderByClause] = useState("");
   const [sortColumn, setSortColumn] = useState<string | null>(null);
@@ -152,11 +149,34 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   const [applyVersion, setApplyVersion] = useState(0);
   const [primaryKeys, setPrimaryKeys] = useState<string[]>([]);
   const [pkLoaded, setPkLoaded] = useState(false);
+  const [deletePreview, setDeletePreview] = useState<{
+    statement: string;
+    usesPrimaryKey: boolean;
+  } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [selectedRowIdx, setSelectedRowIdx] = useState<number | null>(null);
+  const [exportFormat, setExportFormat] = useState<TableExportFormat>("csv");
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<string[]>([]);
+  const [rowDensity, setRowDensity] = useState<RowDensity>("default");
+  const [focusCellRequest, setFocusCellRequest] = useState<FocusCellRequest | null>(null);
+  const requestSeq = useRef(0);
+  const latestDataRequest = useRef(0);
+  const latestCountRequest = useRef(0);
+  const latestImportRequest = useRef(0);
+  const cancelledRequests = useRef(new Set<number>());
 
   const driver = queryMeta?.driver;
   const assetId = queryMeta?.assetId ?? 0;
 
   const totalPages = totalRows != null ? Math.max(1, Math.ceil(totalRows / pageSize)) : null;
+  const nextRequestId = useCallback(() => {
+    requestSeq.current += 1;
+    return requestSeq.current;
+  }, []);
+  const isCancelled = useCallback((requestId: number) => cancelledRequests.current.has(requestId), []);
 
   // Fetch primary key column names for the current table. Used to build a
   // concise UPDATE WHERE clause instead of matching every column.
@@ -165,8 +185,8 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     try {
       let sql: string;
       if (driver === "postgresql") {
-        const escapedTable = table.replace(/'/g, "''");
-        sql = `SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.table_schema = 'public' AND tc.table_name = '${escapedTable}' AND tc.constraint_type = 'PRIMARY KEY' ORDER BY kcu.ordinal_position`;
+        const tableLiteral = sqlQuote(table);
+        sql = `SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.table_schema = 'public' AND tc.table_name = ${tableLiteral} AND tc.constraint_type = 'PRIMARY KEY' ORDER BY kcu.ordinal_position`;
       } else {
         sql = `SHOW KEYS FROM ${quoteIdent(database, driver)}.${quoteIdent(table, driver)} WHERE Key_name = 'PRIMARY'`;
       }
@@ -181,41 +201,90 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     }
   }, [assetId, database, table, driver]);
 
+  const fetchColumnTypes = useCallback(async () => {
+    if (!assetId) return;
+    try {
+      let sql: string;
+      if (driver === "postgresql") {
+        const tableLiteral = sqlQuote(table);
+        sql =
+          `SELECT column_name, data_type, udt_name, is_nullable, column_default FROM information_schema.columns ` +
+          `WHERE table_schema = 'public' AND table_name = ${tableLiteral} ORDER BY ordinal_position`;
+      } else {
+        sql = `SHOW COLUMNS FROM ${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+      }
+      const result = await ExecuteSQL(assetId, sql, database);
+      const parsed: SQLResult = JSON.parse(result);
+      const next: Record<string, string> = {};
+      const nextRules: TableColumnRule[] = [];
+      for (const row of parsed.rows ?? []) {
+        const name = String(row["column_name"] ?? row["Field"] ?? row["field"] ?? "");
+        const type = String(row["data_type"] ?? row["Type"] ?? row["type"] ?? row["udt_name"] ?? "");
+        if (name && type) next[name] = type;
+        if (name) {
+          const nullableRaw = String(row["is_nullable"] ?? row["Null"] ?? row["null"] ?? "").toUpperCase();
+          const defaultValue = row["column_default"] ?? row["Default"] ?? row["default"];
+          const extra = String(row["Extra"] ?? row["extra"] ?? "").toLowerCase();
+          nextRules.push({
+            name,
+            nullable: nullableRaw === "YES",
+            hasDefault: defaultValue != null,
+            autoIncrement: extra.includes("auto_increment"),
+          });
+        }
+      }
+      setColumnTypes(next);
+      setColumnRules(nextRules);
+    } catch {
+      setColumnTypes({});
+      setColumnRules([]);
+    }
+  }, [assetId, database, table, driver]);
+
   useEffect(() => {
     setPrimaryKeys([]);
     setPkLoaded(false);
     fetchPrimaryKeys();
-  }, [fetchPrimaryKeys]);
+    setColumnTypes({});
+    setColumnRules([]);
+    fetchColumnTypes();
+  }, [fetchPrimaryKeys, fetchColumnTypes]);
 
   // Fetch total count
   const fetchCount = useCallback(async () => {
     if (!assetId) return;
-    const tableName =
-      driver === "postgresql" ? `"${table}"` : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+    const requestId = nextRequestId();
+    latestCountRequest.current = requestId;
+    const tableName = quoteTableRef(database, table, driver);
     const where = whereClause.trim();
     const wherePart = where ? ` WHERE ${where}` : "";
     try {
       const result = await ExecuteSQL(assetId, `SELECT COUNT(*) AS cnt FROM ${tableName}${wherePart}`, database);
       const parsed: SQLResult = JSON.parse(result);
+      if (isCancelled(requestId) || latestCountRequest.current !== requestId) return;
       const row = parsed.rows?.[0];
       if (row) {
         const cnt = Number(Object.values(row)[0]);
         if (!isNaN(cnt)) setTotalRows(cnt);
       }
     } catch {
+      if (isCancelled(requestId) || latestCountRequest.current !== requestId) return;
       setTotalRows(null);
+    } finally {
+      cancelledRequests.current.delete(requestId);
     }
-  }, [assetId, database, table, driver, whereClause]);
+  }, [assetId, database, table, driver, whereClause, nextRequestId, isCancelled]);
 
   const fetchData = useCallback(
     async (pageNum: number) => {
       if (!assetId) return;
+      const requestId = nextRequestId();
+      latestDataRequest.current = requestId;
       setLoading(true);
       setError(null);
 
       const offset = pageNum * pageSize;
-      const tableName =
-        driver === "postgresql" ? `"${table}"` : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+      const tableName = quoteTableRef(database, table, driver);
       const where = whereClause.trim();
       // Header-click sort takes precedence over the manual ORDER BY input.
       const orderBy =
@@ -229,17 +298,34 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
       try {
         const result = await ExecuteSQL(assetId, sql, database);
         const parsed: SQLResult = JSON.parse(result);
+        if (isCancelled(requestId) || latestDataRequest.current !== requestId) return;
         setColumns(parsed.columns || []);
         setRows(parsed.rows || []);
+        setSelectedRowIdx(null);
       } catch (e) {
+        if (isCancelled(requestId) || latestDataRequest.current !== requestId) return;
         setError(String(e));
         setColumns([]);
         setRows([]);
+        setSelectedRowIdx(null);
       } finally {
-        setLoading(false);
+        if (!isCancelled(requestId) && latestDataRequest.current === requestId) setLoading(false);
+        cancelledRequests.current.delete(requestId);
       }
     },
-    [assetId, database, table, driver, pageSize, whereClause, orderByClause, sortColumn, sortDir]
+    [
+      assetId,
+      database,
+      table,
+      driver,
+      pageSize,
+      whereClause,
+      orderByClause,
+      sortColumn,
+      sortDir,
+      nextRequestId,
+      isCancelled,
+    ]
   );
 
   useEffect(() => {
@@ -258,7 +344,15 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   // Clear edits when page changes
   useEffect(() => {
     setEdits(new Map());
+    setNewRows([]);
   }, [page, pageSize]);
+
+  useEffect(() => {
+    setVisibleColumns((prev) => {
+      const retained = prev.filter((col) => columns.includes(col));
+      return retained.length > 0 ? retained : columns;
+    });
+  }, [columns]);
 
   const handleCellEdit = useCallback((edit: CellEdit) => {
     setEdits((prev) => {
@@ -271,7 +365,38 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
 
   const handleDiscard = useCallback(() => {
     setEdits(new Map());
+    setNewRows([]);
   }, []);
+
+  const handleAddInlineRow = useCallback(() => {
+    if (columns.length === 0) return;
+    const rowIdx = rows.length + newRows.length;
+    setNewRows((prev) => [...prev, {}]);
+    setSelectedRowIdx(rowIdx);
+    setFocusCellRequest({ rowIdx, col: columns[0], nonce: Date.now() });
+  }, [columns, newRows.length, rows.length]);
+
+  const removeNewRow = useCallback(
+    (rowIdx: number) => {
+      const newRowIdx = rowIdx - rows.length;
+      if (newRowIdx < 0 || newRowIdx >= newRows.length) return;
+      setNewRows((prev) => prev.filter((_, idx) => idx !== newRowIdx));
+      setEdits((prev) => {
+        const next = new Map<string, unknown>();
+        for (const [key, value] of prev) {
+          const sep = key.indexOf(":");
+          const currentRowIdx = Number(key.substring(0, sep));
+          const column = key.substring(sep + 1);
+          if (currentRowIdx === rowIdx) continue;
+          const shiftedRowIdx = currentRowIdx > rowIdx ? currentRowIdx - 1 : currentRowIdx;
+          next.set(`${shiftedRowIdx}:${column}`, value);
+        }
+        return next;
+      });
+      setSelectedRowIdx(null);
+    },
+    [newRows.length, rows.length]
+  );
 
   // Build SQL statements for preview
   const buildUpdateStatements = useCallback((): string[] => {
@@ -287,6 +412,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
 
     const statements: string[] = [];
     for (const [rowIdx, colEdits] of rowEdits) {
+      if (rowIdx >= rows.length) continue;
       const row = rows[rowIdx];
       if (!row) continue;
 
@@ -309,8 +435,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
         }
       }
 
-      const tableName =
-        driver === "postgresql" ? `"${table}"` : `${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
+      const tableName = quoteTableRef(database, table, driver);
       const whereSQL = whereClauses.join(" AND ");
 
       if (driver === "postgresql") {
@@ -328,15 +453,75 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     return statements;
   }, [edits, rows, columns, driver, database, table, primaryKeys]);
 
+  const buildInsertStatements = useCallback((): { statements: string[]; missingFields: string[] } => {
+    const statements: string[] = [];
+    const missingFields = new Set<string>();
+
+    newRows.forEach((_, newRowIdx) => {
+      const rowIdx = rows.length + newRowIdx;
+      const values: Record<string, unknown> = {};
+      for (const column of columns) {
+        const key = `${rowIdx}:${column}`;
+        if (edits.has(key)) values[column] = edits.get(key);
+      }
+
+      for (const field of validateInsertRow(columnRules, values)) {
+        missingFields.add(field);
+      }
+      statements.push(buildInsertStatement({ database, table, driver, values }));
+    });
+
+    return { statements: missingFields.size > 0 ? [] : statements, missingFields: Array.from(missingFields) };
+  }, [columnRules, columns, database, driver, edits, newRows, rows.length, table]);
+
+  const buildChangeStatements = useCallback((): { statements: string[]; missingFields: string[] } => {
+    const insertResult = buildInsertStatements();
+    if (insertResult.missingFields.length > 0) return insertResult;
+    return { statements: [...insertResult.statements, ...buildUpdateStatements()], missingFields: [] };
+  }, [buildInsertStatements, buildUpdateStatements]);
+
+  const showInsertValidationError = useCallback(
+    (fields: string[]) => {
+      toast.error(t("query.insertRequiredFields", { fields: fields.join(", ") }));
+    },
+    [t]
+  );
+
+  const openSqlDialog = useCallback(
+    (mode: "preview" | "confirm") => {
+      const result = buildChangeStatements();
+      if (result.missingFields.length > 0) {
+        showInsertValidationError(result.missingFields);
+        return;
+      }
+      if (result.statements.length === 0) return;
+      setDialogMode(mode);
+    },
+    [buildChangeStatements, showInsertValidationError]
+  );
+
   const previewStatements = useMemo(() => {
     if (dialogMode === null) return [];
-    return buildUpdateStatements();
-  }, [dialogMode, buildUpdateStatements]);
+    return buildChangeStatements().statements;
+  }, [dialogMode, buildChangeStatements]);
+
+  const pendingSqlSummary = useMemo(() => {
+    if (edits.size === 0 && newRows.length === 0) return "";
+    const result = buildChangeStatements();
+    return result.missingFields.length === 0 ? (result.statements[0] ?? "") : "";
+  }, [buildChangeStatements, edits.size, newRows.length]);
 
   const handleSubmit = useCallback(async () => {
-    if (edits.size === 0 || !assetId) return;
+    if ((edits.size === 0 && newRows.length === 0) || !assetId) return;
 
-    const statements = buildUpdateStatements();
+    const changeResult = buildChangeStatements();
+    if (changeResult.missingFields.length > 0) {
+      showInsertValidationError(changeResult.missingFields);
+      return;
+    }
+
+    const statements = changeResult.statements;
+    if (statements.length === 0) return;
     setSubmitting(true);
     let affectedTotal = 0;
     let zeroAffected = 0;
@@ -360,6 +545,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     if (affectedTotal > 0) {
       toast.success(t("query.updateSuccessAffected", { affected: affectedTotal }));
       setEdits(new Map());
+      setNewRows([]);
       fetchData(page);
       fetchCount();
     }
@@ -369,7 +555,18 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     if (errorMsg) {
       toast.error(errorMsg.trim());
     }
-  }, [edits, assetId, database, buildUpdateStatements, page, fetchData, fetchCount, t]);
+  }, [
+    edits.size,
+    newRows.length,
+    assetId,
+    database,
+    buildChangeStatements,
+    showInsertValidationError,
+    page,
+    fetchData,
+    fetchCount,
+    t,
+  ]);
 
   const handlePageInputConfirm = useCallback(() => {
     const num = parseInt(pageInput, 10);
@@ -381,10 +578,27 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     setPage(target);
   }, [pageInput, page, totalPages]);
 
+  const handlePageSizeChange = useCallback((nextPageSize: number) => {
+    setPageSize(nextPageSize);
+    setPage(0);
+    setEdits(new Map());
+    setNewRows([]);
+  }, []);
+
   const handleRefresh = useCallback(() => {
     fetchData(page);
     fetchCount();
   }, [fetchData, fetchCount, page]);
+
+  const handleStopLoading = useCallback(() => {
+    if (!loading && !importing) return;
+    cancelledRequests.current.add(latestDataRequest.current);
+    cancelledRequests.current.add(latestCountRequest.current);
+    cancelledRequests.current.add(latestImportRequest.current);
+    setLoading(false);
+    setImporting(false);
+    toast.info(t("query.stopLoadingToast"));
+  }, [importing, loading, t]);
 
   useEffect(() => {
     if (!isOuterActive || !isInnerActive) return;
@@ -400,28 +614,220 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   }, [isOuterActive, isInnerActive, handleRefresh]);
 
   const handleApplyQuery = useCallback(() => {
-    setWhereClause(whereInput.trim());
-    setOrderByClause(orderByInput.trim());
-    // Manual ORDER BY input overrides the header-click sort state.
-    if (orderByInput.trim()) {
+    setWhereClause(buildFilterWhereClause(filters, driver));
+    const sortClause = buildSortOrderByClause(sorts, driver);
+    setOrderByClause(sortClause);
+    // Builder ORDER BY overrides the header-click sort state.
+    if (sortClause) {
       setSortColumn(null);
       setSortDir(null);
     }
     setPage(0);
     setEdits(new Map());
+    setNewRows([]);
     setApplyVersion((v) => v + 1);
-  }, [whereInput, orderByInput]);
+  }, [driver, filters, sorts]);
 
   const handleSortChange = useCallback((col: string | null, dir: SortDir) => {
     setSortColumn(col);
     setSortDir(dir);
-    // Header click takes precedence — clear the manual ORDER BY input so the user
+    // Header click takes precedence — clear the builder ORDER BY state so the user
     // can see which sort is actually applied.
-    setOrderByInput("");
+    setSorts([]);
     setOrderByClause("");
     setPage(0);
     setEdits(new Map());
+    setNewRows([]);
     setApplyVersion((v) => v + 1);
+  }, []);
+
+  const handleFilterByCellValue = useCallback(
+    ({ col, value, operator = "=" }: { col: string; value: unknown; operator?: CellValueFilterOperator }) => {
+      const filterValue = filterOperatorNeedsRange(operator) ? [value, value] : value;
+      const clause = buildFilterByCellValueClause(col, filterValue, driver, operator);
+      setFilters([createFilterCondition(`cell-${col}`, col, { value: filterValue, operator })]);
+      setShowFilterSort(true);
+      setWhereClause(clause);
+      setPage(0);
+      setEdits(new Map());
+      setNewRows([]);
+      setApplyVersion((v) => v + 1);
+    },
+    [driver]
+  );
+
+  const handleRemoveColumnFilter = useCallback(
+    (column: string) => {
+      setFilters((prev) => {
+        const next = removeFilterItemsByColumn(prev, column);
+        setWhereClause(buildFilterWhereClause(next, driver));
+        return next;
+      });
+      setPage(0);
+      setEdits(new Map());
+      setNewRows([]);
+      setApplyVersion((v) => v + 1);
+    },
+    [driver]
+  );
+
+  const handleRemoveAllFilters = useCallback(() => {
+    setFilters([]);
+    setWhereClause("");
+    setPage(0);
+    setEdits(new Map());
+    setNewRows([]);
+    setApplyVersion((v) => v + 1);
+  }, []);
+
+  const handleSortByColumn = useCallback(
+    (col: string, dir: Exclude<SortDir, null>) => {
+      handleSortChange(col, dir);
+    },
+    [handleSortChange]
+  );
+
+  const handleClearFilterSort = useCallback(() => {
+    setFilters([]);
+    setWhereClause("");
+    setSorts([]);
+    setOrderByClause("");
+    setSortColumn(null);
+    setSortDir(null);
+    setPage(0);
+    setEdits(new Map());
+    setNewRows([]);
+    setApplyVersion((v) => v + 1);
+  }, []);
+
+  const handleDeleteRow = useCallback(
+    (rowIdx: number) => {
+      if (rowIdx >= rows.length) {
+        removeNewRow(rowIdx);
+        return;
+      }
+      const row = rows[rowIdx];
+      if (!row) return;
+      const statement = buildDeleteStatement({
+        database,
+        table,
+        columns,
+        row,
+        primaryKeys,
+        driver,
+      });
+      setDeletePreview({ statement: statement.sql, usesPrimaryKey: statement.usesPrimaryKey });
+    },
+    [columns, database, driver, primaryKeys, removeNewRow, rows, table]
+  );
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!assetId || !deletePreview) return;
+    setDeleting(true);
+    try {
+      const result = await ExecuteSQL(assetId, deletePreview.statement, database);
+      const parsed: SQLResult = JSON.parse(result);
+      const affected = Number(parsed.affected_rows ?? 0);
+      toast.success(t("query.deleteRecordSuccess", { affected }));
+      setDeletePreview(null);
+      setEdits(new Map());
+      setNewRows([]);
+      await fetchData(page);
+      await fetchCount();
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setDeleting(false);
+    }
+  }, [assetId, database, deletePreview, fetchCount, fetchData, page, t]);
+
+  const handleDeleteSelectedRow = useCallback(() => {
+    if (selectedRowIdx == null) return;
+    handleDeleteRow(selectedRowIdx);
+  }, [handleDeleteRow, selectedRowIdx]);
+
+  const handleSelectedCellChange = useCallback((cell: { rowIdx: number } | null) => {
+    setSelectedRowIdx(cell?.rowIdx ?? null);
+  }, []);
+
+  const handleExport = useCallback(() => {
+    if (rows.length === 0 || columns.length === 0) return;
+    setShowExportDialog(true);
+  }, [columns.length, rows.length]);
+
+  const handleCopyAs = useCallback(
+    async (
+      format: CopyAsFormat,
+      ctx: { rowIdx: number; selectedColumns?: string[]; selectedRowIndices?: number[] }
+    ) => {
+      const activeColumns = ctx.selectedColumns?.length ? ctx.selectedColumns : columns;
+      const activeRows = ctx.selectedRowIndices?.length
+        ? ctx.selectedRowIndices.map((i) => rows[i]).filter(Boolean)
+        : [rows[ctx.rowIdx]];
+      if (activeRows.length === 0) return;
+      const tableName = driver === "postgresql" ? table : `${database}.${table}`;
+      const contentByFormat: Record<CopyAsFormat, string> = {
+        insert: toInsertSql(tableName, activeColumns, activeRows, driver),
+        update: toUpdateSql(tableName, activeColumns, activeRows[0], primaryKeys, driver),
+        "tsv-data": toTsvData(activeColumns, activeRows),
+        "tsv-fields": toTsvFields(activeColumns),
+        "tsv-fields-data": toTsv(activeColumns, activeRows),
+      };
+      await navigator.clipboard.writeText(contentByFormat[format]);
+      toast.success(t("query.copied"));
+    },
+    [columns, database, driver, primaryKeys, rows, table, t]
+  );
+
+  const handleImportSuccess = useCallback(async () => {
+    setImporting(false);
+    setPage(0);
+    setEdits(new Map());
+    setNewRows([]);
+    setApplyVersion((v) => v + 1);
+    await fetchData(0);
+    await fetchCount();
+  }, [fetchData, fetchCount]);
+
+  const handleImportSubmitStart = useCallback(() => {
+    const requestId = nextRequestId();
+    latestImportRequest.current = requestId;
+    return requestId;
+  }, [nextRequestId]);
+
+  const isImportSubmitCancelled = useCallback(
+    (requestId: number) => isCancelled(requestId) || latestImportRequest.current !== requestId,
+    [isCancelled]
+  );
+
+  const handleVisibleColumnToggle = useCallback(
+    (column: string) => {
+      setVisibleColumns((prev) => {
+        const current = prev.length > 0 ? prev : columns;
+        if (current.includes(column)) {
+          if (current.length === 1) return current;
+          return current.filter((col) => col !== column);
+        }
+        return columns.filter((col) => col === column || current.includes(col));
+      });
+    },
+    [columns]
+  );
+
+  const handleHideColumn = useCallback(
+    (column: string) => {
+      setVisibleColumns((prev) => {
+        const current = prev.length > 0 ? prev : columns;
+        if (!current.includes(column) || current.length === 1) return current;
+        return current.filter((col) => col !== column);
+      });
+    },
+    [columns]
+  );
+
+  const handleAddColumnFilter = useCallback((column: string) => {
+    setFilters((prev) => [...prev, createFilterCondition(`column-${column}-${Date.now()}`, column)]);
+    setShowFilterSort(true);
   }, []);
 
   const handleViewDDL = useCallback(async () => {
@@ -433,9 +839,9 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
       let ddl = "";
 
       if (driver === "postgresql") {
-        const escapedTable = table.replace(/'/g, "''");
-        const columnsSql = `SELECT column_name, data_type, udt_name, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${escapedTable}' ORDER BY ordinal_position`;
-        const primaryKeySql = `SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.table_schema = 'public' AND tc.table_name = '${escapedTable}' AND tc.constraint_type = 'PRIMARY KEY' ORDER BY kcu.ordinal_position`;
+        const tableLiteral = sqlQuote(table);
+        const columnsSql = `SELECT column_name, data_type, udt_name, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ${tableLiteral} ORDER BY ordinal_position`;
+        const primaryKeySql = `SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.table_schema = 'public' AND tc.table_name = ${tableLiteral} AND tc.constraint_type = 'PRIMARY KEY' ORDER BY kcu.ordinal_position`;
 
         const columnsResult = await ExecuteSQL(assetId, columnsSql, database);
         const primaryKeyResult = await ExecuteSQL(assetId, primaryKeySql, database);
@@ -456,17 +862,17 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
             const type = dataType === "USER-DEFINED" && udtName ? udtName : dataType;
             const nullable = String(col.is_nullable ?? "").toUpperCase() === "YES";
 
-            let line = `"${name}" ${type}`;
+            let line = `${quoteIdent(name, driver)} ${type}`;
             if (!nullable) line += " NOT NULL";
             if (columnDefault) line += ` DEFAULT ${columnDefault}`;
             return line;
           });
 
           if (primaryKeyColumns.length > 0) {
-            defs.push(`PRIMARY KEY (${primaryKeyColumns.map((c) => `"${c}"`).join(", ")})`);
+            defs.push(`PRIMARY KEY (${primaryKeyColumns.map((c) => quoteIdent(c, driver)).join(", ")})`);
           }
 
-          ddl = `CREATE TABLE "public"."${table}" (\n  ${defs.join(",\n  ")}\n);`;
+          ddl = `CREATE TABLE ${quoteIdent("public", driver)}.${quoteIdent(table, driver)} (\n  ${defs.join(",\n  ")}\n);`;
         }
       } else {
         const quotedTable = quoteIdent(table, driver);
@@ -495,69 +901,44 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     toast.success(t("query.copied"));
   }, [ddlLoading, ddlSQL, t]);
 
-  const handleInsertSuccess = useCallback(async () => {
-    setPage(0);
-    setEdits(new Map());
-    setApplyVersion((v) => v + 1);
-    await fetchData(0);
-    await fetchCount();
-  }, [fetchData, fetchCount]);
-
   const hasNext = totalPages != null ? page < totalPages - 1 : rows.length === pageSize;
   const hasPrev = page > 0;
-  const hasEdits = edits.size > 0;
+  const tableRows = useMemo(() => [...rows, ...newRows], [newRows, rows]);
+  const pendingEditCount = edits.size + newRows.length;
+  const hasEdits = pendingEditCount > 0;
+  const hasSelectedRow = selectedRowIdx != null && tableRows[selectedRowIdx] != null;
+  const effectiveVisibleColumns = visibleColumns.length > 0 ? visibleColumns : columns;
+  const hasActiveFilterSort =
+    filters.length > 0 || sorts.length > 0 || !!whereClause || !!orderByClause || !!sortColumn || !!sortDir;
 
   return (
     <div className="flex flex-col h-full">
-      {/* Filter bar */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-muted/20 shrink-0">
-        <div className="flex items-center gap-1 flex-1 min-w-0">
-          <span className="text-[11px] font-mono text-muted-foreground">WHERE</span>
-          <Input
-            className="h-7 text-xs font-mono"
-            value={whereInput}
-            onChange={(e) => setWhereInput(e.target.value)}
-            placeholder={t("query.wherePlaceholder")}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-                handleApplyQuery();
-              }
-            }}
-          />
-        </div>
-        <div className="flex items-center gap-1 flex-1 min-w-0">
-          <span className="text-[11px] font-mono text-muted-foreground whitespace-nowrap">ORDER BY</span>
-          <Input
-            className="h-7 text-xs font-mono"
-            value={orderByInput}
-            onChange={(e) => setOrderByInput(e.target.value)}
-            placeholder={t("query.orderByPlaceholder")}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-                handleApplyQuery();
-              }
-            }}
-          />
-        </div>
-        <Button variant="outline" size="sm" className="h-7 text-xs gap-1 shrink-0" onClick={handleApplyQuery}>
-          <Filter className="h-3.5 w-3.5" />
-          {t("query.applyFilter")}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 text-xs gap-1 shrink-0"
-          onClick={() => setShowInsertDialog(true)}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          {t("query.addRow")}
-        </Button>
+      <div className="flex items-center gap-2 border-b border-border bg-muted/20 px-3 py-1.5 shrink-0">
         <Button variant="outline" size="sm" className="h-7 text-xs gap-1 shrink-0" onClick={handleViewDDL}>
           <FileCode2 className="h-3.5 w-3.5" />
           {t("query.viewDDL")}
         </Button>
+        <TableEditorToolbar
+          hasEdits={hasEdits}
+          submitting={submitting || deleting}
+          canExport={rows.length > 0}
+          canImport={columns.length > 0}
+          columns={columns}
+          visibleColumns={effectiveVisibleColumns}
+          rowDensity={rowDensity}
+          exportFormat={exportFormat}
+          onExportFormatChange={setExportFormat}
+          onVisibleColumnToggle={handleVisibleColumnToggle}
+          onRowDensityChange={setRowDensity}
+          filterSortOpen={showFilterSort}
+          filterSortActive={hasActiveFilterSort}
+          onToggleFilterSort={() => setShowFilterSort((open) => !open)}
+          onSubmit={() => openSqlDialog("confirm")}
+          onDiscard={handleDiscard}
+          onImport={() => setShowImportDialog(true)}
+          onExport={handleExport}
+          onPreviewSql={() => openSqlDialog("preview")}
+        />
         {driver !== "postgresql" && pkLoaded && primaryKeys.length === 0 && columns.length > 0 && (
           <span
             className="flex items-center gap-1 text-[11px] text-amber-600 shrink-0"
@@ -569,159 +950,93 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
         )}
       </div>
 
+      {showFilterSort && (
+        <TableFilterBuilder
+          columns={columns}
+          rows={rows}
+          filters={filters}
+          sorts={sorts}
+          driver={driver}
+          onChange={setFilters}
+          onSortsChange={setSorts}
+          onApply={handleApplyQuery}
+        />
+      )}
+
       {/* Table content */}
       <QueryResultTable
         columns={columns}
-        rows={rows}
-        loading={loading}
+        rows={tableRows}
+        loading={loading || importing}
         error={error ?? undefined}
         editable
         edits={edits}
         onCellEdit={handleCellEdit}
+        onSetCellValue={handleCellEdit}
+        onPasteCell={handleCellEdit}
+        onGenerateUuid={handleCellEdit}
+        onCopyAs={handleCopyAs}
+        onFilterByCellValue={handleFilterByCellValue}
+        onSortByColumn={handleSortByColumn}
+        onClearFilterSort={handleClearFilterSort}
+        onAddColumnFilter={handleAddColumnFilter}
+        onRemoveColumnFilter={handleRemoveColumnFilter}
+        onRemoveAllFilters={handleRemoveAllFilters}
+        onDeleteRow={handleDeleteRow}
+        onHideColumn={handleHideColumn}
+        onVisibleColumnToggle={handleVisibleColumnToggle}
+        onSelectedCellChange={handleSelectedCellChange}
+        onRefresh={handleRefresh}
         showRowNumber
         rowNumberOffset={page * pageSize}
         sortColumn={sortColumn}
         sortDir={sortDir}
         onSortChange={handleSortChange}
         enableColumnFilter
+        visibleColumns={effectiveVisibleColumns}
+        columnTypes={columnTypes}
+        rowDensity={rowDensity}
+        focusCellRequest={focusCellRequest}
+        renderCell={(value, ctx) => {
+          if (ctx.rowIdx >= rows.length && value == null) {
+            return <span className="text-muted-foreground/70 italic">(Default)</span>;
+          }
+          if (value == null) return <span className="text-muted-foreground italic">NULL</span>;
+          return <span className="truncate block">{cellValueToText(value)}</span>;
+        }}
       />
 
-      {/* Edit action bar */}
-      {hasEdits && (
-        <div className="flex items-center gap-2 px-3 py-2 border-t border-border bg-muted/50 shrink-0">
-          <span className="text-xs text-muted-foreground">{t("query.pendingEdits", { count: edits.size })}</span>
-          <div className="ml-auto flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs gap-1"
-              onClick={handleDiscard}
-              disabled={submitting}
-            >
-              <Undo2 className="h-3.5 w-3.5" />
-              {t("query.discardEdits")}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs gap-1"
-              onClick={() => setDialogMode("preview")}
-              disabled={submitting}
-            >
-              <Eye className="h-3.5 w-3.5" />
-              {t("query.previewSql")}
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              className="h-7 text-xs gap-1"
-              onClick={() => setDialogMode("confirm")}
-              disabled={submitting}
-            >
-              {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-              {t("query.submitEdits")}
-            </Button>
-          </div>
-        </div>
-      )}
-
       {/* Footer bar */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-t border-border bg-muted/30 shrink-0">
-        {totalRows != null && (
-          <span className="text-xs text-muted-foreground">{t("query.totalRows", { count: totalRows })}</span>
-        )}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6"
-          onClick={handleRefresh}
-          disabled={loading}
-          title={`${t("query.refreshTable")} (${REFRESH_SHORTCUT_LABEL})`}
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-        </Button>
-        <div className="ml-auto flex items-center gap-1">
-          {/* Page size selector */}
-          <Select
-            value={String(pageSize)}
-            onValueChange={(v) => {
-              setPageSize(Number(v));
-              setPage(0);
-            }}
-          >
-            <SelectTrigger size="sm" className="h-6 w-[80px] text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PAGE_SIZES.map((s) => (
-                <SelectItem key={s} value={String(s)} className="text-xs">
-                  {t("query.perPage", { count: s })}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {/* First page */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            disabled={!hasPrev || loading}
-            onClick={() => setPage(0)}
-            title={t("query.firstPage")}
-          >
-            <ChevronsLeft className="h-3.5 w-3.5" />
-          </Button>
-          {/* Previous page */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            disabled={!hasPrev || loading}
-            onClick={() => setPage((p) => p - 1)}
-            title={t("query.prevPage")}
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-          </Button>
-          {/* Page input */}
-          <Input
-            className="h-6 w-[48px] text-xs text-center px-1"
-            value={pageInput}
-            onChange={(e) => setPageInput(e.target.value)}
-            onBlur={handlePageInputConfirm}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handlePageInputConfirm();
-            }}
-          />
-          {totalPages != null && (
-            <span className="text-xs text-muted-foreground whitespace-nowrap">/ {totalPages}</span>
-          )}
-          {/* Next page */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            disabled={!hasNext || loading}
-            onClick={() => setPage((p) => p + 1)}
-            title={t("query.nextPage")}
-          >
-            <ChevronRight className="h-3.5 w-3.5" />
-          </Button>
-          {/* Last page */}
-          {totalPages != null && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              disabled={!hasNext || loading}
-              onClick={() => setPage(totalPages - 1)}
-              title={t("query.lastPage")}
-            >
-              <ChevronsRight className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
-      </div>
+      <TableDataStatusBar
+        pendingEditCount={pendingEditCount}
+        sqlSummary={pendingSqlSummary}
+        totalRows={totalRows}
+        page={page}
+        totalPages={totalPages}
+        pageSize={pageSize}
+        pageInput={pageInput}
+        hasPrev={hasPrev}
+        hasNext={hasNext}
+        hasSelectedRow={hasSelectedRow}
+        submitting={submitting || deleting}
+        loading={loading || importing}
+        refreshTitle={`${t("query.refreshTable")} (${REFRESH_SHORTCUT_LABEL})`}
+        onRefresh={handleRefresh}
+        onStopLoading={handleStopLoading}
+        onPageInputChange={setPageInput}
+        onPageInputConfirm={handlePageInputConfirm}
+        onPageSizeChange={handlePageSizeChange}
+        onFirstPage={() => setPage(0)}
+        onPreviousPage={() => setPage((p) => p - 1)}
+        onNextPage={() => setPage((p) => p + 1)}
+        onLastPage={() => {
+          if (totalPages != null) setPage(totalPages - 1);
+        }}
+        onAddRow={handleAddInlineRow}
+        onDeleteRow={handleDeleteSelectedRow}
+        onApplyChanges={() => openSqlDialog("confirm")}
+        onDiscardChanges={handleDiscard}
+      />
 
       {/* DDL dialog */}
       <AlertDialog open={showDDLDialog} onOpenChange={setShowDDLDialog}>
@@ -753,15 +1068,40 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Insert row dialog */}
-      <InsertRowDialog
-        open={showInsertDialog}
-        onOpenChange={setShowInsertDialog}
+      <ImportTableDataDialog
+        open={showImportDialog}
+        onOpenChange={setShowImportDialog}
         assetId={assetId}
         database={database}
         table={table}
+        columns={columns}
+        columnTypes={columnTypes}
+        primaryKeys={primaryKeys}
         driver={driver}
-        onSuccess={handleInsertSuccess}
+        onSubmittingChange={setImporting}
+        onSubmitStart={handleImportSubmitStart}
+        isSubmitCancelled={isImportSubmitCancelled}
+        onSuccess={handleImportSuccess}
+      />
+
+      <ExportTableDataDialog
+        open={showExportDialog}
+        onOpenChange={setShowExportDialog}
+        assetId={assetId}
+        database={database}
+        table={table}
+        columns={columns}
+        rows={rows}
+        totalRows={totalRows}
+        page={page}
+        pageSize={pageSize}
+        whereClause={whereClause}
+        orderByClause={orderByClause}
+        sortColumn={sortColumn}
+        sortDir={sortDir}
+        driver={driver}
+        initialFormat={exportFormat}
+        onFormatChange={setExportFormat}
       />
 
       {/* SQL preview / submit confirmation */}
@@ -773,6 +1113,23 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
         statements={previewStatements}
         onConfirm={dialogMode === "confirm" ? handleSubmit : undefined}
         submitting={submitting}
+      />
+
+      <SqlPreviewDialog
+        open={deletePreview !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeletePreview(null);
+        }}
+        statements={deletePreview ? [deletePreview.statement] : []}
+        onConfirm={handleConfirmDelete}
+        submitting={deleting}
+        warning={
+          deletePreview && !deletePreview.usesPrimaryKey ? (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+              {t("query.deleteRecordNoPrimaryKeyWarning")}
+            </div>
+          ) : undefined
+        }
       />
     </div>
   );

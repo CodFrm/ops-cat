@@ -46,6 +46,7 @@ func (a *App) GetAvailableAssetTypes() []AssetTypeInfo {
 		{Type: asset_entity.AssetTypeRedis, DisplayName: "Redis"},
 		{Type: asset_entity.AssetTypeMongoDB, DisplayName: "MongoDB", SSHTunnel: true},
 		{Type: asset_entity.AssetTypeKafka, DisplayName: "Kafka", SSHTunnel: true},
+		{Type: asset_entity.AssetTypeK8s, DisplayName: "K8S"},
 	}
 	if a.extSvc != nil {
 		bridge := a.extSvc.Bridge()

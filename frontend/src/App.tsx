@@ -244,6 +244,23 @@ function App() {
   };
 
   const handleConnectAsset = async (asset: asset_entity.Asset) => {
+    if (asset.Type === "k8s") {
+      const pageId = `k8s-${asset.ID}`;
+      const tabStore = useTabStore.getState();
+      const existing = tabStore.tabs.find((t) => t.id === pageId);
+      if (existing) {
+        tabStore.activateTab(pageId);
+      } else {
+        tabStore.openTab({
+          id: pageId,
+          type: "page",
+          label: asset.Name,
+          icon: asset.Icon || "kubernetes",
+          meta: { type: "page", pageId: "k8s-cluster", assetId: asset.ID },
+        });
+      }
+      return;
+    }
     const def = getAssetType(asset.Type);
     if (def?.connectAction === "query") {
       useQueryStore.getState().openQueryTab(asset);

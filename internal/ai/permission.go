@@ -17,7 +17,7 @@ import (
 
 // CheckPermission 统一权限检查（策略 + DB Grant 匹配）。
 // 不包含用户确认逻辑 — NeedConfirm 时由调用方处理。
-// assetType: "ssh" | "database" | "redis" | "mongodb" | "kafka" | "exec"（exec 等同于 ssh）| "sql"（sql 等同于 database）| "mongo"（mongo 等同于 mongodb）
+// assetType: "ssh" | "database" | "redis" | "mongodb" | "kafka" | "k8s" | "exec"（exec 等同于 ssh）| "sql"（sql 等同于 database）| "mongo"（mongo 等同于 mongodb）
 func CheckPermission(ctx context.Context, assetType string, assetID int64, command string) CheckResult {
 	// opsctl 使用的类型名映射到内部类型
 	switch assetType {
@@ -40,6 +40,8 @@ func CheckPermission(ctx context.Context, assetType string, assetID int64, comma
 		return checkMongoDBPermission(ctx, assetID, command)
 	case asset_entity.AssetTypeKafka:
 		return checkKafkaPermission(ctx, assetID, command)
+	case asset_entity.AssetTypeK8s:
+		return checkK8sPermission(ctx, assetID, command)
 	default:
 		return CheckResult{Decision: NeedConfirm}
 	}
@@ -180,6 +182,37 @@ func checkRedisPermission(ctx context.Context, assetID int64, command string) Ch
 
 	// NeedConfirm：收集允许的 Redis 命令作为提示
 	merged := mergeRedisPolicy(mergedPolicy, asset_entity.DefaultRedisPolicy())
+	if len(merged.AllowList) > 0 {
+		result.HintRules = merged.AllowList
+	}
+	return result
+}
+
+// --- K8s ---
+
+func checkK8sPermission(ctx context.Context, assetID int64, command string) CheckResult {
+	groupResult := CheckGroupGenericPolicy(ctx, assetID, command, MatchCommandRule)
+	if groupResult.Decision == Deny {
+		return groupResult
+	}
+
+	asset, _ := resolveAssetPolicyChain(ctx, assetID)
+	mergedPolicy := collectK8sPolicies(ctx, asset)
+	result := CheckK8sPolicy(ctx, mergedPolicy, command)
+
+	if result.Decision == NeedConfirm && groupResult.Decision == Allow {
+		return groupResult
+	}
+
+	if result.Decision != NeedConfirm {
+		return result
+	}
+
+	if grantResult := matchGrantForAsset(ctx, assetID, command); grantResult != nil {
+		return *grantResult
+	}
+
+	merged := mergeK8sPolicy(mergedPolicy, asset_entity.DefaultK8sPolicy())
 	if len(merged.AllowList) > 0 {
 		result.HintRules = merged.AllowList
 	}

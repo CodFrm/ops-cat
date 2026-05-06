@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import logoLight from "@/assets/images/logo.png";
 import logoDark from "@/assets/images/logo-dark.png";
 import { useFullscreen } from "@/hooks/useFullscreen";
+import { K8sClusterPage } from "@/components/k8s/K8sClusterPage";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTabStore, type QueryTabMeta, type PageTabMeta, type InfoTabMeta } from "@/stores/tabStore";
@@ -155,6 +156,11 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset, commandO
                 <SnippetsPage />
               </div>
             );
+          case "k8s-cluster": {
+            const k8sAsset = meta.assetId ? assets.find((a) => a.ID === meta.assetId) : null;
+            if (!k8sAsset) return null;
+            return <K8sClusterPage asset={k8sAsset} />;
+          }
           default:
             if (meta.extensionName) {
               return <ExtensionPage extensionName={meta.extensionName} pageId={meta.pageId} assetId={meta.assetId} />;

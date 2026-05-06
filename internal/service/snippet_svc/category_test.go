@@ -11,7 +11,7 @@ import (
 func TestCategoryRegistry_List(t *testing.T) {
 	r := NewCategoryRegistry()
 	list := r.List()
-	assert.Len(t, list, 5)
+	assert.Len(t, list, 6)
 
 	ids := make([]string, len(list))
 	for i, c := range list {
@@ -43,6 +43,7 @@ func TestCategoryRegistry_AssetTypeMapping(t *testing.T) {
 		snippet_entity.CategorySQL:    "database",
 		snippet_entity.CategoryRedis:  "redis",
 		snippet_entity.CategoryMongo:  "mongodb",
+		snippet_entity.CategoryK8s:    "k8s",
 		snippet_entity.CategoryPrompt: "",
 	}
 	for id, want := range cases {

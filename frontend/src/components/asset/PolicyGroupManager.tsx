@@ -30,6 +30,9 @@ const builtinTabs: { key: string; label: string }[] = [
 ];
 
 const builtinTabKeys = new Set(builtinTabs.map((t) => t.key));
+const tabAliasMap: Record<string, string> = {
+  k8s: "command",
+};
 
 interface EditState {
   id: string;
@@ -76,7 +79,7 @@ function serializePolicy(policy: Record<string, string[]>): string {
 
 export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initialTab }: PolicyGroupManagerProps) {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<string>(initialTab || "command");
+  const [activeTab, setActiveTab] = useState<string>(tabAliasMap[initialTab || ""] || initialTab || "command");
   const [groups, setGroups] = useState<policy_group_entity.PolicyGroupItem[]>([]);
   const [tabs, setTabs] = useState(builtinTabs);
   const [editState, setEditState] = useState<EditState | null>(null);
@@ -117,6 +120,12 @@ export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initia
       // ignore
     }
   }, []);
+
+  useEffect(() => {
+    if (open) {
+      setActiveTab(tabAliasMap[initialTab || ""] || initialTab || "command");
+    }
+  }, [initialTab, open]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect

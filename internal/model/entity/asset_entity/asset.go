@@ -18,6 +18,7 @@ const (
 	AssetTypeRedis    = "redis"
 	AssetTypeMongoDB  = "mongodb"
 	AssetTypeKafka    = "kafka"
+	AssetTypeK8s      = "k8s"
 )
 
 // DatabaseDriver 数据库驱动类型
@@ -222,6 +223,19 @@ type KafkaConnectClusterConfig struct {
 	TLSKeyFile    string `json:"tls_key_file,omitempty"`
 }
 
+// K8sConfig K8S集群类型的特定配置
+type K8sConfig struct {
+	Kubeconfig string `json:"kubeconfig,omitempty"` // kubeconfig YAML 内容
+	Namespace  string `json:"namespace,omitempty"`  // 默认命名空间
+	Context    string `json:"context,omitempty"`    // kubeconfig context 名称
+}
+
+// K8sConfig PasswordSource implementation.
+// Kubeconfig 在落库时由 assettype/k8s.go 加密；返回密文走通用解密路径
+// （credential_resolver.ResolvePasswordGeneric）。
+func (c *K8sConfig) GetCredentialID() int64 { return 0 }
+func (c *K8sConfig) GetPassword() string    { return c.Kubeconfig }
+
 // DatabaseConfig PasswordSource implementation
 func (c *DatabaseConfig) GetCredentialID() int64 { return c.CredentialID }
 func (c *DatabaseConfig) GetPassword() string    { return c.Password }
@@ -270,6 +284,12 @@ type KafkaPolicy = policy.KafkaPolicy
 // DefaultKafkaPolicy 返回默认 Kafka 权限策略
 var DefaultKafkaPolicy = policy.DefaultKafkaPolicy
 
+// K8sPolicy K8S 权限策略（类型别名，定义在 policy 包）
+type K8sPolicy = policy.K8sPolicy
+
+// DefaultK8sPolicy 返回默认 K8S 权限策略
+var DefaultK8sPolicy = policy.DefaultK8sPolicy
+
 // --- 充血模型方法 ---
 
 // IsSSH 判断是否SSH类型
@@ -295,6 +315,11 @@ func (a *Asset) IsMongoDB() bool {
 // IsKafka 判断是否 Kafka 类型
 func (a *Asset) IsKafka() bool {
 	return a.Type == AssetTypeKafka
+}
+
+// IsK8s 判断是否K8S集群类型
+func (a *Asset) IsK8s() bool {
+	return a.Type == AssetTypeK8s
 }
 
 // GetSSHConfig 解析SSH配置
@@ -387,6 +412,24 @@ func (a *Asset) SetKafkaConfig(cfg *KafkaConfig) error {
 	return nil
 }
 
+// GetK8sConfig 解析K8S配置
+func (a *Asset) GetK8sConfig() (*K8sConfig, error) {
+	if !a.IsK8s() {
+		return nil, errors.New("资产不是K8S集群类型")
+	}
+	return jsonfield.Unmarshal[K8sConfig](a.Config, "K8S配置")
+}
+
+// SetK8sConfig 序列化K8S配置到Config字段
+func (a *Asset) SetK8sConfig(cfg *K8sConfig) error {
+	s, err := jsonfield.Marshal(cfg, "K8S配置")
+	if err != nil {
+		return err
+	}
+	a.Config = s
+	return nil
+}
+
 // GetQueryPolicy 解析SQL权限策略（database类型）
 func (a *Asset) GetQueryPolicy() (*QueryPolicy, error) {
 	return jsonfield.UnmarshalOrDefault[QueryPolicy](a.CmdPolicy, "SQL权限策略")
@@ -455,6 +498,23 @@ func (a *Asset) SetKafkaPolicy(p *KafkaPolicy) error {
 	return nil
 }
 
+// GetK8sPolicy 解析K8S权限策略
+func (a *Asset) GetK8sPolicy() (*K8sPolicy, error) {
+	return jsonfield.UnmarshalOrDefault[K8sPolicy](a.CmdPolicy, "K8S权限策略")
+}
+
+// SetK8sPolicy 序列化K8S权限策略
+func (a *Asset) SetK8sPolicy(p *K8sPolicy) error {
+	s, err := jsonfield.MarshalOrClear(p, func(v *K8sPolicy) bool {
+		return v.IsEmpty()
+	}, "K8S权限策略")
+	if err != nil {
+		return err
+	}
+	a.CmdPolicy = s
+	return nil
+}
+
 // Validate 校验资产必填字段和类型配置的完整性
 func (a *Asset) Validate() error {
 	if a.Name == "" {
@@ -476,6 +536,8 @@ func (a *Asset) Validate() error {
 		return a.validateMongoDB()
 	case AssetTypeKafka:
 		return a.validateKafka()
+	case AssetTypeK8s:
+		return a.validateK8s()
 	default:
 		// 扩展资产类型由扩展自行校验
 		return nil
@@ -605,6 +667,18 @@ func (a *Asset) validateKafka() error {
 	return nil
 }
 
+// validateK8s 校验K8S集群类型特定配置
+func (a *Asset) validateK8s() error {
+	cfg, err := a.GetK8sConfig()
+	if err != nil {
+		return fmt.Errorf("K8S配置无效: %w", err)
+	}
+	if cfg.Kubeconfig == "" {
+		return errors.New("K8S集群kubeconfig不能为空")
+	}
+	return nil
+}
+
 func validateKafkaBroker(broker string) error {
 	broker = strings.TrimSpace(broker)
 	if broker == "" {
@@ -668,6 +742,12 @@ func (a *Asset) CanConnect() bool {
 			return false
 		}
 		return len(cfg.Brokers) > 0
+	case AssetTypeK8s:
+		cfg, err := a.GetK8sConfig()
+		if err != nil {
+			return false
+		}
+		return cfg.Kubeconfig != ""
 	}
 	return false
 }

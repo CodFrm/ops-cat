@@ -38,9 +38,7 @@ export function KafkaDetailInfoCard({ asset, sshTunnelName }: DetailInfoCardProp
         <InfoItem label={t("asset.kafkaClientId")} value={cfg.client_id || "opskat"} mono />
         <InfoItem label={t("asset.kafkaSaslMechanism")} value={sasl.toUpperCase()} mono />
         {cfg.username && <InfoItem label={t("asset.username")} value={cfg.username} mono />}
-        {(cfg.password || cfg.credential_id) && (
-          <InfoItem label={t("asset.password")} value={"●●●●●●"} />
-        )}
+        {(cfg.password || cfg.credential_id) && <InfoItem label={t("asset.password")} value={"●●●●●●"} />}
         {cfg.tls && <InfoItem label={t("asset.tls")} value={"✓"} />}
         {cfg.request_timeout_seconds ? (
           <InfoItem label={t("asset.kafkaRequestTimeout")} value={String(cfg.request_timeout_seconds)} mono />

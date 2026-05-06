@@ -204,7 +204,7 @@ export function ExtensionPanel() {
               activePageId === page.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"
             }`}
           >
-            {t(page.i18n?.name) || page.id}
+            {page.i18n?.name ? t(page.i18n.name) : page.id}
             {page.slot && <span className="ml-1 text-xs opacity-60">({page.slot})</span>}
           </button>
         ))}

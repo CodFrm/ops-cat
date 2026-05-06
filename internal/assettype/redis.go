@@ -39,6 +39,10 @@ func (h *redisHandler) ResolvePassword(ctx context.Context, a *asset_entity.Asse
 	return credential_resolver.Default().ResolvePasswordGeneric(ctx, cfg)
 }
 
+func (h *redisHandler) ValidateCreateArgs(args map[string]any) error {
+	return validateRemoteServerArgs(args)
+}
+
 func (h *redisHandler) DefaultPolicy() any { return asset_entity.DefaultRedisPolicy() }
 
 func (h *redisHandler) ApplyCreateArgs(_ context.Context, a *asset_entity.Asset, args map[string]any) error {

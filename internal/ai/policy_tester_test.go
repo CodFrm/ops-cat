@@ -199,6 +199,63 @@ func TestTestRedisPolicy(t *testing.T) {
 	})
 }
 
+func TestTestK8sPolicy(t *testing.T) {
+	ctx := context.Background()
+
+	Convey("testK8sPolicy", t, func() {
+		Convey("无策略时返回 NeedConfirm", func() {
+			out := testK8sPolicy(ctx, nil, nil, "kubectl get pods")
+			So(out.Decision, ShouldEqual, NeedConfirm)
+		})
+
+		Convey("引用内置组时允许只读命令", func() {
+			p := &asset_entity.K8sPolicy{
+				Groups: []string{policy.BuiltinK8sReadOnly},
+			}
+			out := testK8sPolicy(ctx, p, nil, "kubectl get pods -A")
+			So(out.Decision, ShouldEqual, Allow)
+		})
+
+		Convey("引用内置组时拒绝高危命令", func() {
+			p := &asset_entity.K8sPolicy{
+				Groups: []string{policy.BuiltinK8sDangerousDeny},
+			}
+			out := testK8sPolicy(ctx, p, nil, "kubectl delete pod nginx")
+			So(out.Decision, ShouldEqual, Deny)
+		})
+
+		Convey("资产 allow 规则匹配", func() {
+			p := &asset_entity.K8sPolicy{AllowList: []string{"kubectl get *"}}
+			out := testK8sPolicy(ctx, p, nil, "kubectl get pods")
+			So(out.Decision, ShouldEqual, Allow)
+		})
+
+		Convey("资产 deny 规则匹配", func() {
+			p := &asset_entity.K8sPolicy{DenyList: []string{"kubectl delete *"}}
+			out := testK8sPolicy(ctx, p, nil, "kubectl delete pod nginx")
+			So(out.Decision, ShouldEqual, Deny)
+		})
+
+		Convey("组链上的 K8S 策略会生效", func() {
+			group := &group_entity.Group{Name: "测试组", K8sPol: `{"allow_list":["kubectl get *"]}`}
+			out := testK8sPolicy(ctx, nil, []*group_entity.Group{group}, "kubectl get ns")
+			So(out.Decision, ShouldEqual, Allow)
+		})
+
+		Convey("默认策略正确生效", func() {
+			p := policy.DefaultK8sPolicy()
+			out := testK8sPolicy(ctx, p, nil, "kubectl get pods")
+			So(out.Decision, ShouldEqual, Allow)
+
+			out = testK8sPolicy(ctx, p, nil, "kubectl delete pod nginx")
+			So(out.Decision, ShouldEqual, Deny)
+
+			out = testK8sPolicy(ctx, p, nil, "kubectl apply -f deploy.yaml")
+			So(out.Decision, ShouldEqual, NeedConfirm)
+		})
+	})
+}
+
 func TestTestQueryPolicy(t *testing.T) {
 	ctx := context.Background()
 
