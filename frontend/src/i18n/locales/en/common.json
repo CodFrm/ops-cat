@@ -265,6 +265,7 @@
     "k8sContext": "Context",
     "k8sKubeconfig": "Kubeconfig",
     "k8sKubeconfigPlaceholder": "Paste kubeconfig YAML content...",
+    "k8sKubeconfigEditPlaceholder": "Kubeconfig is stored encrypted. Leave blank to keep current; type new content to replace.",
     "k8sRevealKubeconfig": "Reveal kubeconfig",
     "k8sEnterKubeconfig": "Enter kubeconfig",
     "k8sClusterInfo": "Cluster Info",

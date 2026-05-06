@@ -31,6 +31,9 @@ export function K8sConfigSection({
   isEditing,
 }: K8sConfigSectionProps) {
   const { t } = useTranslation();
+  const placeholder = isEditing
+    ? t("asset.k8sKubeconfigEditPlaceholder") || "kubeconfig 已加密保存。留空则保留原值；输入新内容则覆盖。"
+    : t("asset.k8sKubeconfigPlaceholder") || "Paste kubeconfig YAML content...";
   return (
     <div className="grid gap-3 border rounded-lg p-4">
       <div className="grid gap-2">
@@ -40,7 +43,7 @@ export function K8sConfigSection({
             <Textarea
               value={kubeconfig}
               onChange={(e) => setKubeconfig(e.target.value)}
-              placeholder={t("asset.k8sKubeconfigPlaceholder") || "Paste kubeconfig YAML content..."}
+              placeholder={placeholder}
               rows={4}
               className="font-mono text-xs pr-9 whitespace-pre-wrap break-all"
             />

@@ -25,8 +25,6 @@ import (
 // k8sCallContext 加载 K8S 资产时返回的所有调用上下文。
 // kubeconfig 是已解密的 YAML 文本，opts 已带上 SSH 隧道 dial 函数（若配置）。
 type k8sCallContext struct {
-	asset      *asset_entity.Asset
-	cfg        *asset_entity.K8sConfig
 	kubeconfig string
 	opts       []k8s.ClientOption
 }
@@ -57,8 +55,6 @@ func (a *App) loadK8sCall(ctx context.Context, assetID int64) (*k8sCallContext, 
 		return nil, fmt.Errorf("decrypt kubeconfig: %w", err)
 	}
 	return &k8sCallContext{
-		asset:      asset,
-		cfg:        cfg,
 		kubeconfig: kubeconfig,
 		opts:       a.k8sClientOptions(asset, cfg),
 	}, nil
