@@ -531,7 +531,12 @@ export function AISettingsSection() {
                     model: editingProvider.model,
                     maxOutputTokens: editingProvider.maxOutputTokens,
                     contextWindow: editingProvider.contextWindow,
-                    reasoningEffort: (editingProvider.reasoningEffort || "none") as "none" | "low" | "medium" | "high" | "xhigh",
+                    reasoningEffort: (editingProvider.reasoningEffort || "none") as
+                      | "none"
+                      | "low"
+                      | "medium"
+                      | "high"
+                      | "xhigh",
                   }
                 : undefined
             }
