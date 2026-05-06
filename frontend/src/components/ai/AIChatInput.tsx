@@ -206,6 +206,57 @@ function firstLine(s: string): string {
   return i === -1 ? s.trim() : s.slice(0, i).trim();
 }
 
+function createClientRect(left: number, top: number, right: number, bottom: number): DOMRect {
+  const width = Math.max(0, right - left);
+  const height = Math.max(0, bottom - top);
+  return {
+    x: left,
+    y: top,
+    width,
+    height,
+    left,
+    top,
+    right,
+    bottom,
+    toJSON: () => ({ x: left, y: top, width, height, left, top, right, bottom }),
+  } as DOMRect;
+}
+
+function fallbackSuggestionClientRect(props: SuggestionProps<unknown>): DOMRect {
+  const docSize = props.editor.state.doc.content.size;
+  const from = Math.max(0, Math.min(props.range.from, docSize));
+  const to = Math.max(from, Math.min(props.range.to, docSize));
+
+  try {
+    const start = props.editor.view.coordsAtPos(from);
+    const end = props.editor.view.coordsAtPos(to);
+    return createClientRect(
+      Math.min(start.left, end.left),
+      Math.min(start.top, end.top),
+      Math.max(start.right, end.right),
+      Math.max(start.bottom, end.bottom)
+    );
+  } catch {
+    return createClientRect(0, 0, 0, 0);
+  }
+}
+
+function suggestionReferenceClientRect<TItem>(props: SuggestionProps<TItem>) {
+  return () => props.clientRect?.() ?? fallbackSuggestionClientRect(props as SuggestionProps<unknown>);
+}
+
+function createSuggestionPopup<TItem>(props: SuggestionProps<TItem>, content: Element): Instance[] {
+  return tippy("body", {
+    getReferenceClientRect: suggestionReferenceClientRect(props),
+    appendTo: () => document.body,
+    content,
+    showOnCreate: true,
+    interactive: true,
+    trigger: "manual",
+    placement: "bottom-start",
+  });
+}
+
 /**
  * Build a ProseMirror plugin that triggers on `/` and inserts the picked snippet
  * as PLAIN TEXT (not a Mention node) — prompt snippets are just template text.
@@ -280,21 +331,14 @@ function createSnippetSuggestionExtension(activeRef: MutableRefObject<boolean>) 
                   props: buildProps(props),
                   editor: props.editor,
                 });
-                if (!props.clientRect) return;
-                popup = tippy("body", {
-                  getReferenceClientRect: props.clientRect as () => DOMRect,
-                  appendTo: () => document.body,
-                  content: component.element,
-                  showOnCreate: true,
-                  interactive: true,
-                  trigger: "manual",
-                  placement: "bottom-start",
-                });
+                popup = createSuggestionPopup(props, component.element);
               },
               onUpdate: (props) => {
                 component?.updateProps(buildProps(props));
-                if (popup[0] && props.clientRect) {
-                  popup[0].setProps({ getReferenceClientRect: props.clientRect as () => DOMRect });
+                if (popup[0]) {
+                  popup[0].setProps({ getReferenceClientRect: suggestionReferenceClientRect(props) });
+                } else if (component) {
+                  popup = createSuggestionPopup(props, component.element);
                 }
               },
               onKeyDown: (props: SuggestionKeyDownProps) => {
@@ -433,21 +477,14 @@ export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(funct
                   props: makeProps(props),
                   editor: props.editor,
                 });
-                if (!props.clientRect) return;
-                popup = tippy("body", {
-                  getReferenceClientRect: props.clientRect as () => DOMRect,
-                  appendTo: () => document.body,
-                  content: component.element,
-                  showOnCreate: true,
-                  interactive: true,
-                  trigger: "manual",
-                  placement: "bottom-start",
-                });
+                popup = createSuggestionPopup(props, component.element);
               },
               onUpdate: (props: SuggestionProps<MentionItem>) => {
                 component?.updateProps(makeProps(props));
-                if (popup[0] && props.clientRect) {
-                  popup[0].setProps({ getReferenceClientRect: props.clientRect as () => DOMRect });
+                if (popup[0]) {
+                  popup[0].setProps({ getReferenceClientRect: suggestionReferenceClientRect(props) });
+                } else if (component) {
+                  popup = createSuggestionPopup(props, component.element);
                 }
               },
               onKeyDown: (props: SuggestionKeyDownProps) => {
