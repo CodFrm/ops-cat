@@ -531,7 +531,8 @@ export function AISettingsSection() {
                     model: editingProvider.model,
                     maxOutputTokens: editingProvider.maxOutputTokens,
                     contextWindow: editingProvider.contextWindow,
-                    reasoningEffort: (editingProvider.reasoningEffort || "none") as
+                    reasoningEffort: (editingProvider.reasoningEffort ||
+                      (editingProvider.reasoningEnabled ? "medium" : "none")) as
                       | "none"
                       | "low"
                       | "medium"
