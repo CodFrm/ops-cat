@@ -32,8 +32,8 @@ export function K8sConfigSection({
 }: K8sConfigSectionProps) {
   const { t } = useTranslation();
   const placeholder = isEditing
-    ? t("asset.k8sKubeconfigEditPlaceholder") || "kubeconfig 已加密保存。留空则保留原值；输入新内容则覆盖。"
-    : t("asset.k8sKubeconfigPlaceholder") || "Paste kubeconfig YAML content...";
+    ? t("asset.k8sKubeconfigEditPlaceholder")
+    : t("asset.k8sKubeconfigPlaceholder");
   return (
     <div className="grid gap-3 border rounded-lg p-4">
       <div className="grid gap-2">
