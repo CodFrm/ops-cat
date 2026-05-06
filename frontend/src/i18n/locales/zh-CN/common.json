@@ -1237,6 +1237,7 @@
     "importUrlPlaceholder": "https://example.com/users.csv",
     "importDelimiterIntro": "字段由什么分隔？请选择合适的分隔符。",
     "importRecordDelimiter": "记录分隔符：",
+    "importRecordDelimiterAuto": "自动",
     "importDelimited": "分隔符 - 逗号、Tab 等字符分隔字段",
     "importFixedWidth": "固定宽度 - 字段按列对齐，字段之间用空格分隔",
     "importFieldDelimiter": "字段分隔符：",

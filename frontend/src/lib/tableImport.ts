@@ -5,12 +5,27 @@ export type ImportNullStrategy = "empty-is-empty-string" | "empty-is-null" | "li
 export type ImportDataFormat = "text" | "csv" | "json" | "xml";
 export type ImportFieldDelimiter = "," | "\t" | ";" | "|" | " ";
 export type ImportMode = "append" | "update" | "append-update" | "append-skip" | "delete" | "copy";
+export type ImportRecordDelimiter = "auto" | "lf" | "cr" | "crlf";
+export type ImportTextQualifier = '"' | "'" | "none";
+export type ImportDateOrder = "dmy" | "mdy" | "ymd";
+export type ImportDateTimeOrder = "date-time" | "time-date";
+export type ImportBinaryEncoding = "base64" | "hex";
 
 export interface ImportAdvancedOptions {
   extendedInsert?: boolean;
   maxStatementSizeKb?: number;
   emptyStringAsNull?: boolean;
   ignoreForeignKeyConstraint?: boolean;
+}
+
+export interface ImportValueConversionOptions {
+  dateOrder?: ImportDateOrder;
+  dateTimeOrder?: ImportDateTimeOrder;
+  dateDelimiter?: string;
+  yearDelimiter?: string;
+  timeDelimiter?: string;
+  decimalSymbol?: string;
+  binaryEncoding?: ImportBinaryEncoding;
 }
 
 export interface ParsedDelimitedTable {
@@ -22,6 +37,8 @@ export interface ParseImportSourceTextArgs {
   text: string;
   format: ImportDataFormat;
   fieldDelimiter?: ImportFieldDelimiter;
+  recordDelimiter?: ImportRecordDelimiter;
+  textQualifier?: ImportTextQualifier;
   fixedWidth?: boolean;
   fieldNameRowEnabled?: boolean;
   fieldNameRow?: number;
@@ -39,6 +56,8 @@ export interface BuildImportInsertSqlArgs {
   primaryKeys?: string[];
   advancedOptions?: ImportAdvancedOptions;
   driver?: string;
+  columnTypes?: Record<string, string>;
+  conversionOptions?: ImportValueConversionOptions;
 }
 
 export function detectDelimiter(text: string): Delimiter {
@@ -48,7 +67,36 @@ export function detectDelimiter(text: string): Delimiter {
   return tabs > commas ? "\t" : ",";
 }
 
-function parseDelimitedRows(text: string, delimiter: ImportFieldDelimiter = detectDelimiter(text)): string[][] {
+interface NewlineMatch {
+  match: boolean;
+  len: number;
+}
+
+function newlineAt(text: string, i: number, mode: ImportRecordDelimiter): NewlineMatch {
+  const ch = text[i];
+  const next = text[i + 1];
+  if (mode === "lf") return { match: ch === "\n", len: 1 };
+  if (mode === "cr") return { match: ch === "\r" && next !== "\n", len: 1 };
+  if (mode === "crlf") return { match: ch === "\r" && next === "\n", len: 2 };
+  if (ch === "\r" && next === "\n") return { match: true, len: 2 };
+  if (ch === "\n" || ch === "\r") return { match: true, len: 1 };
+  return { match: false, len: 0 };
+}
+
+interface ParseDelimitedRowsOptions {
+  recordDelimiter?: ImportRecordDelimiter;
+  textQualifier?: ImportTextQualifier;
+}
+
+function parseDelimitedRows(
+  text: string,
+  delimiter: ImportFieldDelimiter = detectDelimiter(text),
+  options: ParseDelimitedRowsOptions = {}
+): string[][] {
+  const recordDelimiter = options.recordDelimiter ?? "auto";
+  const qualifier = options.textQualifier ?? '"';
+  const useQualifier = qualifier !== "none";
+
   const rows: string[][] = [];
   let currentRow: string[] = [];
   let current = "";
@@ -58,9 +106,9 @@ function parseDelimitedRows(text: string, delimiter: ImportFieldDelimiter = dete
     const ch = text[i];
     const next = text[i + 1];
 
-    if (ch === '"') {
-      if (inQuotes && next === '"') {
-        current += '"';
+    if (useQualifier && ch === qualifier) {
+      if (inQuotes && next === qualifier) {
+        current += qualifier;
         i++;
       } else {
         inQuotes = !inQuotes;
@@ -74,13 +122,16 @@ function parseDelimitedRows(text: string, delimiter: ImportFieldDelimiter = dete
       continue;
     }
 
-    if ((ch === "\n" || ch === "\r") && !inQuotes) {
-      if (ch === "\r" && next === "\n") i++;
-      currentRow.push(current);
-      if (currentRow.some((cell) => cell !== "")) rows.push(currentRow);
-      currentRow = [];
-      current = "";
-      continue;
+    if (!inQuotes) {
+      const nl = newlineAt(text, i, recordDelimiter);
+      if (nl.match) {
+        i += nl.len - 1;
+        currentRow.push(current);
+        if (currentRow.some((cell) => cell !== "")) rows.push(currentRow);
+        currentRow = [];
+        current = "";
+        continue;
+      }
     }
 
     current += ch;
@@ -211,7 +262,12 @@ export function parseImportSourceText(args: ParseImportSourceTextArgs): ParsedDe
   if (args.format === "json") return parseJsonText(args.text);
   if (args.format === "xml") return parseXmlText(args.text);
 
-  const rows = args.fixedWidth ? parseFixedWidthRows(args.text) : parseDelimitedRows(args.text, args.fieldDelimiter);
+  const rows = args.fixedWidth
+    ? parseFixedWidthRows(args.text)
+    : parseDelimitedRows(args.text, args.fieldDelimiter, {
+        recordDelimiter: args.recordDelimiter,
+        textQualifier: args.textQualifier,
+      });
   return applyRowOptions(rows, args);
 }
 
@@ -221,17 +277,244 @@ function importValue(cell: string, nullStrategy: ImportNullStrategy): unknown {
   return cell;
 }
 
+const MONTH_NAMES: Record<string, number> = {
+  jan: 1,
+  january: 1,
+  feb: 2,
+  february: 2,
+  mar: 3,
+  march: 3,
+  apr: 4,
+  april: 4,
+  may: 5,
+  jun: 6,
+  june: 6,
+  jul: 7,
+  july: 7,
+  aug: 8,
+  august: 8,
+  sep: 9,
+  sept: 9,
+  september: 9,
+  oct: 10,
+  october: 10,
+  nov: 11,
+  november: 11,
+  dec: 12,
+  december: 12,
+};
+
+function isNumericType(type: string): boolean {
+  return /^(tinyint|smallint|mediumint|int|bigint|integer|float|double|decimal|numeric|real)/i.test(type);
+}
+
+function isDateOnlyType(type: string): boolean {
+  return /^date(?!time)/i.test(type);
+}
+
+function isDateTimeType(type: string): boolean {
+  return /^(datetime|timestamp)/i.test(type);
+}
+
+function isBinaryType(type: string): boolean {
+  return /^(blob|tinyblob|mediumblob|longblob|binary|varbinary|bytea)/i.test(type);
+}
+
+function pad(value: number, width: number): string {
+  return String(value).padStart(width, "0");
+}
+
+function expandTwoDigitYear(text: string): number | null {
+  const trimmed = text.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  if (trimmed.length <= 2) return n + (n < 70 ? 2000 : 1900);
+  return n;
+}
+
+function parseMonth(text: string): number | null {
+  const trimmed = text.trim().toLowerCase();
+  if (trimmed in MONTH_NAMES) return MONTH_NAMES[trimmed];
+  if (!/^\d+$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  if (n < 1 || n > 12) return null;
+  return n;
+}
+
+function splitDateParts(
+  text: string,
+  order: ImportDateOrder,
+  dateDelimiter: string,
+  yearDelimiter?: string
+): [string, string, string] | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  if (yearDelimiter && yearDelimiter !== dateDelimiter) {
+    if (order === "ymd") {
+      const idx = trimmed.indexOf(yearDelimiter);
+      if (idx === -1) return null;
+      const rest = trimmed.slice(idx + yearDelimiter.length).split(dateDelimiter);
+      if (rest.length !== 2) return null;
+      return [trimmed.slice(0, idx), rest[0], rest[1]];
+    }
+    const idx = trimmed.lastIndexOf(yearDelimiter);
+    if (idx === -1) return null;
+    const rest = trimmed.slice(0, idx).split(dateDelimiter);
+    if (rest.length !== 2) return null;
+    return [rest[0], rest[1], trimmed.slice(idx + yearDelimiter.length)];
+  }
+  const parts = trimmed.split(dateDelimiter);
+  if (parts.length !== 3) return null;
+  return [parts[0], parts[1], parts[2]];
+}
+
+function parseImportDate(text: string, options?: ImportValueConversionOptions): string | null {
+  const order = options?.dateOrder ?? "ymd";
+  const delim = options?.dateDelimiter && options.dateDelimiter.length > 0 ? options.dateDelimiter : "-";
+  const yearDelim = options?.yearDelimiter && options.yearDelimiter.length > 0 ? options.yearDelimiter : undefined;
+
+  const parts = splitDateParts(text, order, delim, yearDelim);
+  if (!parts) return null;
+
+  let yearText: string;
+  let monthText: string;
+  let dayText: string;
+  if (order === "dmy") {
+    [dayText, monthText, yearText] = parts;
+  } else if (order === "mdy") {
+    [monthText, dayText, yearText] = parts;
+  } else {
+    [yearText, monthText, dayText] = parts;
+  }
+
+  const y = expandTwoDigitYear(yearText);
+  const m = parseMonth(monthText);
+  const dTrim = dayText.trim();
+  const d = /^\d+$/.test(dTrim) ? Number(dTrim) : NaN;
+  if (y == null || m == null || !Number.isInteger(d) || d < 1 || d > 31) return null;
+  return `${pad(y, 4)}-${pad(m, 2)}-${pad(d, 2)}`;
+}
+
+function parseImportTime(text: string, options?: ImportValueConversionOptions): string | null {
+  const delim = options?.timeDelimiter && options.timeDelimiter.length > 0 ? options.timeDelimiter : ":";
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const parts = trimmed.split(delim);
+  if (parts.length < 2 || parts.length > 3) return null;
+  const h = /^\d+$/.test(parts[0]) ? Number(parts[0]) : NaN;
+  const m = /^\d+$/.test(parts[1]) ? Number(parts[1]) : NaN;
+  const sRaw = parts[2] ?? "0";
+  const s = /^\d+$/.test(sRaw) ? Number(sRaw) : NaN;
+  if (
+    !Number.isInteger(h) ||
+    !Number.isInteger(m) ||
+    !Number.isInteger(s) ||
+    h < 0 ||
+    h > 23 ||
+    m < 0 ||
+    m > 59 ||
+    s < 0 ||
+    s > 59
+  ) {
+    return null;
+  }
+  return `${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)}`;
+}
+
+function parseImportDateTime(text: string, options?: ImportValueConversionOptions): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const idx = trimmed.search(/\s/);
+  if (idx === -1) {
+    const date = parseImportDate(trimmed, options);
+    return date ? `${date} 00:00:00` : null;
+  }
+  const left = trimmed.slice(0, idx);
+  const right = trimmed.slice(idx + 1).trim();
+  const order = options?.dateTimeOrder ?? "date-time";
+  const datePart = order === "time-date" ? right : left;
+  const timePart = order === "time-date" ? left : right;
+  const date = parseImportDate(datePart, options);
+  if (!date) return null;
+  const time = parseImportTime(timePart, options);
+  if (!time) return null;
+  return `${date} ${time}`;
+}
+
+function bytesToHex(binary: string): string {
+  let hex = "";
+  for (let i = 0; i < binary.length; i++) {
+    hex += binary.charCodeAt(i).toString(16).padStart(2, "0");
+  }
+  return hex;
+}
+
+function formatBinaryLiteral(text: string, encoding: ImportBinaryEncoding, driver?: string): string | null {
+  const cleaned = text.replace(/\s+/g, "");
+  let hex: string;
+  if (encoding === "base64") {
+    if (!cleaned) return driver === "postgresql" ? `'\\x'::bytea` : `X''`;
+    if (!/^[A-Za-z0-9+/=]+$/.test(cleaned)) return null;
+    try {
+      hex = bytesToHex(atob(cleaned));
+    } catch {
+      return null;
+    }
+  } else {
+    if (!/^[0-9a-fA-F]*$/.test(cleaned)) return null;
+    hex = cleaned.toLowerCase();
+    if (hex.length % 2 !== 0) hex = `0${hex}`;
+  }
+  if (driver === "postgresql") return `'\\x${hex}'::bytea`;
+  return `X'${hex}'`;
+}
+
+function emitImportLiteral(
+  cell: string,
+  target: string,
+  nullStrategy: ImportNullStrategy,
+  columnTypes: Record<string, string> | undefined,
+  conversion: ImportValueConversionOptions | undefined,
+  driver: string | undefined
+): string {
+  const value = importValue(cell, nullStrategy);
+  if (value == null) return "NULL";
+  const text = String(value);
+  const type = columnTypes?.[target];
+
+  if (type) {
+    if (isBinaryType(type) && conversion?.binaryEncoding) {
+      const literal = formatBinaryLiteral(text, conversion.binaryEncoding, driver);
+      if (literal) return literal;
+    }
+    if (isDateOnlyType(type)) {
+      const iso = parseImportDate(text, conversion);
+      if (iso) return sqlQuote(iso);
+    } else if (isDateTimeType(type)) {
+      const iso = parseImportDateTime(text, conversion);
+      if (iso) return sqlQuote(iso);
+    } else if (isNumericType(type) && conversion?.decimalSymbol && conversion.decimalSymbol !== ".") {
+      const normalized = text.split(conversion.decimalSymbol).join(".");
+      return sqlQuote(normalized);
+    }
+  }
+
+  return sqlQuote(value);
+}
+
+type LiteralEmitter = (cell: string, target: string) => string;
+
 function whereClauseForRow(
   row: string[],
   mapped: { source: string; index: number; target: string }[],
-  nullStrategy: ImportNullStrategy,
+  emit: LiteralEmitter,
   driver?: string
 ): string {
   return mapped
     .map((item) => {
-      const value = importValue(row[item.index] ?? "", nullStrategy);
+      const literal = emit(row[item.index] ?? "", item.target);
       const column = quoteIdent(item.target, driver);
-      return value == null ? `${column} IS NULL` : `${column} = ${sqlQuote(value)}`;
+      return literal === "NULL" ? `${column} IS NULL` : `${column} = ${literal}`;
     })
     .join(" AND ");
 }
@@ -275,6 +558,8 @@ export function buildImportInsertSql({
   primaryKeys = [],
   advancedOptions,
   driver,
+  columnTypes,
+  conversionOptions,
 }: BuildImportInsertSqlArgs): string[] {
   const effectiveNullStrategy = advancedOptions?.emptyStringAsNull ? "empty-is-null" : nullStrategy;
   const mapped = headers
@@ -296,8 +581,11 @@ export function buildImportInsertSql({
     return [];
   }
 
+  const emit: LiteralEmitter = (cell, target) =>
+    emitImportLiteral(cell, target, effectiveNullStrategy, columnTypes, conversionOptions, driver);
+
   const rowValuesSql = rows.map(
-    (row) => `(${mapped.map((item) => sqlQuote(importValue(row[item.index] ?? "", effectiveNullStrategy))).join(", ")})`
+    (row) => `(${mapped.map((item) => emit(row[item.index] ?? "", item.target)).join(", ")})`
   );
 
   const buildInsertStatements = (insertKeyword: string, suffix = "") => {
@@ -318,12 +606,9 @@ export function buildImportInsertSql({
     if (valueMapped.length === 0) return [];
     statements = rows.map((row) => {
       const setSql = valueMapped
-        .map(
-          (item) =>
-            `${quoteIdent(item.target, driver)} = ${sqlQuote(importValue(row[item.index] ?? "", effectiveNullStrategy))}`
-        )
+        .map((item) => `${quoteIdent(item.target, driver)} = ${emit(row[item.index] ?? "", item.target)}`)
         .join(", ");
-      return `UPDATE ${quotedTable} SET ${setSql} WHERE ${whereClauseForRow(row, keyMapped, effectiveNullStrategy, driver)};`;
+      return `UPDATE ${quotedTable} SET ${setSql} WHERE ${whereClauseForRow(row, keyMapped, emit, driver)};`;
     });
   } else if (mode === "append-update") {
     const insertPrefix = "INSERT INTO";
@@ -354,7 +639,7 @@ export function buildImportInsertSql({
     }
   } else if (mode === "delete") {
     statements = rows.map(
-      (row) => `DELETE FROM ${quotedTable} WHERE ${whereClauseForRow(row, keyMapped, effectiveNullStrategy, driver)};`
+      (row) => `DELETE FROM ${quotedTable} WHERE ${whereClauseForRow(row, keyMapped, emit, driver)};`
     );
   } else {
     statements = buildInsertStatements("INSERT INTO");

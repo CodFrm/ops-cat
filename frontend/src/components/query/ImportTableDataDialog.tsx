@@ -32,10 +32,16 @@ import {
   buildImportInsertSql,
   detectDelimiter,
   parseImportSourceText,
+  type ImportBinaryEncoding,
   type ImportDataFormat,
+  type ImportDateOrder,
+  type ImportDateTimeOrder,
   type ImportFieldDelimiter,
   type ImportMode,
   type ImportNullStrategy,
+  type ImportRecordDelimiter,
+  type ImportTextQualifier,
+  type ImportValueConversionOptions,
   type ParsedDelimitedTable,
 } from "@/lib/tableImport";
 
@@ -204,23 +210,23 @@ export function ImportTableDataDialog({
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [urlDraft, setUrlDraft] = useState("");
   const [loadingUrl, setLoadingUrl] = useState(false);
-  const [recordDelimiter, setRecordDelimiter] = useState("lf");
+  const [recordDelimiter, setRecordDelimiter] = useState<ImportRecordDelimiter>("auto");
   const [importShape, setImportShape] = useState<"delimited" | "fixed">("delimited");
   const [fieldDelimiter, setFieldDelimiter] = useState<ImportFieldDelimiter>("\t");
   const [customDelimiter, setCustomDelimiter] = useState("");
-  const [textQualifier, setTextQualifier] = useState('"');
+  const [textQualifier, setTextQualifier] = useState<ImportTextQualifier>('"');
   const [fieldNameRowEnabled, setFieldNameRowEnabled] = useState(true);
   const [fieldNameRow, setFieldNameRow] = useState(1);
   const [dataStartRow, setDataStartRow] = useState(2);
   const [dataEndRow, setDataEndRow] = useState("");
-  const [dateOrder, setDateOrder] = useState("dmy");
-  const [dateTimeOrder, setDateTimeOrder] = useState("date-time");
+  const [dateOrder, setDateOrder] = useState<ImportDateOrder>("dmy");
+  const [dateTimeOrder, setDateTimeOrder] = useState<ImportDateTimeOrder>("date-time");
   const [dateDelimiter, setDateDelimiter] = useState("/");
   const [yearDelimiterEnabled, setYearDelimiterEnabled] = useState(false);
   const [yearDelimiter, setYearDelimiter] = useState("/");
   const [timeDelimiter, setTimeDelimiter] = useState(":");
   const [decimalSymbol, setDecimalSymbol] = useState(".");
-  const [binaryEncoding, setBinaryEncoding] = useState("base64");
+  const [binaryEncoding, setBinaryEncoding] = useState<ImportBinaryEncoding>("base64");
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [primaryKeys, setPrimaryKeys] = useState<Set<string>>(new Set(tablePrimaryKeys ?? []));
   const [nullStrategy, setNullStrategy] = useState<ImportNullStrategy>("literal-null");
@@ -257,6 +263,16 @@ export function ImportTableDataDialog({
     setEmptyStringAsNull(false);
     setIgnoreForeignKeyConstraint(false);
     setContinueOnError(true);
+    setRecordDelimiter("auto");
+    setTextQualifier('"');
+    setDateOrder("dmy");
+    setDateTimeOrder("date-time");
+    setDateDelimiter("/");
+    setYearDelimiterEnabled(false);
+    setYearDelimiter("/");
+    setTimeDelimiter(":");
+    setDecimalSymbol(".");
+    setBinaryEncoding("base64");
   }, [open, tablePrimaryKeys]);
 
   useEffect(() => {
@@ -275,6 +291,8 @@ export function ImportTableDataDialog({
           text: source.text,
           format,
           fieldDelimiter: delimiter,
+          recordDelimiter,
+          textQualifier,
           fixedWidth: importShape === "fixed",
           fieldNameRowEnabled,
           fieldNameRow,
@@ -292,7 +310,9 @@ export function ImportTableDataDialog({
     fieldNameRowEnabled,
     format,
     importShape,
+    recordDelimiter,
     sources,
+    textQualifier,
   ]);
 
   useEffect(() => {
@@ -303,6 +323,27 @@ export function ImportTableDataDialog({
   const primaryKeyColumns = useMemo(
     () => Array.from(primaryKeys).filter((column) => Object.values(mapping).includes(column)),
     [mapping, primaryKeys]
+  );
+  const conversionOptions = useMemo<ImportValueConversionOptions>(
+    () => ({
+      dateOrder,
+      dateTimeOrder,
+      dateDelimiter,
+      yearDelimiter: yearDelimiterEnabled ? yearDelimiter : undefined,
+      timeDelimiter,
+      decimalSymbol,
+      binaryEncoding,
+    }),
+    [
+      binaryEncoding,
+      dateDelimiter,
+      dateOrder,
+      dateTimeOrder,
+      decimalSymbol,
+      timeDelimiter,
+      yearDelimiter,
+      yearDelimiterEnabled,
+    ]
   );
   const statements = useMemo(
     () =>
@@ -321,8 +362,12 @@ export function ImportTableDataDialog({
           ignoreForeignKeyConstraint,
         },
         driver,
+        columnTypes,
+        conversionOptions,
       }),
     [
+      columnTypes,
+      conversionOptions,
       driver,
       emptyStringAsNull,
       extendedInsert,
@@ -625,11 +670,15 @@ export function ImportTableDataDialog({
           <p className="text-sm font-medium">{t("query.importDelimiterIntro")}</p>
           <div className="flex items-center gap-3">
             <Label className="w-36 justify-end text-sm">{t("query.importRecordDelimiter")}</Label>
-            <Select value={recordDelimiter} onValueChange={setRecordDelimiter}>
+            <Select
+              value={recordDelimiter}
+              onValueChange={(value) => setRecordDelimiter(value as ImportRecordDelimiter)}
+            >
               <SelectTrigger className="h-8 w-32 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="auto">{t("query.importRecordDelimiterAuto")}</SelectItem>
                 <SelectItem value="lf">LF</SelectItem>
                 <SelectItem value="crlf">CRLF</SelectItem>
                 <SelectItem value="cr">CR</SelectItem>
@@ -676,7 +725,11 @@ export function ImportTableDataDialog({
             </div>
             <div className="flex items-center gap-3">
               <Label className="w-36 justify-end text-sm">{t("query.importTextQualifier")}</Label>
-              <Select value={textQualifier} disabled={importShape !== "delimited"} onValueChange={setTextQualifier}>
+              <Select
+                value={textQualifier}
+                disabled={importShape !== "delimited"}
+                onValueChange={(value) => setTextQualifier(value as ImportTextQualifier)}
+              >
                 <SelectTrigger className="h-8 w-32 text-xs">
                   <SelectValue />
                 </SelectTrigger>
@@ -740,7 +793,7 @@ export function ImportTableDataDialog({
               <div className="text-sm font-semibold">{t("query.importDateTimeFormats")}</div>
               <div className="grid grid-cols-[140px_1fr] items-center gap-2 text-sm">
                 <Label className="justify-end">{t("query.exportDateOrder")}</Label>
-                <Select value={dateOrder} onValueChange={setDateOrder}>
+                <Select value={dateOrder} onValueChange={(value) => setDateOrder(value as ImportDateOrder)}>
                   <SelectTrigger className="h-8 w-40 text-xs">
                     <SelectValue />
                   </SelectTrigger>
@@ -751,7 +804,7 @@ export function ImportTableDataDialog({
                   </SelectContent>
                 </Select>
                 <Label className="justify-end">{t("query.importDateTimeOrder")}</Label>
-                <Select value={dateTimeOrder} onValueChange={setDateTimeOrder}>
+                <Select value={dateTimeOrder} onValueChange={(value) => setDateTimeOrder(value as ImportDateTimeOrder)}>
                   <SelectTrigger className="h-8 w-48 text-xs">
                     <SelectValue />
                   </SelectTrigger>
@@ -806,7 +859,10 @@ export function ImportTableDataDialog({
               <Label className="justify-end">{t("query.exportDecimalSymbol")}</Label>
               <Input value={decimalSymbol} onChange={(event) => setDecimalSymbol(event.target.value)} className="h-8" />
               <Label className="justify-end">{t("query.exportBinaryEncoding")}</Label>
-              <Select value={binaryEncoding} onValueChange={setBinaryEncoding}>
+              <Select
+                value={binaryEncoding}
+                onValueChange={(value) => setBinaryEncoding(value as ImportBinaryEncoding)}
+              >
                 <SelectTrigger className="h-8 text-xs">
                   <SelectValue />
                 </SelectTrigger>

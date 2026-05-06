@@ -159,4 +159,179 @@ describe("table import helpers", () => {
       ],
     });
   });
+
+  it("defaults to auto record-delimiter detection so Windows CSVs do not leak \\r into cells", () => {
+    expect(
+      parseImportSourceText({
+        text: "id,name\r\n1,Alice\r\n2,Bob\n",
+        format: "csv",
+        fieldDelimiter: ",",
+      })
+    ).toEqual({
+      headers: ["id", "name"],
+      rows: [
+        ["1", "Alice"],
+        ["2", "Bob"],
+      ],
+    });
+  });
+
+  it("respects an explicit record delimiter so opposite line endings stay inside cells", () => {
+    expect(
+      parseImportSourceText({
+        text: "id,note\r1,line\nstill-one\r2,bob",
+        format: "csv",
+        fieldDelimiter: ",",
+        recordDelimiter: "cr",
+      })
+    ).toEqual({
+      headers: ["id", "note"],
+      rows: [
+        ["1", "line\nstill-one"],
+        ["2", "bob"],
+      ],
+    });
+
+    expect(
+      parseImportSourceText({
+        text: "id,note\r\n1,line\nstill-one\r\n",
+        format: "csv",
+        fieldDelimiter: ",",
+        recordDelimiter: "crlf",
+      })
+    ).toEqual({
+      headers: ["id", "note"],
+      rows: [["1", "line\nstill-one"]],
+    });
+  });
+
+  it("supports single-quote text qualifiers and disabling qualifiers entirely", () => {
+    expect(
+      parseImportSourceText({
+        text: "id,name\n1,'Alice, A.'\n2,'say ''hi'''",
+        format: "csv",
+        fieldDelimiter: ",",
+        textQualifier: "'",
+      })
+    ).toEqual({
+      headers: ["id", "name"],
+      rows: [
+        ["1", "Alice, A."],
+        ["2", "say 'hi'"],
+      ],
+    });
+
+    expect(
+      parseImportSourceText({
+        text: 'id,name\n1,"Alice"',
+        format: "csv",
+        fieldDelimiter: ",",
+        textQualifier: "none",
+      })
+    ).toEqual({
+      headers: ["id", "name"],
+      rows: [["1", '"Alice"']],
+    });
+  });
+
+  it("normalizes decimal symbols for numeric target columns", () => {
+    expect(
+      buildImportInsertSql({
+        tableName: "appdb.metrics",
+        headers: ["id", "score", "name"],
+        rows: [["1", "1,5", "alice,bob"]],
+        mapping: { id: "id", score: "score", name: "name" },
+        nullStrategy: "literal-null",
+        driver: "mysql",
+        columnTypes: { id: "int", score: "decimal(10,2)", name: "varchar(64)" },
+        conversionOptions: { decimalSymbol: "," },
+      })
+    ).toEqual(["INSERT INTO `appdb`.`metrics` (`id`, `score`, `name`) VALUES ('1', '1.5', 'alice,bob');"]);
+  });
+
+  it("converts source dates and datetimes to canonical SQL literals", () => {
+    expect(
+      buildImportInsertSql({
+        tableName: "appdb.events",
+        headers: ["id", "occurred_on", "occurred_at"],
+        rows: [["1", "24/8/23", "15:30:38 24/Aug/2023"]],
+        mapping: { id: "id", occurred_on: "occurred_on", occurred_at: "occurred_at" },
+        nullStrategy: "literal-null",
+        driver: "mysql",
+        columnTypes: { id: "int", occurred_on: "date", occurred_at: "datetime" },
+        conversionOptions: {
+          dateOrder: "dmy",
+          dateDelimiter: "/",
+          dateTimeOrder: "time-date",
+          timeDelimiter: ":",
+        },
+      })
+    ).toEqual([
+      "INSERT INTO `appdb`.`events` (`id`, `occurred_on`, `occurred_at`) VALUES ('1', '2023-08-24', '2023-08-24 15:30:38');",
+    ]);
+  });
+
+  it("supports a separate year delimiter when enabled", () => {
+    expect(
+      buildImportInsertSql({
+        tableName: "appdb.events",
+        headers: ["d"],
+        rows: [["24/8-2023"]],
+        mapping: { d: "d" },
+        nullStrategy: "literal-null",
+        driver: "mysql",
+        columnTypes: { d: "date" },
+        conversionOptions: {
+          dateOrder: "dmy",
+          dateDelimiter: "/",
+          yearDelimiter: "-",
+        },
+      })
+    ).toEqual(["INSERT INTO `appdb`.`events` (`d`) VALUES ('2023-08-24');"]);
+  });
+
+  it("emits driver-aware binary literals from base64 and hex encodings", () => {
+    expect(
+      buildImportInsertSql({
+        tableName: "appdb.files",
+        headers: ["id", "payload"],
+        rows: [["1", "SGVsbG8="]],
+        mapping: { id: "id", payload: "payload" },
+        nullStrategy: "literal-null",
+        driver: "mysql",
+        columnTypes: { id: "int", payload: "blob" },
+        conversionOptions: { binaryEncoding: "base64" },
+      })
+    ).toEqual(["INSERT INTO `appdb`.`files` (`id`, `payload`) VALUES ('1', X'48656c6c6f');"]);
+
+    expect(
+      buildImportInsertSql({
+        tableName: "appdb.files",
+        headers: ["id", "payload"],
+        rows: [["1", "48656C6C6F"]],
+        mapping: { id: "id", payload: "payload" },
+        nullStrategy: "literal-null",
+        driver: "postgresql",
+        columnTypes: { id: "int", payload: "bytea" },
+        conversionOptions: { binaryEncoding: "hex" },
+      })
+    ).toEqual([`INSERT INTO "appdb"."files" ("id", "payload") VALUES ('1', '\\x48656c6c6f'::bytea);`]);
+  });
+
+  it("uses converted literals in WHERE clauses for primary-key based modes", () => {
+    expect(
+      buildImportInsertSql({
+        tableName: "appdb.events",
+        headers: ["id", "name"],
+        rows: [["1,5", "Alice"]],
+        mapping: { id: "id", name: "name" },
+        nullStrategy: "literal-null",
+        primaryKeys: ["id"],
+        mode: "update",
+        driver: "mysql",
+        columnTypes: { id: "decimal(10,2)", name: "varchar(64)" },
+        conversionOptions: { decimalSymbol: "," },
+      })
+    ).toEqual(["UPDATE `appdb`.`events` SET `name` = 'Alice' WHERE `id` = '1.5';"]);
+  });
 });

@@ -1237,6 +1237,7 @@
     "importUrlPlaceholder": "https://example.com/users.csv",
     "importDelimiterIntro": "What delimiter separates your fields? Select the appropriate delimiter.",
     "importRecordDelimiter": "Record Delimiter:",
+    "importRecordDelimiterAuto": "Auto",
     "importDelimited": "Delimited - Characters such as comma or tab separate each field",
     "importFixedWidth": "Fixed Width - Fields are aligned in columns with spaces between each field",
     "importFieldDelimiter": "Field Delimiter:",
