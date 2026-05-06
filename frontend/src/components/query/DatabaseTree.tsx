@@ -33,14 +33,10 @@ import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { CreateDatabaseDialog } from "./CreateDatabaseDialog";
 import { CreateTableDialog } from "./CreateTableDialog";
 import { AlterTableDialog } from "./AlterTableDialog";
+import { quoteIdent, quoteTableRef } from "@/lib/tableSql";
 
 interface DatabaseTreeProps {
   tabId: string;
-}
-
-function quoteIdent(name: string, driver?: string): string {
-  if (driver === "postgresql") return `"${name}"`;
-  return `\`${name}\``;
 }
 
 export function DatabaseTree({ tabId }: DatabaseTreeProps) {
@@ -318,10 +314,7 @@ export function DatabaseTree({ tabId }: DatabaseTreeProps) {
                                 </ContextMenuItem>
                                 <ContextMenuItem
                                   onClick={() => {
-                                    const tableName =
-                                      driver === "postgresql"
-                                        ? `"${tbl}"`
-                                        : `${quoteIdent(db, driver)}.${quoteIdent(tbl, driver)}`;
+                                    const tableName = quoteTableRef(db, tbl, driver);
                                     openSqlTab(tabId, db, `SELECT * FROM ${tableName} LIMIT 100`);
                                   }}
                                 >

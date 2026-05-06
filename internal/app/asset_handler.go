@@ -3,6 +3,7 @@ package app
 import (
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -34,19 +35,23 @@ func (h *ExtensionAssetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 
 	rel := strings.TrimPrefix(r.URL.Path, "/extensions/")
-	filePath := filepath.Join(h.extensionsDir, filepath.FromSlash(rel))
-
-	// Prevent directory traversal
-	if !strings.HasPrefix(filepath.Clean(filePath), filepath.Clean(h.extensionsDir)) {
+	if rel == "" || strings.HasPrefix(rel, "/") {
 		http.NotFound(w, r)
 		return
 	}
 
-	info, err := os.Stat(filePath) //nolint:gosec // path validated by traversal check above
+	file, err := os.OpenInRoot(h.extensionsDir, filepath.FromSlash(rel))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	info, err := file.Stat()
 	if err != nil || info.IsDir() {
 		http.NotFound(w, r)
 		return
 	}
 
-	http.ServeFile(w, r, filePath)
+	http.ServeContent(w, r, path.Base(rel), info.ModTime(), file)
 }

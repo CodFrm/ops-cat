@@ -11,6 +11,7 @@ import (
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/service/asset_svc"
 	"github.com/opskat/opskat/internal/service/credential_resolver"
+	"github.com/opskat/opskat/internal/service/query_svc"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
@@ -134,6 +135,62 @@ func (a *App) ExecuteSQL(assetID int64, sqlText string, database string) (string
 	}()
 
 	return ai.ExecuteSQL(ctx, db, sqlText)
+}
+
+// ExecuteTableImport executes a prepared table import batch on one database session.
+func (a *App) ExecuteTableImport(
+	assetID int64,
+	database string,
+	request query_svc.TableImportBatchRequest,
+) (*query_svc.TableImportBatchResult, error) {
+	asset, err := asset_svc.Asset().Get(a.langCtx(), assetID)
+	if err != nil {
+		return nil, fmt.Errorf("资产不存在: %w", err)
+	}
+	if !asset.IsDatabase() {
+		return nil, fmt.Errorf("资产不是数据库类型")
+	}
+	cfg, err := asset.GetDatabaseConfig()
+	if err != nil {
+		return nil, fmt.Errorf("获取数据库配置失败: %w", err)
+	}
+	if database != "" {
+		cfg.Database = database
+	}
+	password, err := credential_resolver.Default().ResolveDatabasePassword(a.langCtx(), cfg)
+	if err != nil {
+		return nil, fmt.Errorf("解析凭据失败: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(a.langCtx(), 30*time.Minute)
+	defer cancel()
+
+	db, tunnel, err := connpool.DialDatabase(ctx, asset, cfg, password, a.sshPool)
+	if err != nil {
+		return nil, fmt.Errorf("连接数据库失败: %w", err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			logger.Default().Warn("close db failed", zap.Error(err))
+		}
+		if tunnel != nil {
+			if err := tunnel.Close(); err != nil {
+				logger.Default().Warn("close tunnel failed", zap.Error(err))
+			}
+		}
+	}()
+
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("打开数据库会话失败: %w", err)
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			logger.Default().Warn("close db session failed", zap.Error(err))
+		}
+	}()
+
+	return query_svc.RunTableImportBatch(ctx, query_svc.NewSQLSession(conn), cfg.Driver, request)
 }
 
 // ExecuteSQLPaged 在指定数据库资产上执行分页 SQL 查询（SELECT/WITH 子查询包装）
