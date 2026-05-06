@@ -17,6 +17,7 @@ import (
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/repository/asset_repo"
 	"github.com/opskat/opskat/internal/service/asset_svc"
+	"github.com/opskat/opskat/internal/service/credential_svc"
 )
 
 type k8sCommandPlan struct {
@@ -63,10 +64,15 @@ func handleExecK8s(ctx context.Context, args map[string]any) (string, error) {
 		}
 	}
 
-	if asset.SSHTunnelID != 0 {
-		return executeK8sCommandOverSSH(ctx, asset.SSHTunnelID, cfg.Kubeconfig, plan.Args)
+	kubeconfig, err := credential_svc.Default().Decrypt(cfg.Kubeconfig)
+	if err != nil {
+		return "", fmt.Errorf("decrypt kubeconfig: %w", err)
 	}
-	return executeK8sCommandLocal(ctx, cfg.Kubeconfig, plan.Args)
+
+	if asset.SSHTunnelID != 0 {
+		return executeK8sCommandOverSSH(ctx, asset.SSHTunnelID, kubeconfig, plan.Args)
+	}
+	return executeK8sCommandLocal(ctx, kubeconfig, plan.Args)
 }
 
 func k8sAuditCommandFromArgs(args map[string]any) string {

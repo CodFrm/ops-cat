@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/opskat/opskat/internal/assettype"
 	"github.com/opskat/opskat/internal/k8s"
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/service/asset_svc"
@@ -21,287 +22,130 @@ import (
 	"go.uber.org/zap"
 )
 
-func (a *App) GetK8sClusterInfo(assetID int64) (string, error) {
+// k8sCallContext 加载 K8S 资产时返回的所有调用上下文。
+// kubeconfig 是已解密的 YAML 文本，opts 已带上 SSH 隧道 dial 函数（若配置）。
+type k8sCallContext struct {
+	asset      *asset_entity.Asset
+	cfg        *asset_entity.K8sConfig
+	kubeconfig string
+	opts       []k8s.ClientOption
+}
+
+// loadK8sCall 校验资产、解析 K8S 配置、解密 kubeconfig、构造 ClientOption。
+// 所有需要调用 internal/k8s 的 Wails 绑定都从这里获取上下文。
+func (a *App) loadK8sCall(ctx context.Context, assetID int64) (*k8sCallContext, error) {
+	asset, err := asset_svc.Asset().Get(ctx, assetID)
+	if err != nil {
+		return nil, fmt.Errorf("get asset: %w", err)
+	}
+	if !asset.IsK8s() {
+		return nil, fmt.Errorf("asset %d is not a K8S cluster", assetID)
+	}
+	cfg, err := asset.GetK8sConfig()
+	if err != nil {
+		return nil, fmt.Errorf("get K8S config: %w", err)
+	}
+	if cfg.Kubeconfig == "" {
+		return nil, fmt.Errorf("no kubeconfig configured for this K8S asset")
+	}
+	h, ok := assettype.Get(asset_entity.AssetTypeK8s)
+	if !ok {
+		return nil, fmt.Errorf("k8s asset type handler not registered")
+	}
+	kubeconfig, err := h.ResolvePassword(ctx, asset)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt kubeconfig: %w", err)
+	}
+	return &k8sCallContext{
+		asset:      asset,
+		cfg:        cfg,
+		kubeconfig: kubeconfig,
+		opts:       a.k8sClientOptions(asset, cfg),
+	}, nil
+}
+
+// runK8sCall 是 9 个 GetK8sNamespace*/GetK8sClusterInfo/GetK8sPodDetail 共用的模板：
+// 加载上下文 → 调用 fn → JSON 序列化。
+func (a *App) runK8sCall(assetID int64, label string, fn func(ctx context.Context, c *k8sCallContext) (any, error)) (string, error) {
 	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
 	defer cancel()
 
-	asset, err := asset_svc.Asset().Get(ctx, assetID)
+	c, err := a.loadK8sCall(ctx, assetID)
 	if err != nil {
-		return "", fmt.Errorf("get asset: %w", err)
+		return "", err
 	}
-	if !asset.IsK8s() {
-		return "", fmt.Errorf("asset %d is not a K8S cluster", assetID)
+	result, err := fn(ctx, c)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", label, err)
 	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("marshal %s: %w", label, err)
+	}
+	return string(data), nil
+}
 
-	cfg, err := asset.GetK8sConfig()
-	if err != nil {
-		return "", fmt.Errorf("get K8S config: %w", err)
-	}
-	if cfg.Kubeconfig == "" {
-		return "", fmt.Errorf("no kubeconfig configured for this K8S asset")
-	}
-
-	info, err := k8s.GetClusterInfo(ctx, cfg.Kubeconfig, a.k8sClientOptions(asset, cfg)...)
-	if err != nil {
-		return "", fmt.Errorf("get K8S cluster info: %w", err)
-	}
-
-	result, err := json.Marshal(info)
-	if err != nil {
-		return "", fmt.Errorf("marshal cluster info: %w", err)
-	}
-	return string(result), nil
+func (a *App) GetK8sClusterInfo(assetID int64) (string, error) {
+	return a.runK8sCall(assetID, "get K8S cluster info", func(ctx context.Context, c *k8sCallContext) (any, error) {
+		return k8s.GetClusterInfo(ctx, c.kubeconfig, c.opts...)
+	})
 }
 
 func (a *App) GetK8sNamespaceResources(assetID int64, namespace string) (string, error) {
-	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
-	defer cancel()
-
-	asset, err := asset_svc.Asset().Get(ctx, assetID)
-	if err != nil {
-		return "", fmt.Errorf("get asset: %w", err)
-	}
-	if !asset.IsK8s() {
-		return "", fmt.Errorf("asset %d is not a K8S cluster", assetID)
-	}
-
-	cfg, err := asset.GetK8sConfig()
-	if err != nil {
-		return "", fmt.Errorf("get K8S config: %w", err)
-	}
-	if cfg.Kubeconfig == "" {
-		return "", fmt.Errorf("no kubeconfig configured for this K8S asset")
-	}
-
-	res, err := k8s.GetNamespaceResources(ctx, cfg.Kubeconfig, namespace, a.k8sClientOptions(asset, cfg)...)
-	if err != nil {
-		return "", fmt.Errorf("get K8S namespace resources: %w", err)
-	}
-
-	result, err := json.Marshal(res)
-	if err != nil {
-		return "", fmt.Errorf("marshal namespace resources: %w", err)
-	}
-	return string(result), nil
+	return a.runK8sCall(assetID, "get K8S namespace resources", func(ctx context.Context, c *k8sCallContext) (any, error) {
+		return k8s.GetNamespaceResources(ctx, c.kubeconfig, namespace, c.opts...)
+	})
 }
 
 func (a *App) GetK8sNamespacePods(assetID int64, namespace string) (string, error) {
-	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
-	defer cancel()
-
-	asset, err := asset_svc.Asset().Get(ctx, assetID)
-	if err != nil {
-		return "", fmt.Errorf("get asset: %w", err)
-	}
-	if !asset.IsK8s() {
-		return "", fmt.Errorf("asset %d is not a K8S cluster", assetID)
-	}
-
-	cfg, err := asset.GetK8sConfig()
-	if err != nil {
-		return "", fmt.Errorf("get K8S config: %w", err)
-	}
-	if cfg.Kubeconfig == "" {
-		return "", fmt.Errorf("no kubeconfig configured for this K8S asset")
-	}
-
-	pods, err := k8s.GetNamespacePods(ctx, cfg.Kubeconfig, namespace, a.k8sClientOptions(asset, cfg)...)
-	if err != nil {
-		return "", fmt.Errorf("get K8S namespace pods: %w", err)
-	}
-
-	result, err := json.Marshal(pods)
-	if err != nil {
-		return "", fmt.Errorf("marshal namespace pods: %w", err)
-	}
-	return string(result), nil
+	return a.runK8sCall(assetID, "get K8S namespace pods", func(ctx context.Context, c *k8sCallContext) (any, error) {
+		return k8s.GetNamespacePods(ctx, c.kubeconfig, namespace, c.opts...)
+	})
 }
 
 func (a *App) GetK8sNamespaceDeployments(assetID int64, namespace string) (string, error) {
-	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
-	defer cancel()
-
-	asset, err := asset_svc.Asset().Get(ctx, assetID)
-	if err != nil {
-		return "", fmt.Errorf("get asset: %w", err)
-	}
-	if !asset.IsK8s() {
-		return "", fmt.Errorf("asset %d is not a K8S cluster", assetID)
-	}
-
-	cfg, err := asset.GetK8sConfig()
-	if err != nil {
-		return "", fmt.Errorf("get K8S config: %w", err)
-	}
-	if cfg.Kubeconfig == "" {
-		return "", fmt.Errorf("no kubeconfig configured for this K8S asset")
-	}
-
-	deployments, err := k8s.GetNamespaceDeployments(ctx, cfg.Kubeconfig, namespace, a.k8sClientOptions(asset, cfg)...)
-	if err != nil {
-		return "", fmt.Errorf("get K8S namespace deployments: %w", err)
-	}
-
-	result, err := json.Marshal(deployments)
-	if err != nil {
-		return "", fmt.Errorf("marshal deployments: %w", err)
-	}
-	return string(result), nil
+	return a.runK8sCall(assetID, "get K8S namespace deployments", func(ctx context.Context, c *k8sCallContext) (any, error) {
+		return k8s.GetNamespaceDeployments(ctx, c.kubeconfig, namespace, c.opts...)
+	})
 }
 
 func (a *App) GetK8sNamespaceServices(assetID int64, namespace string) (string, error) {
-	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
-	defer cancel()
-
-	asset, err := asset_svc.Asset().Get(ctx, assetID)
-	if err != nil {
-		return "", fmt.Errorf("get asset: %w", err)
-	}
-	if !asset.IsK8s() {
-		return "", fmt.Errorf("asset %d is not a K8S cluster", assetID)
-	}
-
-	cfg, err := asset.GetK8sConfig()
-	if err != nil {
-		return "", fmt.Errorf("get K8S config: %w", err)
-	}
-	if cfg.Kubeconfig == "" {
-		return "", fmt.Errorf("no kubeconfig configured for this K8S asset")
-	}
-
-	services, err := k8s.GetNamespaceServices(ctx, cfg.Kubeconfig, namespace, a.k8sClientOptions(asset, cfg)...)
-	if err != nil {
-		return "", fmt.Errorf("get K8S namespace services: %w", err)
-	}
-
-	result, err := json.Marshal(services)
-	if err != nil {
-		return "", fmt.Errorf("marshal services: %w", err)
-	}
-	return string(result), nil
+	return a.runK8sCall(assetID, "get K8S namespace services", func(ctx context.Context, c *k8sCallContext) (any, error) {
+		return k8s.GetNamespaceServices(ctx, c.kubeconfig, namespace, c.opts...)
+	})
 }
 
 func (a *App) GetK8sNamespaceConfigMaps(assetID int64, namespace string) (string, error) {
-	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
-	defer cancel()
-
-	asset, err := asset_svc.Asset().Get(ctx, assetID)
-	if err != nil {
-		return "", fmt.Errorf("get asset: %w", err)
-	}
-	if !asset.IsK8s() {
-		return "", fmt.Errorf("asset %d is not a K8S cluster", assetID)
-	}
-
-	cfg, err := asset.GetK8sConfig()
-	if err != nil {
-		return "", fmt.Errorf("get K8S config: %w", err)
-	}
-	if cfg.Kubeconfig == "" {
-		return "", fmt.Errorf("no kubeconfig configured for this K8S asset")
-	}
-
-	configmaps, err := k8s.GetNamespaceConfigMaps(ctx, cfg.Kubeconfig, namespace, a.k8sClientOptions(asset, cfg)...)
-	if err != nil {
-		return "", fmt.Errorf("get K8S namespace configmaps: %w", err)
-	}
-
-	result, err := json.Marshal(configmaps)
-	if err != nil {
-		return "", fmt.Errorf("marshal configmaps: %w", err)
-	}
-	return string(result), nil
+	return a.runK8sCall(assetID, "get K8S namespace configmaps", func(ctx context.Context, c *k8sCallContext) (any, error) {
+		return k8s.GetNamespaceConfigMaps(ctx, c.kubeconfig, namespace, c.opts...)
+	})
 }
 
 func (a *App) GetK8sNamespaceSecrets(assetID int64, namespace string) (string, error) {
-	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
-	defer cancel()
-
-	asset, err := asset_svc.Asset().Get(ctx, assetID)
-	if err != nil {
-		return "", fmt.Errorf("get asset: %w", err)
-	}
-	if !asset.IsK8s() {
-		return "", fmt.Errorf("asset %d is not a K8S cluster", assetID)
-	}
-
-	cfg, err := asset.GetK8sConfig()
-	if err != nil {
-		return "", fmt.Errorf("get K8S config: %w", err)
-	}
-	if cfg.Kubeconfig == "" {
-		return "", fmt.Errorf("no kubeconfig configured for this K8S asset")
-	}
-
-	secrets, err := k8s.GetNamespaceSecrets(ctx, cfg.Kubeconfig, namespace, a.k8sClientOptions(asset, cfg)...)
-	if err != nil {
-		return "", fmt.Errorf("get K8S namespace secrets: %w", err)
-	}
-
-	result, err := json.Marshal(secrets)
-	if err != nil {
-		return "", fmt.Errorf("marshal secrets: %w", err)
-	}
-	return string(result), nil
+	return a.runK8sCall(assetID, "get K8S namespace secrets", func(ctx context.Context, c *k8sCallContext) (any, error) {
+		return k8s.GetNamespaceSecrets(ctx, c.kubeconfig, namespace, c.opts...)
+	})
 }
 
 func (a *App) GetK8sPodDetail(assetID int64, namespace, podName string) (string, error) {
-	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
-	defer cancel()
-
-	asset, err := asset_svc.Asset().Get(ctx, assetID)
-	if err != nil {
-		return "", fmt.Errorf("get asset: %w", err)
-	}
-	if !asset.IsK8s() {
-		return "", fmt.Errorf("asset %d is not a K8S cluster", assetID)
-	}
-
-	cfg, err := asset.GetK8sConfig()
-	if err != nil {
-		return "", fmt.Errorf("get K8S config: %w", err)
-	}
-	if cfg.Kubeconfig == "" {
-		return "", fmt.Errorf("no kubeconfig configured for this K8S asset")
-	}
-
-	detail, err := k8s.GetPodDetail(ctx, cfg.Kubeconfig, namespace, podName, a.k8sClientOptions(asset, cfg)...)
-	if err != nil {
-		return "", fmt.Errorf("get K8S pod detail: %w", err)
-	}
-
-	result, err := json.Marshal(detail)
-	if err != nil {
-		return "", fmt.Errorf("marshal pod detail: %w", err)
-	}
-	return string(result), nil
+	return a.runK8sCall(assetID, "get K8S pod detail", func(ctx context.Context, c *k8sCallContext) (any, error) {
+		return k8s.GetPodDetail(ctx, c.kubeconfig, namespace, podName, c.opts...)
+	})
 }
 
 func (a *App) StartK8sPodLogs(assetID int64, namespace, podName, container string, tailLines int64) (string, error) {
 	loadCtx, loadCancel := context.WithTimeout(a.ctx, 30*time.Second)
 	defer loadCancel()
-	asset, err := asset_svc.Asset().Get(loadCtx, assetID)
+	c, err := a.loadK8sCall(loadCtx, assetID)
 	if err != nil {
-		return "", fmt.Errorf("get asset: %w", err)
-	}
-	if !asset.IsK8s() {
-		return "", fmt.Errorf("asset %d is not a K8S cluster", assetID)
-	}
-
-	cfg, err := asset.GetK8sConfig()
-	if err != nil {
-		return "", fmt.Errorf("get K8S config: %w", err)
-	}
-	if cfg.Kubeconfig == "" {
-		return "", fmt.Errorf("no kubeconfig configured for this K8S asset")
+		return "", err
 	}
 
 	streamID := fmt.Sprintf("k8s-log-%d", atomic.AddInt64(&a.k8sLogStreamCounter, 1))
-
 	ctx, cancel := context.WithCancel(a.ctx)
 	a.k8sLogStreams.Store(streamID, cancel)
 
-	reader, err := k8s.StreamPodLogs(ctx, cfg.Kubeconfig, namespace, podName, container, tailLines, a.k8sClientOptions(asset, cfg)...)
+	reader, err := k8s.StreamPodLogs(ctx, c.kubeconfig, namespace, podName, container, tailLines, c.opts...)
 	if err != nil {
 		cancel()
 		a.k8sLogStreams.Delete(streamID)

@@ -454,7 +454,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   const loadK8sConfig = (asset: asset_entity.Asset) => {
     try {
       const cfg = JSON.parse(asset.Config || "{}");
-      setKubeconfig(cfg.kubeconfig || "");
+      // kubeconfig 已加密落库，编辑时不预填密文；用户重新输入即视为替换。
+      setKubeconfig("");
       setK8sNamespace(cfg.namespace || "");
       setK8sContext(cfg.context || "");
       setShowKubeconfig(false);
@@ -838,7 +839,23 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       config = JSON.stringify(mongoConfig);
     } else if (assetType === "k8s") {
       const k8sConfig: Record<string, unknown> = {};
-      if (kubeconfig) k8sConfig.kubeconfig = kubeconfig;
+      if (kubeconfig) {
+        // 用户输入了新的 kubeconfig（明文 YAML），加密后落库。
+        try {
+          k8sConfig.kubeconfig = await EncryptPassword(kubeconfig);
+        } catch {
+          toast.error("Failed to encrypt kubeconfig");
+          return;
+        }
+      } else if (editAsset) {
+        // 编辑模式且未输入新值：保留原 ciphertext。
+        try {
+          const oldCfg = JSON.parse(editAsset.Config || "{}") as { kubeconfig?: string };
+          if (oldCfg.kubeconfig) k8sConfig.kubeconfig = oldCfg.kubeconfig;
+        } catch {
+          // 旧 config 解析失败：让 ciphertext 缺失冒到后端校验
+        }
+      }
       if (k8sNamespace) k8sConfig.namespace = k8sNamespace;
       if (k8sContext) k8sConfig.context = k8sContext;
       config = JSON.stringify(k8sConfig);
@@ -1280,7 +1297,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
               (["ssh", "database", "redis"].includes(assetType) && !host) ||
               (assetType === "mongodb" && mongoConnectionMode === "manual" && !host) ||
               (assetType === "mongodb" && mongoConnectionMode === "uri" && !connectionURI) ||
-              (assetType === "k8s" && !kubeconfig)
+              (assetType === "k8s" && !kubeconfig && !editAsset)
             }
           >
             {t("action.save")}

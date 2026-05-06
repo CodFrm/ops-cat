@@ -160,9 +160,11 @@ type K8sConfig struct {
 	Context    string `json:"context,omitempty"`    // kubeconfig context 名称
 }
 
-// K8sConfig PasswordSource implementation
+// K8sConfig PasswordSource implementation.
+// Kubeconfig 在落库时由 assettype/k8s.go 加密；返回密文走通用解密路径
+// （credential_resolver.ResolvePasswordGeneric）。
 func (c *K8sConfig) GetCredentialID() int64 { return 0 }
-func (c *K8sConfig) GetPassword() string    { return "" }
+func (c *K8sConfig) GetPassword() string    { return c.Kubeconfig }
 
 // DatabaseConfig PasswordSource implementation
 func (c *DatabaseConfig) GetCredentialID() int64 { return c.CredentialID }
