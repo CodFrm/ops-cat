@@ -543,13 +543,17 @@ func GetPodDetail(ctx context.Context, kubeconfig, namespace, podName string, op
 	readyContainers := int32(0)
 	totalContainers := len(pod.Spec.Containers)
 	restarts := int32(0)
+	statusByName := make(map[string]*corev1.ContainerStatus, len(pod.Status.ContainerStatuses))
+	for i := range pod.Status.ContainerStatuses {
+		cs := &pod.Status.ContainerStatuses[i]
+		statusByName[cs.Name] = cs
+	}
 	containers := make([]ContainerDetail, 0, len(pod.Spec.Containers))
-	for i, c := range pod.Spec.Containers {
+	for _, c := range pod.Spec.Containers {
 		state := "Unknown"
 		ready := false
 		cr := int32(0)
-		if i < len(pod.Status.ContainerStatuses) {
-			cs := pod.Status.ContainerStatuses[i]
+		if cs, ok := statusByName[c.Name]; ok {
 			ready = cs.Ready
 			cr = cs.RestartCount
 			restarts += cr
