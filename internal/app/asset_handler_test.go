@@ -5,14 +5,16 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestExtensionAssetHandler(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "extensions")
 	extDir := filepath.Join(dir, "test-ext", "frontend")
 	_ = os.MkdirAll(extDir, 0755)
 	_ = os.WriteFile(filepath.Join(extDir, "index.js"), []byte("export function Page(){}"), 0644)
+	_ = os.WriteFile(filepath.Join(filepath.Dir(dir), "secret.txt"), []byte("secret"), 0644)
 
 	fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -54,6 +56,19 @@ func TestExtensionAssetHandler(t *testing.T) {
 
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("expected 404, got %d", rec.Code)
+		}
+	})
+
+	t.Run("blocks traversal outside extension directory", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/extensions/%2e%2e/secret.txt", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d", rec.Code)
+		}
+		if body := rec.Body.String(); strings.Contains(body, "secret") {
+			t.Fatalf("served file outside extension directory: %s", body)
 		}
 	})
 }

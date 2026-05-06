@@ -159,10 +159,10 @@ func TestPollOnce(t *testing.T) {
 				capturedMethod = r.Method
 				capturedAccept = r.Header.Get("Accept")
 				capturedContentType = r.Header.Get("Content-Type")
-				r.ParseForm()                                   //nolint:errcheck,gosec // test HTTP handler
-				capturedClientID = r.FormValue("client_id")     //nolint:gosec // test HTTP handler
-				capturedDeviceCode = r.FormValue("device_code") //nolint:gosec // test HTTP handler
-				capturedGrantType = r.FormValue("grant_type")   //nolint:gosec // test HTTP handler
+				r.ParseForm() //nolint:errcheck,gosec // test HTTP handler
+				capturedClientID = r.PostForm.Get("client_id")
+				capturedDeviceCode = r.PostForm.Get("device_code")
+				capturedGrantType = r.PostForm.Get("grant_type")
 
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler

@@ -2,10 +2,11 @@ package app
 
 import (
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 )
+
+const extensionPathPrefix = "/extensions/"
 
 // ExtensionAssetHandler serves extension static files from the extensions
 // directory at /extensions/{name}/..., falling back to the default handler
@@ -13,18 +14,28 @@ import (
 type ExtensionAssetHandler struct {
 	extensionsDir  string
 	defaultHandler http.Handler
+	fileSystem     http.FileSystem
+	fileHandler    http.Handler
 }
 
 // NewExtensionAssetHandler creates a handler that serves extension files.
 func NewExtensionAssetHandler(extensionsDir string, defaultHandler http.Handler) *ExtensionAssetHandler {
+	cleanDir, err := filepath.Abs(extensionsDir)
+	if err != nil {
+		cleanDir = filepath.Clean(extensionsDir)
+	}
+
+	fileSystem := http.Dir(cleanDir)
 	return &ExtensionAssetHandler{
-		extensionsDir:  extensionsDir,
+		extensionsDir:  cleanDir,
 		defaultHandler: defaultHandler,
+		fileSystem:     fileSystem,
+		fileHandler:    http.StripPrefix(extensionPathPrefix, http.FileServer(fileSystem)),
 	}
 }
 
 func (h *ExtensionAssetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !strings.HasPrefix(r.URL.Path, "/extensions/") {
+	if !strings.HasPrefix(r.URL.Path, extensionPathPrefix) {
 		if h.defaultHandler != nil {
 			h.defaultHandler.ServeHTTP(w, r)
 		} else {
@@ -33,20 +44,40 @@ func (h *ExtensionAssetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	rel := strings.TrimPrefix(r.URL.Path, "/extensions/")
-	filePath := filepath.Join(h.extensionsDir, filepath.FromSlash(rel))
-
-	// Prevent directory traversal
-	if !strings.HasPrefix(filepath.Clean(filePath), filepath.Clean(h.extensionsDir)) {
+	rel := strings.TrimPrefix(r.URL.Path, extensionPathPrefix)
+	if !h.isLocalExtensionPath(rel) {
 		http.NotFound(w, r)
 		return
 	}
 
-	info, err := os.Stat(filePath) //nolint:gosec // path validated by traversal check above
+	file, err := h.fileSystem.Open(rel)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	info, err := file.Stat()
 	if err != nil || info.IsDir() {
 		http.NotFound(w, r)
 		return
 	}
 
-	http.ServeFile(w, r, filePath)
+	h.fileHandler.ServeHTTP(w, r)
+}
+
+func (h *ExtensionAssetHandler) isLocalExtensionPath(rel string) bool {
+	localRel := filepath.FromSlash(rel)
+	if !filepath.IsLocal(localRel) {
+		return false
+	}
+
+	filePath := filepath.Join(h.extensionsDir, localRel)
+	relToRoot, err := filepath.Rel(h.extensionsDir, filePath)
+	if err != nil || relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return true
 }
