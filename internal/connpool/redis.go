@@ -3,11 +3,9 @@ package connpool
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"time"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
@@ -82,31 +80,11 @@ func buildRedisOptions(cfg *asset_entity.RedisConfig, password string) (*redis.O
 }
 
 func buildRedisTLSConfig(cfg *asset_entity.RedisConfig) (*tls.Config, error) {
-	tlsConfig := &tls.Config{
-		MinVersion:         tls.VersionTLS12,
-		ServerName:         cfg.TLSServerName,
-		InsecureSkipVerify: cfg.TLSInsecure,
-	}
-	if cfg.TLSCAFile != "" {
-		ca, err := os.ReadFile(cfg.TLSCAFile)
-		if err != nil {
-			return nil, fmt.Errorf("读取 Redis TLS CA 证书失败: %w", err)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(ca) {
-			return nil, fmt.Errorf("解析 Redis TLS CA 证书失败")
-		}
-		tlsConfig.RootCAs = pool
-	}
-	if cfg.TLSCertFile != "" || cfg.TLSKeyFile != "" {
-		if cfg.TLSCertFile == "" || cfg.TLSKeyFile == "" {
-			return nil, fmt.Errorf("redis TLS 客户端证书和私钥必须同时配置")
-		}
-		cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
-		if err != nil {
-			return nil, fmt.Errorf("加载 Redis TLS 客户端证书失败: %w", err)
-		}
-		tlsConfig.Certificates = []tls.Certificate{cert}
-	}
-	return tlsConfig, nil
+	return BuildTLSConfig("Redis", TLSFields{
+		ServerName: cfg.TLSServerName,
+		Insecure:   cfg.TLSInsecure,
+		CAFile:     cfg.TLSCAFile,
+		CertFile:   cfg.TLSCertFile,
+		KeyFile:    cfg.TLSKeyFile,
+	})
 }

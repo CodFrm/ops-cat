@@ -3,7 +3,6 @@ package assettype
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/model/entity/policy"
@@ -46,7 +45,7 @@ func (h *kafkaHandler) ResolvePassword(ctx context.Context, a *asset_entity.Asse
 func (h *kafkaHandler) DefaultPolicy() any { return asset_entity.DefaultKafkaPolicy() }
 
 func (h *kafkaHandler) ValidateCreateArgs(args map[string]any) error {
-	if len(argStringSlice(args, "brokers")) == 0 {
+	if len(ArgStringSlice(args, "brokers")) == 0 {
 		host := ArgString(args, "host")
 		port := ArgInt(args, "port")
 		if host == "" || port <= 0 {
@@ -59,12 +58,12 @@ func (h *kafkaHandler) ValidateCreateArgs(args map[string]any) error {
 func (h *kafkaHandler) ApplyCreateArgs(_ context.Context, a *asset_entity.Asset, args map[string]any) error {
 	a.SSHTunnelID = ArgInt64(args, "ssh_asset_id")
 	cfg := &asset_entity.KafkaConfig{
-		Brokers:               argStringSlice(args, "brokers"),
+		Brokers:               ArgStringSlice(args, "brokers"),
 		ClientID:              ArgString(args, "client_id"),
 		SASLMechanism:         ArgString(args, "sasl_mechanism"),
 		Username:              ArgString(args, "username"),
-		TLS:                   argBool(args, "tls"),
-		TLSInsecure:           argBool(args, "tls_insecure"),
+		TLS:                   ArgBool(args, "tls"),
+		TLSInsecure:           ArgBool(args, "tls_insecure"),
 		TLSServerName:         ArgString(args, "tls_server_name"),
 		TLSCAFile:             ArgString(args, "tls_ca_file"),
 		TLSCertFile:           ArgString(args, "tls_cert_file"),
@@ -99,7 +98,7 @@ func (h *kafkaHandler) ApplyUpdateArgs(_ context.Context, a *asset_entity.Asset,
 	if err != nil || cfg == nil {
 		return err
 	}
-	if brokers := argStringSlice(args, "brokers"); len(brokers) > 0 {
+	if brokers := ArgStringSlice(args, "brokers"); len(brokers) > 0 {
 		cfg.Brokers = brokers
 	}
 	if v := ArgString(args, "client_id"); v != "" {
@@ -112,10 +111,10 @@ func (h *kafkaHandler) ApplyUpdateArgs(_ context.Context, a *asset_entity.Asset,
 		cfg.Username = ArgString(args, "username")
 	}
 	if _, ok := args["tls"]; ok {
-		cfg.TLS = argBool(args, "tls")
+		cfg.TLS = ArgBool(args, "tls")
 	}
 	if _, ok := args["tls_insecure"]; ok {
-		cfg.TLSInsecure = argBool(args, "tls_insecure")
+		cfg.TLSInsecure = ArgBool(args, "tls_insecure")
 	}
 	if _, ok := args["tls_server_name"]; ok {
 		cfg.TLSServerName = ArgString(args, "tls_server_name")
@@ -151,52 +150,4 @@ func (h *kafkaHandler) ApplyUpdateArgs(_ context.Context, a *asset_entity.Asset,
 		cfg.CredentialID = 0
 	}
 	return a.SetKafkaConfig(cfg)
-}
-
-func argStringSlice(args map[string]any, key string) []string {
-	v, ok := args[key]
-	if !ok || v == nil {
-		return nil
-	}
-	switch x := v.(type) {
-	case []string:
-		return cleanStrings(x)
-	case []any:
-		out := make([]string, 0, len(x))
-		for _, item := range x {
-			out = append(out, fmt.Sprintf("%v", item))
-		}
-		return cleanStrings(out)
-	case string:
-		parts := strings.FieldsFunc(x, func(r rune) bool { return r == ',' || r == '\n' || r == ';' })
-		return cleanStrings(parts)
-	default:
-		return nil
-	}
-}
-
-func cleanStrings(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, v := range values {
-		v = strings.TrimSpace(v)
-		if v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
-func argBool(args map[string]any, key string) bool {
-	v, ok := args[key]
-	if !ok {
-		return false
-	}
-	switch x := v.(type) {
-	case bool:
-		return x
-	case string:
-		return strings.EqualFold(x, "true") || x == "1" || strings.EqualFold(x, "yes")
-	default:
-		return fmt.Sprintf("%v", x) == "1"
-	}
 }
