@@ -225,7 +225,6 @@ type DefaultToolExecutor struct {
 	sshCache     *SSHClientCache
 	sshPool      *sshpool.Pool // SSH 连接池，供 Redis/Database 隧道使用
 	mongoDBCache *MongoDBClientCache
-	kafkaCache   *KafkaClientCache
 }
 
 func NewDefaultToolExecutor() *DefaultToolExecutor {
@@ -238,7 +237,6 @@ func NewDefaultToolExecutor() *DefaultToolExecutor {
 		sshCache:     NewSSHClientCache(),
 		sshPool:      sshpool.NewPool(&AIPoolDialer{}, 5*time.Minute),
 		mongoDBCache: NewMongoDBClientCache(),
-		kafkaCache:   NewKafkaClientCache(),
 	}
 }
 
@@ -247,9 +245,6 @@ func (e *DefaultToolExecutor) Close() error {
 	e.sshPool.Close()
 	if err := e.mongoDBCache.Close(); err != nil {
 		logger.Default().Warn("close MongoDB cache", zap.Error(err))
-	}
-	if err := e.kafkaCache.Close(); err != nil {
-		logger.Default().Warn("close Kafka cache", zap.Error(err))
 	}
 	return e.sshCache.Close()
 }
@@ -271,7 +266,5 @@ func (e *DefaultToolExecutor) Execute(ctx context.Context, name string, argsJSON
 	}
 	// 注入 MongoDB 缓存，exec_mongo 会自动使用
 	ctx = WithMongoDBCache(ctx, e.mongoDBCache)
-	// 注入 Kafka 缓存，Kafka 工具会自动使用
-	ctx = WithKafkaCache(ctx, e.kafkaCache)
 	return handler(ctx, args)
 }

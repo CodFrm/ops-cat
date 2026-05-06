@@ -34,6 +34,10 @@ type kafkaClientEntry struct {
 	fingerprint string
 	client      *kgo.Client
 	lastUsed    time.Time
+	// refs 计算正在使用该 client 的借出方；closing 表示已被驱逐或主动关闭，
+	// 仅当 refs 归零时真正调用 client.Close()，避免并发使用与关闭的 race。
+	refs    int
+	closing bool
 }
 
 // KafkaClientManager owns bounded franz-go client reuse for UI/Wails service calls.
@@ -54,9 +58,11 @@ func NewKafkaClientManager(sshPool *sshpool.Pool) *KafkaClientManager {
 	}
 }
 
-func (m *KafkaClientManager) Get(ctx context.Context, asset *asset_entity.Asset, cfg *asset_entity.KafkaConfig, password string) (*kgo.Client, error) {
+// Acquire 借出一个缓存 client，调用方在使用结束后必须调用返回的 release。
+// release 内部扣减引用计数；若该 entry 已被驱逐且无人再引用则真正关闭底层 client。
+func (m *KafkaClientManager) Acquire(ctx context.Context, asset *asset_entity.Asset, cfg *asset_entity.KafkaConfig, password string) (*kgo.Client, func(), error) {
 	if asset == nil || cfg == nil {
-		return nil, fmt.Errorf("kafka 资产配置为空")
+		return nil, nil, fmt.Errorf("kafka 资产配置为空")
 	}
 	fingerprint := KafkaConfigFingerprint(asset, cfg)
 	key := fmt.Sprintf("%d:%s", asset.ID, fingerprint)
@@ -66,54 +72,87 @@ func (m *KafkaClientManager) Get(ctx context.Context, asset *asset_entity.Asset,
 	m.closeStaleLocked(asset.ID, fingerprint, now)
 	if entry := m.clients[key]; entry != nil {
 		entry.lastUsed = now
+		entry.refs++
 		client := entry.client
 		m.mu.Unlock()
-		return client, nil
+		return client, m.releaser(entry), nil
 	}
 	m.mu.Unlock()
 
 	client, err := DialKafka(ctx, asset, cfg, password, m.sshPool)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if entry := m.clients[key]; entry != nil {
 		entry.lastUsed = now
+		entry.refs++
+		m.mu.Unlock()
 		client.Close()
-		return entry.client, nil
+		return entry.client, m.releaser(entry), nil
 	}
-	m.clients[key] = &kafkaClientEntry{assetID: asset.ID, fingerprint: fingerprint, client: client, lastUsed: now}
+	entry := &kafkaClientEntry{assetID: asset.ID, fingerprint: fingerprint, client: client, lastUsed: now, refs: 1}
+	m.clients[key] = entry
 	m.evictOverflowLocked()
-	return client, nil
+	m.mu.Unlock()
+	return client, m.releaser(entry), nil
+}
+
+func (m *KafkaClientManager) releaser(entry *kafkaClientEntry) func() {
+	return func() {
+		m.mu.Lock()
+		entry.refs--
+		shouldClose := entry.closing && entry.refs == 0
+		m.mu.Unlock()
+		if shouldClose {
+			entry.client.Close()
+		}
+	}
 }
 
 func (m *KafkaClientManager) CloseAsset(assetID int64) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	var toClose []*kafkaClientEntry
 	for key, entry := range m.clients {
 		if entry.assetID == assetID {
-			entry.client.Close()
+			entry.closing = true
 			delete(m.clients, key)
+			if entry.refs == 0 {
+				toClose = append(toClose, entry)
+			}
 		}
+	}
+	m.mu.Unlock()
+	for _, e := range toClose {
+		e.client.Close()
 	}
 }
 
 func (m *KafkaClientManager) Close() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	var toClose []*kafkaClientEntry
 	for key, entry := range m.clients {
-		entry.client.Close()
+		entry.closing = true
 		delete(m.clients, key)
+		if entry.refs == 0 {
+			toClose = append(toClose, entry)
+		}
+	}
+	m.mu.Unlock()
+	for _, e := range toClose {
+		e.client.Close()
 	}
 }
 
 func (m *KafkaClientManager) closeStaleLocked(assetID int64, fingerprint string, now time.Time) {
 	for key, entry := range m.clients {
 		if now.Sub(entry.lastUsed) > m.ttl || (entry.assetID == assetID && entry.fingerprint != fingerprint) {
-			entry.client.Close()
+			entry.closing = true
 			delete(m.clients, key)
+			if entry.refs == 0 {
+				entry.client.Close()
+			}
 		}
 	}
 }
@@ -121,18 +160,21 @@ func (m *KafkaClientManager) closeStaleLocked(assetID int64, fingerprint string,
 func (m *KafkaClientManager) evictOverflowLocked() {
 	for len(m.clients) > m.max {
 		var oldestKey string
-		var oldest time.Time
+		var oldestEntry *kafkaClientEntry
 		for key, entry := range m.clients {
-			if oldestKey == "" || entry.lastUsed.Before(oldest) {
+			if oldestEntry == nil || entry.lastUsed.Before(oldestEntry.lastUsed) {
 				oldestKey = key
-				oldest = entry.lastUsed
+				oldestEntry = entry
 			}
 		}
-		if oldestKey == "" {
+		if oldestEntry == nil {
 			return
 		}
-		m.clients[oldestKey].client.Close()
+		oldestEntry.closing = true
 		delete(m.clients, oldestKey)
+		if oldestEntry.refs == 0 {
+			oldestEntry.client.Close()
+		}
 	}
 }
 
@@ -182,10 +224,13 @@ func BuildKafkaOptions(asset *asset_entity.Asset, cfg *asset_entity.KafkaConfig,
 			return nil, err
 		}
 	}
+	if tunnelID > 0 && sshPool == nil {
+		return nil, fmt.Errorf("kafka 配置了 SSH 隧道但 sshPool 不可用")
+	}
 	if cfg.TLS && tunnelID == 0 {
 		opts = append(opts, kgo.DialTLSConfig(tlsConfig))
 	}
-	if tunnelID > 0 && sshPool != nil {
+	if tunnelID > 0 {
 		opts = append(opts, kgo.Dialer(func(ctx context.Context, network, addr string) (net.Conn, error) {
 			host, port, err := splitKafkaAddr(addr)
 			if err != nil {
@@ -209,9 +254,6 @@ func BuildKafkaOptions(asset *asset_entity.Asset, cfg *asset_entity.KafkaConfig,
 			}
 			return tlsConn, nil
 		}))
-	}
-	if cfg.TLS && tunnelID > 0 && sshPool == nil {
-		opts = append(opts, kgo.DialTLSConfig(tlsConfig))
 	}
 	mech := normalizeKafkaSASLMechanism(cfg.SASLMechanism)
 	switch mech {

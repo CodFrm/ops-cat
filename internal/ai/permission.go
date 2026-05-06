@@ -225,8 +225,9 @@ func checkMongoDBPermission(ctx context.Context, assetID int64, operation string
 // --- Kafka ---
 
 func checkKafkaPermission(ctx context.Context, assetID int64, command string) CheckResult {
-	// 组通用策略
-	groupResult := CheckGroupGenericPolicy(ctx, assetID, command, MatchKafkaRule)
+	// 组通用策略：使用通用 shell-glob 匹配，与 Database/MongoDB 一致；
+	// MatchKafkaRule 仅适用于 "<action> <resource>" 格式，不能用于通用 CommandPolicy。
+	groupResult := CheckGroupGenericPolicy(ctx, assetID, command, MatchCommandRule)
 	if groupResult.Decision == Deny {
 		return groupResult
 	}

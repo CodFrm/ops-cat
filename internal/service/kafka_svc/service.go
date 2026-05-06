@@ -81,10 +81,11 @@ func (s *Service) withClient(ctx context.Context, assetID int64, fn func(context
 	opCtx, cancel := context.WithTimeout(ctx, kafkaTimeout(cfg, defaultKafkaOperationTimeout))
 	defer cancel()
 
-	client, err := s.clients.Get(opCtx, asset, cfg, password)
+	client, release, err := s.clients.Acquire(opCtx, asset, cfg, password)
 	if err != nil {
 		return fmt.Errorf("连接 Kafka 失败: %w", err)
 	}
+	defer release()
 	admin := kadm.NewClient(client)
 	applyKafkaAdminTimeout(admin, cfg)
 	return fn(opCtx, client, admin, asset, cfg)

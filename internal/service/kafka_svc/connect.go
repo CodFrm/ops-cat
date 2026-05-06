@@ -167,10 +167,16 @@ func (s *Service) CreateConnector(ctx context.Context, req ConnectorConfigReques
 			return err
 		}
 		payload := map[string]any{"name": name, "config": config}
-		if err := client.do(ctx, http.MethodPost, "/connectors", nil, payload, nil); err != nil {
+		var info connectConnectorInfo
+		if err := client.do(ctx, http.MethodPost, "/connectors", nil, payload, &info); err != nil {
 			return fmt.Errorf("创建 Kafka Connect connector 失败: %w", err)
 		}
-		out = ConnectorOperationResponse{Cluster: client.cluster, Name: name}
+		// 服务端可能对 name 做归一化（如去空白），以响应中的 name 为准
+		resolvedName := strings.TrimSpace(info.Name)
+		if resolvedName == "" {
+			resolvedName = name
+		}
+		out = ConnectorOperationResponse{Cluster: client.cluster, Name: resolvedName}
 		return nil
 	})
 	return out, err
