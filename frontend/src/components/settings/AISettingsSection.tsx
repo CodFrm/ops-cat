@@ -398,7 +398,9 @@ export function AISettingsSection() {
           values.apiKey,
           values.model,
           values.maxOutputTokens,
-          values.contextWindow
+          values.contextWindow,
+          values.reasoningEnabled,
+          values.reasoningEffort
         );
       } else {
         const created = await CreateAIProvider(
@@ -408,7 +410,9 @@ export function AISettingsSection() {
           values.apiKey,
           values.model,
           values.maxOutputTokens,
-          values.contextWindow
+          values.contextWindow,
+          values.reasoningEnabled,
+          values.reasoningEffort
         );
         if (providers.length === 0 && created.id) {
           await SetActiveAIProvider(created.id);
@@ -527,6 +531,7 @@ export function AISettingsSection() {
                     model: editingProvider.model,
                     maxOutputTokens: editingProvider.maxOutputTokens,
                     contextWindow: editingProvider.contextWindow,
+                    reasoningEffort: (editingProvider.reasoningEffort || "none") as "none" | "low" | "medium" | "high" | "xhigh",
                   }
                 : undefined
             }

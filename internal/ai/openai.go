@@ -17,21 +17,25 @@ import (
 
 // OpenAIProvider OpenAI 兼容 API provider
 type OpenAIProvider struct {
-	apiBase         string
-	apiKey          string
-	model           string
-	name            string
-	maxOutputTokens int
+	apiBase          string
+	apiKey           string
+	model            string
+	name             string
+	maxOutputTokens  int
+	reasoningEnabled bool
+	reasoningEffort  string
 }
 
 // NewOpenAIProvider 创建 OpenAI 兼容 provider
-func NewOpenAIProvider(name, apiBase, apiKey, model string, maxOutputTokens int) *OpenAIProvider {
+func NewOpenAIProvider(name, apiBase, apiKey, model string, maxOutputTokens int, reasoningEnabled bool, reasoningEffort string) *OpenAIProvider {
 	return &OpenAIProvider{
-		name:            name,
-		apiBase:         strings.TrimRight(apiBase, "/"),
-		apiKey:          apiKey,
-		model:           model,
-		maxOutputTokens: maxOutputTokens,
+		name:             name,
+		apiBase:          strings.TrimRight(apiBase, "/"),
+		apiKey:           apiKey,
+		model:            model,
+		maxOutputTokens:  maxOutputTokens,
+		reasoningEnabled: reasoningEnabled,
+		reasoningEffort:  normalizeOpenAIReasoningEffort(reasoningEffort),
 	}
 }
 
@@ -41,12 +45,20 @@ func (p *OpenAIProvider) Model() string { return p.model }
 
 // openAIRequest OpenAI API 请求体
 type openAIRequest struct {
-	Model         string               `json:"model"`
-	Messages      []Message            `json:"messages"`
-	Tools         []Tool               `json:"tools,omitempty"`
-	Stream        bool                 `json:"stream"`
-	StreamOptions *openAIStreamOptions `json:"stream_options,omitempty"`
-	MaxTokens     int                  `json:"max_tokens,omitempty"`
+	Model           string               `json:"model"`
+	Messages        []Message            `json:"messages"`
+	Tools           []Tool               `json:"tools,omitempty"`
+	Stream          bool                 `json:"stream"`
+	StreamOptions   *openAIStreamOptions `json:"stream_options,omitempty"`
+	MaxTokens       int                  `json:"max_tokens,omitempty"`
+	ReasoningEffort string               `json:"reasoning_effort,omitempty"`
+	// DeepSeek thinking mode: {"type":"enabled"} or {"type":"disabled"}
+	Thinking *deepSeekThinking `json:"thinking,omitempty"`
+}
+
+// deepSeekThinking DeepSeek 思考模式控制
+type deepSeekThinking struct {
+	Type string `json:"type"` // "enabled" | "disabled"
 }
 
 // openAIStreamOptions stream 专用选项，include_usage=true 后最后一个 chunk 会带 usage
@@ -83,6 +95,29 @@ type openAIUsage struct {
 	} `json:"prompt_tokens_details"`
 }
 
+func supportsOpenAIReasoningEffort(model string) bool {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(lower, "o1") ||
+		strings.HasPrefix(lower, "o3") ||
+		strings.HasPrefix(lower, "o4") ||
+		strings.HasPrefix(lower, "gpt-5")
+}
+
+func normalizeOpenAIReasoningEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "low", "medium", "high", "xhigh":
+		return strings.ToLower(strings.TrimSpace(effort))
+	case "none":
+		return "none"
+	default:
+		return "medium"
+	}
+}
+
+func isDeepSeekModel(model string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "deepseek")
+}
+
 func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []Tool) (<-chan StreamEvent, error) {
 	reqBody := openAIRequest{
 		Model:         p.model,
@@ -90,6 +125,18 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 		Stream:        true,
 		StreamOptions: &openAIStreamOptions{IncludeUsage: true},
 		MaxTokens:     p.maxOutputTokens,
+	}
+	if p.reasoningEnabled && supportsOpenAIReasoningEffort(p.model) {
+		reqBody.ReasoningEffort = normalizeOpenAIReasoningEffort(p.reasoningEffort)
+	}
+	// DeepSeek thinking mode: needs explicit thinking.type field
+	if isDeepSeekModel(p.model) {
+		if p.reasoningEnabled && p.reasoningEffort != "none" {
+			reqBody.Thinking = &deepSeekThinking{Type: "enabled"}
+			reqBody.ReasoningEffort = normalizeOpenAIReasoningEffort(p.reasoningEffort)
+		} else {
+			reqBody.Thinking = &deepSeekThinking{Type: "disabled"}
+		}
 	}
 	if len(tools) > 0 {
 		reqBody.Tools = tools

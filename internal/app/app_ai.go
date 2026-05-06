@@ -58,7 +58,15 @@ func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
 	case "anthropic":
 		provider = ai.NewAnthropicProvider(p.Name, p.APIBase, apiKey, p.Model, maxOutputTokens)
 	default: // "openai"
-		provider = ai.NewOpenAIProvider(p.Name, p.APIBase, apiKey, p.Model, maxOutputTokens)
+		provider = ai.NewOpenAIProvider(
+			p.Name,
+			p.APIBase,
+			apiKey,
+			p.Model,
+			maxOutputTokens,
+			p.ReasoningEnabled,
+			p.ReasoningEffort,
+		)
 	}
 
 	config := ai.NewDefaultConfig()

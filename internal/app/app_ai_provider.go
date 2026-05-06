@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/opskat/opskat/internal/ai"
 	"github.com/opskat/opskat/internal/model/entity/ai_provider_entity"
@@ -10,30 +11,53 @@ import (
 
 // AIProviderInfo 返回给前端的 Provider 信息
 type AIProviderInfo struct {
-	ID              int64  `json:"id"`
-	Name            string `json:"name"`
-	Type            string `json:"type"`
-	APIBase         string `json:"apiBase"`
-	APIKey          string `json:"apiKey"`
-	MaskedAPIKey    string `json:"maskedApiKey"`
-	Model           string `json:"model"`
-	MaxOutputTokens int    `json:"maxOutputTokens"`
-	ContextWindow   int    `json:"contextWindow"`
-	IsActive        bool   `json:"isActive"`
+	ID               int64  `json:"id"`
+	Name             string `json:"name"`
+	Type             string `json:"type"`
+	APIBase          string `json:"apiBase"`
+	APIKey           string `json:"apiKey"`
+	MaskedAPIKey     string `json:"maskedApiKey"`
+	Model            string `json:"model"`
+	MaxOutputTokens  int    `json:"maxOutputTokens"`
+	ContextWindow    int    `json:"contextWindow"`
+	ReasoningEnabled bool   `json:"reasoningEnabled"`
+	ReasoningEffort  string `json:"reasoningEffort"`
+	IsActive         bool   `json:"isActive"`
 }
 
 func toProviderInfo(p *ai_provider_entity.AIProvider, apiKey string) AIProviderInfo {
 	return AIProviderInfo{
-		ID:              p.ID,
-		Name:            p.Name,
-		Type:            p.Type,
-		APIBase:         p.APIBase,
-		APIKey:          apiKey,
-		MaskedAPIKey:    maskAPIKey(apiKey),
-		Model:           p.Model,
-		MaxOutputTokens: p.MaxOutputTokens,
-		ContextWindow:   p.ContextWindow,
-		IsActive:        p.IsActive,
+		ID:               p.ID,
+		Name:             p.Name,
+		Type:             p.Type,
+		APIBase:          p.APIBase,
+		APIKey:           apiKey,
+		MaskedAPIKey:     maskAPIKey(apiKey),
+		Model:            p.Model,
+		MaxOutputTokens:  p.MaxOutputTokens,
+		ContextWindow:    p.ContextWindow,
+		ReasoningEnabled: p.ReasoningEnabled,
+		ReasoningEffort:  p.ReasoningEffort,
+		IsActive:         p.IsActive,
+	}
+}
+
+func normalizeProviderReasoningConfig(providerType string, reasoningEnabled bool, reasoningEffort string) (bool, string) {
+	if providerType != "openai" {
+		return false, ""
+	}
+	effort := strings.ToLower(strings.TrimSpace(reasoningEffort))
+	switch effort {
+	case "low", "medium", "high", "xhigh":
+		return true, effort
+	case "none":
+		return false, ""
+	default:
+		// Backwards compat: old data with toggle=true but no effort → medium
+		if reasoningEnabled {
+			return true, "medium"
+		}
+		return false, ""
 	}
 }
 
@@ -63,34 +87,40 @@ func (a *App) GetActiveAIProvider() (*AIProviderInfo, error) {
 }
 
 // CreateAIProvider 创建新 Provider
-func (a *App) CreateAIProvider(name, providerType, apiBase, apiKey, model string, maxOutputTokens, contextWindow int) (*AIProviderInfo, error) {
+func (a *App) CreateAIProvider(name, providerType, apiBase, apiKey, model string, maxOutputTokens, contextWindow int, reasoningEnabled bool, reasoningEffort string) (*AIProviderInfo, error) {
+	reasoningEnabled, reasoningEffort = normalizeProviderReasoningConfig(providerType, reasoningEnabled, reasoningEffort)
 	p := &ai_provider_entity.AIProvider{
-		Name:            name,
-		Type:            providerType,
-		APIBase:         apiBase,
-		Model:           model,
-		MaxOutputTokens: maxOutputTokens,
-		ContextWindow:   contextWindow,
+		Name:             name,
+		Type:             providerType,
+		APIBase:          apiBase,
+		Model:            model,
+		MaxOutputTokens:  maxOutputTokens,
+		ContextWindow:    contextWindow,
+		ReasoningEnabled: reasoningEnabled,
+		ReasoningEffort:  reasoningEffort,
 	}
 	if err := ai_provider_svc.AIProvider().Create(a.langCtx(), p, apiKey); err != nil {
 		return nil, fmt.Errorf("创建 Provider 失败: %w", err)
 	}
-	info := toProviderInfo(p, maskAPIKey(apiKey))
+	info := toProviderInfo(p, apiKey)
 	return &info, nil
 }
 
 // UpdateAIProvider 更新 Provider
-func (a *App) UpdateAIProvider(id int64, name, providerType, apiBase, apiKey, model string, maxOutputTokens, contextWindow int) error {
+func (a *App) UpdateAIProvider(id int64, name, providerType, apiBase, apiKey, model string, maxOutputTokens, contextWindow int, reasoningEnabled bool, reasoningEffort string) error {
 	p, err := ai_provider_svc.AIProvider().Get(a.langCtx(), id)
 	if err != nil {
 		return fmt.Errorf("provider 不存在: %w", err)
 	}
+	reasoningEnabled, reasoningEffort = normalizeProviderReasoningConfig(providerType, reasoningEnabled, reasoningEffort)
 	p.Name = name
 	p.Type = providerType
 	p.APIBase = apiBase
 	p.Model = model
 	p.MaxOutputTokens = maxOutputTokens
 	p.ContextWindow = contextWindow
+	p.ReasoningEnabled = reasoningEnabled
+	p.ReasoningEffort = reasoningEffort
 	if err := ai_provider_svc.AIProvider().Update(a.langCtx(), p, apiKey); err != nil {
 		return fmt.Errorf("更新 Provider 失败: %w", err)
 	}
