@@ -29,7 +29,6 @@ coverage.out
 coverage.html
 
 superpowers
-!docs/superpowers
 .omc
 
 coverage_new.out
