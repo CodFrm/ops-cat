@@ -210,16 +210,4 @@
     background-image: linear-gradient(oklch(0.55 0.09 85 / 35%), oklch(0.55 0.09 85 / 35%));
   }
 
-  .tree-group-content {
-    display: grid;
-    grid-template-rows: 1fr;
-    transition: grid-template-rows 200ms ease;
-  }
-  .tree-group-content[data-collapsed="true"] {
-    grid-template-rows: 0fr;
-  }
-  .tree-group-content > div {
-    overflow: hidden;
-  }
-
 }

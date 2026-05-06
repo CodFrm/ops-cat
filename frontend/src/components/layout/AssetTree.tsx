@@ -523,8 +523,8 @@ function GroupItem({
       ) : (
         groupRow
       )}
-      <div className="tree-group-content" data-collapsed={!expanded ? "true" : undefined}>
-        <div>
+      {expanded && (
+        <div className="tree-group-content">
           {children.map((child) => (
             <GroupItem
               key={child.ID}
@@ -660,7 +660,7 @@ function GroupItem({
             </div>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
