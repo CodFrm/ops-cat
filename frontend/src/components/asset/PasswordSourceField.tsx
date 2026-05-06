@@ -19,6 +19,10 @@ interface PasswordSourceFieldProps {
   hasExistingPassword?: boolean;
   /** Asset ID for decrypting existing password on reveal */
   editAssetId?: number;
+  /** Override label for inline secret input. */
+  secretLabel?: string;
+  /** Override label for managed secret selector. */
+  selectSecretLabel?: string;
 }
 
 export function PasswordSourceField({
@@ -32,6 +36,8 @@ export function PasswordSourceField({
   placeholder = "",
   hasExistingPassword = false,
   editAssetId,
+  secretLabel,
+  selectSecretLabel,
 }: PasswordSourceFieldProps) {
   const { t } = useTranslation();
   const [showPassword, setShowPassword] = useState(false);
@@ -73,7 +79,7 @@ export function PasswordSourceField({
       </div>
       {source === "inline" ? (
         <div className="grid gap-2">
-          <Label>{t("asset.password")}</Label>
+          <Label>{secretLabel || t("asset.password")}</Label>
           <div className="relative">
             <Input
               type={showPassword ? "text" : "password"}
@@ -102,7 +108,7 @@ export function PasswordSourceField({
         </div>
       ) : (
         <div className="grid gap-2">
-          <Label>{t("asset.selectPassword")}</Label>
+          <Label>{selectSecretLabel || t("asset.selectPassword")}</Label>
           {managedPasswords.length > 0 ? (
             <Select value={String(credentialId)} onValueChange={(v) => onCredentialIdChange(Number(v))}>
               <SelectTrigger>

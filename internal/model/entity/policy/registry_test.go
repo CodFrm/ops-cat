@@ -27,6 +27,12 @@ func TestDefaultPolicyRegistry(t *testing.T) {
 			rp, ok := p.(*RedisPolicy)
 			So(ok, ShouldBeTrue)
 			So(rp.Groups, ShouldContain, BuiltinRedisReadOnly)
+
+			p, ok = GetDefaultPolicyOf("kafka")
+			So(ok, ShouldBeTrue)
+			kp, ok := p.(*KafkaPolicy)
+			So(ok, ShouldBeTrue)
+			So(kp.Groups, ShouldContain, BuiltinKafkaMetadataReadOnly)
 		})
 
 		Convey("未注册类型返回 false", func() {

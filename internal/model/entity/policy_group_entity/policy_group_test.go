@@ -120,8 +120,8 @@ func TestBuiltinGroups(t *testing.T) {
 	convey.Convey("BuiltinGroups内置权限组列表", t, func() {
 		groups := BuiltinGroups()
 
-		convey.Convey("共返回12个内置组", func() {
-			assert.Len(t, groups, 12)
+		convey.Convey("共返回19个内置组", func() {
+			assert.Len(t, groups, 19)
 		})
 
 		convey.Convey("所有内置组ID均以builtin:开头", func() {
@@ -168,6 +168,18 @@ func TestBuiltinGroups(t *testing.T) {
 				}
 			}
 			assert.Equal(t, 3, count)
+		})
+
+		convey.Convey("kafka类型内置组有7个", func() {
+			var count int
+			for _, g := range groups {
+				if g.PolicyType == PolicyTypeKafka {
+					count++
+				}
+			}
+			assert.Equal(t, 7, count)
+			assert.NotNil(t, FindBuiltin(policy.BuiltinKafkaMetadataReadOnly))
+			assert.NotNil(t, FindBuiltin(policy.BuiltinKafkaDangerousDeny))
 		})
 	})
 }

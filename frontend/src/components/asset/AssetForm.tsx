@@ -32,12 +32,19 @@ import {
   TestDatabaseConnection,
   TestRedisConnection,
   TestMongoDBConnection,
+  TestKafkaConnection,
 } from "../../../wailsjs/go/app/App";
 import { app } from "../../../wailsjs/go/models";
 import { SSHConfigSection } from "@/components/asset/SSHConfigSection";
 import { DatabaseConfigSection } from "@/components/asset/DatabaseConfigSection";
 import { RedisConfigSection } from "@/components/asset/RedisConfigSection";
 import { MongoDBConfigSection } from "@/components/asset/MongoDBConfigSection";
+import {
+  KafkaConfigSection,
+  type KafkaCompanionAuthForm,
+  type KafkaConnectClusterForm,
+  type KafkaSchemaRegistryForm,
+} from "@/components/asset/KafkaConfigSection";
 import { K8sConfigSection } from "@/components/asset/K8sConfigSection";
 import { useExtensionStore } from "@/extension";
 import { ExtensionConfigForm } from "@/components/asset/ExtensionConfigForm";
@@ -118,7 +125,61 @@ interface MongoDBConfig {
   ssh_asset_id?: number;
 }
 
-type AssetType = "ssh" | "database" | "redis" | "mongodb" | "k8s" | (string & {});
+interface KafkaConfig {
+  brokers: string[];
+  client_id?: string;
+  sasl_mechanism?: string;
+  username?: string;
+  password?: string;
+  credential_id?: number;
+  tls?: boolean;
+  tls_insecure?: boolean;
+  tls_server_name?: string;
+  tls_ca_file?: string;
+  tls_cert_file?: string;
+  tls_key_file?: string;
+  request_timeout_seconds?: number;
+  message_preview_bytes?: number;
+  message_fetch_limit?: number;
+  ssh_asset_id?: number;
+  schema_registry?: KafkaSchemaRegistryConfig;
+  connect?: KafkaConnectConfig;
+}
+
+interface KafkaSchemaRegistryConfig {
+  enabled?: boolean;
+  url?: string;
+  auth_type?: string;
+  username?: string;
+  password?: string;
+  credential_id?: number;
+  tls_insecure?: boolean;
+  tls_server_name?: string;
+  tls_ca_file?: string;
+  tls_cert_file?: string;
+  tls_key_file?: string;
+}
+
+interface KafkaConnectConfig {
+  enabled?: boolean;
+  clusters?: KafkaConnectClusterConfig[];
+}
+
+interface KafkaConnectClusterConfig {
+  name?: string;
+  url?: string;
+  auth_type?: string;
+  username?: string;
+  password?: string;
+  credential_id?: number;
+  tls_insecure?: boolean;
+  tls_server_name?: string;
+  tls_ca_file?: string;
+  tls_cert_file?: string;
+  tls_key_file?: string;
+}
+
+type AssetType = "ssh" | "database" | "redis" | "mongodb" | "kafka" | "k8s" | (string & {});
 
 const DEFAULT_PORTS: Record<string, number> = {
   ssh: 22,
@@ -126,6 +187,7 @@ const DEFAULT_PORTS: Record<string, number> = {
   postgresql: 5432,
   redis: 6379,
   mongodb: 27017,
+  kafka: 9092,
   k8s: 6443,
 };
 
@@ -135,8 +197,80 @@ const DEFAULT_ICONS: Record<string, string> = {
   postgresql: "postgresql",
   redis: "redis",
   mongodb: "mongodb",
+  kafka: "kafka",
   k8s: "kubernetes",
 };
+
+function defaultKafkaCompanionAuth(): KafkaCompanionAuthForm {
+  return {
+    authType: "none",
+    username: "",
+    password: "",
+    encryptedPassword: "",
+    passwordSource: "inline",
+    credentialId: 0,
+    tlsInsecure: false,
+    tlsServerName: "",
+    tlsCAFile: "",
+    tlsCertFile: "",
+    tlsKeyFile: "",
+  };
+}
+
+function defaultKafkaSchemaRegistry(): KafkaSchemaRegistryForm {
+  return {
+    enabled: false,
+    url: "",
+    ...defaultKafkaCompanionAuth(),
+  };
+}
+
+function kafkaSchemaRegistryFromConfig(cfg?: KafkaSchemaRegistryConfig): KafkaSchemaRegistryForm {
+  return {
+    enabled: !!cfg?.enabled,
+    url: cfg?.url || "",
+    authType: cfg?.auth_type || "none",
+    username: kafkaCompanionUsernameFromConfig(cfg),
+    password: kafkaCompanionPlainSecretFromConfig(cfg),
+    encryptedPassword: cfg?.password || "",
+    passwordSource: cfg?.credential_id ? "managed" : "inline",
+    credentialId: cfg?.credential_id || 0,
+    tlsInsecure: !!cfg?.tls_insecure,
+    tlsServerName: cfg?.tls_server_name || "",
+    tlsCAFile: cfg?.tls_ca_file || "",
+    tlsCertFile: cfg?.tls_cert_file || "",
+    tlsKeyFile: cfg?.tls_key_file || "",
+  };
+}
+
+function newKafkaConnectCluster(cfg?: KafkaConnectClusterConfig, index = 0): KafkaConnectClusterForm {
+  return {
+    id: `connect-${Date.now().toString(36)}-${index}-${Math.random().toString(36).slice(2)}`,
+    name: cfg?.name || "",
+    url: cfg?.url || "",
+    authType: cfg?.auth_type || "none",
+    username: kafkaCompanionUsernameFromConfig(cfg),
+    password: kafkaCompanionPlainSecretFromConfig(cfg),
+    encryptedPassword: cfg?.password || "",
+    passwordSource: cfg?.credential_id ? "managed" : "inline",
+    credentialId: cfg?.credential_id || 0,
+    tlsInsecure: !!cfg?.tls_insecure,
+    tlsServerName: cfg?.tls_server_name || "",
+    tlsCAFile: cfg?.tls_ca_file || "",
+    tlsCertFile: cfg?.tls_cert_file || "",
+    tlsKeyFile: cfg?.tls_key_file || "",
+  };
+}
+
+function kafkaCompanionUsernameFromConfig(cfg?: KafkaSchemaRegistryConfig | KafkaConnectClusterConfig): string {
+  if (cfg?.auth_type === "bearer") return "";
+  return cfg?.username || "";
+}
+
+function kafkaCompanionPlainSecretFromConfig(cfg?: KafkaSchemaRegistryConfig | KafkaConnectClusterConfig): string {
+  if (cfg?.auth_type !== "bearer" || cfg.password || cfg.credential_id) return "";
+  return cfg.username || "";
+}
 
 export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }: AssetFormProps) {
   const { t } = useTranslation();
@@ -217,6 +351,27 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   const [replicaSet, setReplicaSet] = useState("");
   const [authSource, setAuthSource] = useState("");
 
+  // Kafka fields
+  const [kafkaBrokersText, setKafkaBrokersText] = useState("");
+  const [kafkaClientId, setKafkaClientId] = useState("opskat");
+  const [kafkaSaslMechanism, setKafkaSaslMechanism] = useState("none");
+  const [kafkaTlsInsecure, setKafkaTlsInsecure] = useState(false);
+  const [kafkaTlsServerName, setKafkaTlsServerName] = useState("");
+  const [kafkaTlsCAFile, setKafkaTlsCAFile] = useState("");
+  const [kafkaTlsCertFile, setKafkaTlsCertFile] = useState("");
+  const [kafkaTlsKeyFile, setKafkaTlsKeyFile] = useState("");
+  const [kafkaRequestTimeoutSeconds, setKafkaRequestTimeoutSeconds] = useState(30);
+  const [kafkaMessagePreviewBytes, setKafkaMessagePreviewBytes] = useState(4096);
+  const [kafkaMessageFetchLimit, setKafkaMessageFetchLimit] = useState(50);
+  const [kafkaSchemaRegistry, setKafkaSchemaRegistryState] =
+    useState<KafkaSchemaRegistryForm>(defaultKafkaSchemaRegistry());
+  const [kafkaConnectEnabled, setKafkaConnectEnabled] = useState(false);
+  const [kafkaConnectClusters, setKafkaConnectClusters] = useState<KafkaConnectClusterForm[]>([]);
+
+  const setKafkaSchemaRegistry = useCallback((patch: Partial<KafkaSchemaRegistryForm>) => {
+    setKafkaSchemaRegistryState((current) => ({ ...current, ...patch }));
+  }, []);
+
   // K8S fields
   const [kubeconfig, setKubeconfig] = useState("");
   const [k8sNamespace, setK8sNamespace] = useState("");
@@ -267,6 +422,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
           loadRedisConfig(editAsset);
         } else if (editType === "mongodb") {
           loadMongoDBConfig(editAsset);
+        } else if (editType === "kafka") {
+          loadKafkaConfig(editAsset);
         } else if (editType === "k8s") {
           loadK8sConfig(editAsset);
         } else {
@@ -291,6 +448,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         resetDatabaseFields();
         resetRedisFields();
         resetMongoDBFields();
+        resetKafkaFields();
         resetK8sFields();
         setExtConfig({});
       }
@@ -451,6 +609,46 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     }
   };
 
+  const loadKafkaConfig = (asset: asset_entity.Asset) => {
+    try {
+      const cfg: KafkaConfig = JSON.parse(asset.Config || "{}");
+      setKafkaBrokersText((cfg.brokers || []).join("\n"));
+      setKafkaClientId(cfg.client_id || "opskat");
+      setKafkaSaslMechanism(cfg.sasl_mechanism || "none");
+      setUsername(cfg.username || "");
+      setTls(cfg.tls || false);
+      setKafkaTlsInsecure(cfg.tls_insecure || false);
+      setKafkaTlsServerName(cfg.tls_server_name || "");
+      setKafkaTlsCAFile(cfg.tls_ca_file || "");
+      setKafkaTlsCertFile(cfg.tls_cert_file || "");
+      setKafkaTlsKeyFile(cfg.tls_key_file || "");
+      setKafkaRequestTimeoutSeconds(cfg.request_timeout_seconds || 30);
+      setKafkaMessagePreviewBytes(cfg.message_preview_bytes || 4096);
+      setKafkaMessageFetchLimit(cfg.message_fetch_limit || 50);
+      setSshTunnelId(asset.sshTunnelId || cfg.ssh_asset_id || 0);
+      setKafkaSchemaRegistryState(kafkaSchemaRegistryFromConfig(cfg.schema_registry));
+      setKafkaConnectEnabled(!!cfg.connect?.enabled);
+      setKafkaConnectClusters(
+        (cfg.connect?.clusters || []).map((cluster, index) => newKafkaConnectCluster(cluster, index))
+      );
+
+      if (cfg.credential_id) {
+        setPasswordSource("managed");
+        setPasswordCredentialId(cfg.credential_id);
+        setEncryptedPassword("");
+        setPassword("");
+      } else {
+        setPasswordSource("inline");
+        setPasswordCredentialId(0);
+        setEncryptedPassword(cfg.password || "");
+        setPassword("");
+      }
+    } catch {
+      resetSharedFields("kafka");
+      resetKafkaFields();
+    }
+  };
+
   const loadK8sConfig = (asset: asset_entity.Asset) => {
     try {
       const cfg = JSON.parse(asset.Config || "{}");
@@ -538,6 +736,25 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setTls(false);
   };
 
+  const resetKafkaFields = () => {
+    setKafkaBrokersText("");
+    setKafkaClientId("opskat");
+    setKafkaSaslMechanism("none");
+    setTls(false);
+    setKafkaTlsInsecure(false);
+    setKafkaTlsServerName("");
+    setKafkaTlsCAFile("");
+    setKafkaTlsCertFile("");
+    setKafkaTlsKeyFile("");
+    setKafkaRequestTimeoutSeconds(30);
+    setKafkaMessagePreviewBytes(4096);
+    setKafkaMessageFetchLimit(50);
+    setSshTunnelId(0);
+    setKafkaSchemaRegistryState(defaultKafkaSchemaRegistry());
+    setKafkaConnectEnabled(false);
+    setKafkaConnectClusters([]);
+  };
+
   // K8S-exclusive fields only
   const resetK8sFields = () => {
     setKubeconfig("");
@@ -580,6 +797,36 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     } else if (!password && encryptedPassword) {
       cfg.password = encryptedPassword;
     }
+    return cfg;
+  };
+
+  const kafkaBrokers = () =>
+    kafkaBrokersText
+      .split(/[\n,]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+  const buildKafkaConfig = (): KafkaConfig => {
+    const cfg: KafkaConfig = {
+      brokers: kafkaBrokers(),
+    };
+    if (kafkaClientId.trim()) cfg.client_id = kafkaClientId.trim();
+    if (kafkaSaslMechanism && kafkaSaslMechanism !== "none") {
+      cfg.sasl_mechanism = kafkaSaslMechanism;
+      if (username) cfg.username = username;
+    } else {
+      cfg.sasl_mechanism = "none";
+    }
+    if (tls) cfg.tls = true;
+    if (tls && kafkaTlsInsecure) cfg.tls_insecure = true;
+    if (tls && kafkaTlsServerName) cfg.tls_server_name = kafkaTlsServerName;
+    if (tls && kafkaTlsCAFile) cfg.tls_ca_file = kafkaTlsCAFile;
+    if (tls && kafkaTlsCertFile) cfg.tls_cert_file = kafkaTlsCertFile;
+    if (tls && kafkaTlsKeyFile) cfg.tls_key_file = kafkaTlsKeyFile;
+    if (kafkaRequestTimeoutSeconds > 0) cfg.request_timeout_seconds = kafkaRequestTimeoutSeconds;
+    if (kafkaMessagePreviewBytes > 0) cfg.message_preview_bytes = kafkaMessagePreviewBytes;
+    if (kafkaMessageFetchLimit > 0) cfg.message_fetch_limit = kafkaMessageFetchLimit;
+    if (sshTunnelId > 0) cfg.ssh_asset_id = sshTunnelId;
     return cfg;
   };
 
@@ -698,6 +945,22 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     }
   };
 
+  const handleTestKafkaConnection = async () => {
+    const cfg = buildKafkaConfig();
+    if (kafkaSaslMechanism !== "none") {
+      applyTestPasswordSource(cfg);
+    }
+    setTesting(true);
+    try {
+      await TestKafkaConnection(JSON.stringify(cfg), password);
+      toast.success(t("asset.testConnectionSuccess"));
+    } catch (e) {
+      toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
+    } finally {
+      setTesting(false);
+    }
+  };
+
   const encryptPasswordValue = async (): Promise<string | undefined> => {
     if (password) {
       try {
@@ -709,6 +972,110 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     }
     if (encryptedPassword) return encryptedPassword;
     return "";
+  };
+
+  const encryptKafkaCompanionPassword = async (
+    plainPassword: string,
+    existingEncryptedPassword: string
+  ): Promise<string | undefined> => {
+    if (plainPassword) {
+      try {
+        return await EncryptPassword(plainPassword);
+      } catch {
+        toast.error("Failed to encrypt password");
+        return undefined;
+      }
+    }
+    if (existingEncryptedPassword) return existingEncryptedPassword;
+    return "";
+  };
+
+  const applyKafkaCompanionAuth = async (
+    cfg: KafkaSchemaRegistryConfig | KafkaConnectClusterConfig,
+    form: KafkaCompanionAuthForm
+  ): Promise<boolean> => {
+    const authType = form.authType || "none";
+    if (authType === "none") return true;
+    cfg.auth_type = authType;
+    if (authType !== "bearer" && form.username.trim()) cfg.username = form.username.trim();
+    if (form.passwordSource === "managed" && form.credentialId > 0) {
+      cfg.credential_id = form.credentialId;
+      return true;
+    }
+    const encrypted = await encryptKafkaCompanionPassword(form.password, form.encryptedPassword);
+    if (encrypted === undefined) return false;
+    if (encrypted) cfg.password = encrypted;
+    return true;
+  };
+
+  const applyKafkaCompanionTLS = (
+    cfg: KafkaSchemaRegistryConfig | KafkaConnectClusterConfig,
+    form: KafkaCompanionAuthForm
+  ) => {
+    if (form.tlsInsecure) cfg.tls_insecure = true;
+    if (form.tlsServerName.trim()) cfg.tls_server_name = form.tlsServerName.trim();
+    if (form.tlsCAFile.trim()) cfg.tls_ca_file = form.tlsCAFile.trim();
+    if (form.tlsCertFile.trim()) cfg.tls_cert_file = form.tlsCertFile.trim();
+    if (form.tlsKeyFile.trim()) cfg.tls_key_file = form.tlsKeyFile.trim();
+  };
+
+  const validateKafkaCompanions = (): boolean => {
+    if (kafkaSchemaRegistry.enabled && !kafkaSchemaRegistry.url.trim()) {
+      toast.error(t("asset.kafkaSchemaRegistryURLRequired"));
+      return false;
+    }
+    if (kafkaSchemaRegistry.enabled && !validateKafkaCompanionAuth(kafkaSchemaRegistry)) return false;
+    if (kafkaConnectEnabled) {
+      const clusters = kafkaConnectClusters.filter((cluster) => cluster.name.trim() || cluster.url.trim());
+      if (clusters.length === 0) {
+        toast.error(t("asset.kafkaConnectClusterRequired"));
+        return false;
+      }
+      if (clusters.some((cluster) => !cluster.name.trim() || !cluster.url.trim())) {
+        toast.error(t("asset.kafkaConnectClusterInvalid"));
+        return false;
+      }
+      if (clusters.some((cluster) => !validateKafkaCompanionAuth(cluster))) return false;
+    }
+    return true;
+  };
+
+  const validateKafkaCompanionAuth = (form: KafkaCompanionAuthForm): boolean => {
+    if (form.authType !== "bearer") return true;
+    const hasToken =
+      form.passwordSource === "managed" ? form.credentialId > 0 : !!form.password.trim() || !!form.encryptedPassword;
+    if (!hasToken) {
+      toast.error(t("asset.kafkaBearerTokenRequired"));
+      return false;
+    }
+    return true;
+  };
+
+  const buildKafkaSchemaRegistryConfig = async (): Promise<KafkaSchemaRegistryConfig | undefined> => {
+    if (!kafkaSchemaRegistry.enabled) return undefined;
+    const cfg: KafkaSchemaRegistryConfig = {
+      enabled: true,
+      url: kafkaSchemaRegistry.url.trim(),
+    };
+    if (!(await applyKafkaCompanionAuth(cfg, kafkaSchemaRegistry))) return undefined;
+    applyKafkaCompanionTLS(cfg, kafkaSchemaRegistry);
+    return cfg;
+  };
+
+  const buildKafkaConnectConfig = async (): Promise<KafkaConnectConfig | undefined> => {
+    if (!kafkaConnectEnabled) return undefined;
+    const cfg: KafkaConnectConfig = { enabled: true, clusters: [] };
+    const clusters = kafkaConnectClusters.filter((cluster) => cluster.name.trim() || cluster.url.trim());
+    for (const cluster of clusters) {
+      const next: KafkaConnectClusterConfig = {
+        name: cluster.name.trim(),
+        url: cluster.url.trim(),
+      };
+      if (!(await applyKafkaCompanionAuth(next, cluster))) return undefined;
+      applyKafkaCompanionTLS(next, cluster);
+      cfg.clusters?.push(next);
+    }
+    return cfg;
   };
 
   const encryptProxyPassword = async (): Promise<string | undefined> => {
@@ -837,6 +1204,29 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       if (database) mongoConfig.database = database;
       if (tls) mongoConfig.tls = true;
       config = JSON.stringify(mongoConfig);
+    } else if (assetType === "kafka") {
+      if (!validateKafkaCompanions()) return;
+      const kafkaConfig = buildKafkaConfig();
+      if (kafkaSaslMechanism !== "none") {
+        if (passwordSource === "managed" && passwordCredentialId > 0) {
+          kafkaConfig.credential_id = passwordCredentialId;
+        } else {
+          const encrypted = await encryptPasswordValue();
+          if (encrypted === undefined) return;
+          if (encrypted) kafkaConfig.password = encrypted;
+        }
+      }
+      const schemaRegistryConfig = await buildKafkaSchemaRegistryConfig();
+      if (kafkaSchemaRegistry.enabled) {
+        if (!schemaRegistryConfig) return;
+        kafkaConfig.schema_registry = schemaRegistryConfig;
+      }
+      const connectConfig = await buildKafkaConnectConfig();
+      if (kafkaConnectEnabled) {
+        if (!connectConfig) return;
+        kafkaConfig.connect = connectConfig;
+      }
+      config = JSON.stringify(kafkaConfig);
     } else if (assetType === "k8s") {
       const k8sConfig: Record<string, unknown> = {};
       if (kubeconfig) {
@@ -925,12 +1315,14 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
           ? t("asset.typeRedis")
           : assetType === "mongodb"
             ? t("asset.typeMongoDB")
-            : assetType === "k8s"
-              ? t("asset.typeK8s")
-              : (() => {
-                  const found = availableTypes.find((at) => at.type === assetType);
-                  return found ? resolveExtDisplayName(found) : assetType;
-                })();
+            : assetType === "kafka"
+              ? t("asset.typeKafka")
+              : assetType === "k8s"
+                ? t("asset.typeK8s")
+                : (() => {
+                    const found = availableTypes.find((at) => at.type === assetType);
+                    return found ? resolveExtDisplayName(found) : assetType;
+                  })();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -954,6 +1346,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                   <SelectItem value="database">{t("asset.typeDatabase")}</SelectItem>
                   <SelectItem value="redis">{t("asset.typeRedis")}</SelectItem>
                   <SelectItem value="mongodb">{t("asset.typeMongoDB")}</SelectItem>
+                  <SelectItem value="kafka">{t("asset.typeKafka")}</SelectItem>
                   <SelectItem value="k8s">{t("asset.typeK8s")}</SelectItem>
                   {availableTypes
                     .filter((at) => !!at.extensionName)
@@ -982,9 +1375,11 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                       ? "cache-01"
                       : assetType === "mongodb"
                         ? "mongo-01"
-                        : assetType === "k8s"
-                          ? "prod-cluster"
-                          : `my-${assetType}`
+                        : assetType === "kafka"
+                          ? "kafka-prod"
+                          : assetType === "k8s"
+                            ? "prod-cluster"
+                            : `my-${assetType}`
               }
             />
           </div>
@@ -1171,6 +1566,54 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             />
           )}
 
+          {assetType === "kafka" && (
+            <KafkaConfigSection
+              brokersText={kafkaBrokersText}
+              setBrokersText={setKafkaBrokersText}
+              clientId={kafkaClientId}
+              setClientId={setKafkaClientId}
+              saslMechanism={kafkaSaslMechanism}
+              setSaslMechanism={setKafkaSaslMechanism}
+              username={username}
+              setUsername={setUsername}
+              tls={tls}
+              setTls={setTls}
+              tlsInsecure={kafkaTlsInsecure}
+              setTlsInsecure={setKafkaTlsInsecure}
+              tlsServerName={kafkaTlsServerName}
+              setTlsServerName={setKafkaTlsServerName}
+              tlsCAFile={kafkaTlsCAFile}
+              setTlsCAFile={setKafkaTlsCAFile}
+              tlsCertFile={kafkaTlsCertFile}
+              setTlsCertFile={setKafkaTlsCertFile}
+              tlsKeyFile={kafkaTlsKeyFile}
+              setTlsKeyFile={setKafkaTlsKeyFile}
+              requestTimeoutSeconds={kafkaRequestTimeoutSeconds}
+              setRequestTimeoutSeconds={setKafkaRequestTimeoutSeconds}
+              messagePreviewBytes={kafkaMessagePreviewBytes}
+              setMessagePreviewBytes={setKafkaMessagePreviewBytes}
+              messageFetchLimit={kafkaMessageFetchLimit}
+              setMessageFetchLimit={setKafkaMessageFetchLimit}
+              sshTunnelId={sshTunnelId}
+              setSshTunnelId={setSshTunnelId}
+              password={password}
+              setPassword={setPassword}
+              encryptedPassword={encryptedPassword}
+              passwordSource={passwordSource}
+              setPasswordSource={setPasswordSource}
+              passwordCredentialId={passwordCredentialId}
+              setPasswordCredentialId={setPasswordCredentialId}
+              managedPasswords={managedPasswords}
+              editAssetId={editAsset?.ID}
+              schemaRegistry={kafkaSchemaRegistry}
+              setSchemaRegistry={setKafkaSchemaRegistry}
+              connectEnabled={kafkaConnectEnabled}
+              setConnectEnabled={setKafkaConnectEnabled}
+              connectClusters={kafkaConnectClusters}
+              setConnectClusters={setKafkaConnectClusters}
+            />
+          )}
+
           {/* K8S config */}
           {assetType === "k8s" && (
             <K8sConfigSection
@@ -1193,6 +1636,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             assetType !== "database" &&
             assetType !== "redis" &&
             assetType !== "mongodb" &&
+            assetType !== "kafka" &&
             assetType !== "k8s" &&
             (() => {
               const extInfo = useExtensionStore.getState().getExtensionForAssetType(assetType);
@@ -1211,7 +1655,11 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             })()}
 
           {/* Test Connection */}
-          {(assetType === "ssh" || assetType === "database" || assetType === "redis" || assetType === "mongodb") && (
+          {(assetType === "ssh" ||
+            assetType === "database" ||
+            assetType === "redis" ||
+            assetType === "mongodb" ||
+            assetType === "kafka") && (
             <Button
               type="button"
               variant="outline"
@@ -1223,10 +1671,19 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                     ? handleTestDatabaseConnection
                     : assetType === "mongodb"
                       ? handleTestMongoDBConnection
-                      : handleTestRedisConnection
+                      : assetType === "kafka"
+                        ? handleTestKafkaConnection
+                        : handleTestRedisConnection
               }
               disabled={
-                testing || (assetType !== "mongodb" ? !host : mongoConnectionMode === "uri" ? !connectionURI : !host)
+                testing ||
+                (assetType === "kafka"
+                  ? kafkaBrokers().length === 0
+                  : assetType !== "mongodb"
+                    ? !host
+                    : mongoConnectionMode === "uri"
+                      ? !connectionURI
+                      : !host)
               }
               className="gap-1 w-fit"
             >
@@ -1259,6 +1716,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
               (["ssh", "database", "redis"].includes(assetType) && !host) ||
               (assetType === "mongodb" && mongoConnectionMode === "manual" && !host) ||
               (assetType === "mongodb" && mongoConnectionMode === "uri" && !connectionURI) ||
+              (assetType === "kafka" && kafkaBrokers().length === 0) ||
               (assetType === "k8s" && !kubeconfig && !editAsset)
             }
           >

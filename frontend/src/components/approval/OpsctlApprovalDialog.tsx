@@ -58,7 +58,13 @@ interface QueueItem {
 }
 
 function TypeBadge({ type }: { type: string }) {
-  const icons: Record<string, typeof Terminal> = { exec: Terminal, sql: Database, redis: Server };
+  const icons: Record<string, typeof Terminal> = {
+    exec: Terminal,
+    sql: Database,
+    redis: Server,
+    mongo: Database,
+    kafka: Database,
+  };
   const Icon = icons[type] || Terminal;
   return (
     <span className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground bg-muted">

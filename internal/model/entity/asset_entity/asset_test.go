@@ -277,3 +277,67 @@ func TestValidateMongoDB(t *testing.T) {
 		})
 	})
 }
+
+func TestKafkaConfig(t *testing.T) {
+	convey.Convey("Kafka配置序列化与反序列化", t, func() {
+		a := &Asset{Name: "kafka", Type: AssetTypeKafka, Status: StatusActive}
+		cfg := &KafkaConfig{
+			Brokers:               []string{"broker-1:9092", "broker-2:9092"},
+			ClientID:              "opskat-test",
+			SASLMechanism:         KafkaSASLSCRAMSHA256,
+			Username:              "alice",
+			Password:              "encrypted",
+			TLS:                   true,
+			TLSInsecure:           true,
+			RequestTimeoutSeconds: 10,
+			MessagePreviewBytes:   2048,
+			MessageFetchLimit:     50,
+		}
+		err := a.SetKafkaConfig(cfg)
+		assert.NoError(t, err)
+
+		got, err := a.GetKafkaConfig()
+		assert.NoError(t, err)
+		assert.Equal(t, cfg.Brokers, got.Brokers)
+		assert.Equal(t, cfg.ClientID, got.ClientID)
+		assert.Equal(t, cfg.SASLMechanism, got.SASLMechanism)
+		assert.Equal(t, cfg.Username, got.Username)
+		assert.Equal(t, cfg.TLS, got.TLS)
+		assert.True(t, a.IsKafka())
+		assert.True(t, a.CanConnect())
+	})
+}
+
+func TestValidateKafka(t *testing.T) {
+	convey.Convey("Kafka资产校验", t, func() {
+		convey.Convey("明文连接配置完整时校验通过", func() {
+			a := &Asset{Name: "kafka", Type: AssetTypeKafka}
+			_ = a.SetKafkaConfig(&KafkaConfig{Brokers: []string{"localhost:9092"}})
+			assert.NoError(t, a.Validate())
+		})
+
+		convey.Convey("broker缺少端口应返回错误", func() {
+			a := &Asset{Name: "kafka", Type: AssetTypeKafka}
+			_ = a.SetKafkaConfig(&KafkaConfig{Brokers: []string{"localhost"}})
+			assert.Error(t, a.Validate())
+		})
+
+		convey.Convey("SASL启用时需要用户名和密码来源", func() {
+			a := &Asset{Name: "kafka", Type: AssetTypeKafka}
+			_ = a.SetKafkaConfig(&KafkaConfig{
+				Brokers:       []string{"localhost:9092"},
+				SASLMechanism: KafkaSASLPlain,
+			})
+			assert.Error(t, a.Validate())
+		})
+
+		convey.Convey("TLS证书和私钥必须成对配置", func() {
+			a := &Asset{Name: "kafka", Type: AssetTypeKafka}
+			_ = a.SetKafkaConfig(&KafkaConfig{
+				Brokers:     []string{"localhost:9092"},
+				TLSCertFile: "/tmp/client.pem",
+			})
+			assert.Error(t, a.Validate())
+		})
+	})
+}

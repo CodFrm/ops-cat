@@ -68,6 +68,7 @@ func TestMatchRedisRule(t *testing.T) {
 		Convey("key pattern glob 匹配", func() {
 			So(MatchRedisRule("DEL user:*", "DEL user:123"), ShouldBeTrue)
 			So(MatchRedisRule("DEL user:*", "DEL order:123"), ShouldBeFalse)
+			So(MatchRedisRule("DEL cache/*", "DEL cache/a/b"), ShouldBeFalse)
 		})
 
 		Convey("不同命令不匹配", func() {

@@ -17,7 +17,7 @@ import (
 
 // CheckPermission 统一权限检查（策略 + DB Grant 匹配）。
 // 不包含用户确认逻辑 — NeedConfirm 时由调用方处理。
-// assetType: "ssh" | "database" | "redis" | "mongodb" | "k8s" | "exec"（exec 等同于 ssh）| "sql"（sql 等同于 database）| "mongo"（mongo 等同于 mongodb）
+// assetType: "ssh" | "database" | "redis" | "mongodb" | "kafka" | "k8s" | "exec"（exec 等同于 ssh）| "sql"（sql 等同于 database）| "mongo"（mongo 等同于 mongodb）
 func CheckPermission(ctx context.Context, assetType string, assetID int64, command string) CheckResult {
 	// opsctl 使用的类型名映射到内部类型
 	switch assetType {
@@ -38,6 +38,8 @@ func CheckPermission(ctx context.Context, assetType string, assetID int64, comma
 		return checkRedisPermission(ctx, assetID, command)
 	case asset_entity.AssetTypeMongoDB:
 		return checkMongoDBPermission(ctx, assetID, command)
+	case asset_entity.AssetTypeKafka:
+		return checkKafkaPermission(ctx, assetID, command)
 	case asset_entity.AssetTypeK8s:
 		return checkK8sPermission(ctx, assetID, command)
 	default:
@@ -253,6 +255,43 @@ func checkMongoDBPermission(ctx context.Context, assetID int64, operation string
 	return result
 }
 
+// --- Kafka ---
+
+func checkKafkaPermission(ctx context.Context, assetID int64, command string) CheckResult {
+	// 组通用策略：使用通用 shell-glob 匹配，与 Database/MongoDB 一致；
+	// MatchKafkaRule 仅适用于 "<action> <resource>" 格式，不能用于通用 CommandPolicy。
+	groupResult := CheckGroupGenericPolicy(ctx, assetID, command, MatchCommandRule)
+	if groupResult.Decision == Deny {
+		return groupResult
+	}
+
+	// Kafka 策略
+	asset, _ := resolveAssetPolicyChain(ctx, assetID)
+	mergedPolicy := collectKafkaPolicies(ctx, asset)
+	result := CheckKafkaPolicy(ctx, mergedPolicy, command)
+
+	// 组通用 allow 优先于类型专用的 NeedConfirm
+	if result.Decision == NeedConfirm && groupResult.Decision == Allow {
+		return groupResult
+	}
+
+	if result.Decision != NeedConfirm {
+		return result
+	}
+
+	// DB Grant 匹配
+	if grantResult := matchGrantForAssetWith(ctx, assetID, command, MatchKafkaRule); grantResult != nil {
+		return *grantResult
+	}
+
+	// NeedConfirm：收集允许的 Kafka action/resource 规则作为提示
+	merged := mergeKafkaPolicy(mergedPolicy, asset_entity.DefaultKafkaPolicy())
+	if len(merged.AllowList) > 0 {
+		result.HintRules = merged.AllowList
+	}
+	return result
+}
+
 // checkMongoPolicyRules 检查 MongoDB 操作是否符合给定策略（不合并默认策略）
 func checkMongoPolicyRules(ctx context.Context, p *asset_entity.MongoPolicy, operation string) CheckResult {
 	if p == nil {
@@ -303,6 +342,10 @@ func mergeMongoPolicy(custom, defaults *asset_entity.MongoPolicy) *asset_entity.
 
 // matchGrantForAsset 为 database/redis 类型做 DB Grant 匹配
 func matchGrantForAsset(ctx context.Context, assetID int64, command string) *CheckResult {
+	return matchGrantForAssetWith(ctx, assetID, command, MatchCommandRule)
+}
+
+func matchGrantForAssetWith(ctx context.Context, assetID int64, command string, matchFn MatchFunc) *CheckResult {
 	asset, err := asset_svc.Asset().Get(ctx, assetID)
 	if err != nil {
 		return nil
@@ -311,7 +354,7 @@ func matchGrantForAsset(ctx context.Context, assetID int64, command string) *Che
 	if asset != nil && asset.GroupID > 0 {
 		groups = resolveGroupChain(ctx, asset.GroupID)
 	}
-	if pattern := matchGrantPatterns(ctx, assetID, groups, []string{command}); pattern != "" {
+	if pattern := matchGrantPatternsWith(ctx, assetID, groups, []string{command}, matchFn); pattern != "" {
 		return &CheckResult{Decision: Allow, DecisionSource: SourceGrantAllow, MatchedPattern: pattern}
 	}
 	return nil

@@ -31,9 +31,9 @@ OpsKat
 
 ## 关于
 
-平时操作服务器环境，经常要打开好几个工具来回切换。OpsKat 把常用的资产操作都集成在一起，不用再在好几个工具之间跳了。加上 AI Agent，直接跟它说一句话就能搞定，当然每一步都有策略管控和审计日志。
+平时操作服务器环境，经常要打开好几个工具来回切换：SSH、数据库、Redis、Kafka 控制台来回跳。OpsKat 把常用的资产操作都集成在一起，不用再在好几个工具之间跳了。加上 AI Agent，直接跟它说一句话就能搞定，当然每一步都有策略管控和审计日志。
 
-目前支持管理 SSH 服务器、MySQL/PostgreSQL 数据库、Redis，后续还会考虑使用插件模式集成其它常用运维资产。
+目前支持管理 SSH 服务器、MySQL/PostgreSQL 数据库、Redis、MongoDB 和 Kafka，后续还会考虑使用插件模式集成其它常用运维资产。
 
 **如果觉得有用，求个 Star ⭐ 这是对我们最大的支持！**
 
@@ -45,13 +45,14 @@ https://github.com/user-attachments/assets/035fc0df-230c-456b-87bd-8a4a125feaec
 
 - **"帮我看一下 web-01 上 nginx 最近的错误日志"** → AI 自动 SSH 上去执行命令并返回结果
 - **"统计一下 db-prod 上 users 表各 status 的数量"** → AI 通过 SSH 隧道连数据库执行 SQL
+- **"列出 kafka-prod 里有延迟的消费组"** → AI 在策略管控下读取 Kafka 元数据和消费组延迟
 - **"检查一下 k3s 集群的健康状况"** → AI 自动跑 kubectl 相关命令，汇总节点和 Pod 状态
 
 ## 🛡️ 安全与审计
 
 给 AI 操作服务器的权限，怎么保证安全？
 
-- **操作策略** — SSH 命令、SQL 语句、Redis 操作都支持白名单/黑名单，SQL 还会基于 Parser 自动拦截无 WHERE 的 DELETE/UPDATE 等危险操作
+- **操作策略** — SSH 命令、SQL 语句、Redis 操作、MongoDB 操作和 Kafka 动作都支持白名单/黑名单，SQL 还会基于 Parser 自动拦截无 WHERE 的 DELETE/UPDATE 等危险操作
 - **策略组** — 内置常用模板（Linux 只读、危险命令拒绝等），也可以自定义
 - **预申请权限** — AI 或 opsctl 可以提前申请一批命令的执行权限，用户一次审批后，后续匹配的命令自动放行，不用每条都确认
 - **审计日志** — 所有操作自动记录，谁在什么时候对哪台服务器执行了什么命令，决策来源全部可追溯
@@ -60,12 +61,14 @@ https://github.com/user-attachments/assets/035fc0df-230c-456b-87bd-8a4a125feaec
 
 抛开 AI 部分，OpsKat 本身也是一个功能完整的终端和资产管理工具：
 
-- 树形分组管理 SSH 服务器、数据库、Redis
+- 树形分组管理 SSH 服务器、数据库、Redis、MongoDB 和 Kafka
 - 分屏终端，自定义主题
 - SFTP 文件浏览器
 - 跳板机链式连接
 - 数据库查询编辑器（MySQL/PostgreSQL，支持 SSH 隧道）
 - Redis 命令执行与 Key 浏览器
+- MongoDB 集合浏览与查询执行
+- Kafka 集群、Topic、消息、消费组、ACL、Schema Registry 和 Kafka Connect 管理
 - 端口转发、SOCKS 代理
 - 凭据加密存储
 - 从 SSH config / Tabby 导入

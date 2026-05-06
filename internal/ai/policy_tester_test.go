@@ -237,7 +237,7 @@ func TestTestK8sPolicy(t *testing.T) {
 		})
 
 		Convey("组链上的 K8S 策略会生效", func() {
-			group := &group_entity.Group{Name: "测试组", K8sPolicy: `{"allow_list":["kubectl get *"]}`}
+			group := &group_entity.Group{Name: "测试组", K8sPol: `{"allow_list":["kubectl get *"]}`}
 			out := testK8sPolicy(ctx, nil, []*group_entity.Group{group}, "kubectl get ns")
 			So(out.Decision, ShouldEqual, Allow)
 		})

@@ -2,6 +2,7 @@
 import type { ComponentType } from "react";
 import { Monitor, Database, Cylinder, Leaf, Container, Server } from "lucide-react";
 import { getIconComponent } from "@/components/asset/IconPicker";
+import { KafkaIcon } from "@/components/asset/brand-icons";
 import type { ExtManifest } from "@/extension/types";
 import type { asset_entity } from "../../../wailsjs/go/models";
 
@@ -54,6 +55,14 @@ const BUILTIN_OPTIONS: AssetTypeOption[] = [
     label: "nav.mongodb",
     labelIsI18nKey: true,
     icon: Leaf,
+    group: "builtin",
+  },
+  {
+    value: "kafka",
+    aliases: ["kafka"],
+    label: "nav.kafka",
+    labelIsI18nKey: true,
+    icon: KafkaIcon,
     group: "builtin",
   },
   {

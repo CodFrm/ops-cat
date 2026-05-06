@@ -1,7 +1,7 @@
 package ai
 
 import (
-	"path/filepath"
+	"path"
 	"strings"
 )
 
@@ -189,9 +189,9 @@ func matchSubCommand(pattern string, subs []string) bool {
 	return false
 }
 
-// matchGlobPattern 使用 filepath.Match 做 glob 匹配
+// matchGlobPattern 使用固定的 POSIX 路径分隔符语义做 glob 匹配，避免规则随本机 OS 改变。
 func matchGlobPattern(pattern, value string) bool {
-	matched, err := filepath.Match(pattern, value)
+	matched, err := path.Match(pattern, value)
 	if err != nil {
 		return pattern == value
 	}

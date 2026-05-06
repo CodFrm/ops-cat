@@ -1,6 +1,8 @@
 package import_svc
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	. "github.com/smartystreets/goconvey/convey"
@@ -284,7 +286,9 @@ func TestExpandPath(t *testing.T) {
 		Convey("波浪号展开", func() {
 			result := expandPath("~/test/path")
 			So(result, ShouldNotEqual, "~/test/path")
-			So(result, ShouldEndWith, "/test/path")
+			home, err := os.UserHomeDir()
+			So(err, ShouldBeNil)
+			So(result, ShouldEqual, filepath.Join(home, "test", "path"))
 		})
 
 		Convey("绝对路径不变", func() {
@@ -299,7 +303,9 @@ func TestExpandPath(t *testing.T) {
 
 		Convey("仅波浪号", func() {
 			result := expandPath("~")
-			So(result, ShouldNotEqual, "~")
+			home, err := os.UserHomeDir()
+			So(err, ShouldBeNil)
+			So(result, ShouldEqual, home)
 		})
 	})
 }

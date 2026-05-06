@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/service/extension_svc"
 	"github.com/opskat/opskat/pkg/extension"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -40,11 +41,12 @@ func (a *App) GetExtensionManifest(name string) (*extension.Manifest, error) {
 // GetAvailableAssetTypes returns built-in + extension asset types.
 func (a *App) GetAvailableAssetTypes() []AssetTypeInfo {
 	types := []AssetTypeInfo{
-		{Type: "ssh", DisplayName: "SSH"},
-		{Type: "database", DisplayName: "Database"},
-		{Type: "redis", DisplayName: "Redis"},
-		{Type: "mongodb", DisplayName: "MongoDB"},
-		{Type: "k8s", DisplayName: "K8S"},
+		{Type: asset_entity.AssetTypeSSH, DisplayName: "SSH"},
+		{Type: asset_entity.AssetTypeDatabase, DisplayName: "Database"},
+		{Type: asset_entity.AssetTypeRedis, DisplayName: "Redis"},
+		{Type: asset_entity.AssetTypeMongoDB, DisplayName: "MongoDB", SSHTunnel: true},
+		{Type: asset_entity.AssetTypeKafka, DisplayName: "Kafka", SSHTunnel: true},
+		{Type: asset_entity.AssetTypeK8s, DisplayName: "K8S"},
 	}
 	if a.extSvc != nil {
 		bridge := a.extSvc.Bridge()

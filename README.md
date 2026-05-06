@@ -31,9 +31,9 @@ OpsKat
 
 ## About
 
-Managing servers often means juggling multiple tools — SSH clients, database GUIs, Redis managers — constantly switching between them. OpsKat brings everything together in one place. With its AI agent, you can describe what you need in natural language, and it handles the rest. Even without the AI features, all common asset operations are unified in a single interface.
+Managing servers often means juggling multiple tools — SSH clients, database GUIs, Redis managers, and Kafka consoles — constantly switching between them. OpsKat brings everything together in one place. With its AI agent, you can describe what you need in natural language, and it handles the rest. Even without the AI features, all common asset operations are unified in a single interface.
 
-Currently supports SSH servers, MySQL/PostgreSQL databases, and Redis, with more asset types planned via a plugin system.
+Currently supports SSH servers, MySQL/PostgreSQL databases, Redis, MongoDB, and Kafka, with more asset types planned via a plugin system.
 
 **If you find it useful, please give us a Star ⭐ — it means a lot!**
 
@@ -45,13 +45,14 @@ https://github.com/user-attachments/assets/035fc0df-230c-456b-87bd-8a4a125feaec
 
 - **"Show me the recent nginx error logs on web-01"** → AI automatically SSHs in, runs the command, and returns the results
 - **"Count users by status in the db-prod users table"** → AI connects to the database via SSH tunnel and executes the SQL query
+- **"List lagging Kafka consumer groups in kafka-prod"** → AI checks Kafka metadata and group lag under policy control
 - **"Check the health of the k3s cluster"** → AI runs kubectl commands and summarizes node and pod status
 
 ## 🛡️ Security & Audit
 
 Giving AI permission to operate on your servers — how do you keep it safe?
 
-- **Operation policies** — SSH commands, SQL statements, and Redis operations all support allow/deny lists. SQL is analyzed by a parser that automatically blocks dangerous operations like DELETE/UPDATE without WHERE clauses
+- **Operation policies** — SSH commands, SQL statements, Redis operations, MongoDB operations, and Kafka actions all support allow/deny lists. SQL is analyzed by a parser that automatically blocks dangerous operations like DELETE/UPDATE without WHERE clauses
 - **Policy groups** — Built-in templates (Linux read-only, dangerous command deny, etc.) plus custom user-defined groups
 - **Pre-approved permissions** — AI or opsctl can request a batch of command patterns upfront. Once approved, matching commands execute automatically without per-command confirmation
 - **Audit logs** — Every operation is automatically recorded: who, when, which server, what command, and the full decision trail
@@ -60,12 +61,14 @@ Giving AI permission to operate on your servers — how do you keep it safe?
 
 Beyond the AI, OpsKat is a complete terminal and asset management tool:
 
-- Tree-structured grouping for SSH servers, databases, and Redis
+- Tree-structured grouping for SSH servers, databases, Redis, MongoDB, and Kafka
 - Split pane terminal with customizable themes
 - SFTP file browser
 - Jump host chain connections
 - SQL query editor (MySQL/PostgreSQL via SSH tunnel)
 - Redis command execution with key browser
+- MongoDB collection browsing and query execution
+- Kafka cluster, topic, message, consumer group, ACL, Schema Registry, and Kafka Connect management
 - Port forwarding and SOCKS proxy
 - Encrypted credential storage
 - Import from SSH config / Tabby

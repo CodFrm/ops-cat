@@ -16,6 +16,7 @@ const (
 	PolicyTypeQuery   = "query"
 	PolicyTypeRedis   = "redis"
 	PolicyTypeMongo   = "mongo"
+	PolicyTypeKafka   = "kafka"
 )
 
 // PolicyGroup 权限组实体（数据库）
@@ -44,7 +45,7 @@ func (pg *PolicyGroup) Validate() error {
 		return errors.New("权限组名称不能为空")
 	}
 	switch pg.PolicyType {
-	case PolicyTypeCommand, PolicyTypeQuery, PolicyTypeRedis, PolicyTypeMongo:
+	case PolicyTypeCommand, PolicyTypeQuery, PolicyTypeRedis, PolicyTypeMongo, PolicyTypeKafka:
 	default:
 		if !hasExtensionPolicyType(pg.PolicyType) {
 			return errors.New("无效的策略类型")
@@ -283,6 +284,109 @@ func BuiltinGroups() []*PolicyGroup {
 			Policy: mustMarshal(&policy.MongoPolicy{
 				DenyTypes: []string{
 					"dropDatabase", "dropCollection",
+				},
+			}),
+		},
+		// Kafka 类型
+		{
+			BuiltinID:   policy.BuiltinKafkaMetadataReadOnly,
+			Name:        "Kafka Metadata Read-Only",
+			Description: "Allow Kafka cluster, broker, topic, and consumer group metadata reads",
+			PolicyType:  PolicyTypeKafka,
+			Policy: mustMarshal(&policy.KafkaPolicy{
+				AllowList: []string{
+					"cluster.read *",
+					"broker.read *",
+					"cluster.config.read *",
+					"topic.list *",
+					"topic.read *",
+					"topic.config.read *",
+					"consumer_group.list *",
+					"consumer_group.read *",
+				},
+			}),
+		},
+		{
+			BuiltinID:   policy.BuiltinKafkaMessageRead,
+			Name:        "Kafka Message Read",
+			Description: "Allow bounded Kafka message browsing",
+			PolicyType:  PolicyTypeKafka,
+			Policy: mustMarshal(&policy.KafkaPolicy{
+				AllowList: []string{
+					"message.read *",
+				},
+			}),
+		},
+		{
+			BuiltinID:   policy.BuiltinKafkaSchemaReadOnly,
+			Name:        "Kafka Schema Registry Read-Only",
+			Description: "Allow Schema Registry read operations",
+			PolicyType:  PolicyTypeKafka,
+			Policy: mustMarshal(&policy.KafkaPolicy{
+				AllowList: []string{
+					"schema.read *",
+				},
+			}),
+		},
+		{
+			BuiltinID:   policy.BuiltinKafkaConnectReadOnly,
+			Name:        "Kafka Connect Read-Only",
+			Description: "Allow Kafka Connect read operations",
+			PolicyType:  PolicyTypeKafka,
+			Policy: mustMarshal(&policy.KafkaPolicy{
+				AllowList: []string{
+					"connect.read *",
+				},
+			}),
+		},
+		{
+			BuiltinID:   policy.BuiltinKafkaOperator,
+			Name:        "Kafka Operator",
+			Description: "Allow Kafka topic, message, and consumer group administration",
+			PolicyType:  PolicyTypeKafka,
+			Policy: mustMarshal(&policy.KafkaPolicy{
+				AllowList: []string{
+					"topic.create *",
+					"topic.config.write *",
+					"topic.partitions.write *",
+					"topic.records.delete *",
+					"message.write *",
+					"consumer_group.offset.write *",
+					"consumer_group.delete *",
+					"schema.write *",
+					"schema.delete *",
+					"connect.write *",
+					"connect.state.write *",
+					"connect.delete *",
+				},
+			}),
+		},
+		{
+			BuiltinID:   policy.BuiltinKafkaSecurityAdmin,
+			Name:        "Kafka Security Admin",
+			Description: "Allow Kafka ACL changes",
+			PolicyType:  PolicyTypeKafka,
+			Policy: mustMarshal(&policy.KafkaPolicy{
+				AllowList: []string{
+					"acl.read *",
+					"acl.write *",
+				},
+			}),
+		},
+		{
+			BuiltinID:   policy.BuiltinKafkaDangerousDeny,
+			Name:        "Kafka Dangerous Deny",
+			Description: "Deny destructive and high-risk Kafka operations",
+			PolicyType:  PolicyTypeKafka,
+			Policy: mustMarshal(&policy.KafkaPolicy{
+				DenyList: []string{
+					"topic.delete *",
+					"topic.records.delete *",
+					"consumer_group.offset.write *",
+					"consumer_group.delete *",
+					"acl.write *",
+					"schema.delete *",
+					"connect.delete *",
 				},
 			}),
 		},

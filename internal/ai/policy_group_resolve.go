@@ -94,6 +94,26 @@ func resolveMongoGroups(ctx context.Context, groupIDs []string) (allowTypes, den
 	return
 }
 
+// resolveKafkaGroups 解析引用的 Kafka 权限组，返回合并后的 allow/deny 规则
+func resolveKafkaGroups(ctx context.Context, groupIDs []string) (allow, deny []string) {
+	if len(groupIDs) == 0 {
+		return
+	}
+	for _, pg := range fetchPolicyGroups(ctx, groupIDs) {
+		if pg.PolicyType != policy_group_entity.PolicyTypeKafka {
+			continue
+		}
+		var p policy.KafkaPolicy
+		if err := json.Unmarshal([]byte(pg.Policy), &p); err != nil {
+			logger.Default().Warn("unmarshal policy group kafka policy", zap.String("id", pg.BuiltinID), zap.Error(err))
+			continue
+		}
+		allow = append(allow, p.AllowList...)
+		deny = append(deny, p.DenyList...)
+	}
+	return
+}
+
 // fetchPolicyGroups 按 ID 列表获取权限组（内置组从代码，用户组从 DB）
 func fetchPolicyGroups(ctx context.Context, ids []string) []*policy_group_entity.PolicyGroup {
 	var result []*policy_group_entity.PolicyGroup

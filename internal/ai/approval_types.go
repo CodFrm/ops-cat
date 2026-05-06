@@ -2,7 +2,7 @@ package ai
 
 // ApprovalItem 统一审批项，AI 和 opsctl 共用
 type ApprovalItem struct {
-	Type      string `json:"type"` // "exec", "k8s", "sql", "redis", "cp", "grant"
+	Type      string `json:"type"` // "exec", "k8s", "sql", "redis", "mongo", "kafka", "cp", "grant"
 	AssetID   int64  `json:"asset_id"`
 	AssetName string `json:"asset_name"`
 	GroupID   int64  `json:"group_id,omitempty"`

@@ -10,7 +10,7 @@ registerAssetType({
   connectAction: "query",
   DetailInfoCard: MongoDBDetailInfoCard,
   policy: {
-    policyType: "mongodb",
+    policyType: "mongo",
     titleKey: "asset.mongoPolicy",
     hintKey: "asset.mongoPolicyHint",
     testPlaceholderKey: "asset.policyTestMongoPlaceholder",

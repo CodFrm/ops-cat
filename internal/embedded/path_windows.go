@@ -54,7 +54,7 @@ func broadcastSettingChange() {
 		uintptr(0xFFFF),              // HWND_BROADCAST
 		uintptr(0x001A),              // WM_SETTINGCHANGE
 		0,                            // wParam
-		uintptr(unsafe.Pointer(env)), //nolint:gosec // lParam
+		uintptr(unsafe.Pointer(env)), //nolint:gosec // required by SendMessageTimeoutW lParam
 		uintptr(0x0002),              // SMTO_ABORTIFHUNG
 		uintptr(5000),                // timeout ms
 		0,                            // lpdwResult

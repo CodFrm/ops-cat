@@ -209,6 +209,10 @@ func (c *CommandPolicyChecker) SubmitGrantMulti(ctx context.Context, items []Gra
 // 返回首个匹配的 pattern，空字符串表示未匹配
 // groups 为资产所属的组链（组 → 父组 → ... → 根）
 func matchGrantPatterns(ctx context.Context, assetID int64, groups []*group_entity.Group, subCmds []string) string {
+	return matchGrantPatternsWith(ctx, assetID, groups, subCmds, MatchCommandRule)
+}
+
+func matchGrantPatternsWith(ctx context.Context, assetID int64, groups []*group_entity.Group, subCmds []string, matchFn MatchFunc) string {
 	sessionID := GetSessionID(ctx)
 	if sessionID == "" {
 		return ""
@@ -236,7 +240,7 @@ func matchGrantPatterns(ctx context.Context, assetID int64, groups []*group_enti
 			if !grantItemMatchesTarget(item, assetID, groupIDs) {
 				continue
 			}
-			if MatchCommandRule(item.Command, cmd) {
+			if matchFn(item.Command, cmd) {
 				matched = true
 				if firstPattern == "" {
 					firstPattern = item.Command
@@ -295,6 +299,11 @@ func CheckRedisPolicyForOpsctl(ctx context.Context, assetID int64, command strin
 	return CheckPermission(ctx, asset_entity.AssetTypeRedis, assetID, command)
 }
 
+// CheckKafkaPolicyForOpsctl 检查 Kafka 策略，内部委托 CheckPermission。
+func CheckKafkaPolicyForOpsctl(ctx context.Context, assetID int64, command string) CheckResult {
+	return CheckPermission(ctx, asset_entity.AssetTypeKafka, assetID, command)
+}
+
 // CheckForAsset 按资产类型分发权限检查
 func (c *CommandPolicyChecker) CheckForAsset(ctx context.Context, assetID int64, assetType, command string) CheckResult {
 	result := CheckPermission(ctx, assetType, assetID, command)
@@ -328,6 +337,8 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 		approvalType = "redis"
 	case asset_entity.AssetTypeMongoDB:
 		approvalType = "mongo"
+	case asset_entity.AssetTypeKafka:
+		approvalType = "kafka"
 	case asset_entity.AssetTypeK8s:
 		approvalType = "k8s"
 	}
@@ -567,6 +578,42 @@ func collectMongoDBPolicies(ctx context.Context, asset *asset_entity.Asset) *ass
 			merged.AllowTypes = p.AllowTypes
 		}
 		merged.DenyTypes = appendUnique(merged.DenyTypes, p.DenyTypes...)
+	}
+	return merged
+}
+
+// collectKafkaPolicies 收集资产 + 组链的 Kafka 权限策略并合并
+func collectKafkaPolicies(ctx context.Context, asset *asset_entity.Asset) *asset_entity.KafkaPolicy {
+	var holders []policy.Holder
+	if asset != nil {
+		holders = append(holders, asset)
+		if asset.GroupID > 0 {
+			for _, g := range resolveGroupChain(ctx, asset.GroupID) {
+				holders = append(holders, g)
+			}
+		}
+	}
+	policies := collectPoliciesFromChain(holders, func(h policy.Holder) (*asset_entity.KafkaPolicy, error) {
+		return h.GetKafkaPolicy()
+	})
+	if len(policies) == 0 {
+		return nil
+	}
+	// 解析引用的权限组
+	for _, p := range policies {
+		if len(p.Groups) > 0 {
+			grpAllow, grpDeny := resolveKafkaGroups(ctx, p.Groups)
+			p.AllowList = append(p.AllowList, grpAllow...)
+			p.DenyList = append(p.DenyList, grpDeny...)
+		}
+	}
+	// 合并：allow_list 取第一个非空（资产优先），deny_list 全部合并
+	merged := &asset_entity.KafkaPolicy{}
+	for _, p := range policies {
+		if len(merged.AllowList) == 0 && len(p.AllowList) > 0 {
+			merged.AllowList = p.AllowList
+		}
+		merged.DenyList = appendUnique(merged.DenyList, p.DenyList...)
 	}
 	return merged
 }

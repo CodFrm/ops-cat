@@ -18,6 +18,7 @@ import (
 	"github.com/opskat/opskat/internal/repository/extension_state_repo"
 	"github.com/opskat/opskat/internal/service/credential_resolver"
 	"github.com/opskat/opskat/internal/service/extension_svc"
+	"github.com/opskat/opskat/internal/service/kafka_svc"
 	"github.com/opskat/opskat/internal/service/redis_svc"
 	"github.com/opskat/opskat/internal/service/sftp_svc"
 	"github.com/opskat/opskat/internal/service/snippet_svc"
@@ -75,6 +76,7 @@ type App struct {
 	sshPool                 *sshpool.Pool              // opsctl SSH 连接池
 	sshProxyServer          *sshpool.Server            // SSH 连接池 Unix socket 服务
 	redisService            *redis_svc.Service         // Redis 浏览/编辑服务
+	kafkaService            *kafka_svc.Service         // Kafka 管理服务
 	shutdownCh              chan struct{}              // 关闭信号，cleanup 时 close 以解除所有阻塞等待
 	pendingAuthResponses    sync.Map                   // map[string]chan []string（keyboard-interactive 认证响应用）
 	pendingHostKeyResponses sync.Map                   // map[string]chan ssh_svc.HostKeyAction（主机密钥校验响应用）
@@ -119,6 +121,7 @@ func (a *App) Startup(ctx context.Context) {
 	a.startApprovalServer(authToken)
 	a.startSSHPoolServer(authToken)
 	a.redisService = redis_svc.New(a.sshPool)
+	a.kafkaService = kafka_svc.New(a.sshPool)
 	a.startAutoUpdateCheck()
 	a.InitAIProvider()
 	a.subscribeAIFlushAck()
@@ -187,6 +190,10 @@ func (a *App) Cleanup() {
 	// 先发送关闭信号，解除所有阻塞等待（审批、权限确认等），避免 wg.Wait 死锁
 	close(a.shutdownCh)
 
+	if a.kafkaService != nil {
+		a.kafkaService.Close()
+		a.kafkaService = nil
+	}
 	if a.sshProxyServer != nil {
 		a.sshProxyServer.Stop()
 	}

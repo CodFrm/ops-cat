@@ -2,6 +2,7 @@ package approval
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"github.com/smartystreets/goconvey/convey"
@@ -117,7 +118,8 @@ func TestApprovalResponse_JSON(t *testing.T) {
 
 func TestSocketPath(t *testing.T) {
 	convey.Convey("SocketPath", t, func() {
-		path := SocketPath("/tmp/opskat")
-		assert.Equal(t, "/tmp/opskat/approval.sock", path)
+		dataDir := t.TempDir()
+		path := SocketPath(dataDir)
+		assert.Equal(t, filepath.Join(dataDir, "approval.sock"), path)
 	})
 }

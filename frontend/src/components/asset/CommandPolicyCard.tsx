@@ -64,7 +64,9 @@ export function CommandPolicyCard({
           ? ("query" as const)
           : policyType === "redis"
             ? ("redis" as const)
-            : (policyType as string);
+            : policyType === "mongodb"
+              ? ("mongo" as const)
+              : (policyType as string);
 
   return (
     <div className="rounded-xl border bg-card p-4">

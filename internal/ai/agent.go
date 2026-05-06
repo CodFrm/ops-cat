@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/opskat/opskat/internal/service/kafka_svc"
 	"github.com/opskat/opskat/internal/sshpool"
 
 	"github.com/cago-frame/cago/pkg/logger"
@@ -225,6 +226,7 @@ type DefaultToolExecutor struct {
 	sshCache     *SSHClientCache
 	sshPool      *sshpool.Pool // SSH 连接池，供 Redis/Database 隧道使用
 	mongoDBCache *MongoDBClientCache
+	kafkaService *kafka_svc.Service // 同一次 Chat 内复用 Kafka client，避免每次工具调用重新 dial+ping
 }
 
 func NewDefaultToolExecutor() *DefaultToolExecutor {
@@ -232,16 +234,21 @@ func NewDefaultToolExecutor() *DefaultToolExecutor {
 	for _, def := range AllToolDefs() {
 		handlers[def.Name] = def.Handler
 	}
+	pool := sshpool.NewPool(&AIPoolDialer{}, 5*time.Minute)
 	return &DefaultToolExecutor{
 		handlers:     handlers,
 		sshCache:     NewSSHClientCache(),
-		sshPool:      sshpool.NewPool(&AIPoolDialer{}, 5*time.Minute),
+		sshPool:      pool,
 		mongoDBCache: NewMongoDBClientCache(),
+		kafkaService: kafka_svc.New(pool),
 	}
 }
 
 // Close 关闭所有缓存的连接
 func (e *DefaultToolExecutor) Close() error {
+	if e.kafkaService != nil {
+		e.kafkaService.Close()
+	}
 	e.sshPool.Close()
 	if err := e.mongoDBCache.Close(); err != nil {
 		logger.Default().Warn("close MongoDB cache", zap.Error(err))
@@ -266,5 +273,7 @@ func (e *DefaultToolExecutor) Execute(ctx context.Context, name string, argsJSON
 	}
 	// 注入 MongoDB 缓存，exec_mongo 会自动使用
 	ctx = WithMongoDBCache(ctx, e.mongoDBCache)
+	// 注入 Kafka service，kafka_* handler 会复用其内部 KafkaClientManager 的缓存
+	ctx = WithKafkaService(ctx, e.kafkaService)
 	return handler(ctx, args)
 }

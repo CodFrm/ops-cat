@@ -2,7 +2,7 @@ package ai
 
 import (
 	"context"
-	"path/filepath"
+	"path"
 	"strings"
 
 	"github.com/cago-frame/cago/pkg/logger"
@@ -67,9 +67,9 @@ func MatchRedisRule(rule, cmd string) bool {
 	// 按首个参数做 glob 匹配（key pattern）
 	ruleFirstArg := strings.Fields(ruleArgs)[0]
 	cmdFirstArg := strings.Fields(cmdArgs)[0]
-	matched, err := filepath.Match(ruleFirstArg, cmdFirstArg)
+	matched, err := path.Match(ruleFirstArg, cmdFirstArg)
 	if err != nil {
-		logger.Default().Warn("redis policy filepath match", zap.String("pattern", ruleFirstArg), zap.Error(err))
+		logger.Default().Warn("redis policy path match", zap.String("pattern", ruleFirstArg), zap.Error(err))
 	}
 	return matched
 }

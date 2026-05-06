@@ -6,7 +6,7 @@ describe("getAssetTypeOptions", () => {
   it("returns built-in options when extensions registry is empty", () => {
     const opts = getAssetTypeOptions({});
     const values = opts.map((o) => o.value);
-    expect(values).toEqual(["ssh", "database", "redis", "mongodb", "k8s"]);
+    expect(values).toEqual(["ssh", "database", "redis", "mongodb", "kafka", "k8s"]);
     expect(opts.every((o) => o.group === "builtin")).toBe(true);
   });
 

@@ -165,3 +165,42 @@ func TestDefaultMongoPolicy(t *testing.T) {
 		})
 	})
 }
+
+func TestKafkaPolicyIsEmpty(t *testing.T) {
+	Convey("KafkaPolicy.IsEmpty()", t, func() {
+		Convey("空策略返回 true", func() {
+			p := &KafkaPolicy{}
+			So(p.IsEmpty(), ShouldBeTrue)
+		})
+
+		Convey("有 AllowList 时返回 false", func() {
+			p := &KafkaPolicy{AllowList: []string{"topic.read *"}}
+			So(p.IsEmpty(), ShouldBeFalse)
+		})
+
+		Convey("有 DenyList 时返回 false", func() {
+			p := &KafkaPolicy{DenyList: []string{"topic.delete *"}}
+			So(p.IsEmpty(), ShouldBeFalse)
+		})
+
+		Convey("有 Groups 时返回 false", func() {
+			p := &KafkaPolicy{Groups: []string{BuiltinKafkaMetadataReadOnly}}
+			So(p.IsEmpty(), ShouldBeFalse)
+		})
+	})
+}
+
+func TestDefaultKafkaPolicy(t *testing.T) {
+	Convey("DefaultKafkaPolicy()", t, func() {
+		p := DefaultKafkaPolicy()
+
+		Convey("不为空", func() {
+			So(p.IsEmpty(), ShouldBeFalse)
+		})
+
+		Convey("包含内置 Kafka 权限组引用", func() {
+			So(p.Groups, ShouldContain, BuiltinKafkaMetadataReadOnly)
+			So(p.Groups, ShouldContain, BuiltinKafkaDangerousDeny)
+		})
+	})
+}

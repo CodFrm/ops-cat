@@ -108,6 +108,7 @@ func TestMatchCommandRule(t *testing.T) {
 		Convey("路径 glob 匹配", func() {
 			So(MatchCommandRule("cat /var/log/*", "cat /var/log/nginx.log"), ShouldBeTrue)
 			So(MatchCommandRule("cat /var/log/*", "cat /etc/passwd"), ShouldBeFalse)
+			So(MatchCommandRule("cat /var/log/*", "cat /var/log/nginx/access.log"), ShouldBeFalse)
 		})
 
 		Convey("多余子命令 - 无通配符拒绝", func() {
