@@ -328,6 +328,8 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 		approvalType = "redis"
 	case asset_entity.AssetTypeMongoDB:
 		approvalType = "mongo"
+	case asset_entity.AssetTypeK8s:
+		approvalType = "k8s"
 	}
 
 	items := []ApprovalItem{{
@@ -565,6 +567,40 @@ func collectMongoDBPolicies(ctx context.Context, asset *asset_entity.Asset) *ass
 			merged.AllowTypes = p.AllowTypes
 		}
 		merged.DenyTypes = appendUnique(merged.DenyTypes, p.DenyTypes...)
+	}
+	return merged
+}
+
+// collectK8sPolicies 收集资产 + 组链的 K8s 权限策略并合并
+func collectK8sPolicies(ctx context.Context, asset *asset_entity.Asset) *asset_entity.K8sPolicy {
+	var holders []policy.Holder
+	if asset != nil {
+		holders = append(holders, asset)
+		if asset.GroupID > 0 {
+			for _, g := range resolveGroupChain(ctx, asset.GroupID) {
+				holders = append(holders, g)
+			}
+		}
+	}
+	policies := collectPoliciesFromChain(holders, func(h policy.Holder) (*asset_entity.K8sPolicy, error) {
+		return h.GetK8sPolicy()
+	})
+	if len(policies) == 0 {
+		return nil
+	}
+	for _, p := range policies {
+		if len(p.Groups) > 0 {
+			grpAllow, grpDeny := resolveCommandGroups(ctx, p.Groups)
+			p.AllowList = append(p.AllowList, grpAllow...)
+			p.DenyList = append(p.DenyList, grpDeny...)
+		}
+	}
+	merged := &asset_entity.K8sPolicy{}
+	for _, p := range policies {
+		if len(merged.AllowList) == 0 && len(p.AllowList) > 0 {
+			merged.AllowList = p.AllowList
+		}
+		merged.DenyList = appendUnique(merged.DenyList, p.DenyList...)
 	}
 	return merged
 }

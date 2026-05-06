@@ -60,6 +60,7 @@ func NewCategoryRegistry() *CategoryRegistry {
 		{ID: snippet_entity.CategorySQL, AssetType: "database", Label: "SQL", Source: CategorySourceBuiltin},
 		{ID: snippet_entity.CategoryRedis, AssetType: "redis", Label: "Redis", Source: CategorySourceBuiltin},
 		{ID: snippet_entity.CategoryMongo, AssetType: "mongodb", Label: "Mongo", Source: CategorySourceBuiltin},
+		{ID: snippet_entity.CategoryK8s, AssetType: "k8s", Label: "K8S", Source: CategorySourceBuiltin},
 		{ID: snippet_entity.CategoryPrompt, AssetType: "", Label: "Prompt", Source: CategorySourceBuiltin},
 	}
 	r := &CategoryRegistry{builtins: builtins}

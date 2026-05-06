@@ -24,7 +24,7 @@ func cmdCreate(ctx context.Context, handlers map[string]ai.ToolHandlerFunc, args
 	switch resource {
 	case "asset":
 		fs := flag.NewFlagSet("create asset", flag.ExitOnError)
-		assetType := fs.String("type", "ssh", `Asset type: "ssh", "database", "redis", or "mongodb"`)
+		assetType := fs.String("type", "ssh", `Asset type: "ssh", "database", "redis", "mongodb", or "k8s"`)
 		name := fs.String("name", "", "Display name for the asset (required)")
 		host := fs.String("host", "", "Hostname or IP address (required)")
 		port := fs.Int("port", 0, "Port number (default: auto by type)")
@@ -33,15 +33,41 @@ func cmdCreate(ctx context.Context, handlers map[string]ai.ToolHandlerFunc, args
 		driver := fs.String("driver", "", `Database driver: "mysql" or "postgresql" (required for database type)`)
 		database := fs.String("database", "", "Default database name (for database type)")
 		readOnly := fs.Bool("read-only", false, "Enable read-only mode (for database type)")
-		sshAsset := fs.String("ssh-asset", "", "SSH asset name/ID for tunnel connection (for database/redis)")
+		sshAsset := fs.String("ssh-asset", "", "SSH asset name/ID for tunnel connection (for database/redis/k8s)")
+		kubeconfig := fs.String("kubeconfig", "", "Kubeconfig YAML content (k8s type)")
+		kubeconfigFile := fs.String("kubeconfig-file", "", "Path to kubeconfig YAML file (k8s type)")
+		k8sNamespace := fs.String("namespace", "", "Default Kubernetes namespace (k8s type)")
+		k8sContext := fs.String("context", "", "Kubeconfig context name (k8s type)")
 		groupID := fs.Int64("group-id", 0, "Group ID to assign the asset to (0 = ungrouped)")
 		description := fs.String("description", "", "Optional description or notes")
 		icon := fs.String("icon", "", "Icon name (e.g. server, kubernetes, docker)")
 		fs.Usage = func() { printCreateAssetUsage() }
 		_ = fs.Parse(args[1:])
 
-		if *name == "" || *host == "" || *username == "" {
-			fmt.Fprintln(os.Stderr, "Error: --name, --host, and --username are required")
+		if *kubeconfig == "" && *kubeconfigFile != "" {
+			data, readErr := os.ReadFile(*kubeconfigFile)
+			if readErr != nil {
+				fmt.Fprintf(os.Stderr, "Error reading kubeconfig file: %v\n", readErr)
+				return 1
+			}
+			*kubeconfig = string(data)
+		}
+
+		if *name == "" {
+			fmt.Fprintln(os.Stderr, "Error: --name is required")
+			fmt.Fprintln(os.Stderr)
+			printCreateAssetUsage()
+			return 1
+		}
+		if *assetType == "k8s" {
+			if *kubeconfig == "" {
+				fmt.Fprintln(os.Stderr, "Error: --kubeconfig or --kubeconfig-file is required for k8s assets")
+				fmt.Fprintln(os.Stderr)
+				printCreateAssetUsage()
+				return 1
+			}
+		} else if *host == "" || *username == "" {
+			fmt.Fprintln(os.Stderr, "Error: --host and --username are required")
 			fmt.Fprintln(os.Stderr)
 			printCreateAssetUsage()
 			return 1
@@ -79,6 +105,15 @@ func cmdCreate(ctx context.Context, handlers map[string]ai.ToolHandlerFunc, args
 				params["read_only"] = "true"
 			}
 		}
+		if *assetType == "k8s" {
+			params["kubeconfig"] = *kubeconfig
+			if *k8sNamespace != "" {
+				params["namespace"] = *k8sNamespace
+			}
+			if *k8sContext != "" {
+				params["context"] = *k8sContext
+			}
+		}
 		if *sshAsset != "" {
 			sshID, resolveErr := resolveAssetID(ctx, *sshAsset)
 			if resolveErr != nil {
@@ -97,9 +132,13 @@ func cmdCreate(ctx context.Context, handlers map[string]ai.ToolHandlerFunc, args
 			params["icon"] = *icon
 		}
 		// Require approval
+		detail := fmt.Sprintf("opsctl create asset --type %s --name %s", *assetType, *name)
+		if *assetType != "k8s" {
+			detail = fmt.Sprintf("%s --host %s", detail, *host)
+		}
 		if _, err := requireApproval(ctx, approval.ApprovalRequest{
 			Type:      "create",
-			Detail:    fmt.Sprintf("opsctl create asset --type %s --name %s --host %s", *assetType, *name, *host),
+			Detail:    detail,
 			SessionID: session,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -195,7 +234,7 @@ func printCreateUsage() {
   opsctl create <resource> [flags]
 
 Resources:
-  asset     Create a new asset (ssh, database, or redis)
+  asset     Create a new asset (ssh, database, redis, mongodb, or k8s)
 
 Run 'opsctl create asset --help' for details.
 `)
@@ -207,17 +246,22 @@ func printCreateAssetUsage() {
 
 Required Flags:
   --name <string>         Display name for the asset
-  --host <string>         Hostname or IP address
-  --username <string>     Login username
+  --host <string>         Hostname or IP address (required except k8s)
+  --username <string>     Login username (required except k8s)
 
 Optional Flags:
-  --type <string>         Asset type: "ssh" (default), "database", or "redis"
-  --port <int>            Port number (default: auto by type — 22/3306/5432/6379)
+  --type <string>         Asset type: "ssh" (default), "database", "redis", "mongodb", or "k8s"
+  --port <int>            Port number (default: auto by type — 22/3306/5432/6379/27017)
   --auth-type <string>    SSH auth method: "password" or "key" (SSH type only)
   --driver <string>       Database driver: "mysql" or "postgresql" (database type, required)
   --database <string>     Default database name (database type)
   --read-only             Enable read-only mode (database type)
-  --ssh-asset <asset>     SSH asset name/ID for tunnel connection (database/redis types)
+  --kubeconfig <string>   Kubeconfig YAML content (k8s type)
+  --kubeconfig-file <path>
+                          Path to kubeconfig YAML file (k8s type)
+  --namespace <string>    Default Kubernetes namespace (k8s type)
+  --context <string>      Kubeconfig context name (k8s type)
+  --ssh-asset <asset>     SSH asset name/ID for tunnel connection (database/redis/k8s types)
   --group-id <int>        Group ID to assign the asset to (0 = ungrouped)
   --description <string>  Optional description or notes
   --icon <string>         Icon name (default: auto by type)
@@ -241,6 +285,7 @@ Examples:
   opsctl create asset --type database --driver postgresql --name "Analytics" --host pg.internal --port 5432 --username readonly --read-only
   opsctl create asset --type redis --name "Cache" --host redis.internal --username default
   opsctl create asset --type database --driver mysql --name "DB via SSH" --host 127.0.0.1 --username app --ssh-asset web-server
+  opsctl create asset --type k8s --name "Prod Cluster" --kubeconfig-file ~/.kube/config --context prod
 `)
 }
 

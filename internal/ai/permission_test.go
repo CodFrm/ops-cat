@@ -329,6 +329,90 @@ func TestCheckPermission_Redis(t *testing.T) {
 	})
 }
 
+func TestCheckPermission_K8s(t *testing.T) {
+	Convey("CheckPermission K8s", t, func() {
+		ctx, mockAsset, _ := setupPolicyTest(t)
+
+		Convey("allow list match → Allow", func() {
+			asset := &asset_entity.Asset{
+				ID:   1,
+				Type: asset_entity.AssetTypeK8s,
+				CmdPolicy: mustJSON(asset_entity.K8sPolicy{
+					AllowList: []string{"kubectl get *", "kubectl describe *"},
+				}),
+			}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			result := CheckPermission(ctx, asset_entity.AssetTypeK8s, 1, "kubectl get pods -A")
+			So(result.Decision, ShouldEqual, Allow)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyAllow)
+		})
+
+		Convey("deny list match → Deny", func() {
+			asset := &asset_entity.Asset{
+				ID:   1,
+				Type: asset_entity.AssetTypeK8s,
+				CmdPolicy: mustJSON(asset_entity.K8sPolicy{
+					DenyList: []string{"kubectl delete *"},
+				}),
+			}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			result := CheckPermission(ctx, asset_entity.AssetTypeK8s, 1, "kubectl delete pod api-0")
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
+		})
+
+		Convey("NeedConfirm returns kubectl rules as HintRules", func() {
+			asset := &asset_entity.Asset{
+				ID:   1,
+				Type: asset_entity.AssetTypeK8s,
+				CmdPolicy: mustJSON(asset_entity.K8sPolicy{
+					AllowList: []string{"kubectl get *", "kubectl logs *"},
+				}),
+			}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			result := CheckPermission(ctx, asset_entity.AssetTypeK8s, 1, "kubectl rollout restart deploy/api")
+			So(result.Decision, ShouldEqual, NeedConfirm)
+			So(result.HintRules, ShouldContain, "kubectl get *")
+			So(result.HintRules, ShouldContain, "kubectl logs *")
+		})
+
+		Convey("grant match → Allow", func() {
+			asset := &asset_entity.Asset{
+				ID:   1,
+				Type: asset_entity.AssetTypeK8s,
+				CmdPolicy: mustJSON(asset_entity.K8sPolicy{
+					AllowList: []string{"kubectl get *"},
+				}),
+			}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			stubGrant := newStubGrantRepo()
+			origGrant := grant_repo.Grant()
+			grant_repo.RegisterGrant(stubGrant)
+			t.Cleanup(func() {
+				if origGrant != nil {
+					grant_repo.RegisterGrant(origGrant)
+				}
+			})
+
+			stubGrant.sessions["sess-k8s"] = &grant_entity.GrantSession{
+				ID: "sess-k8s", Status: grant_entity.GrantStatusApproved,
+			}
+			stubGrant.items["sess-k8s"] = []*grant_entity.GrantItem{
+				{GrantSessionID: "sess-k8s", AssetID: 1, Command: "kubectl rollout restart *"},
+			}
+
+			grantCtx := WithSessionID(ctx, "sess-k8s")
+			result := CheckPermission(grantCtx, asset_entity.AssetTypeK8s, 1, "kubectl rollout restart deploy/api")
+			So(result.Decision, ShouldEqual, Allow)
+			So(result.DecisionSource, ShouldEqual, SourceGrantAllow)
+		})
+	})
+}
+
 func TestSaveGrantPattern(t *testing.T) {
 	Convey("SaveGrantPattern", t, func() {
 		stubGrant := newStubGrantRepo()

@@ -48,14 +48,14 @@ func AllToolDefs() []ToolDef {
 			Name:        "list_assets",
 			Description: "List managed remote server assets. Returns an array of assets (with ID, name, type, group, etc.). This is typically the first step to discover asset IDs for other operations. Supports filtering by type and group. Use get_asset to view asset description and connection details.",
 			Params: []ParamDef{
-				{Name: "asset_type", Type: ParamString, Description: `Filter by asset type. Supported: "ssh", "database", "redis", "mongodb". Omit to return all types.`},
+				{Name: "asset_type", Type: ParamString, Description: `Filter by asset type. Supported: "ssh", "database", "redis", "mongodb", "k8s". Omit to return all types.`},
 				{Name: "group_id", Type: ParamNumber, Description: "Filter by group ID. Omit or set to 0 to list all groups."},
 			},
 			Handler: handleListAssets,
 		},
 		{
 			Name:        "get_asset",
-			Description: "Get detailed information about a specific asset, including its SSH connection configuration (host, port, username, auth method).",
+			Description: "Get detailed information about a specific asset, including SSH connection fields and asset-type-specific metadata. For k8s assets, inspect namespace, context, and ssh_tunnel_id to decide whether kubectl should run through an SSH jump host.",
 			Params: []ParamDef{
 				{Name: "id", Type: ParamNumber, Description: "Asset ID. Use list_assets to find available IDs.", Required: true},
 			},
@@ -72,14 +72,24 @@ func AllToolDefs() []ToolDef {
 			CommandExtractor: func(args map[string]any) string { return argString(args, "command") },
 		},
 		{
+			Name:        "exec_k8s",
+			Description: "Execute a kubectl command against a k8s asset. The tool uses the asset's stored kubeconfig, automatically applies the asset's default context/namespace when not explicitly provided, and preserves policy checks, approval, grant matching, and audit logging. If the k8s asset has ssh_tunnel_id, the command runs on that SSH jump host; otherwise kubectl runs locally. Pass either a full kubectl command or just the kubectl subcommand. Do not pass --kubeconfig.",
+			Params: []ParamDef{
+				{Name: "asset_id", Type: ParamNumber, Description: "K8s asset ID. Use list_assets with asset_type='k8s' to find it.", Required: true},
+				{Name: "command", Type: ParamString, Description: "kubectl command or subcommand, for example 'get pods -A' or 'kubectl describe pod api-0'.", Required: true},
+			},
+			Handler:          handleExecK8s,
+			CommandExtractor: k8sAuditCommandFromArgs,
+		},
+		{
 			Name:        "add_asset",
-			Description: `Add a new asset to the inventory. Supports types: "ssh", "database", "redis", "mongodb". For database, specify driver ("mysql" or "postgresql"). Credentials (password / private_key) are stored encrypted; never echo them back to the user.`,
+			Description: `Add a new asset to the inventory. Supports types: "ssh", "database", "redis", "mongodb", "k8s". For database, specify driver ("mysql" or "postgresql"). For k8s, specify kubeconfig. Credentials (password / private_key) are stored encrypted; never echo them back to the user.`,
 			Params: []ParamDef{
 				{Name: "name", Type: ParamString, Description: `Display name for the asset.`, Required: true},
-				{Name: "type", Type: ParamString, Description: `Asset type: "ssh" (default), "database", "redis", or "mongodb".`},
-				{Name: "host", Type: ParamString, Description: "Hostname or IP address.", Required: true},
-				{Name: "port", Type: ParamNumber, Description: "Port number (default: 22 for SSH, 3306 for MySQL, 5432 for PostgreSQL, 6379 for Redis, 27017 for MongoDB).", Required: true},
-				{Name: "username", Type: ParamString, Description: "Login username.", Required: true},
+				{Name: "type", Type: ParamString, Description: `Asset type: "ssh" (default), "database", "redis", "mongodb", or "k8s".`},
+				{Name: "host", Type: ParamString, Description: "Hostname or IP address. Required except for k8s."},
+				{Name: "port", Type: ParamNumber, Description: "Port number (default: 22 for SSH, 3306 for MySQL, 5432 for PostgreSQL, 6379 for Redis, 27017 for MongoDB). Required except for k8s."},
+				{Name: "username", Type: ParamString, Description: "Login username. Required except for k8s."},
 				{Name: "password", Type: ParamString, Description: "Plaintext password. Stored encrypted by the app. For SSH password auth, or database/redis/mongodb."},
 				{Name: "auth_type", Type: ParamString, Description: `SSH auth method: "password" (default if password supplied) or "key" (default if private_key supplied). Only for SSH type.`},
 				{Name: "private_key", Type: ParamString, Description: "SSH private key in PEM format. Imported into the credential store and linked to the asset. SSH only."},
@@ -88,7 +98,10 @@ func AllToolDefs() []ToolDef {
 				{Name: "database", Type: ParamString, Description: "Default database name. For database / mongodb type."},
 				{Name: "read_only", Type: ParamString, Description: `Set to "true" to enable read-only mode. For database type.`},
 				{Name: "redis_db", Type: ParamNumber, Description: "Default Redis DB index (0-15). Redis only."},
-				{Name: "ssh_asset_id", Type: ParamNumber, Description: "SSH asset ID for tunnel connection. For database / redis / mongodb types."},
+				{Name: "kubeconfig", Type: ParamString, Description: "Kubeconfig YAML content. Required for k8s type."},
+				{Name: "namespace", Type: ParamString, Description: "Default Kubernetes namespace. K8s only."},
+				{Name: "context", Type: ParamString, Description: "Kubeconfig context name to use. K8s only."},
+				{Name: "ssh_asset_id", Type: ParamNumber, Description: "SSH asset ID for tunnel connection. For database / redis / mongodb / k8s types."},
 				{Name: "group_id", Type: ParamNumber, Description: "Group ID to assign this asset to."},
 				{Name: "description", Type: ParamString, Description: "Optional description or notes."},
 			},
@@ -219,7 +232,7 @@ func AllToolDefs() []ToolDef {
 		},
 		{
 			Name:        "request_permission",
-			Description: "Request approval for grant of command patterns BEFORE executing them. Submit command patterns (one per line, supports '*' wildcard) for one or more target assets. The user will review and may edit the patterns before approving. Once approved, subsequent run_command/exec_sql/exec_redis calls matching any approved pattern will be auto-approved.",
+			Description: "Request approval for grant of command patterns BEFORE executing them. Submit command patterns (one per line, supports '*' wildcard) for one or more target assets. The user will review and may edit the patterns before approving. Once approved, subsequent run_command/exec_k8s/exec_sql/exec_redis calls matching any approved pattern will be auto-approved.",
 			Params: []ParamDef{
 				{Name: "items", Type: ParamString, Description: `JSON array of items. Each item: {"asset_id": <number>, "command_patterns": "<patterns separated by newline>"}. Example: [{"asset_id":1,"command_patterns":"cat /var/log/*\nsystemctl * nginx"},{"asset_id":2,"command_patterns":"SELECT * FROM users"}]`, Required: true},
 				{Name: "reason", Type: ParamString, Description: "Brief explanation of why these permissions are needed.", Required: true},

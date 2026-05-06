@@ -72,4 +72,17 @@ func TestExtensionAssetHandler(t *testing.T) {
 			t.Fatalf("unexpected body: %s", body)
 		}
 	})
+
+	t.Run("rejects encoded directory traversal", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/extensions/%2e%2e/secret.js", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d", rec.Code)
+		}
+		if body := rec.Body.String(); strings.Contains(body, "secret") {
+			t.Fatalf("unexpected body: %s", body)
+		}
+	})
 }

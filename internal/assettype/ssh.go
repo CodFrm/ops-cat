@@ -43,6 +43,10 @@ func (h *sshHandler) ResolvePassword(ctx context.Context, a *asset_entity.Asset)
 
 func (h *sshHandler) DefaultPolicy() any { return asset_entity.DefaultCommandPolicy() }
 
+func (h *sshHandler) ValidateCreateArgs(args map[string]any) error {
+	return validateRemoteServerArgs(args)
+}
+
 func (h *sshHandler) ApplyCreateArgs(ctx context.Context, a *asset_entity.Asset, args map[string]any) error {
 	authType := ArgString(args, "auth_type")
 	password := ArgString(args, "password")

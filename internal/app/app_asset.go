@@ -19,7 +19,7 @@ import (
 
 // PolicyTestRequest 策略测试请求
 type PolicyTestRequest struct {
-	PolicyType string `json:"policyType"` // "ssh" | "database" | "redis"
+	PolicyType string `json:"policyType"` // "ssh" | "database" | "redis" | "k8s"
 	PolicyJSON string `json:"policyJSON"` // JSON 编码的策略结构体（当前编辑状态）
 	Command    string `json:"command"`    // 待测试的命令/SQL/Redis命令
 	AssetID    int64  `json:"assetID"`    // 资产ID（用于解析资产组链）
@@ -34,7 +34,7 @@ type PolicyTestResult struct {
 	Message        string `json:"message"`        // 可读说明
 }
 
-// TestPolicyRule 测试命令/SQL/Redis 命令是否匹配当前策略（含资产组继承）
+// TestPolicyRule 测试命令/SQL/Redis/K8S 命令是否匹配当前策略（含资产组继承）
 func (a *App) TestPolicyRule(req PolicyTestRequest) (*PolicyTestResult, error) {
 	command := strings.TrimSpace(req.Command)
 	if command == "" {
@@ -67,6 +67,12 @@ func (a *App) TestPolicyRule(req PolicyTestRequest) (*PolicyTestResult, error) {
 				return nil, fmt.Errorf("invalid Redis policy JSON: %w", err)
 			}
 			input.CurrentRedis = &p
+		case "k8s":
+			var p asset_entity.K8sPolicy
+			if err := json.Unmarshal([]byte(req.PolicyJSON), &p); err != nil {
+				return nil, fmt.Errorf("invalid K8S policy JSON: %w", err)
+			}
+			input.CurrentK8s = &p
 		default:
 			return nil, fmt.Errorf("unsupported policy type: %s", req.PolicyType)
 		}

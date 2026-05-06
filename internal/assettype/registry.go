@@ -16,8 +16,19 @@ type AssetTypeHandler interface {
 	SafeView(a *asset_entity.Asset) map[string]any
 	ResolvePassword(ctx context.Context, a *asset_entity.Asset) (string, error)
 	DefaultPolicy() any
+	// ValidateCreateArgs 校验 AI 工具创建资产时的必填字段。
+	// 由 handleAddAsset 在 ApplyCreateArgs 之前调用，每种类型自行声明所需字段。
+	ValidateCreateArgs(args map[string]any) error
 	ApplyCreateArgs(ctx context.Context, a *asset_entity.Asset, args map[string]any) error
 	ApplyUpdateArgs(ctx context.Context, a *asset_entity.Asset, args map[string]any) error
+}
+
+// validateRemoteServerArgs 是 ssh/database/redis/mongodb 共用的 host/port/username 校验。
+func validateRemoteServerArgs(args map[string]any) error {
+	if ArgString(args, "host") == "" || ArgInt(args, "port") == 0 || ArgString(args, "username") == "" {
+		return fmt.Errorf("missing required parameters: host, port, username")
+	}
+	return nil
 }
 
 var (

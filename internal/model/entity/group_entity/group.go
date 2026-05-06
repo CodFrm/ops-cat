@@ -18,6 +18,7 @@ type Group struct {
 	QryPolicy   string `gorm:"column:query_policy;type:text"`
 	RdsPolicy   string `gorm:"column:redis_policy;type:text"`
 	MgoPolicy   string `gorm:"column:mongo_policy;type:text"`
+	K8sPolicy   string `gorm:"column:k8s_policy;type:text"`
 	SortOrder   int    `gorm:"column:sort_order;default:0"`
 	Createtime  int64  `gorm:"column:createtime"`
 	Updatetime  int64  `gorm:"column:updatetime"`
@@ -106,5 +107,22 @@ func (g *Group) SetMongoPolicy(p *policy.MongoPolicy) error {
 		return err
 	}
 	g.MgoPolicy = s
+	return nil
+}
+
+// GetK8sPolicy 解析 K8S 权限策略
+func (g *Group) GetK8sPolicy() (*policy.K8sPolicy, error) {
+	return jsonfield.UnmarshalOrDefault[policy.K8sPolicy](g.K8sPolicy, "K8S权限策略")
+}
+
+// SetK8sPolicy 序列化 K8S 权限策略
+func (g *Group) SetK8sPolicy(p *policy.K8sPolicy) error {
+	s, err := jsonfield.MarshalOrClear(p, func(v *policy.K8sPolicy) bool {
+		return v.IsEmpty()
+	}, "K8S权限策略")
+	if err != nil {
+		return err
+	}
+	g.K8sPolicy = s
 	return nil
 }

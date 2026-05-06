@@ -16,7 +16,7 @@ func addToUserPath(dir string) error {
 	if err != nil {
 		return fmt.Errorf("open registry key: %w", err)
 	}
-	defer k.Close()
+	defer func() { _ = k.Close() }()
 
 	currentPath, _, err := k.GetStringValue("Path")
 	if err != nil && err != registry.ErrNotExist {
@@ -50,13 +50,13 @@ func broadcastSettingChange() {
 	env, _ := syscall.UTF16PtrFromString("Environment")
 	user32 := syscall.NewLazyDLL("user32.dll")
 	proc := user32.NewProc("SendMessageTimeoutW")
-	proc.Call(
-		uintptr(0xFFFF),                  // HWND_BROADCAST
-		uintptr(0x001A),                  // WM_SETTINGCHANGE
-		0,                                // wParam
-		uintptr(unsafe.Pointer(env)),     // lParam
-		uintptr(0x0002),                  // SMTO_ABORTIFHUNG
-		uintptr(5000),                    // timeout ms
-		0,                                // lpdwResult
+	_, _, _ = proc.Call(
+		uintptr(0xFFFF),              // HWND_BROADCAST
+		uintptr(0x001A),              // WM_SETTINGCHANGE
+		0,                            // wParam
+		uintptr(unsafe.Pointer(env)), //nolint:gosec // lParam
+		uintptr(0x0002),              // SMTO_ABORTIFHUNG
+		uintptr(5000),                // timeout ms
+		0,                            // lpdwResult
 	)
 }

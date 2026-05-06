@@ -55,6 +55,7 @@ describe("AssetTypeFilterButton", () => {
     expect(screen.getByText("nav.database")).toBeTruthy();
     expect(screen.getByText("nav.redis")).toBeTruthy();
     expect(screen.getByText("nav.mongodb")).toBeTruthy();
+    expect(screen.getByText("nav.k8s")).toBeTruthy();
   });
 
   it('clicking "All types" from empty selects every option', async () => {
@@ -67,7 +68,7 @@ describe("AssetTypeFilterButton", () => {
     );
     await user.click(screen.getByRole("button", { name: /asset.filterByType/i }));
     await user.click(screen.getByText("asset.filterAllTypes"));
-    expect(onChange).toHaveBeenCalledWith(["ssh", "database", "redis", "mongodb"]);
+    expect(onChange).toHaveBeenCalledWith(["ssh", "database", "redis", "mongodb", "k8s"]);
   });
 
   it('clicking "All types" when everything is checked deselects all', async () => {
@@ -76,7 +77,7 @@ describe("AssetTypeFilterButton", () => {
     render(
       <TooltipProvider>
         <AssetTypeFilterButton
-          value={["ssh", "database", "redis", "mongodb"]}
+          value={["ssh", "database", "redis", "mongodb", "k8s"]}
           options={builtinOpts}
           onChange={onChange}
         />

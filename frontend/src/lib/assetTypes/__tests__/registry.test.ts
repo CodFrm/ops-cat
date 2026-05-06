@@ -2,11 +2,12 @@ import { describe, it, expect } from "vitest";
 import { getAssetType, isBuiltinType, getBuiltinTypes } from "../index";
 
 describe("AssetType Registry", () => {
-  it("registers all four built-in types", () => {
+  it("registers all five built-in types", () => {
     expect(getAssetType("ssh")).toBeDefined();
     expect(getAssetType("database")).toBeDefined();
     expect(getAssetType("redis")).toBeDefined();
     expect(getAssetType("mongodb")).toBeDefined();
+    expect(getAssetType("k8s")).toBeDefined();
   });
 
   it("returns undefined for unknown type", () => {
@@ -16,11 +17,12 @@ describe("AssetType Registry", () => {
   it("isBuiltinType", () => {
     expect(isBuiltinType("ssh")).toBe(true);
     expect(isBuiltinType("mongodb")).toBe(true);
+    expect(isBuiltinType("k8s")).toBe(true);
     expect(isBuiltinType("unknown")).toBe(false);
   });
 
-  it("getBuiltinTypes returns all four", () => {
-    expect(getBuiltinTypes().length).toBe(4);
+  it("getBuiltinTypes returns all five", () => {
+    expect(getBuiltinTypes().length).toBe(5);
   });
 
   it("each type has required fields", () => {
@@ -34,8 +36,9 @@ describe("AssetType Registry", () => {
     }
   });
 
-  it("ssh is terminal, others are query", () => {
+  it("ssh and k8s are terminal, others are query", () => {
     expect(getAssetType("ssh")!.connectAction).toBe("terminal");
+    expect(getAssetType("k8s")!.connectAction).toBe("terminal");
     expect(getAssetType("database")!.connectAction).toBe("query");
     expect(getAssetType("redis")!.connectAction).toBe("query");
     expect(getAssetType("mongodb")!.connectAction).toBe("query");
@@ -45,5 +48,6 @@ describe("AssetType Registry", () => {
     expect(getAssetType("ssh")!.canConnectInNewTab).toBe(true);
     expect(getAssetType("database")!.canConnectInNewTab).toBe(false);
     expect(getAssetType("mongodb")!.canConnectInNewTab).toBe(false);
+    expect(getAssetType("k8s")!.canConnectInNewTab).toBe(false);
   });
 });

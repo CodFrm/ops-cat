@@ -58,11 +58,13 @@ export function CommandPolicyCard({
   const managerTab =
     policyType === "ssh"
       ? ("command" as const)
-      : policyType === "database"
-        ? ("query" as const)
-        : policyType === "redis"
-          ? ("redis" as const)
-          : (policyType as string);
+      : policyType === "k8s"
+        ? ("command" as const)
+        : policyType === "database"
+          ? ("query" as const)
+          : policyType === "redis"
+            ? ("redis" as const)
+            : (policyType as string);
 
   return (
     <div className="rounded-xl border bg-card p-4">

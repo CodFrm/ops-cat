@@ -54,16 +54,16 @@ Use this checklist in every PR description:
 
 ```markdown
 ## Summary
-- 
+-
 
 ## Scope
-- 
+-
 
 ## Out of Scope
-- 
+-
 
 ## Screenshots / Recording
-- 
+-
 
 ## Test Plan
 - [ ] `cd frontend && pnpm test -- <specific-test-file>`
@@ -71,7 +71,7 @@ Use this checklist in every PR description:
 - [ ] Manual: open a MySQL table and verify ...
 
 ## Risk
-- 
+-
 
 ## Rollback
 - Revert this PR. No migration or data format change is included.

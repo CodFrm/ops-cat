@@ -176,6 +176,14 @@ func TestExtractCommandForAudit(t *testing.T) {
 			assert.Equal(t, "GET mykey", cmd)
 		})
 
+		convey.Convey("exec_k8s 规范化 kubectl 命令", func() {
+			cmd := ExtractCommandForAudit("exec_k8s", map[string]any{
+				"asset_id": float64(1),
+				"command":  "get pods -A",
+			})
+			assert.Equal(t, "kubectl get pods -A", cmd)
+		})
+
 		convey.Convey("其他工具返回空字符串", func() {
 			cmd := ExtractCommandForAudit("list_assets", map[string]any{})
 			assert.Equal(t, "", cmd)

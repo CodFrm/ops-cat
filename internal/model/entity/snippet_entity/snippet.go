@@ -12,6 +12,7 @@ const (
 	CategorySQL    = "sql"
 	CategoryRedis  = "redis"
 	CategoryMongo  = "mongo"
+	CategoryK8s    = "k8s"
 	CategoryPrompt = "prompt"
 )
 
@@ -31,13 +32,13 @@ const (
 
 // AllCategories 返回所有内置片段分类的 ID 列表
 func AllCategories() []string {
-	return []string{CategoryShell, CategorySQL, CategoryRedis, CategoryMongo, CategoryPrompt}
+	return []string{CategoryShell, CategorySQL, CategoryRedis, CategoryMongo, CategoryK8s, CategoryPrompt}
 }
 
 // IsValidCategory 判断分类是否为内置合法分类
 func IsValidCategory(s string) bool {
 	switch s {
-	case CategoryShell, CategorySQL, CategoryRedis, CategoryMongo, CategoryPrompt:
+	case CategoryShell, CategorySQL, CategoryRedis, CategoryMongo, CategoryK8s, CategoryPrompt:
 		return true
 	}
 	return false
@@ -55,6 +56,8 @@ func CategoryAssetType(cat string) string {
 		return "redis"
 	case CategoryMongo:
 		return "mongodb"
+	case CategoryK8s:
+		return "k8s"
 	case CategoryPrompt:
 		return ""
 	}

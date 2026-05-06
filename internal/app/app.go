@@ -85,6 +85,8 @@ type App struct {
 	runners                 sync.Map                   // map[int64]*ai.ConversationRunner
 	extSvc                  *extension_svc.Service
 	flushAckCh              chan struct{} // OnBeforeClose 等待前端确认 flush 完成
+	k8sLogStreams           sync.Map      // map[string]context.CancelFunc — pod log stream cancellations
+	k8sLogStreamCounter     int64         // pod log stream ID counter
 }
 
 // NewApp 创建App实例

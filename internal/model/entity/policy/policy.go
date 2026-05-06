@@ -68,12 +68,32 @@ func DefaultMongoPolicy() *MongoPolicy {
 	return &MongoPolicy{Groups: []string{BuiltinMongoReadOnly, BuiltinMongoDangerousDeny}}
 }
 
+// K8sPolicy K8S 权限策略（k8s 类型资产使用，与命令策略结构相同）
+type K8sPolicy struct {
+	AllowList []string `json:"allow_list"`       // 允许执行的 kubectl 命令模式
+	DenyList  []string `json:"deny_list"`        // 拒绝执行的 kubectl 命令模式
+	Groups    []string `json:"groups,omitempty"` // 引用的权限组 ID
+}
+
+// IsEmpty 检查策略是否为空
+func (p *K8sPolicy) IsEmpty() bool {
+	return len(p.AllowList) == 0 && len(p.DenyList) == 0 && len(p.Groups) == 0
+}
+
+// DefaultK8sPolicy 返回默认 K8S 权限策略（引用内置权限组）
+func DefaultK8sPolicy() *K8sPolicy {
+	return &K8sPolicy{
+		Groups: []string{BuiltinK8sReadOnly, BuiltinK8sDangerousDeny},
+	}
+}
+
 // Holder 策略持有者接口，Asset 和 Group 均实现此接口
 type Holder interface {
 	GetCommandPolicy() (*CommandPolicy, error)
 	GetQueryPolicy() (*QueryPolicy, error)
 	GetRedisPolicy() (*RedisPolicy, error)
 	GetMongoPolicy() (*MongoPolicy, error)
+	GetK8sPolicy() (*K8sPolicy, error)
 }
 
 // DefaultRedisPolicy 返回默认 Redis 权限策略（引用内置权限组）
@@ -97,6 +117,7 @@ const (
 	BuiltinMongoReadOnly      = "builtin:mongo-readonly"
 	BuiltinMongoReadWrite     = "builtin:mongo-readwrite"
 	BuiltinMongoDangerousDeny = "builtin:mongo-dangerous-deny"
+	BuiltinK8sDangerousDeny   = "builtin:k8s-dangerous-deny"
 
 	// BuiltinPrefix 内置权限组 ID 前缀
 	BuiltinPrefix = "builtin:"

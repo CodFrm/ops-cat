@@ -43,6 +43,8 @@ func (a *App) GetAvailableAssetTypes() []AssetTypeInfo {
 		{Type: "ssh", DisplayName: "SSH"},
 		{Type: "database", DisplayName: "Database"},
 		{Type: "redis", DisplayName: "Redis"},
+		{Type: "mongodb", DisplayName: "MongoDB"},
+		{Type: "k8s", DisplayName: "K8S"},
 	}
 	if a.extSvc != nil {
 		bridge := a.extSvc.Bridge()

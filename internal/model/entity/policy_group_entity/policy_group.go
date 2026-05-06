@@ -137,6 +137,21 @@ func BuiltinGroups() []*PolicyGroup {
 			}),
 		},
 		{
+			BuiltinID:   policy.BuiltinK8sDangerousDeny,
+			Name:        "Kubernetes Dangerous Deny",
+			Description: "Deny dangerous Kubernetes commands",
+			PolicyType:  PolicyTypeCommand,
+			Policy: mustMarshal(&policy.CommandPolicy{
+				DenyList: []string{
+					"kubectl delete *",
+					"kubectl replace --force *",
+					"kubectl drain *",
+					"kubectl debug *",
+					"kubectl drain --force *",
+				},
+			}),
+		},
+		{
 			BuiltinID:   policy.BuiltinDockerReadOnly,
 			Name:        "Docker Read-Only",
 			Description: "Docker read-only commands",
