@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
-import { Eye, EyeOff, Loader2, PlugZap } from "lucide-react";
+import { Loader2, PlugZap } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -20,7 +20,6 @@ import {
 } from "@opskat/ui";
 import { IconPicker } from "@/components/asset/IconPicker";
 import { GroupSelect } from "@/components/asset/GroupSelect";
-import { AssetSelect } from "@/components/asset/AssetSelect";
 import { useAssetStore } from "@/stores/assetStore";
 import { asset_entity, credential_entity } from "../../../wailsjs/go/models";
 import {
@@ -39,6 +38,7 @@ import { SSHConfigSection } from "@/components/asset/SSHConfigSection";
 import { DatabaseConfigSection } from "@/components/asset/DatabaseConfigSection";
 import { RedisConfigSection } from "@/components/asset/RedisConfigSection";
 import { MongoDBConfigSection } from "@/components/asset/MongoDBConfigSection";
+import { K8sConfigSection } from "@/components/asset/K8sConfigSection";
 import { useExtensionStore } from "@/extension";
 import { ExtensionConfigForm } from "@/components/asset/ExtensionConfigForm";
 
@@ -1173,57 +1173,19 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
 
           {/* K8S config */}
           {assetType === "k8s" && (
-            <div className="grid gap-3 border rounded-lg p-4">
-              <div className="grid gap-2">
-                <Label>{t("asset.k8sKubeconfig")}</Label>
-                {showKubeconfig ? (
-                  <div className="relative min-w-0 overflow-hidden">
-                    <Textarea
-                      value={kubeconfig}
-                      onChange={(e) => setKubeconfig(e.target.value)}
-                      placeholder={t("asset.k8sKubeconfigPlaceholder") || "Paste kubeconfig YAML content..."}
-                      rows={4}
-                      className="font-mono text-xs pr-9 whitespace-pre-wrap break-all"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="absolute right-1 top-2 h-7 w-7"
-                      onClick={() => setShowKubeconfig(false)}
-                    >
-                      <EyeOff className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                ) : (
-                  <Button type="button" variant="outline" className="w-full" onClick={() => setShowKubeconfig(true)}>
-                    <Eye className="h-3.5 w-3.5 mr-1" />
-                    {editAsset ? t("asset.k8sRevealKubeconfig") : t("asset.k8sEnterKubeconfig")}
-                  </Button>
-                )}
-              </div>
-              <div className="grid gap-2">
-                <Label>{t("asset.k8sNamespace")}</Label>
-                <Input value={k8sNamespace} onChange={(e) => setK8sNamespace(e.target.value)} placeholder="default" />
-              </div>
-              <div className="grid gap-2">
-                <Label>{t("asset.k8sContext")}</Label>
-                <Input
-                  value={k8sContext}
-                  onChange={(e) => setK8sContext(e.target.value)}
-                  placeholder="current context"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>{t("asset.sshTunnel")}</Label>
-                <AssetSelect
-                  value={sshTunnelId}
-                  onValueChange={setSshTunnelId}
-                  filterType="ssh"
-                  placeholder={t("asset.sshTunnelNone")}
-                />
-              </div>
-            </div>
+            <K8sConfigSection
+              kubeconfig={kubeconfig}
+              setKubeconfig={setKubeconfig}
+              showKubeconfig={showKubeconfig}
+              setShowKubeconfig={setShowKubeconfig}
+              namespace={k8sNamespace}
+              setNamespace={setK8sNamespace}
+              contextName={k8sContext}
+              setContextName={setK8sContext}
+              sshTunnelId={sshTunnelId}
+              setSshTunnelId={setSshTunnelId}
+              isEditing={!!editAsset}
+            />
           )}
 
           {/* Extension type config */}
