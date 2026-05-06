@@ -38,6 +38,7 @@ function setupStores(driver = "mysql", table = "users") {
       "query-1": {
         databases: ["appdb"],
         tables: { appdb: [table] },
+        loadingTables: {},
         expandedDbs: ["appdb"],
         loadingDbs: false,
         innerTabs: [{ id: "table-1", type: "table", database: "appdb", table }],

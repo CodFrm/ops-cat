@@ -33,7 +33,7 @@ import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { CreateDatabaseDialog } from "./CreateDatabaseDialog";
 import { CreateTableDialog } from "./CreateTableDialog";
 import { AlterTableDialog } from "./AlterTableDialog";
-import { quoteTableRef } from "@/lib/tableSql";
+import { quoteIdent, quoteTableRef } from "@/lib/tableSql";
 
 interface DatabaseTreeProps {
   tabId: string;
