@@ -458,7 +458,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       setK8sNamespace(cfg.namespace || "");
       setK8sContext(cfg.context || "");
       setShowKubeconfig(false);
-      setSshTunnelId(asset.sshTunnelId || cfg.ssh_asset_id || 0);
+      setSshTunnelId(asset.sshTunnelId || 0);
       setHost(""); // K8S uses kubeconfig, not host
       setPort(6443);
       setUsername("");

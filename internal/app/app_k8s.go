@@ -348,9 +348,6 @@ func (a *App) k8sClientOptions(asset *asset_entity.Asset, cfg *asset_entity.K8sC
 	}
 
 	tunnelID := asset.SSHTunnelID
-	if tunnelID == 0 {
-		tunnelID = cfg.SSHAssetID
-	}
 	if tunnelID == 0 || a.sshPool == nil {
 		return opts
 	}

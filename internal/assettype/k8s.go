@@ -23,14 +23,10 @@ func (h *k8sHandler) SafeView(a *asset_entity.Asset) map[string]any {
 	if err != nil || cfg == nil {
 		return nil
 	}
-	sshTunnelID := a.SSHTunnelID
-	if sshTunnelID == 0 {
-		sshTunnelID = cfg.SSHAssetID
-	}
 	return map[string]any{
 		"namespace":     cfg.Namespace,
 		"context":       cfg.Context,
-		"ssh_tunnel_id": sshTunnelID,
+		"ssh_tunnel_id": a.SSHTunnelID,
 	}
 }
 

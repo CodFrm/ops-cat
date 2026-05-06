@@ -6,7 +6,6 @@ interface K8sConfig {
   kubeconfig?: string;
   namespace?: string;
   context?: string;
-  ssh_asset_id?: number;
 }
 
 export function K8sDetailInfoCard({ asset, sshTunnelName }: DetailInfoCardProps) {
@@ -19,8 +18,7 @@ export function K8sDetailInfoCard({ asset, sshTunnelName }: DetailInfoCardProps)
     /* ignore */
   }
   if (!cfg) return null;
-  const tunnelID = asset.sshTunnelId || cfg.ssh_asset_id;
-  const tunnelName = sshTunnelName(tunnelID);
+  const tunnelName = sshTunnelName(asset.sshTunnelId);
 
   return (
     <div className="rounded-xl border bg-card p-4">

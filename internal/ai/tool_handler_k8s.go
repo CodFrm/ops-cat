@@ -63,12 +63,8 @@ func handleExecK8s(ctx context.Context, args map[string]any) (string, error) {
 		}
 	}
 
-	tunnelID := asset.SSHTunnelID
-	if tunnelID == 0 {
-		tunnelID = cfg.SSHAssetID
-	}
-	if tunnelID != 0 {
-		return executeK8sCommandOverSSH(ctx, tunnelID, cfg.Kubeconfig, plan.Args)
+	if asset.SSHTunnelID != 0 {
+		return executeK8sCommandOverSSH(ctx, asset.SSHTunnelID, cfg.Kubeconfig, plan.Args)
 	}
 	return executeK8sCommandLocal(ctx, cfg.Kubeconfig, plan.Args)
 }

@@ -158,7 +158,6 @@ type K8sConfig struct {
 	Kubeconfig string `json:"kubeconfig,omitempty"` // kubeconfig YAML 内容
 	Namespace  string `json:"namespace,omitempty"`  // 默认命名空间
 	Context    string `json:"context,omitempty"`    // kubeconfig context 名称
-	SSHAssetID int64  `json:"ssh_asset_id,omitempty"`
 }
 
 // K8sConfig PasswordSource implementation
