@@ -1,3 +1,33 @@
+<a name="1.5.0"></a>
+
+## 1.5.0 (2026-05-06)
+
+本次版本带来 K8S 资产与集群资源管理、Kafka 管理两大全新模块，Redis 管理面板大幅完善，新增 VSCode 风格的 Cmd+P 快速打开、终端字体预设、终端与在线目录的 cwd 双向同步；MySQL 完善了表格编辑、导入导出与筛选流程，并对资产路径做了重构以优化前端打包体积；同时修复了 AI 误传 group_id=0/parent_id=0 导致资产或分组被意外解绑、SSH 登录提示被遮挡、设置页配置 AI 提供商后助手仍要求重新配置等多项问题。
+
+### 🚀 主要新功能
+
+- 💥 支持 K8S 资产与集群资源管理 ([#58](https://github.com/opskat/opskat/pull/58)) (by @shanaiardor)
+- 💥 支持 Kafka 管理 ([#68](https://github.com/opskat/opskat/pull/68)) (by @Pililink)
+- ✨ 完善 Redis 管理体验与运维面板 ([#53](https://github.com/opskat/opskat/pull/53)) (by @Pililink)
+- ✨ 完善 MySQL 表格编辑、导入导出与筛选流程 ([#59](https://github.com/opskat/opskat/pull/59)) (by @youaremywind)
+- ✨ Cmd+P 快速打开（VSCode 风格） ([#55](https://github.com/opskat/opskat/pull/55)) (by @CodFrm)
+- ✨ 支持终端字体预设 ([#66](https://github.com/opskat/opskat/pull/66)) (by @CodFrm)
+- ✨ 终端与在线目录支持 cwd 双向同步 ([#63](https://github.com/opskat/opskat/pull/63)) (by @2849236173)
+- ✨ database 表右键菜单支持删除表/清空表，二次确认避免误操作 (by @CodFrm)
+
+### 🐛 Bug 修复
+
+- 🐛 修复 SSH 登录提示被隐藏 ([#67](https://github.com/opskat/opskat/pull/67)) (by @CodFrm)
+- 🐛 修复 AI 误传 group_id=0/parent_id=0 导致资产或分组被意外解绑 (by @CodFrm)
+- 🐛 修复首次在设置中配置 AI 提供商后助手仍要求重新配置 [#61](https://github.com/opskat/opskat/issues/61) (by @CodFrm)
+- 🐛 修复侧边助手发送后输入框未清空 [#60](https://github.com/opskat/opskat/issues/60) (by @CodFrm)
+- 🐛 修复数据库树刷新功能 (by @CodFrm)
+- 🐛 修复 SSH 资产测试连接未传递托管密码凭据 [#57](https://github.com/opskat/opskat/issues/57) (by @CodFrm)
+
+### ♻️ 重构
+
+- ♻️ 重构资产路径并优化前端打包体积 ([#64](https://github.com/opskat/opskat/pull/64)) (by @CodFrm)
+
 <a name="1.4.1"></a>
 
 ## 1.4.1 (2026-04-28)
