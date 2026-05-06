@@ -278,7 +278,9 @@ func (a *App) GetK8sPodDetail(assetID int64, namespace, podName string) (string,
 }
 
 func (a *App) StartK8sPodLogs(assetID int64, namespace, podName, container string, tailLines int64) (string, error) {
-	asset, err := asset_svc.Asset().Get(a.ctx, assetID)
+	loadCtx, loadCancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer loadCancel()
+	asset, err := asset_svc.Asset().Get(loadCtx, assetID)
 	if err != nil {
 		return "", fmt.Errorf("get asset: %w", err)
 	}
