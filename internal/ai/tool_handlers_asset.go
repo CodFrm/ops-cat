@@ -150,9 +150,6 @@ func handleGetAsset(ctx context.Context, args map[string]any) (string, error) {
 
 func handleAddAsset(ctx context.Context, args map[string]any) (string, error) {
 	name := argString(args, "name")
-	host := argString(args, "host")
-	port := argInt(args, "port")
-	username := argString(args, "username")
 	assetType := argString(args, "type")
 	if assetType == "" {
 		assetType = asset_entity.AssetTypeSSH
@@ -160,20 +157,17 @@ func handleAddAsset(ctx context.Context, args map[string]any) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("missing required parameter: name")
 	}
-	switch assetType {
-	case asset_entity.AssetTypeK8s:
-		// K8S uses kubeconfig instead of host/port.
-		if argString(args, "kubeconfig") == "" {
-			return "", fmt.Errorf("missing required parameter: kubeconfig for k8s type")
-		}
-	default:
-		if host == "" || port == 0 || username == "" {
-			return "", fmt.Errorf("missing required parameters: host, port, username")
-		}
+
+	h, ok := assettype.Get(assetType)
+	if !ok {
+		return "", fmt.Errorf("unsupported asset type: %s", assetType)
 	}
+	if err := h.ValidateCreateArgs(args); err != nil {
+		return "", err
+	}
+
 	groupID := argInt64(args, "group_id")
 	description := argString(args, "description")
-
 	icon := argString(args, "icon")
 
 	asset := &asset_entity.Asset{
@@ -184,10 +178,6 @@ func handleAddAsset(ctx context.Context, args map[string]any) (string, error) {
 		Description: description,
 	}
 
-	h, ok := assettype.Get(assetType)
-	if !ok {
-		return "", fmt.Errorf("unsupported asset type: %s", assetType)
-	}
 	if err := h.ApplyCreateArgs(ctx, asset, args); err != nil {
 		return "", err
 	}

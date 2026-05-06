@@ -140,6 +140,43 @@ func TestK8sHandler(t *testing.T) {
 			convey.So(plain, convey.ShouldEqual, sampleKubeconfig)
 		})
 
+		convey.Convey("ValidateCreateArgs requires kubeconfig", func() {
+			err := h.ValidateCreateArgs(map[string]any{})
+			convey.So(err, convey.ShouldNotBeNil)
+
+			err = h.ValidateCreateArgs(map[string]any{"kubeconfig": sampleKubeconfig})
+			convey.So(err, convey.ShouldBeNil)
+		})
+
+		convey.Convey("ApplyCreateArgs rejects whitespace in namespace/context", func() {
+			a := &asset_entity.Asset{Type: "k8s"}
+			err := h.ApplyCreateArgs(context.Background(), a, map[string]any{
+				"kubeconfig": sampleKubeconfig,
+				"namespace":  "bad name",
+			})
+			convey.So(err, convey.ShouldNotBeNil)
+			convey.So(err.Error(), convey.ShouldContainSubstring, "whitespace")
+		})
+
+		convey.Convey("ApplyCreateArgs rejects flag-like context", func() {
+			a := &asset_entity.Asset{Type: "k8s"}
+			err := h.ApplyCreateArgs(context.Background(), a, map[string]any{
+				"kubeconfig": sampleKubeconfig,
+				"context":    "--inject",
+			})
+			convey.So(err, convey.ShouldNotBeNil)
+			convey.So(err.Error(), convey.ShouldContainSubstring, "must not start with '-'")
+		})
+
+		convey.Convey("ApplyUpdateArgs rejects flag-like namespace", func() {
+			a := &asset_entity.Asset{Type: "k8s"}
+			_ = a.SetK8sConfig(&asset_entity.K8sConfig{Namespace: "ok"})
+			err := h.ApplyUpdateArgs(context.Background(), a, map[string]any{
+				"namespace": "-bad",
+			})
+			convey.So(err, convey.ShouldNotBeNil)
+		})
+
 		convey.Convey("Registered", func() {
 			h, ok := Get("k8s")
 			convey.So(ok, convey.ShouldBeTrue)

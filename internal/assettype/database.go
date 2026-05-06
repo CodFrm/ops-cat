@@ -42,6 +42,10 @@ func (h *databaseHandler) ResolvePassword(ctx context.Context, a *asset_entity.A
 
 func (h *databaseHandler) DefaultPolicy() any { return asset_entity.DefaultQueryPolicy() }
 
+func (h *databaseHandler) ValidateCreateArgs(args map[string]any) error {
+	return validateRemoteServerArgs(args)
+}
+
 func (h *databaseHandler) ApplyCreateArgs(_ context.Context, a *asset_entity.Asset, args map[string]any) error {
 	driver := ArgString(args, "driver")
 	if driver == "" {
