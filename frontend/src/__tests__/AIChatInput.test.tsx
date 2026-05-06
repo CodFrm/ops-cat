@@ -41,6 +41,39 @@ describe("AIChatInput", () => {
     expect(screen.getByRole("option").textContent).toContain("prod-db");
   });
 
+  it("空输入只输入 @ 也弹出 MentionList", async () => {
+    render(<AIChatInput onSubmit={vi.fn()} sendOnEnter={true} />);
+    const editor = screen.getByRole("textbox");
+    await userEvent.click(editor);
+    await userEvent.keyboard("@");
+    await waitFor(() => expect(screen.getByRole("listbox")).toBeInTheDocument());
+    expect(screen.getByRole("option").textContent).toContain("prod-db");
+  });
+
+  it("TipTap 暂时拿不到 @ decoration 位置时仍会弹出 MentionList", async () => {
+    const originalQuerySelector = Element.prototype.querySelector;
+    const querySelectorSpy = vi.spyOn(Element.prototype, "querySelector").mockImplementation(function (
+      this: Element,
+      selector: string
+    ) {
+      if (typeof selector === "string" && selector.startsWith("[data-decoration-id=")) {
+        return null;
+      }
+      return originalQuerySelector.call(this, selector);
+    });
+
+    try {
+      render(<AIChatInput onSubmit={vi.fn()} sendOnEnter={true} />);
+      const editor = screen.getByRole("textbox");
+      await userEvent.click(editor);
+      await userEvent.keyboard("@");
+      await waitFor(() => expect(screen.getByRole("listbox")).toBeInTheDocument());
+      expect(screen.getByRole("option").textContent).toContain("prod-db");
+    } finally {
+      querySelectorSpy.mockRestore();
+    }
+  });
+
   it("提及弹窗激活时 Enter 选中候选项而不触发发送", async () => {
     const onSubmit = vi.fn();
     render(<AIChatInput onSubmit={onSubmit} sendOnEnter={true} />);
