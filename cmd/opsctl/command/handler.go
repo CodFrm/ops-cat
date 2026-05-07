@@ -39,7 +39,7 @@ func callHandler(ctx context.Context, handlers map[string]ai.ToolHandlerFunc, to
 	// 写审计日志
 	argsJSON, marshalErr := json.Marshal(params)
 	if marshalErr != nil {
-		logger.Default().Warn("marshal audit params", zap.Error(marshalErr))
+		logger.Ctx(ctx).Warn("marshal audit params", zap.Error(marshalErr))
 	}
 	var dec *ai.CheckResult
 	if len(decision) > 0 {
@@ -57,7 +57,7 @@ func callHandler(ctx context.Context, handlers map[string]ai.ToolHandlerFunc, to
 		dataDir := bootstrap.AppDataDir()
 		token, tokenErr := bootstrap.ReadAuthToken(dataDir)
 		if tokenErr != nil {
-			logger.Default().Warn("read auth token", zap.Error(tokenErr))
+			logger.Ctx(ctx).Warn("read auth token", zap.Error(tokenErr))
 		}
 		approval.SendNotification(
 			approval.SocketPath(dataDir),

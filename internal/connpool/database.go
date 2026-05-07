@@ -38,7 +38,7 @@ func DialDatabase(ctx context.Context, asset *asset_entity.Asset, cfg *asset_ent
 	if err != nil {
 		if tunnel != nil {
 			if err := tunnel.Close(); err != nil {
-				logger.Default().Warn("close ssh tunnel", zap.Error(err))
+				logger.Ctx(ctx).Warn("close ssh tunnel", zap.Error(err))
 			}
 		}
 		return nil, nil, err
@@ -47,11 +47,11 @@ func DialDatabase(ctx context.Context, asset *asset_entity.Asset, cfg *asset_ent
 	// 测试连接（必须在 setReadOnly 之前，确保连接性检查受 ctx 超时保护）
 	if pingErr := db.PingContext(ctx); pingErr != nil {
 		if err := db.Close(); err != nil {
-			logger.Default().Warn("close db", zap.Error(err))
+			logger.Ctx(ctx).Warn("close db", zap.Error(err))
 		}
 		if tunnel != nil {
 			if err := tunnel.Close(); err != nil {
-				logger.Default().Warn("close ssh tunnel", zap.Error(err))
+				logger.Ctx(ctx).Warn("close ssh tunnel", zap.Error(err))
 			}
 		}
 		return nil, nil, fmt.Errorf("数据库连接失败: %w", pingErr)
@@ -61,11 +61,11 @@ func DialDatabase(ctx context.Context, asset *asset_entity.Asset, cfg *asset_ent
 	if cfg.ReadOnly {
 		if roErr := setReadOnly(ctx, db, cfg.Driver); roErr != nil {
 			if err := db.Close(); err != nil {
-				logger.Default().Warn("close db", zap.Error(err))
+				logger.Ctx(ctx).Warn("close db", zap.Error(err))
 			}
 			if tunnel != nil {
 				if err := tunnel.Close(); err != nil {
-					logger.Default().Warn("close ssh tunnel", zap.Error(err))
+					logger.Ctx(ctx).Warn("close ssh tunnel", zap.Error(err))
 				}
 			}
 			return nil, nil, fmt.Errorf("设置只读模式失败: %w", roErr)

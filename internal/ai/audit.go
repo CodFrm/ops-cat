@@ -103,7 +103,7 @@ func NewDefaultAuditWriter() *DefaultAuditWriter {
 func (w *DefaultAuditWriter) WriteToolCall(ctx context.Context, info ToolCallInfo) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(info.ArgsJSON), &args); err != nil {
-		logger.Default().Warn("unmarshal audit args", zap.Error(err))
+		logger.Ctx(ctx).Warn("unmarshal audit args", zap.Error(err))
 	}
 
 	assetID := argInt64(args, "asset_id")
@@ -152,7 +152,7 @@ func (w *DefaultAuditWriter) WriteToolCall(ctx context.Context, info ToolCallInf
 
 	if repo := audit_repo.Audit(); repo != nil {
 		if err := repo.Create(context.Background(), entry); err != nil {
-			logger.Default().Error("audit log write failed", zap.Error(err))
+			logger.Ctx(ctx).Error("audit log write failed", zap.Error(err))
 		}
 	}
 }
@@ -214,7 +214,7 @@ func writeGrantSubmitAudit(ctx context.Context, assetID int64, assetName string,
 			Createtime: time.Now().Unix(),
 		}
 		if err := repo.Create(context.Background(), entry); err != nil {
-			logger.Default().Error("write grant submit audit", zap.Error(err))
+			logger.Ctx(ctx).Error("write grant submit audit", zap.Error(err))
 		}
 	}
 }
@@ -234,7 +234,7 @@ func WriteGrantSubmitAudit(ctx context.Context, assetID int64, assetName string,
 			Createtime: time.Now().Unix(),
 		}
 		if err := repo.Create(context.Background(), entry); err != nil {
-			logger.Default().Error("write grant submit audit", zap.Error(err))
+			logger.Ctx(ctx).Error("write grant submit audit", zap.Error(err))
 		}
 	}
 }

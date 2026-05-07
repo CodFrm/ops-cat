@@ -173,7 +173,7 @@ func (m *Manager) Close(ctx context.Context) {
 	for _, ext := range exts {
 		if ext.Plugin != nil {
 			if err := ext.Plugin.Close(ctx); err != nil {
-				logger.Default().Warn("close extension plugin", zap.String("name", ext.Name), zap.Error(err))
+				logger.Ctx(ctx).Warn("close extension plugin", zap.String("name", ext.Name), zap.Error(err))
 			}
 		}
 	}
@@ -185,7 +185,7 @@ func (m *Manager) Shutdown(ctx context.Context) {
 	m.Close(ctx)
 	if m.wasmCache != nil {
 		if err := m.wasmCache.Close(ctx); err != nil {
-			logger.Default().Warn("close wasm compilation cache", zap.Error(err))
+			logger.Ctx(ctx).Warn("close wasm compilation cache", zap.Error(err))
 		}
 	}
 }
@@ -200,14 +200,14 @@ func (m *Manager) Watch(ctx context.Context, onChange func()) error {
 
 	if err := os.MkdirAll(m.dir, 0755); err != nil {
 		if closeErr := watcher.Close(); closeErr != nil {
-			logger.Default().Warn("close watcher after mkdir error", zap.Error(closeErr))
+			logger.Ctx(ctx).Warn("close watcher after mkdir error", zap.Error(closeErr))
 		}
 		return fmt.Errorf("create extensions dir: %w", err)
 	}
 
 	if err := watcher.Add(m.dir); err != nil {
 		if closeErr := watcher.Close(); closeErr != nil {
-			logger.Default().Warn("close watcher after add error", zap.Error(closeErr))
+			logger.Ctx(ctx).Warn("close watcher after add error", zap.Error(closeErr))
 		}
 		return fmt.Errorf("watch extensions dir: %w", err)
 	}
@@ -215,7 +215,7 @@ func (m *Manager) Watch(ctx context.Context, onChange func()) error {
 	go func() {
 		defer func() {
 			if err := watcher.Close(); err != nil {
-				logger.Default().Warn("close filesystem watcher", zap.Error(err))
+				logger.Ctx(ctx).Warn("close filesystem watcher", zap.Error(err))
 			}
 		}()
 		for {
@@ -380,7 +380,7 @@ func (m *Manager) Install(ctx context.Context, sourcePath string) (*Manifest, er
 		}
 		defer func() {
 			if err := os.RemoveAll(tmpDir); err != nil {
-				logger.Default().Warn("remove temp dir", zap.String("dir", tmpDir), zap.Error(err))
+				logger.Ctx(ctx).Warn("remove temp dir", zap.String("dir", tmpDir), zap.Error(err))
 			}
 		}()
 		if err := extractZip(sourcePath, tmpDir); err != nil {
@@ -426,7 +426,7 @@ func (m *Manager) Install(ctx context.Context, sourcePath string) (*Manifest, er
 	// Load the extension
 	if _, err := m.LoadExtension(ctx, destDir); err != nil {
 		if removeErr := os.RemoveAll(destDir); removeErr != nil {
-			logger.Default().Warn("remove extension dir after load failure", zap.String("dir", destDir), zap.Error(removeErr))
+			logger.Ctx(ctx).Warn("remove extension dir after load failure", zap.String("dir", destDir), zap.Error(removeErr))
 		}
 		return nil, fmt.Errorf("load extension: %w", err)
 	}

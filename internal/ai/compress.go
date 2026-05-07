@@ -93,7 +93,9 @@ func compressMessages(ctx context.Context, provider Provider, messages []Message
 	})
 	for _, msg := range recentMsgs {
 		stripped := msg
-		stripped.Thinking = "" // 压缩时丢弃思考内容，节省 token
+		// 压缩时丢弃思考内容，节省 token；签名跟着一起清，不能脱离 thinking 单独存在。
+		stripped.Thinking = ""
+		stripped.ThinkingSignature = ""
 		result = append(result, stripped)
 	}
 	return result
@@ -161,7 +163,7 @@ Conversation:
 
 	ch, err := provider.Chat(ctx, messages, nil)
 	if err != nil {
-		logger.Default().Warn("compress conversation failed", zap.Error(err))
+		logger.Ctx(ctx).Warn("compress conversation failed", zap.Error(err))
 		return "[Previous conversation context was compressed]\n\n" + truncateRunes(conversationText, 2000)
 	}
 
@@ -171,7 +173,7 @@ Conversation:
 			result.WriteString(event.Content)
 		}
 		if event.Type == "error" {
-			logger.Default().Warn("compress conversation error", zap.String("error", event.Error))
+			logger.Ctx(ctx).Warn("compress conversation error", zap.String("error", event.Error))
 			return "[Previous conversation context was compressed]\n\n" + truncateRunes(conversationText, 2000)
 		}
 	}

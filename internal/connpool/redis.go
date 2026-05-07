@@ -39,11 +39,11 @@ func DialRedis(ctx context.Context, asset *asset_entity.Asset, cfg *asset_entity
 	client := redis.NewClient(opts)
 	if pingErr := client.Ping(ctx).Err(); pingErr != nil {
 		if err := client.Close(); err != nil {
-			logger.Default().Warn("close redis client", zap.Error(err))
+			logger.Ctx(ctx).Warn("close redis client", zap.Error(err))
 		}
 		if tunnel != nil {
 			if err := tunnel.Close(); err != nil {
-				logger.Default().Warn("close ssh tunnel", zap.Error(err))
+				logger.Ctx(ctx).Warn("close ssh tunnel", zap.Error(err))
 			}
 		}
 		return nil, nil, fmt.Errorf("redis 连接失败: %w", pingErr)

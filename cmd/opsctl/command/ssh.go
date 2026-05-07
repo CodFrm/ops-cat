@@ -92,7 +92,7 @@ func cmdSSHDirect(ctx context.Context, assetID int64) int {
 	}
 	defer func() {
 		if err := session.Close(); err != nil {
-			logger.Default().Warn("close SSH session", zap.Error(err))
+			logger.Ctx(ctx).Warn("close SSH session", zap.Error(err))
 		}
 	}()
 
@@ -104,7 +104,7 @@ func cmdSSHDirect(ctx context.Context, assetID int64) int {
 	}
 	defer func() {
 		if err := term.Restore(fd, oldState); err != nil {
-			logger.Default().Warn("restore terminal state", zap.Error(err))
+			logger.Ctx(ctx).Warn("restore terminal state", zap.Error(err))
 		}
 	}()
 
@@ -120,7 +120,7 @@ func cmdSSHDirect(ctx context.Context, assetID int64) int {
 	}
 	if err := session.RequestPty("xterm-256color", height, width, modes); err != nil {
 		if restoreErr := term.Restore(fd, oldState); restoreErr != nil {
-			logger.Default().Warn("restore terminal state", zap.Error(restoreErr))
+			logger.Ctx(ctx).Warn("restore terminal state", zap.Error(restoreErr))
 		}
 		fmt.Fprintf(os.Stderr, "Error: failed to request PTY: %v\n", err)
 		return 1
@@ -135,7 +135,7 @@ func cmdSSHDirect(ctx context.Context, assetID int64) int {
 
 	if err := session.Shell(); err != nil {
 		if restoreErr := term.Restore(fd, oldState); restoreErr != nil {
-			logger.Default().Warn("restore terminal state", zap.Error(restoreErr))
+			logger.Ctx(ctx).Warn("restore terminal state", zap.Error(restoreErr))
 		}
 		fmt.Fprintf(os.Stderr, "Error: failed to start shell: %v\n", err)
 		return 1

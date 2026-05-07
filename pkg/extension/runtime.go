@@ -42,7 +42,7 @@ func LoadPlugin(ctx context.Context, manifest *Manifest, wasmBytes []byte, host 
 	// Register host functions module
 	if err := registerHostModule(ctx, r, host); err != nil {
 		if closeErr := r.Close(ctx); closeErr != nil {
-			logger.Default().Warn("close wasm runtime after host module error", zap.Error(closeErr))
+			logger.Ctx(ctx).Warn("close wasm runtime after host module error", zap.Error(closeErr))
 		}
 		return nil, fmt.Errorf("register host functions: %w", err)
 	}
@@ -50,7 +50,7 @@ func LoadPlugin(ctx context.Context, manifest *Manifest, wasmBytes []byte, host 
 	compiled, err := r.CompileModule(ctx, wasmBytes)
 	if err != nil {
 		if closeErr := r.Close(ctx); closeErr != nil {
-			logger.Default().Warn("close wasm runtime after compile error", zap.Error(closeErr))
+			logger.Ctx(ctx).Warn("close wasm runtime after compile error", zap.Error(closeErr))
 		}
 		return nil, fmt.Errorf("compile wasm: %w", err)
 	}
@@ -205,7 +205,7 @@ func (p *Plugin) callLocked(ctx context.Context, fnName string, input []byte) (j
 	}
 	defer func() {
 		if err := mod.Close(callCtx); err != nil {
-			logger.Default().Warn("close wasm module", zap.Error(err))
+			logger.Ctx(ctx).Warn("close wasm module", zap.Error(err))
 		}
 	}()
 
@@ -289,7 +289,7 @@ func registerHostModule(ctx context.Context, r wazero.Runtime, host HostProvider
 	// host_io_close(handle_id)
 	b.NewFunctionBuilder().WithFunc(func(ctx context.Context, mod api.Module, handleID uint32) {
 		if err := host.IOClose(handleID); err != nil {
-			logger.Default().Warn("close IO handle from host", zap.Uint32("handleID", handleID), zap.Error(err))
+			logger.Ctx(ctx).Warn("close IO handle from host", zap.Uint32("handleID", handleID), zap.Error(err))
 		}
 	}).Export("host_io_close")
 
@@ -342,7 +342,7 @@ func registerHostModule(ctx context.Context, r wazero.Runtime, host HostProvider
 		key := readGuestString(mod, keyPtr, keyLen)
 		val := readGuestBytes(mod, valPtr, valLen)
 		if err := host.KVSet(key, val); err != nil {
-			logger.Default().Warn("host KV set", zap.String("key", key), zap.Error(err))
+			logger.Ctx(ctx).Warn("host KV set", zap.String("key", key), zap.Error(err))
 		}
 	}).Export("host_kv_set")
 
@@ -351,7 +351,7 @@ func registerHostModule(ctx context.Context, r wazero.Runtime, host HostProvider
 		eventType := readGuestString(mod, typePtr, typeLen)
 		data := readGuestBytes(mod, dataPtr, dataLen)
 		if err := host.ActionEvent(eventType, data); err != nil {
-			logger.Default().Warn("host action event", zap.String("eventType", eventType), zap.Error(err))
+			logger.Ctx(ctx).Warn("host action event", zap.String("eventType", eventType), zap.Error(err))
 		}
 	}).Export("host_action_event")
 

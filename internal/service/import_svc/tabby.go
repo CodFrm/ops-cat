@@ -412,7 +412,7 @@ func ImportTabbySelected(ctx context.Context, data []byte, selectedIndexes []int
 			continue
 		}
 		if err := asset_svc.Asset().Update(ctx, asset); err != nil {
-			logger.Default().Warn("update asset jump host after tabby import", zap.Int64("assetID", asset.ID), zap.Error(err))
+			logger.Ctx(ctx).Warn("update asset jump host after tabby import", zap.Int64("assetID", asset.ID), zap.Error(err))
 		}
 	}
 

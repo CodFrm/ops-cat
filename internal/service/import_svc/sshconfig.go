@@ -245,7 +245,7 @@ func ImportSSHConfigSelected(ctx context.Context, data []byte, selectedIndexes [
 			continue
 		}
 		if err := asset_svc.Asset().Update(ctx, asset); err != nil {
-			logger.Default().Warn("update asset jump host after ssh config import", zap.Int64("assetID", asset.ID), zap.Error(err))
+			logger.Ctx(ctx).Warn("update asset jump host after ssh config import", zap.Int64("assetID", asset.ID), zap.Error(err))
 		}
 	}
 

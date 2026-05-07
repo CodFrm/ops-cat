@@ -218,12 +218,12 @@ func (a *App) handleGrantApproval(req approval.ApprovalRequest) approval.Approva
 	case resp := <-ch:
 		if resp.Decision == "deny" {
 			if err := grant_repo.Grant().UpdateSessionStatus(ctx, sessionID, grant_entity.GrantStatusRejected); err != nil {
-				logger.Default().Error("update grant session status to rejected", zap.Error(err))
+				logger.Ctx(ctx).Error("update grant session status to rejected", zap.Error(err))
 			}
 			return approval.ApprovalResponse{Approved: false, Reason: "user denied", SessionID: sessionID}
 		}
 		if err := grant_repo.Grant().UpdateSessionStatus(ctx, sessionID, grant_entity.GrantStatusApproved); err != nil {
-			logger.Default().Error("update grant session status to approved", zap.Error(err))
+			logger.Ctx(ctx).Error("update grant session status to approved", zap.Error(err))
 		}
 		// 处理用户编辑的 items
 		if len(resp.EditedItems) > 0 {
@@ -249,7 +249,7 @@ func (a *App) handleGrantApproval(req approval.ApprovalRequest) approval.Approva
 			}
 			if len(items) > 0 {
 				if err := grant_repo.Grant().UpdateItems(ctx, sessionID, items); err != nil {
-					logger.Default().Error("update grant items", zap.Error(err))
+					logger.Ctx(ctx).Error("update grant items", zap.Error(err))
 				}
 			}
 		}
@@ -270,12 +270,12 @@ func (a *App) handleGrantApproval(req approval.ApprovalRequest) approval.Approva
 		return finalResp
 	case <-a.ctx.Done():
 		if err := grant_repo.Grant().UpdateSessionStatus(ctx, sessionID, grant_entity.GrantStatusRejected); err != nil {
-			logger.Default().Error("update grant session status to rejected on shutdown", zap.Error(err))
+			logger.Ctx(ctx).Error("update grant session status to rejected on shutdown", zap.Error(err))
 		}
 		return approval.ApprovalResponse{Approved: false, Reason: "app shutting down"}
 	case <-a.shutdownCh:
 		if err := grant_repo.Grant().UpdateSessionStatus(ctx, sessionID, grant_entity.GrantStatusRejected); err != nil {
-			logger.Default().Error("update grant session status to rejected on shutdown", zap.Error(err))
+			logger.Ctx(ctx).Error("update grant session status to rejected on shutdown", zap.Error(err))
 		}
 		return approval.ApprovalResponse{Approved: false, Reason: "app shutting down"}
 	}

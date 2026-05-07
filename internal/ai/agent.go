@@ -70,7 +70,7 @@ func (a *Agent) Chat(ctx context.Context, messages []Message, onEvent func(Strea
 	if closer, ok := executor.(io.Closer); ok {
 		defer func() {
 			if err := closer.Close(); err != nil {
-				logger.Default().Warn("close tool executor", zap.Error(err))
+				logger.Ctx(ctx).Warn("close tool executor", zap.Error(err))
 			}
 		}()
 	}
@@ -86,7 +86,7 @@ func (a *Agent) Chat(ctx context.Context, messages []Message, onEvent func(Strea
 	for round := 0; round < maxRounds; round++ {
 		// 检查是否需要压缩上下文
 		if a.config.ContextWindow > 0 && needsCompression(messages, a.config.ContextWindow) {
-			logger.Default().Info("compressing conversation context",
+			logger.Ctx(ctx).Info("compressing conversation context",
 				zap.Int("messages", len(messages)),
 				zap.Int("estimated_tokens", estimateTokens(messages)),
 				zap.Int("context_window", a.config.ContextWindow))
@@ -100,6 +100,7 @@ func (a *Agent) Chat(ctx context.Context, messages []Message, onEvent func(Strea
 
 		var contentBuf string
 		var thinkingBuf string
+		var thinkingSignature string
 		var toolCalls []ToolCall
 		hasToolCall := false
 
@@ -112,6 +113,9 @@ func (a *Agent) Chat(ctx context.Context, messages []Message, onEvent func(Strea
 				thinkingBuf += event.Content
 				onEvent(event)
 			case "thinking_done":
+				if event.ThinkingSignature != "" {
+					thinkingSignature = event.ThinkingSignature
+				}
 				onEvent(event)
 			case "tool_start", "tool_result", "approval_request", "approval_result":
 				onEvent(event)
@@ -140,10 +144,11 @@ func (a *Agent) Chat(ctx context.Context, messages []Message, onEvent func(Strea
 		// reasoning_content 仅 DeepSeek-v4 thinking 模式强制要求回传（否则多轮 400），
 		// 其他 provider 保持原有行为，避免引入未知字段触发严格 OpenAI-compat 后端报错。
 		assistantMsg := Message{
-			Role:      RoleAssistant,
-			Content:   contentBuf,
-			Thinking:  thinkingBuf,
-			ToolCalls: toolCalls,
+			Role:              RoleAssistant,
+			Content:           contentBuf,
+			Thinking:          thinkingBuf,
+			ThinkingSignature: thinkingSignature,
+			ToolCalls:         toolCalls,
 		}
 		if needsReasoningContent(a.provider.Model()) {
 			assistantMsg.ReasoningContent = thinkingBuf

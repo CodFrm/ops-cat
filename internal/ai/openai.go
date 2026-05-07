@@ -85,6 +85,14 @@ type openAIStreamChunk struct {
 	} `json:"choices"`
 	// include_usage 时 API 在最后一个 chunk 返回 usage（choices 为空数组）
 	Usage *openAIUsage `json:"usage,omitempty"`
+	// 部分 OpenAI 兼容 provider 在流中以 {"error": {...}} 形式回报错误
+	Error *openAIStreamError `json:"error,omitempty"`
+}
+
+type openAIStreamError struct {
+	Message string `json:"message"`
+	Type    string `json:"type"`
+	Code    string `json:"code"`
 }
 
 type openAIUsage struct {
@@ -161,15 +169,22 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 	if resp.StatusCode != http.StatusOK {
 		defer func() {
 			if err := resp.Body.Close(); err != nil {
-				logger.Default().Warn("close HTTP response body", zap.Error(err))
+				logger.Ctx(ctx).Warn("close HTTP response body", zap.Error(err))
 			}
 		}()
 		errBody, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			logger.Default().Warn("read error response body", zap.Error(readErr))
+			logger.Ctx(ctx).Warn("read error response body", zap.Error(readErr))
+		}
+		errMsg := strings.TrimSpace(string(errBody))
+		if errMsg == "" {
+			errMsg = http.StatusText(resp.StatusCode)
+			if errMsg == "" {
+				errMsg = "(empty response body)"
+			}
 		}
 		return nil, &ProviderError{
-			Err:        fmt.Errorf("API error %d: %s", resp.StatusCode, string(errBody)),
+			Err:        fmt.Errorf("API error %d: %s", resp.StatusCode, errMsg),
 			RetryAfter: resp.Header.Get("Retry-After"),
 			StatusCode: resp.StatusCode,
 		}
@@ -184,7 +199,7 @@ func (p *OpenAIProvider) readStream(ctx context.Context, body io.ReadCloser, ch 
 	defer close(ch)
 	defer func() {
 		if err := body.Close(); err != nil {
-			logger.Default().Warn("close SSE stream body", zap.Error(err))
+			logger.Ctx(ctx).Warn("close SSE stream body", zap.Error(err))
 		}
 	}()
 
@@ -192,6 +207,10 @@ func (p *OpenAIProvider) readStream(ctx context.Context, body io.ReadCloser, ch 
 	thinkingActive := false
 	// include_usage=true 时最后一个 chunk 的 choices 为空，usage 字段带最终统计
 	var finalUsage *openAIUsage
+	sawDone := false
+	// 部分 OpenAI 兼容 provider 不发 [DONE]，但会在最后一个 content chunk 上带 finish_reason —
+	// 看到任何非空 finish_reason 也视为正常结束。
+	sawFinishReason := false
 
 	scanner := bufio.NewScanner(body)
 	for scanner.Scan() {
@@ -208,12 +227,34 @@ func (p *OpenAIProvider) readStream(ctx context.Context, body io.ReadCloser, ch 
 		}
 		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
+			sawDone = true
 			break
 		}
 
 		var chunk openAIStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			// 把无法解析的行记下来，方便排查 provider 直接吐了非 JSON 错误的情况
+			logger.Ctx(ctx).Warn("openai SSE chunk unmarshal failed",
+				zap.String("model", p.model),
+				zap.String("raw", data),
+				zap.Error(err))
 			continue
+		}
+
+		// 流中错误（OpenAI 兼容 provider 常见做法）—— 直接上报并终止
+		if chunk.Error != nil {
+			msg := strings.TrimSpace(chunk.Error.Message)
+			if msg == "" {
+				msg = "(empty error message)"
+			}
+			logger.Ctx(ctx).Warn("openai stream error chunk",
+				zap.String("model", p.model),
+				zap.String("type", chunk.Error.Type),
+				zap.String("code", chunk.Error.Code),
+				zap.String("message", chunk.Error.Message),
+				zap.String("raw", data))
+			ch <- StreamEvent{Type: "error", Error: msg}
+			return
 		}
 
 		// 最后一个 usage-only chunk：choices 为空，usage 为最终值
@@ -260,6 +301,10 @@ func (p *OpenAIProvider) readStream(ctx context.Context, body io.ReadCloser, ch 
 			existing.Function.Arguments += tc.Function.Arguments
 		}
 
+		if chunk.Choices[0].FinishReason != nil && *chunk.Choices[0].FinishReason != "" {
+			sawFinishReason = true
+		}
+
 		// 完成时发送累积的 tool calls
 		if chunk.Choices[0].FinishReason != nil && *chunk.Choices[0].FinishReason == "tool_calls" {
 			if thinkingActive {
@@ -281,6 +326,46 @@ func (p *OpenAIProvider) readStream(ctx context.Context, body io.ReadCloser, ch 
 	// 流结束时如果仍在思考，发 thinking_done
 	if thinkingActive {
 		ch <- StreamEvent{Type: "thinking_done"}
+	}
+
+	// scanner 出错（连接中断、读取失败等），按 error 上报；不要伪装成 done。
+	if err := scanner.Err(); err != nil {
+		logger.Ctx(ctx).Warn("openai SSE stream scanner error",
+			zap.String("model", p.model),
+			zap.Bool("saw_done", sawDone),
+			zap.Bool("saw_finish_reason", sawFinishReason),
+			zap.Error(err))
+		if finalUsage != nil {
+			cached := finalUsage.PromptTokensDetails.CachedTokens
+			input := max(finalUsage.PromptTokens-cached, 0)
+			ch <- StreamEvent{Type: "usage", Usage: &Usage{
+				InputTokens:     input,
+				OutputTokens:    finalUsage.CompletionTokens,
+				CacheReadTokens: cached,
+			}}
+		}
+		ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("stream interrupted: %v", err)}
+		return
+	}
+
+	// 流自然结束但没收到 [DONE]：宽松判定 —— 只要看到过 finish_reason，就当正常结束
+	// （部分 OpenAI 兼容 provider 不发 [DONE]）。否则视为异常并把上下文写日志。
+	if !sawDone && !sawFinishReason {
+		logger.Ctx(ctx).Warn("openai stream ended without [DONE] or finish_reason",
+			zap.String("model", p.model),
+			zap.Bool("had_usage", finalUsage != nil),
+			zap.Int("pending_tool_calls", len(toolCallMap)))
+		if finalUsage != nil {
+			cached := finalUsage.PromptTokensDetails.CachedTokens
+			input := max(finalUsage.PromptTokens-cached, 0)
+			ch <- StreamEvent{Type: "usage", Usage: &Usage{
+				InputTokens:     input,
+				OutputTokens:    finalUsage.CompletionTokens,
+				CacheReadTokens: cached,
+			}}
+		}
+		ch <- StreamEvent{Type: "error", Error: "stream ended unexpectedly without [DONE] or finish_reason"}
+		return
 	}
 
 	// 如果 scanner 结束时还有未发送的 tool calls

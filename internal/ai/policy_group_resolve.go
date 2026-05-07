@@ -24,7 +24,7 @@ func resolveCommandGroups(ctx context.Context, groupIDs []string) (allow, deny [
 		}
 		var p policy.CommandPolicy
 		if err := json.Unmarshal([]byte(pg.Policy), &p); err != nil {
-			logger.Default().Warn("unmarshal policy group command policy", zap.String("id", pg.BuiltinID), zap.Error(err))
+			logger.Ctx(ctx).Warn("unmarshal policy group command policy", zap.String("id", pg.BuiltinID), zap.Error(err))
 			continue
 		}
 		allow = append(allow, p.AllowList...)
@@ -44,7 +44,7 @@ func resolveQueryGroups(ctx context.Context, groupIDs []string) (allowTypes, den
 		}
 		var p policy.QueryPolicy
 		if err := json.Unmarshal([]byte(pg.Policy), &p); err != nil {
-			logger.Default().Warn("unmarshal policy group query policy", zap.String("id", pg.BuiltinID), zap.Error(err))
+			logger.Ctx(ctx).Warn("unmarshal policy group query policy", zap.String("id", pg.BuiltinID), zap.Error(err))
 			continue
 		}
 		allowTypes = append(allowTypes, p.AllowTypes...)
@@ -65,7 +65,7 @@ func resolveRedisGroups(ctx context.Context, groupIDs []string) (allow, deny []s
 		}
 		var p policy.RedisPolicy
 		if err := json.Unmarshal([]byte(pg.Policy), &p); err != nil {
-			logger.Default().Warn("unmarshal policy group redis policy", zap.String("id", pg.BuiltinID), zap.Error(err))
+			logger.Ctx(ctx).Warn("unmarshal policy group redis policy", zap.String("id", pg.BuiltinID), zap.Error(err))
 			continue
 		}
 		allow = append(allow, p.AllowList...)
@@ -85,7 +85,7 @@ func resolveMongoGroups(ctx context.Context, groupIDs []string) (allowTypes, den
 		}
 		var p policy.MongoPolicy
 		if err := json.Unmarshal([]byte(pg.Policy), &p); err != nil {
-			logger.Default().Warn("unmarshal policy group mongo policy", zap.String("id", pg.BuiltinID), zap.Error(err))
+			logger.Ctx(ctx).Warn("unmarshal policy group mongo policy", zap.String("id", pg.BuiltinID), zap.Error(err))
 			continue
 		}
 		allowTypes = append(allowTypes, p.AllowTypes...)
@@ -105,7 +105,7 @@ func resolveKafkaGroups(ctx context.Context, groupIDs []string) (allow, deny []s
 		}
 		var p policy.KafkaPolicy
 		if err := json.Unmarshal([]byte(pg.Policy), &p); err != nil {
-			logger.Default().Warn("unmarshal policy group kafka policy", zap.String("id", pg.BuiltinID), zap.Error(err))
+			logger.Ctx(ctx).Warn("unmarshal policy group kafka policy", zap.String("id", pg.BuiltinID), zap.Error(err))
 			continue
 		}
 		allow = append(allow, p.AllowList...)
@@ -140,7 +140,7 @@ func fetchPolicyGroups(ctx context.Context, ids []string) []*policy_group_entity
 		if repo != nil {
 			pgs, err := repo.ListByIDs(ctx, dbIDs)
 			if err != nil {
-				logger.Default().Warn("fetch policy groups from DB", zap.Error(err))
+				logger.Ctx(ctx).Warn("fetch policy groups from DB", zap.Error(err))
 			} else {
 				result = append(result, pgs...)
 			}

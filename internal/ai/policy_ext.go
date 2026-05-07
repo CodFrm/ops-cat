@@ -39,7 +39,7 @@ func checkExtensionPolicy(ctx context.Context, groupIDs []string, action, resour
 	for _, pg := range groups {
 		var rule ExtensionPolicyRule
 		if err := json.Unmarshal([]byte(pg.Policy), &rule); err != nil {
-			logger.Default().Warn("unmarshal extension policy group",
+			logger.Ctx(ctx).Warn("unmarshal extension policy group",
 				zap.String("id", pg.BuiltinID), zap.Error(err))
 			continue
 		}

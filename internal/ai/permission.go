@@ -57,7 +57,7 @@ func checkSSHPermission(ctx context.Context, assetID int64, command string) Chec
 
 	asset, err := asset_svc.Asset().Get(ctx, assetID)
 	if err != nil {
-		logger.Default().Warn("get asset for permission check", zap.Int64("assetID", assetID), zap.Error(err))
+		logger.Ctx(ctx).Warn("get asset for permission check", zap.Int64("assetID", assetID), zap.Error(err))
 	}
 	var groups []*group_entity.Group
 	if asset != nil && asset.GroupID > 0 {
@@ -382,7 +382,7 @@ func SaveGrantPattern(ctx context.Context, sessionID string, assetID int64, asse
 		}
 		if createErr := repo.CreateSession(ctx, session); createErr != nil {
 			// 可能并发创建，忽略重复错误
-			logger.Default().Debug("create grant session (may already exist)", zap.String("sessionID", sessionID), zap.Error(createErr))
+			logger.Ctx(ctx).Debug("create grant session (may already exist)", zap.String("sessionID", sessionID), zap.Error(createErr))
 		}
 	}
 
@@ -395,6 +395,6 @@ func SaveGrantPattern(ctx context.Context, sessionID string, assetID int64, asse
 		Createtime:     time.Now().Unix(),
 	}
 	if err := repo.CreateItems(ctx, []*grant_entity.GrantItem{item}); err != nil {
-		logger.Default().Error("save grant pattern", zap.Error(err))
+		logger.Ctx(ctx).Error("save grant pattern", zap.Error(err))
 	}
 }

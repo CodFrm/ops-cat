@@ -55,7 +55,7 @@ func handleSpawnAgent(ctx context.Context, args map[string]any) (string, error) 
 	if toolsRaw, ok := args["tools"]; ok {
 		if toolsJSON, err := json.Marshal(toolsRaw); err == nil {
 			if err := json.Unmarshal(toolsJSON, &toolNames); err != nil {
-				logger.Default().Warn("parse spawn_agent tools param", zap.Error(err))
+				logger.Ctx(ctx).Warn("parse spawn_agent tools param", zap.Error(err))
 			}
 		}
 	}
@@ -132,7 +132,7 @@ func handleSpawnAgent(ctx context.Context, args map[string]any) (string, error) 
 	})
 
 	if err != nil {
-		logger.Default().Warn("sub-agent execution failed", zap.Error(err))
+		logger.Ctx(ctx).Warn("sub-agent execution failed", zap.Error(err))
 		return fmt.Sprintf("Sub-agent failed: %s\n\nPartial result:\n%s", err.Error(), summary), nil
 	}
 

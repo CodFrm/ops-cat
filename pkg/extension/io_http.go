@@ -209,7 +209,7 @@ func (h *httpHandle) Close() error {
 	h.cancel()
 	if h.resp != nil {
 		if err := h.resp.Body.Close(); err != nil {
-			logger.Default().Warn("close HTTP response body", zap.Error(err))
+			logger.Ctx(h.ctx).Warn("close HTTP response body", zap.Error(err))
 		}
 	}
 	return nil

@@ -71,6 +71,7 @@ Bindings stay thin: parse → service → return. Business rules in `service/`, 
 - **Commits:** gitmoji — ✨ feature, 🐛 fix, ♻️ refactor, 🎨 UI, ⚡️ perf, 🔒 security, 🔧 config, ✅ tests, 📄 docs, 🚀 release.
 - **Go mocks:** `go.uber.org/mock` in `mock_*/` subdirs; regen via `go generate ./...`.
 - **Go tests:** goconvey + testify.
+- **Logging:** `cago/pkg/logger` — prefer `logger.Ctx(ctx)` whenever a `context.Context` is reachable (param, struct field like `a.ctx`, captured closure ctx, `cmd.Context()`, `tx.Statement.Context`). `logger.Default()` loses request context — only use it when no ctx is in scope (e.g. `init()`, pure helpers, structs without a ctx field). Don't bolt a ctx parameter onto a function just to log.
 - **Frontend:** Prettier (120 col, 2-space).
 
 ## Fix policy — root cause, in scope, no parking

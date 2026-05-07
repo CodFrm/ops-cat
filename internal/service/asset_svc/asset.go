@@ -57,7 +57,7 @@ func (s *assetSvc) Create(ctx context.Context, asset *asset_entity.Asset) error 
 		if p, ok := policy.GetDefaultPolicyOf(asset.Type); ok {
 			data, err := json.Marshal(p)
 			if err != nil {
-				logger.Default().Error("marshal default policy", zap.Error(err))
+				logger.Ctx(ctx).Error("marshal default policy", zap.Error(err))
 			} else {
 				asset.CmdPolicy = string(data)
 			}

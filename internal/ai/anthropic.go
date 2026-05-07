@@ -103,8 +103,14 @@ type anthropicMessage struct {
 }
 
 type anthropicContentBlock struct {
-	Type         string                 `json:"type"`
-	Text         string                 `json:"text,omitempty"`
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+	// Thinking / Signature: type=thinking 块的内容字段（不是 text）。
+	// 真 Anthropic 在 adaptive thinking + tool_use 多轮会话中要求把 thinking 块
+	// 连同 signature 原样回传，否则 400。DeepSeek-v4 的 Anthropic 兼容端
+	// 不签名但仍然校验 thinking 字段名，缺字段会报 "missing field thinking"。
+	Thinking     string                 `json:"thinking,omitempty"`
+	Signature    string                 `json:"signature,omitempty"`
 	ID           string                 `json:"id,omitempty"`
 	Name         string                 `json:"name,omitempty"`
 	Input        interface{}            `json:"input,omitempty"`
@@ -153,9 +159,10 @@ type anthropicBlockStart struct {
 }
 
 type anthropicDelta struct {
-	Type        string `json:"type"` // "text_delta" | "input_json_delta" | "thinking_delta"
+	Type        string `json:"type"` // "text_delta" | "input_json_delta" | "thinking_delta" | "signature_delta"
 	Text        string `json:"text,omitempty"`
 	Thinking    string `json:"thinking,omitempty"`
+	Signature   string `json:"signature,omitempty"`
 	PartialJSON string `json:"partial_json,omitempty"`
 }
 
@@ -166,10 +173,12 @@ type anthropicStreamError struct {
 
 // blockState 跟踪流式 content block 的状态
 type blockState struct {
-	blockType string // "text" | "tool_use"
+	blockType string // "text" | "tool_use" | "thinking"
 	toolID    string
 	toolName  string
 	inputJSON strings.Builder
+	// signature 仅 thinking 块使用：累积 signature_delta 事件，content_block_stop 时落到 thinking_done。
+	signature strings.Builder
 }
 
 func (p *AnthropicProvider) Chat(ctx context.Context, messages []Message, tools []Tool) (<-chan StreamEvent, error) {
@@ -221,15 +230,22 @@ func (p *AnthropicProvider) Chat(ctx context.Context, messages []Message, tools 
 	if resp.StatusCode != http.StatusOK {
 		defer func() {
 			if err := resp.Body.Close(); err != nil {
-				logger.Default().Warn("close HTTP response body", zap.Error(err))
+				logger.Ctx(ctx).Warn("close HTTP response body", zap.Error(err))
 			}
 		}()
 		errBody, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			logger.Default().Warn("read error response body", zap.Error(readErr))
+			logger.Ctx(ctx).Warn("read error response body", zap.Error(readErr))
+		}
+		errMsg := strings.TrimSpace(string(errBody))
+		if errMsg == "" {
+			errMsg = http.StatusText(resp.StatusCode)
+			if errMsg == "" {
+				errMsg = "(empty response body)"
+			}
 		}
 		return nil, &ProviderError{
-			Err:        fmt.Errorf("API error %d: %s", resp.StatusCode, string(errBody)),
+			Err:        fmt.Errorf("API error %d: %s", resp.StatusCode, errMsg),
 			RetryAfter: resp.Header.Get("Retry-After"),
 			StatusCode: resp.StatusCode,
 		}
@@ -262,8 +278,9 @@ func (p *AnthropicProvider) convertMessages(messages []Message) (string, []anthr
 				var blocks []anthropicContentBlock
 				if msg.Thinking != "" {
 					blocks = append(blocks, anthropicContentBlock{
-						Type: "thinking",
-						Text: msg.Thinking,
+						Type:      "thinking",
+						Thinking:  msg.Thinking,
+						Signature: msg.ThinkingSignature,
 					})
 				}
 				if msg.Content != "" {
@@ -341,7 +358,7 @@ func (p *AnthropicProvider) readStream(ctx context.Context, body io.ReadCloser, 
 	defer close(ch)
 	defer func() {
 		if err := body.Close(); err != nil {
-			logger.Default().Warn("close SSE stream body", zap.Error(err))
+			logger.Ctx(ctx).Warn("close SSE stream body", zap.Error(err))
 		}
 	}()
 
@@ -369,6 +386,10 @@ func (p *AnthropicProvider) readStream(ctx context.Context, body io.ReadCloser, 
 
 		var event anthropicSSEEvent
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			logger.Ctx(ctx).Warn("anthropic SSE event unmarshal failed",
+				zap.String("model", p.model),
+				zap.String("raw", data),
+				zap.Error(err))
 			continue
 		}
 
@@ -417,6 +438,10 @@ func (p *AnthropicProvider) readStream(ctx context.Context, body io.ReadCloser, 
 				if event.Delta.Thinking != "" {
 					ch <- StreamEvent{Type: "thinking", Content: event.Delta.Thinking}
 				}
+			case "signature_delta":
+				// 不立即转发，累积到 content_block_stop 时随 thinking_done 一并下发，
+				// 避免前端为 signature 引入额外事件类型。
+				bs.signature.WriteString(event.Delta.Signature)
 			case "input_json_delta":
 				bs.inputJSON.WriteString(event.Delta.PartialJSON)
 			}
@@ -433,7 +458,7 @@ func (p *AnthropicProvider) readStream(ctx context.Context, body io.ReadCloser, 
 				tc.Function.Arguments = bs.inputJSON.String()
 				ch <- StreamEvent{Type: "tool_call", ToolCalls: []ToolCall{tc}}
 			case "thinking":
-				ch <- StreamEvent{Type: "thinking_done"}
+				ch <- StreamEvent{Type: "thinking_done", ThinkingSignature: bs.signature.String()}
 			}
 			delete(blocks, event.Index)
 
@@ -450,19 +475,36 @@ func (p *AnthropicProvider) readStream(ctx context.Context, body io.ReadCloser, 
 			if event.Error != nil {
 				errMsg = event.Error.Message
 			}
+			logger.Ctx(ctx).Warn("anthropic stream error event",
+				zap.String("model", p.model),
+				zap.String("message", errMsg),
+				zap.String("raw", data))
 			ch <- StreamEvent{Type: "error", Error: errMsg}
 			return
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		logger.Default().Warn("SSE stream scanner error", zap.Error(err))
+		logger.Ctx(ctx).Warn("anthropic SSE stream scanner error",
+			zap.String("model", p.model),
+			zap.Error(err))
+		if usageStarted {
+			u := accumulated
+			ch <- StreamEvent{Type: "usage", Usage: &u}
+		}
+		ch <- StreamEvent{Type: "error", Error: fmt.Sprintf("stream interrupted: %v", err)}
+		return
 	}
 
-	// 如果流意外结束（没有 message_stop），仍发送 done
+	// 流自然结束但没收到 message_stop —— 视为异常，不能伪装成 done，
+	// 否则前端会把空消息当成功完成。runner 看到 error 后会按重试策略处理。
+	logger.Ctx(ctx).Warn("anthropic stream ended without message_stop",
+		zap.String("model", p.model),
+		zap.Bool("had_usage", usageStarted),
+		zap.Int("pending_blocks", len(blocks)))
 	if usageStarted {
 		u := accumulated
 		ch <- StreamEvent{Type: "usage", Usage: &u}
 	}
-	ch <- StreamEvent{Type: "done"}
+	ch <- StreamEvent{Type: "error", Error: "stream ended unexpectedly without message_stop"}
 }

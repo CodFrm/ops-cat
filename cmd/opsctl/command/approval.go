@@ -39,7 +39,7 @@ func requireApproval(ctx context.Context, req approval.ApprovalRequest) (Approva
 	if req.SessionID == "" {
 		id := uuid.New().String()
 		if err := writeActiveSession(id); err != nil {
-			logger.Default().Warn("write active session", zap.String("sessionID", id), zap.Error(err))
+			logger.Ctx(ctx).Warn("write active session", zap.String("sessionID", id), zap.Error(err))
 		}
 		req.SessionID = id
 	}
@@ -78,7 +78,7 @@ func requireApproval(ctx context.Context, req approval.ApprovalRequest) (Approva
 
 	authToken, err := bootstrap.ReadAuthToken(dataDir)
 	if err != nil {
-		logger.Default().Warn("read auth token", zap.Error(err))
+		logger.Ctx(ctx).Warn("read auth token", zap.Error(err))
 	}
 
 	resp, err := approval.RequestApprovalWithToken(sockPath, authToken, req)
@@ -113,7 +113,7 @@ func requireApproval(ctx context.Context, req approval.ApprovalRequest) (Approva
 	// If the desktop app approved the entire session, persist it locally
 	if resp.ApproveGrant && req.SessionID != "" {
 		if err := writeActiveSession(req.SessionID); err != nil {
-			logger.Default().Warn("write active session", zap.String("sessionID", req.SessionID), zap.Error(err))
+			logger.Ctx(ctx).Warn("write active session", zap.String("sessionID", req.SessionID), zap.Error(err))
 		}
 	}
 

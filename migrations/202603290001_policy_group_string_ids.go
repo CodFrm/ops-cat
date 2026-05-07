@@ -64,7 +64,7 @@ func migratePolicyColumn(tx *gorm.DB, table, column string) error {
 		}
 		updateSQL := fmt.Sprintf("UPDATE %s SET %s = ? WHERE id = ?", table, column)
 		if err := tx.Exec(updateSQL, newPolicy, r.ID).Error; err != nil {
-			logger.Default().Warn("migration: update policy column",
+			logger.Ctx(tx.Statement.Context).Warn("migration: update policy column",
 				zap.String("table", table), zap.String("column", column),
 				zap.Int64("id", r.ID), zap.Error(err))
 			return err

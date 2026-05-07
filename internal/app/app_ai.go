@@ -114,7 +114,7 @@ func (a *App) resetRunners() {
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
-		logger.Default().Warn("resetRunners: 部分 runner Stop 未在 3s 内完成，放行关闭")
+		logger.Ctx(a.ctx).Warn("resetRunners: 部分 runner Stop 未在 3s 内完成，放行关闭")
 	}
 }
 
@@ -125,7 +125,7 @@ func (a *App) InitAIProvider() {
 		return // 无激活 provider，跳过
 	}
 	if err := a.activateProvider(p); err != nil {
-		logger.Default().Warn("activate AI provider on startup", zap.Error(err))
+		logger.Ctx(a.ctx).Warn("activate AI provider on startup", zap.Error(err))
 	}
 }
 
@@ -215,15 +215,15 @@ func (a *App) loadConversationDisplayMessages(ctx context.Context, id int64) ([]
 	for _, msg := range msgs {
 		blocks, err := msg.GetBlocks()
 		if err != nil {
-			logger.Default().Warn("get message blocks", zap.Error(err))
+			logger.Ctx(ctx).Warn("get message blocks", zap.Error(err))
 		}
 		mentions, err := msg.GetMentions()
 		if err != nil {
-			logger.Default().Warn("get message mentions", zap.Error(err))
+			logger.Ctx(ctx).Warn("get message mentions", zap.Error(err))
 		}
 		usage, err := msg.GetTokenUsage()
 		if err != nil {
-			logger.Default().Warn("get message token usage", zap.Error(err))
+			logger.Ctx(ctx).Warn("get message token usage", zap.Error(err))
 		}
 		displayMsgs = append(displayMsgs, ConversationDisplayMessage{
 			Role:       msg.Role,
@@ -283,7 +283,7 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 			if msg.Role == ai.RoleUser {
 				title := normalizeConversationTitle(string(msg.Content))
 				if err := conversation_svc.Conversation().UpdateTitle(ctx, convID, title); err != nil {
-					logger.Default().Error("update conversation title", zap.Error(err))
+					logger.Ctx(ctx).Error("update conversation title", zap.Error(err))
 				}
 				break
 			}
@@ -353,7 +353,7 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 		if event.Type == "done" || event.Type == "stopped" {
 			if conv, err := conversation_svc.Conversation().Get(a.ctx, convID); err == nil {
 				if err := conversation_svc.Conversation().Update(a.ctx, conv); err != nil {
-					logger.Default().Warn("update conversation time", zap.Error(err))
+					logger.Ctx(ctx).Warn("update conversation time", zap.Error(err))
 				}
 			}
 		}
@@ -417,13 +417,13 @@ func (a *App) SaveConversationMessages(convID int64, displayMsgs []ConversationD
 			Createtime:     time.Now().Unix(),
 		}
 		if err := msg.SetBlocks(dm.Blocks); err != nil {
-			logger.Default().Error("set message blocks", zap.Error(err))
+			logger.Ctx(ctx).Error("set message blocks", zap.Error(err))
 		}
 		if err := msg.SetMentions(dm.Mentions); err != nil {
-			logger.Default().Error("set message mentions", zap.Error(err))
+			logger.Ctx(ctx).Error("set message mentions", zap.Error(err))
 		}
 		if err := msg.SetTokenUsage(dm.TokenUsage); err != nil {
-			logger.Default().Error("set message token usage", zap.Error(err))
+			logger.Ctx(ctx).Error("set message token usage", zap.Error(err))
 		}
 		msgs = append(msgs, msg)
 	}

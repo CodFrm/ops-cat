@@ -183,7 +183,7 @@ func (s *Service) Upload(ctx context.Context, transferID, sessionID, localPath, 
 	}
 	defer func() {
 		if err := localFile.Close(); err != nil {
-			logger.Default().Warn("close local file", zap.String("path", localPath), zap.Error(err))
+			logger.Ctx(ctx).Warn("close local file", zap.String("path", localPath), zap.Error(err))
 		}
 	}()
 
@@ -198,7 +198,7 @@ func (s *Service) Upload(ctx context.Context, transferID, sessionID, localPath, 
 	}
 	defer func() {
 		if err := remoteFile.Close(); err != nil {
-			logger.Default().Warn("close remote file", zap.String("path", remotePath), zap.Error(err))
+			logger.Ctx(ctx).Warn("close remote file", zap.String("path", remotePath), zap.Error(err))
 		}
 	}()
 
@@ -225,7 +225,7 @@ func (s *Service) Download(ctx context.Context, transferID, sessionID, remotePat
 	}
 	defer func() {
 		if err := remoteFile.Close(); err != nil {
-			logger.Default().Warn("close remote file", zap.String("path", remotePath), zap.Error(err))
+			logger.Ctx(ctx).Warn("close remote file", zap.String("path", remotePath), zap.Error(err))
 		}
 	}()
 
@@ -240,7 +240,7 @@ func (s *Service) Download(ctx context.Context, transferID, sessionID, remotePat
 	}
 	defer func() {
 		if err := localFile.Close(); err != nil {
-			logger.Default().Warn("close local file", zap.String("path", localPath), zap.Error(err))
+			logger.Ctx(ctx).Warn("close local file", zap.String("path", localPath), zap.Error(err))
 		}
 	}()
 
@@ -300,7 +300,7 @@ func (s *Service) UploadDir(ctx context.Context, transferID, sessionID, localDir
 
 		relPath, err := filepath.Rel(localDir, path)
 		if err != nil {
-			logger.Default().Warn("compute relative path", zap.String("base", localDir), zap.String("path", path), zap.Error(err))
+			logger.Ctx(ctx).Warn("compute relative path", zap.String("base", localDir), zap.String("path", path), zap.Error(err))
 			return err
 		}
 		remoteFull := remoteDir + "/" + filepath.ToSlash(relPath)
@@ -316,7 +316,7 @@ func (s *Service) UploadDir(ctx context.Context, transferID, sessionID, localDir
 		}
 		defer func() {
 			if err := localFile.Close(); err != nil {
-				logger.Default().Warn("close local file", zap.String("path", path), zap.Error(err))
+				logger.Ctx(ctx).Warn("close local file", zap.String("path", path), zap.Error(err))
 			}
 		}()
 
@@ -326,7 +326,7 @@ func (s *Service) UploadDir(ctx context.Context, transferID, sessionID, localDir
 		}
 		defer func() {
 			if err := remoteFile.Close(); err != nil {
-				logger.Default().Warn("close remote file", zap.String("path", remoteFull), zap.Error(err))
+				logger.Ctx(ctx).Warn("close remote file", zap.String("path", remoteFull), zap.Error(err))
 			}
 		}()
 
@@ -462,7 +462,7 @@ func (s *Service) DownloadDir(ctx context.Context, transferID, sessionID, remote
 		localFile, err := os.Create(localFull) //nolint:gosec // file path from user config
 		if err != nil {
 			if closeErr := remoteFile.Close(); closeErr != nil {
-				logger.Default().Warn("close remote file", zap.String("path", entry.remotePath), zap.Error(closeErr))
+				logger.Ctx(ctx).Warn("close remote file", zap.String("path", entry.remotePath), zap.Error(closeErr))
 			}
 			return err
 		}
@@ -471,10 +471,10 @@ func (s *Service) DownloadDir(ctx context.Context, transferID, sessionID, remote
 		for {
 			if ctx.Err() != nil {
 				if closeErr := localFile.Close(); closeErr != nil {
-					logger.Default().Warn("close local file", zap.String("path", localFull), zap.Error(closeErr))
+					logger.Ctx(ctx).Warn("close local file", zap.String("path", localFull), zap.Error(closeErr))
 				}
 				if closeErr := remoteFile.Close(); closeErr != nil {
-					logger.Default().Warn("close remote file", zap.String("path", entry.remotePath), zap.Error(closeErr))
+					logger.Ctx(ctx).Warn("close remote file", zap.String("path", entry.remotePath), zap.Error(closeErr))
 				}
 				return ctx.Err()
 			}
@@ -482,10 +482,10 @@ func (s *Service) DownloadDir(ctx context.Context, transferID, sessionID, remote
 			if n > 0 {
 				if _, writeErr := localFile.Write(buf[:n]); writeErr != nil {
 					if closeErr := localFile.Close(); closeErr != nil {
-						logger.Default().Warn("close local file", zap.String("path", localFull), zap.Error(closeErr))
+						logger.Ctx(ctx).Warn("close local file", zap.String("path", localFull), zap.Error(closeErr))
 					}
 					if closeErr := remoteFile.Close(); closeErr != nil {
-						logger.Default().Warn("close remote file", zap.String("path", entry.remotePath), zap.Error(closeErr))
+						logger.Ctx(ctx).Warn("close remote file", zap.String("path", entry.remotePath), zap.Error(closeErr))
 					}
 					return writeErr
 				}
@@ -515,20 +515,20 @@ func (s *Service) DownloadDir(ctx context.Context, transferID, sessionID, remote
 			}
 			if readErr != nil {
 				if closeErr := localFile.Close(); closeErr != nil {
-					logger.Default().Warn("close local file", zap.String("path", localFull), zap.Error(closeErr))
+					logger.Ctx(ctx).Warn("close local file", zap.String("path", localFull), zap.Error(closeErr))
 				}
 				if closeErr := remoteFile.Close(); closeErr != nil {
-					logger.Default().Warn("close remote file", zap.String("path", entry.remotePath), zap.Error(closeErr))
+					logger.Ctx(ctx).Warn("close remote file", zap.String("path", entry.remotePath), zap.Error(closeErr))
 				}
 				return readErr
 			}
 		}
 
 		if closeErr := localFile.Close(); closeErr != nil {
-			logger.Default().Warn("close local file", zap.String("path", localFull), zap.Error(closeErr))
+			logger.Ctx(ctx).Warn("close local file", zap.String("path", localFull), zap.Error(closeErr))
 		}
 		if closeErr := remoteFile.Close(); closeErr != nil {
-			logger.Default().Warn("close remote file", zap.String("path", entry.remotePath), zap.Error(closeErr))
+			logger.Ctx(ctx).Warn("close remote file", zap.String("path", entry.remotePath), zap.Error(closeErr))
 		}
 		filesCompleted++
 	}

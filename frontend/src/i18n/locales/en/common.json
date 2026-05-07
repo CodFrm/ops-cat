@@ -817,6 +817,7 @@
       "tooltip": "Token usage for this reply"
     },
     "retrying": "Retrying",
+    "errorUnknown": "AI error (no details)",
     "newConversation": "New conversation",
     "sidebar": {
       "title": "AI Assistant",

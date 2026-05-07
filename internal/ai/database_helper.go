@@ -102,14 +102,14 @@ func handleExecSQL(ctx context.Context, args map[string]any) (string, error) {
 		if db != nil {
 			defer func() {
 				if err := db.Close(); err != nil {
-					logger.Default().Warn("close database connection", zap.Error(err))
+					logger.Ctx(ctx).Warn("close database connection", zap.Error(err))
 				}
 			}()
 		}
 		if closer != nil {
 			defer func() {
 				if err := closer.Close(); err != nil {
-					logger.Default().Warn("close database tunnel", zap.Error(err))
+					logger.Ctx(ctx).Warn("close database tunnel", zap.Error(err))
 				}
 			}()
 		}
@@ -142,7 +142,7 @@ func ExecuteSQL(ctx context.Context, db *sql.DB, sqlText string) (string, error)
 		}
 		defer func() {
 			if err := rows.Close(); err != nil {
-				logger.Default().Warn("close SQL rows", zap.Error(err))
+				logger.Ctx(ctx).Warn("close SQL rows", zap.Error(err))
 			}
 		}()
 		return formatRowsJSON(rows)
@@ -154,7 +154,7 @@ func ExecuteSQL(ctx context.Context, db *sql.DB, sqlText string) (string, error)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		logger.Default().Warn("get rows affected", zap.Error(err))
+		logger.Ctx(ctx).Warn("get rows affected", zap.Error(err))
 	}
 	return fmt.Sprintf(`{"affected_rows":%d}`, affected), nil
 }
@@ -196,7 +196,7 @@ func ExecuteSQLPaged(ctx context.Context, db *sql.DB, sqlText string, page, page
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			logger.Default().Warn("close SQL rows", zap.Error(err))
+			logger.Ctx(ctx).Warn("close SQL rows", zap.Error(err))
 		}
 	}()
 

@@ -151,7 +151,7 @@ func (a *App) StartK8sPodLogs(assetID int64, namespace, podName, container strin
 	go func() {
 		defer func() {
 			if closeErr := reader.Close(); closeErr != nil {
-				logger.Default().Warn("close k8s log reader", zap.Error(closeErr))
+				logger.Ctx(ctx).Warn("close k8s log reader", zap.Error(closeErr))
 			}
 		}()
 		defer cancel()

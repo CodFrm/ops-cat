@@ -802,6 +802,7 @@
       "tooltip": "本次回复 token 使用量"
     },
     "retrying": "重试中",
+    "errorUnknown": "AI 接口错误（无详细信息）",
     "newConversation": "新对话",
     "sidebar": {
       "title": "AI 助手",

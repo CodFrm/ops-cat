@@ -341,7 +341,7 @@ func runSSHCommandWithStdin(ctx context.Context, client *ssh.Client, command str
 	}
 	defer func() {
 		if err := session.Close(); err != nil && !isExpectedCloseErr(err) {
-			logger.Default().Warn("close SSH session", zap.Error(err))
+			logger.Ctx(ctx).Warn("close SSH session", zap.Error(err))
 		}
 	}()
 
@@ -368,10 +368,10 @@ func runSSHCommandWithStdin(ctx context.Context, client *ssh.Client, command str
 		}
 	case <-ctx.Done():
 		if err := session.Close(); err != nil && !isExpectedCloseErr(err) {
-			logger.Default().Warn("close SSH session on cancel", zap.Error(err))
+			logger.Ctx(ctx).Warn("close SSH session on cancel", zap.Error(err))
 		}
 		if err := client.Close(); err != nil && !isExpectedCloseErr(err) {
-			logger.Default().Warn("close SSH client on cancel", zap.Error(err))
+			logger.Ctx(ctx).Warn("close SSH client on cancel", zap.Error(err))
 		}
 		return "", ctx.Err()
 	}

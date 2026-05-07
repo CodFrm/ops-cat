@@ -34,6 +34,8 @@ export interface ContentBlock {
   toolName?: string;
   toolInput?: string;
   toolCallId?: string; // 跨 turn 还原 tool_calls 历史；老数据无此字段，发送时退化为塌缩消息
+  // thinking 块专用：Anthropic adaptive thinking 的签名，跨 turn 必须原样回传，否则真 Anthropic 400。
+  thinkingSignature?: string;
   status?: "running" | "completed" | "error" | "pending_confirm" | "cancelled";
   confirmId?: string;
   // agent 块专用
@@ -80,6 +82,8 @@ export interface PendingQueueItem {
 interface StreamEventData {
   type: string;
   content?: string;
+  // type=thinking_done 时携带 Anthropic adaptive thinking 块的签名，需随消息持久化用于跨 turn 回传
+  thinking_signature?: string;
   tool_name?: string;
   tool_input?: string;
   tool_call_id?: string;
@@ -1179,10 +1183,15 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
     }
 
     case "thinking_done": {
+      // 后端在 content_block_stop 时把累积的 signature_delta 一起下发，跨 turn 必须随 thinking 内容回传。
+      const sig = event.thinking_signature;
       const updated = updateLastAssistant(msgs, (msg) => {
-        const newBlocks = msg.blocks.map((b) =>
-          b.type === "thinking" && b.status === "running" ? { ...b, status: "completed" as const } : b
-        );
+        const newBlocks = msg.blocks.map((b) => {
+          if (b.type === "thinking" && b.status === "running") {
+            return { ...b, status: "completed" as const, ...(sig ? { thinkingSignature: sig } : {}) };
+          }
+          return b;
+        });
         return { ...msg, blocks: newBlocks };
       });
       if (updated) {
@@ -1325,15 +1334,50 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
 
     case "error": {
       cleanupStreamBuffer(convId);
-      const updated = updateLastAssistant(msgs, (msg) => ({
-        ...msg,
-        blocks: appendText(msg.blocks, `\n\n**Error:** ${event.error}`),
-        streaming: false,
-      }));
+      const errText =
+        (event.error && String(event.error).trim()) || i18n.t("ai.errorUnknown", "AI 接口错误（无详细信息）");
+      const updated = updateLastAssistant(msgs, (msg) => {
+        // 终结仍在运行的中间块，避免 spinner 永远转下去
+        const newBlocks = msg.blocks.map((b) => {
+          if (b.type === "tool" && (b.status === "running" || b.status === "pending_confirm")) {
+            return { ...b, status: "cancelled" as const };
+          }
+          if (b.type === "thinking" && b.status === "running") {
+            return { ...b, status: "completed" as const };
+          }
+          if (b.type === "agent" && b.status === "running") {
+            return {
+              ...b,
+              status: "cancelled" as const,
+              childBlocks: b.childBlocks?.map((c) =>
+                c.status === "running" ? { ...c, status: "cancelled" as const } : c
+              ),
+            };
+          }
+          return b;
+        });
+        // 没有任何先前内容时，避免前导空行让首屏看起来错位
+        const prefix = newBlocks.length === 0 ? "" : "\n\n";
+        return {
+          ...msg,
+          blocks: appendText(newBlocks, `${prefix}**Error:** ${errText}`),
+          streaming: false,
+        };
+      });
       if (updated) {
         updateConversation(convId, { messages: updated, sending: false });
       } else {
-        updateConversation(convId, { sending: false });
+        // 没有 assistant 占位（极端情况：流在创建占位前就挂了）—— 兜底插入一条
+        const errMsg: ChatMessage = {
+          role: "assistant",
+          content: "",
+          blocks: [{ type: "text", content: `**Error:** ${errText}` }],
+          streaming: false,
+        };
+        updateConversation(convId, {
+          messages: [...msgs, errMsg],
+          sending: false,
+        });
       }
 
       // 错误态同样需要落盘，否则强制重启后会丢掉最后一次失败上下文。
@@ -1395,6 +1439,10 @@ function expandToAPIMessages(messages: ChatMessage[]): ai.Message[] {
 
     // assistant 累加器：在遇到 tool block 时刷出当前 assistant + 跟一条 tool 消息
     let thinking = "";
+    // Anthropic adaptive thinking 块的签名，跨 turn 必须原样回传。
+    // 单轮通常只有一个 thinking 块，取最后一次见到的签名即可；
+    // 没有签名（如 DeepSeek 兼容端）就保持空，由后端 omitempty 略掉。
+    let thinkingSignature = "";
     let text = "";
     const pendingToolCalls: { id: string; type: string; function: { name: string; arguments: string } }[] = [];
 
@@ -1404,10 +1452,12 @@ function expandToAPIMessages(messages: ChatMessage[]): ai.Message[] {
       if (thinking) {
         payload.thinking = thinking;
         payload.reasoning_content = thinking;
+        if (thinkingSignature) payload.thinking_signature = thinkingSignature;
       }
       if (pendingToolCalls.length > 0) payload.tool_calls = pendingToolCalls.slice();
       out.push(new ai.Message(payload));
       thinking = "";
+      thinkingSignature = "";
       text = "";
       pendingToolCalls.length = 0;
     };
@@ -1426,10 +1476,13 @@ function expandToAPIMessages(messages: ChatMessage[]): ai.Message[] {
         .filter((b) => b.type === "thinking")
         .map((b) => b.content)
         .join("");
+      // 单轮塌缩场景下，取首个有签名的 thinking 块（拼接会破坏单一签名对应单一文本的假设）。
+      const sig = m.blocks.find((b) => b.type === "thinking" && b.thinkingSignature)?.thinkingSignature;
       const payload: Record<string, unknown> = { role: "assistant", content: m.content };
       if (allThinking) {
         payload.thinking = allThinking;
         payload.reasoning_content = allThinking;
+        if (sig) payload.thinking_signature = sig;
       }
       out.push(new ai.Message(payload));
       continue;
@@ -1438,6 +1491,7 @@ function expandToAPIMessages(messages: ChatMessage[]): ai.Message[] {
     for (const b of m.blocks) {
       if (b.type === "thinking") {
         thinking += b.content;
+        if (b.thinkingSignature) thinkingSignature = b.thinkingSignature;
       } else if (b.type === "text") {
         text += b.content;
       } else if (b.type === "tool" && b.toolCallId) {

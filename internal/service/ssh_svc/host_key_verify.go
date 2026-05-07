@@ -64,7 +64,7 @@ func MakeHostKeyCallback(host string, port int, verifyFn HostKeyVerifyFunc) ssh.
 				// 密钥匹配，更新 last_seen
 				stored.LastSeen = now
 				if err := host_key_repo.HostKey().Upsert(ctx, stored); err != nil {
-					logger.Default().Warn("upsert host key", zap.String("host", host), zap.Int("port", port), zap.Error(err))
+					logger.Ctx(ctx).Warn("upsert host key", zap.String("host", host), zap.Int("port", port), zap.Error(err))
 				}
 				return nil
 			}
@@ -86,7 +86,7 @@ func MakeHostKeyCallback(host string, port int, verifyFn HostKeyVerifyFunc) ssh.
 				stored.Fingerprint = fingerprint
 				stored.LastSeen = now
 				if err := host_key_repo.HostKey().Upsert(ctx, stored); err != nil {
-					logger.Default().Warn("upsert host key", zap.String("host", host), zap.Int("port", port), zap.Error(err))
+					logger.Ctx(ctx).Warn("upsert host key", zap.String("host", host), zap.Int("port", port), zap.Error(err))
 				}
 				return nil
 			case HostKeyAcceptOnce:
@@ -117,7 +117,7 @@ func MakeHostKeyCallback(host string, port int, verifyFn HostKeyVerifyFunc) ssh.
 				LastSeen:    now,
 			}
 			if err := host_key_repo.HostKey().Upsert(ctx, newKey); err != nil {
-				logger.Default().Warn("upsert new host key", zap.String("host", host), zap.Int("port", port), zap.Error(err))
+				logger.Ctx(ctx).Warn("upsert new host key", zap.String("host", host), zap.Int("port", port), zap.Error(err))
 			}
 			return nil
 		case HostKeyAcceptOnce:

@@ -14,12 +14,17 @@ const (
 
 // Message 对话消息
 type Message struct {
-	Role             Role       `json:"role"`
-	Content          string     `json:"content"`
-	Thinking         string     `json:"thinking,omitempty"`          // Anthropic 格式
-	ReasoningContent string     `json:"reasoning_content,omitempty"` // DeepSeek/OpenAI 格式
-	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID       string     `json:"tool_call_id,omitempty"` // role=tool 时标识调用
+	Role    Role   `json:"role"`
+	Content string `json:"content"`
+	// Thinking Anthropic / DeepSeek 思考内容文本。
+	Thinking string `json:"thinking,omitempty"`
+	// ThinkingSignature Anthropic adaptive thinking 块的签名。
+	// 真 Anthropic 在 reasoning + tool_use 多轮会话中必须把上一轮的 thinking 块原样回传
+	// （含 signature），否则 400。DeepSeek-v4 的 Anthropic 兼容端不下发签名，留空即可。
+	ThinkingSignature string     `json:"thinking_signature,omitempty"`
+	ReasoningContent  string     `json:"reasoning_content,omitempty"` // DeepSeek/OpenAI 格式
+	ToolCalls         []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID        string     `json:"tool_call_id,omitempty"` // role=tool 时标识调用
 }
 
 // ToolCall AI 发起的工具调用
@@ -57,16 +62,17 @@ type Usage struct {
 
 // StreamEvent 流式响应事件
 type StreamEvent struct {
-	Type       string     `json:"type"`                   // "content" | "tool_start" | "tool_result" | "tool_call" | "approval_request" | "approval_result" | "agent_start" | "agent_end" | "done" | "error" | "thinking" | "thinking_done" | "stopped" | "retry" | "usage"
-	Content    string     `json:"content,omitempty"`      // type=content/tool_result/approval_result/agent_end 时的文本
-	ToolName   string     `json:"tool_name,omitempty"`    // type=tool_start/tool_result 时的工具名
-	ToolInput  string     `json:"tool_input,omitempty"`   // type=tool_start 时的输入摘要
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // type=tool_call 时的工具调用 (OpenAI)
-	ToolCallID string     `json:"tool_call_id,omitempty"` // type=tool_start/tool_result 时的工具调用 ID，前端用于跨 turn 还原 tool_calls 历史
-	ConfirmID  string     `json:"confirm_id,omitempty"`   // type=approval_request/approval_result 时的确认请求 ID
-	Error      string     `json:"error,omitempty"`        // type=error 时的错误信息
-	AgentRole  string     `json:"agent_role,omitempty"`   // type=agent_start/approval_request 时的角色描述
-	AgentTask  string     `json:"agent_task,omitempty"`   // type=agent_start 时的任务描述
+	Type              string     `json:"type"`                         // "content" | "tool_start" | "tool_result" | "tool_call" | "approval_request" | "approval_result" | "agent_start" | "agent_end" | "done" | "error" | "thinking" | "thinking_done" | "stopped" | "retry" | "usage"
+	Content           string     `json:"content,omitempty"`            // type=content/tool_result/approval_result/agent_end 时的文本
+	ThinkingSignature string     `json:"thinking_signature,omitempty"` // type=thinking_done 时下发的 Anthropic 思考块签名（DeepSeek 等不下发）
+	ToolName          string     `json:"tool_name,omitempty"`          // type=tool_start/tool_result 时的工具名
+	ToolInput         string     `json:"tool_input,omitempty"`         // type=tool_start 时的输入摘要
+	ToolCalls         []ToolCall `json:"tool_calls,omitempty"`         // type=tool_call 时的工具调用 (OpenAI)
+	ToolCallID        string     `json:"tool_call_id,omitempty"`       // type=tool_start/tool_result 时的工具调用 ID，前端用于跨 turn 还原 tool_calls 历史
+	ConfirmID         string     `json:"confirm_id,omitempty"`         // type=approval_request/approval_result 时的确认请求 ID
+	Error             string     `json:"error,omitempty"`              // type=error 时的错误信息
+	AgentRole         string     `json:"agent_role,omitempty"`         // type=agent_start/approval_request 时的角色描述
+	AgentTask         string     `json:"agent_task,omitempty"`         // type=agent_start 时的任务描述
 	// approval_request 专用字段
 	Kind        string         `json:"kind,omitempty"`        // "single" | "batch" | "grant"
 	Items       []ApprovalItem `json:"items,omitempty"`       // 审批项列表

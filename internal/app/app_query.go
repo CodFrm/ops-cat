@@ -45,11 +45,11 @@ func (a *App) TestDatabaseConnection(configJSON string, plainPassword string) er
 	}
 	defer func() {
 		if err := db.Close(); err != nil {
-			logger.Default().Warn("close db failed", zap.Error(err))
+			logger.Ctx(ctx).Warn("close db failed", zap.Error(err))
 		}
 		if tunnel != nil {
 			if err := tunnel.Close(); err != nil {
-				logger.Default().Warn("close tunnel failed", zap.Error(err))
+				logger.Ctx(ctx).Warn("close tunnel failed", zap.Error(err))
 			}
 		}
 	}()
@@ -84,11 +84,11 @@ func (a *App) TestRedisConnection(configJSON string, plainPassword string) error
 	}
 	defer func() {
 		if err := client.Close(); err != nil {
-			logger.Default().Warn("close redis client failed", zap.Error(err))
+			logger.Ctx(ctx).Warn("close redis client failed", zap.Error(err))
 		}
 		if tunnel != nil {
 			if err := tunnel.Close(); err != nil {
-				logger.Default().Warn("close tunnel failed", zap.Error(err))
+				logger.Ctx(ctx).Warn("close tunnel failed", zap.Error(err))
 			}
 		}
 	}()
@@ -125,11 +125,11 @@ func (a *App) ExecuteSQL(assetID int64, sqlText string, database string) (string
 	}
 	defer func() {
 		if err := db.Close(); err != nil {
-			logger.Default().Warn("close db failed", zap.Error(err))
+			logger.Ctx(ctx).Warn("close db failed", zap.Error(err))
 		}
 		if tunnel != nil {
 			if err := tunnel.Close(); err != nil {
-				logger.Default().Warn("close tunnel failed", zap.Error(err))
+				logger.Ctx(ctx).Warn("close tunnel failed", zap.Error(err))
 			}
 		}
 	}()
@@ -171,11 +171,11 @@ func (a *App) ExecuteTableImport(
 	}
 	defer func() {
 		if err := db.Close(); err != nil {
-			logger.Default().Warn("close db failed", zap.Error(err))
+			logger.Ctx(ctx).Warn("close db failed", zap.Error(err))
 		}
 		if tunnel != nil {
 			if err := tunnel.Close(); err != nil {
-				logger.Default().Warn("close tunnel failed", zap.Error(err))
+				logger.Ctx(ctx).Warn("close tunnel failed", zap.Error(err))
 			}
 		}
 	}()
@@ -186,7 +186,7 @@ func (a *App) ExecuteTableImport(
 	}
 	defer func() {
 		if err := conn.Close(); err != nil {
-			logger.Default().Warn("close db session failed", zap.Error(err))
+			logger.Ctx(ctx).Warn("close db session failed", zap.Error(err))
 		}
 	}()
 
@@ -223,11 +223,11 @@ func (a *App) ExecuteSQLPaged(assetID int64, sqlText string, database string, pa
 	}
 	defer func() {
 		if err := db.Close(); err != nil {
-			logger.Default().Warn("close db failed", zap.Error(err))
+			logger.Ctx(ctx).Warn("close db failed", zap.Error(err))
 		}
 		if tunnel != nil {
 			if err := tunnel.Close(); err != nil {
-				logger.Default().Warn("close tunnel failed", zap.Error(err))
+				logger.Ctx(ctx).Warn("close tunnel failed", zap.Error(err))
 			}
 		}
 	}()
@@ -263,11 +263,11 @@ func (a *App) ExecuteRedis(assetID int64, command string, db int) (string, error
 	}
 	defer func() {
 		if err := client.Close(); err != nil {
-			logger.Default().Warn("close redis client failed", zap.Error(err))
+			logger.Ctx(ctx).Warn("close redis client failed", zap.Error(err))
 		}
 		if tunnel != nil {
 			if err := tunnel.Close(); err != nil {
-				logger.Default().Warn("close tunnel failed", zap.Error(err))
+				logger.Ctx(ctx).Warn("close tunnel failed", zap.Error(err))
 			}
 		}
 	}()
@@ -303,11 +303,11 @@ func (a *App) TestMongoDBConnection(configJSON string, plainPassword string) err
 	}
 	defer func() {
 		if err := client.Disconnect(context.Background()); err != nil {
-			logger.Default().Warn("disconnect mongodb client failed", zap.Error(err))
+			logger.Ctx(ctx).Warn("disconnect mongodb client failed", zap.Error(err))
 		}
 		if tunnel != nil {
 			if err := tunnel.Close(); err != nil {
-				logger.Default().Warn("close tunnel failed", zap.Error(err))
+				logger.Ctx(ctx).Warn("close tunnel failed", zap.Error(err))
 			}
 		}
 	}()
@@ -341,11 +341,11 @@ func (a *App) ExecuteMongo(assetID int64, operation, database, collection, query
 	}
 	defer func() {
 		if err := client.Disconnect(context.Background()); err != nil {
-			logger.Default().Warn("disconnect mongodb client failed", zap.Error(err))
+			logger.Ctx(ctx).Warn("disconnect mongodb client failed", zap.Error(err))
 		}
 		if tunnel != nil {
 			if err := tunnel.Close(); err != nil {
-				logger.Default().Warn("close tunnel failed", zap.Error(err))
+				logger.Ctx(ctx).Warn("close tunnel failed", zap.Error(err))
 			}
 		}
 	}()
@@ -380,11 +380,11 @@ func (a *App) ListMongoDatabases(assetID int64) (string, error) {
 	}
 	defer func() {
 		if err := client.Disconnect(context.Background()); err != nil {
-			logger.Default().Warn("disconnect mongodb client failed", zap.Error(err))
+			logger.Ctx(ctx).Warn("disconnect mongodb client failed", zap.Error(err))
 		}
 		if tunnel != nil {
 			if err := tunnel.Close(); err != nil {
-				logger.Default().Warn("close tunnel failed", zap.Error(err))
+				logger.Ctx(ctx).Warn("close tunnel failed", zap.Error(err))
 			}
 		}
 	}()
@@ -427,11 +427,11 @@ func (a *App) ListMongoCollections(assetID int64, database string) (string, erro
 	}
 	defer func() {
 		if err := client.Disconnect(context.Background()); err != nil {
-			logger.Default().Warn("disconnect mongodb client failed", zap.Error(err))
+			logger.Ctx(ctx).Warn("disconnect mongodb client failed", zap.Error(err))
 		}
 		if tunnel != nil {
 			if err := tunnel.Close(); err != nil {
-				logger.Default().Warn("close tunnel failed", zap.Error(err))
+				logger.Ctx(ctx).Warn("close tunnel failed", zap.Error(err))
 			}
 		}
 	}()
@@ -475,11 +475,11 @@ func (a *App) ExecuteRedisArgs(assetID int64, args []string, db int) (string, er
 	}
 	defer func() {
 		if err := client.Close(); err != nil {
-			logger.Default().Warn("close redis client failed", zap.Error(err))
+			logger.Ctx(ctx).Warn("close redis client failed", zap.Error(err))
 		}
 		if tunnel != nil {
 			if err := tunnel.Close(); err != nil {
-				logger.Default().Warn("close tunnel failed", zap.Error(err))
+				logger.Ctx(ctx).Warn("close tunnel failed", zap.Error(err))
 			}
 		}
 	}()

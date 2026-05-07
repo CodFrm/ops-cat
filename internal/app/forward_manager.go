@@ -114,7 +114,7 @@ func (m *ForwardManager) StartConfig(ctx context.Context, configID int64) error 
 		if startErr != nil {
 			rf.errMsg = startErr.Error()
 			cancel()
-			logger.Default().Error("rule failed", zap.Int64("ruleID", rule.ID), zap.Error(startErr))
+			logger.Ctx(ctx).Error("rule failed", zap.Int64("ruleID", rule.ID), zap.Error(startErr))
 		}
 		m.running[rule.ID] = rf
 		atomic.AddInt32(&fc.refs, 1)
@@ -274,7 +274,7 @@ func startLocalForward(ctx context.Context, client *ssh.Client, rule *forward_en
 	go func() {
 		<-ctx.Done()
 		if err := listener.Close(); err != nil {
-			logger.Default().Warn("close listener", zap.Error(err))
+			logger.Ctx(ctx).Warn("close listener", zap.Error(err))
 		}
 	}()
 
@@ -289,7 +289,7 @@ func startLocalForward(ctx context.Context, client *ssh.Client, rule *forward_en
 				rconn, err := client.Dial("tcp", remote)
 				if err != nil {
 					if closeErr := conn.Close(); closeErr != nil {
-						logger.Default().Warn("close conn", zap.Error(closeErr))
+						logger.Ctx(ctx).Warn("close conn", zap.Error(closeErr))
 					}
 					return
 				}
@@ -311,7 +311,7 @@ func startRemoteForward(ctx context.Context, client *ssh.Client, rule *forward_e
 	go func() {
 		<-ctx.Done()
 		if err := listener.Close(); err != nil {
-			logger.Default().Warn("close listener", zap.Error(err))
+			logger.Ctx(ctx).Warn("close listener", zap.Error(err))
 		}
 	}()
 
@@ -326,7 +326,7 @@ func startRemoteForward(ctx context.Context, client *ssh.Client, rule *forward_e
 				lconn, err := net.Dial("tcp", local)
 				if err != nil {
 					if closeErr := conn.Close(); closeErr != nil {
-						logger.Default().Warn("close conn", zap.Error(closeErr))
+						logger.Ctx(ctx).Warn("close conn", zap.Error(closeErr))
 					}
 					return
 				}
@@ -349,7 +349,7 @@ func startDynamicForward(ctx context.Context, client *ssh.Client, rule *forward_
 	go func() {
 		<-ctx.Done()
 		if err := listener.Close(); err != nil {
-			logger.Default().Warn("close listener", zap.Error(err))
+			logger.Ctx(ctx).Warn("close listener", zap.Error(err))
 		}
 	}()
 
@@ -533,7 +533,7 @@ func (a *App) UpdateForwardConfig(id int64, name string, assetID int64, rules []
 
 	if wasRunning {
 		if err := a.forwardManager.StartConfig(ctx, id); err != nil {
-			logger.Default().Error("restart forward config after update", zap.Int64("id", id), zap.Error(err))
+			logger.Ctx(ctx).Error("restart forward config after update", zap.Int64("id", id), zap.Error(err))
 		}
 	}
 
@@ -562,7 +562,7 @@ func (a *App) ListForwardConfigs() ([]ForwardConfigWithStatus, error) {
 	for _, c := range configs {
 		rules, err := forward_repo.Forward().ListRulesByConfigID(ctx, c.ID)
 		if err != nil {
-			logger.Default().Warn("list forward rules by config ID", zap.Error(err), zap.Int64("configID", c.ID))
+			logger.Ctx(ctx).Warn("list forward rules by config ID", zap.Error(err), zap.Int64("configID", c.ID))
 		}
 
 		// 获取资产名

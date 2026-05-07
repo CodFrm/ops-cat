@@ -296,7 +296,7 @@ func (a *App) ListLocalSSHKeys() ([]LocalSSHKeyInfo, error) {
 func (a *App) SelectSSHKeyFile() (*LocalSSHKeyInfo, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		logger.Default().Warn("get user home dir", zap.Error(err))
+		logger.Ctx(a.ctx).Warn("get user home dir", zap.Error(err))
 	}
 	defaultDir := filepath.Join(homeDir, ".ssh")
 

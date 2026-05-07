@@ -125,7 +125,7 @@ func handleListAssets(ctx context.Context, args map[string]any) (string, error) 
 	}
 	data, err := json.Marshal(views)
 	if err != nil {
-		logger.Default().Error("marshal asset list", zap.Error(err))
+		logger.Ctx(ctx).Error("marshal asset list", zap.Error(err))
 		return "", fmt.Errorf("failed to marshal asset list: %w", err)
 	}
 	return string(data), nil
@@ -142,7 +142,7 @@ func handleGetAsset(ctx context.Context, args map[string]any) (string, error) {
 	}
 	data, err := json.Marshal(toSafeView(asset))
 	if err != nil {
-		logger.Default().Error("marshal asset detail", zap.Error(err))
+		logger.Ctx(ctx).Error("marshal asset detail", zap.Error(err))
 		return "", fmt.Errorf("failed to marshal asset detail: %w", err)
 	}
 	return string(data), nil
@@ -245,7 +245,7 @@ func handleListGroups(ctx context.Context, _ map[string]any) (string, error) {
 	}
 	data, err := json.Marshal(views)
 	if err != nil {
-		logger.Default().Error("marshal group list", zap.Error(err))
+		logger.Ctx(ctx).Error("marshal group list", zap.Error(err))
 		return "", fmt.Errorf("failed to marshal group list: %w", err)
 	}
 	return string(data), nil
@@ -272,7 +272,7 @@ func handleGetGroup(ctx context.Context, args map[string]any) (string, error) {
 	}
 	data, err := json.Marshal(view)
 	if err != nil {
-		logger.Default().Error("marshal group detail", zap.Error(err))
+		logger.Ctx(ctx).Error("marshal group detail", zap.Error(err))
 		return "", fmt.Errorf("failed to marshal group detail: %w", err)
 	}
 	return string(data), nil

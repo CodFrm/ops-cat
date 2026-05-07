@@ -81,7 +81,7 @@ func DialMongoDB(ctx context.Context, asset *asset_entity.Asset, cfg *asset_enti
 	if err != nil {
 		if tunnel != nil {
 			if closeErr := tunnel.Close(); closeErr != nil {
-				logger.Default().Warn("close ssh tunnel", zap.Error(closeErr))
+				logger.Ctx(ctx).Warn("close ssh tunnel", zap.Error(closeErr))
 			}
 		}
 		return nil, nil, fmt.Errorf("MongoDB 连接失败: %w", err)
@@ -89,11 +89,11 @@ func DialMongoDB(ctx context.Context, asset *asset_entity.Asset, cfg *asset_enti
 
 	if pingErr := client.Ping(ctx, nil); pingErr != nil {
 		if disconnectErr := client.Disconnect(context.Background()); disconnectErr != nil {
-			logger.Default().Warn("disconnect mongodb client", zap.Error(disconnectErr))
+			logger.Ctx(ctx).Warn("disconnect mongodb client", zap.Error(disconnectErr))
 		}
 		if tunnel != nil {
 			if closeErr := tunnel.Close(); closeErr != nil {
-				logger.Default().Warn("close ssh tunnel", zap.Error(closeErr))
+				logger.Ctx(ctx).Warn("close ssh tunnel", zap.Error(closeErr))
 			}
 		}
 		return nil, nil, fmt.Errorf("MongoDB 连接失败: %w", pingErr)

@@ -242,7 +242,7 @@ func exportCredentials(ctx context.Context, assets []*asset_entity.Asset, crypto
 	for credID := range credIDs {
 		cred, err := credential_repo.Credential().Find(ctx, credID)
 		if err != nil {
-			logger.Default().Warn("credential not found during export", zap.Int64("id", credID), zap.Error(err))
+			logger.Ctx(ctx).Warn("credential not found during export", zap.Int64("id", credID), zap.Error(err))
 			continue
 		}
 		bc := &BackupCredential{Credential: *cred}

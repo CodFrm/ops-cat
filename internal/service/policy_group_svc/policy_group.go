@@ -62,7 +62,7 @@ func (s *policyGroupSvc) List(ctx context.Context, policyType string) ([]*policy
 	}
 	if err != nil {
 		// DB 查询失败（如表未创建）不影响内置组返回
-		logger.Default().Warn("list user policy groups", zap.Error(err))
+		logger.Ctx(ctx).Warn("list user policy groups", zap.Error(err))
 		return items, nil
 	}
 	for _, pg := range userGroups {

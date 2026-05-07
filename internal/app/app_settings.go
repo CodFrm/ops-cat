@@ -947,7 +947,7 @@ func (a *App) registerPlugin(home string) error {
 	cfg := pluginsConfig{Version: 2, Plugins: make(map[string][]pluginEntry)}
 	if data, err := os.ReadFile(pluginsFile); err == nil { //nolint:gosec // path from app data dir
 		if err := json.Unmarshal(data, &cfg); err != nil {
-			logger.Default().Warn("parse installed_plugins.json failed, will overwrite", zap.Error(err))
+			logger.Ctx(a.ctx).Warn("parse installed_plugins.json failed, will overwrite", zap.Error(err))
 			cfg = pluginsConfig{Version: 2, Plugins: make(map[string][]pluginEntry)}
 		}
 	}
@@ -1117,7 +1117,7 @@ func (a *App) InstallSkills() error {
 
 	// 在应用数据目录写一份各工具的插件结构，方便用户手动拷贝
 	if err := a.writePluginReference(); err != nil {
-		logger.Default().Warn("write plugin reference failed", zap.Error(err))
+		logger.Ctx(a.ctx).Warn("write plugin reference failed", zap.Error(err))
 	}
 
 	return nil
@@ -1239,13 +1239,13 @@ func (a *App) startAutoUpdateCheck() {
 
 		info, err := update_svc.CheckForUpdate(a.GetUpdateChannel(), a.GetDownloadMirror())
 		if err != nil {
-			logger.Default().Warn("auto check update failed", zap.Error(err))
+			logger.Ctx(a.ctx).Warn("auto check update failed", zap.Error(err))
 			return
 		}
 
 		cfg.LastUpdateCheck = now
 		if err := bootstrap.SaveConfig(cfg); err != nil {
-			logger.Default().Warn("save last update check time", zap.Error(err))
+			logger.Ctx(a.ctx).Warn("save last update check time", zap.Error(err))
 		}
 
 		if info.HasUpdate {

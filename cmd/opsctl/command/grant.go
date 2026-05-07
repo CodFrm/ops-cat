@@ -210,7 +210,7 @@ func cmdGrantSubmit(ctx context.Context, args []string, session string) int {
 	sockPath := approval.SocketPath(dataDir)
 	authToken, err := bootstrap.ReadAuthToken(dataDir)
 	if err != nil {
-		logger.Default().Warn("read auth token", zap.Error(err))
+		logger.Ctx(ctx).Warn("read auth token", zap.Error(err))
 	}
 
 	// 构建审计用的请求 JSON（使用解析后的 grantItems，包含资产信息）

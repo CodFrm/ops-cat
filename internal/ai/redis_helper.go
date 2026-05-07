@@ -85,14 +85,14 @@ func handleExecRedis(ctx context.Context, args map[string]any) (string, error) {
 		if client != nil {
 			defer func() {
 				if err := client.Close(); err != nil {
-					logger.Default().Warn("close Redis connection", zap.Error(err))
+					logger.Ctx(ctx).Warn("close Redis connection", zap.Error(err))
 				}
 			}()
 		}
 		if closer != nil {
 			defer func() {
 				if err := closer.Close(); err != nil {
-					logger.Default().Warn("close Redis tunnel", zap.Error(err))
+					logger.Ctx(ctx).Warn("close Redis tunnel", zap.Error(err))
 				}
 			}()
 		}

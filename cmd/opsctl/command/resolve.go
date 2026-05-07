@@ -78,7 +78,7 @@ func resolveAsset(ctx context.Context, identifier string) (*asset_entity.Asset, 
 	// Ambiguous - list candidates
 	groupMap, err := buildGroupPathMap(ctx)
 	if err != nil {
-		logger.Default().Warn("build group path map", zap.Error(err))
+		logger.Ctx(ctx).Warn("build group path map", zap.Error(err))
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "ambiguous name %q, matches:\n", identifier)

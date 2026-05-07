@@ -79,14 +79,14 @@ func handleExecMongo(ctx context.Context, args map[string]any) (string, error) {
 		if client != nil {
 			defer func() {
 				if err := client.Disconnect(context.Background()); err != nil {
-					logger.Default().Warn("close MongoDB connection", zap.Error(err))
+					logger.Ctx(ctx).Warn("close MongoDB connection", zap.Error(err))
 				}
 			}()
 		}
 		if closer != nil {
 			defer func() {
 				if err := closer.Close(); err != nil {
-					logger.Default().Warn("close MongoDB tunnel", zap.Error(err))
+					logger.Ctx(ctx).Warn("close MongoDB tunnel", zap.Error(err))
 				}
 			}()
 		}
@@ -248,7 +248,7 @@ func mongoFind(ctx context.Context, client *mongo.Client, database, collection s
 	}
 	defer func() {
 		if err := cursor.Close(ctx); err != nil {
-			logger.Default().Warn("close MongoDB cursor", zap.Error(err))
+			logger.Ctx(ctx).Warn("close MongoDB cursor", zap.Error(err))
 		}
 	}()
 
@@ -502,7 +502,7 @@ func mongoAggregate(ctx context.Context, client *mongo.Client, database, collect
 	}
 	defer func() {
 		if err := cursor.Close(ctx); err != nil {
-			logger.Default().Warn("close MongoDB cursor", zap.Error(err))
+			logger.Ctx(ctx).Warn("close MongoDB cursor", zap.Error(err))
 		}
 	}()
 

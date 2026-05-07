@@ -83,7 +83,7 @@ func (s *conversationSvc) Delete(ctx context.Context, id int64) error {
 
 	// 删除消息
 	if err := conversation_repo.Conversation().DeleteMessages(ctx, id); err != nil {
-		logger.Default().Warn("delete conversation messages", zap.Int64("id", id), zap.Error(err))
+		logger.Ctx(ctx).Warn("delete conversation messages", zap.Int64("id", id), zap.Error(err))
 	}
 
 	// 清理 saveLocks，避免删除后的 conversationID 继续占用 mutex。
@@ -92,7 +92,7 @@ func (s *conversationSvc) Delete(ctx context.Context, id int64) error {
 	// 清理工作目录
 	if conv.WorkDir != "" {
 		if err := os.RemoveAll(conv.WorkDir); err != nil {
-			logger.Default().Warn("remove conversation work dir", zap.String("dir", conv.WorkDir), zap.Error(err))
+			logger.Ctx(ctx).Warn("remove conversation work dir", zap.String("dir", conv.WorkDir), zap.Error(err))
 		}
 	}
 

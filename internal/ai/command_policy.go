@@ -134,7 +134,7 @@ func (c *CommandPolicyChecker) SubmitGrant(ctx context.Context, assetID int64, p
 	if assetID > 0 {
 		asset, err := asset_svc.Asset().Get(ctx, assetID)
 		if err != nil {
-			logger.Default().Warn("get asset for grant submission", zap.Int64("assetID", assetID), zap.Error(err))
+			logger.Ctx(ctx).Warn("get asset for grant submission", zap.Int64("assetID", assetID), zap.Error(err))
 		}
 		if asset != nil {
 			assetName = asset.Name
@@ -179,7 +179,7 @@ func (c *CommandPolicyChecker) SubmitGrantMulti(ctx context.Context, items []Gra
 		if item.AssetID > 0 {
 			asset, err := asset_svc.Asset().Get(ctx, item.AssetID)
 			if err != nil {
-				logger.Default().Warn("get asset for grant submission", zap.Int64("assetID", item.AssetID), zap.Error(err))
+				logger.Ctx(ctx).Warn("get asset for grant submission", zap.Int64("assetID", item.AssetID), zap.Error(err))
 			}
 			if asset != nil {
 				assetName = asset.Name
@@ -321,7 +321,7 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 
 	asset, err := asset_svc.Asset().Get(ctx, assetID)
 	if err != nil {
-		logger.Default().Warn("get asset for confirm", zap.Int64("assetID", assetID), zap.Error(err))
+		logger.Ctx(ctx).Warn("get asset for confirm", zap.Int64("assetID", assetID), zap.Error(err))
 	}
 	assetName := ""
 	if asset != nil {
@@ -426,7 +426,7 @@ func formatDenyMessage(_ context.Context, assetName, command, reason string, hin
 func resolveAssetPolicyChain(ctx context.Context, assetID int64) (*asset_entity.Asset, []policy.Holder) {
 	asset, err := asset_svc.Asset().Get(ctx, assetID)
 	if err != nil {
-		logger.Default().Warn("get asset for policy check", zap.Int64("assetID", assetID), zap.Error(err))
+		logger.Ctx(ctx).Warn("get asset for policy check", zap.Int64("assetID", assetID), zap.Error(err))
 		return nil, nil
 	}
 	var holders []policy.Holder

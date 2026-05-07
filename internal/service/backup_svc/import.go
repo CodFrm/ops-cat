@@ -151,7 +151,7 @@ func Import(ctx context.Context, data *BackupData, opts *ImportOptions, crypto C
 						if data.IncludesCredentials && cfg.Password != "" && crypto != nil {
 							encrypted, encErr := crypto.Encrypt(cfg.Password)
 							if encErr != nil {
-								logger.Default().Warn("re-encrypt ssh password", zap.Error(encErr))
+								logger.Ctx(ctx).Warn("re-encrypt ssh password", zap.Error(encErr))
 							} else {
 								cfg.Password = encrypted
 							}
@@ -160,13 +160,13 @@ func Import(ctx context.Context, data *BackupData, opts *ImportOptions, crypto C
 						if data.IncludesCredentials && cfg.Proxy != nil && cfg.Proxy.Password != "" && crypto != nil {
 							encrypted, encErr := crypto.Encrypt(cfg.Proxy.Password)
 							if encErr != nil {
-								logger.Default().Warn("re-encrypt proxy password", zap.Error(encErr))
+								logger.Ctx(ctx).Warn("re-encrypt proxy password", zap.Error(encErr))
 							} else {
 								cfg.Proxy.Password = encrypted
 							}
 						}
 						if err := a.SetSSHConfig(cfg); err != nil {
-							logger.Default().Warn("set ssh config in import", zap.Error(err))
+							logger.Ctx(ctx).Warn("set ssh config in import", zap.Error(err))
 						}
 					}
 				case a.IsDatabase() && a.Config != "":
@@ -179,13 +179,13 @@ func Import(ctx context.Context, data *BackupData, opts *ImportOptions, crypto C
 						if data.IncludesCredentials && cfg.Password != "" && crypto != nil {
 							encrypted, encErr := crypto.Encrypt(cfg.Password)
 							if encErr != nil {
-								logger.Default().Warn("re-encrypt db password", zap.Error(encErr))
+								logger.Ctx(ctx).Warn("re-encrypt db password", zap.Error(encErr))
 							} else {
 								cfg.Password = encrypted
 							}
 						}
 						if err := a.SetDatabaseConfig(cfg); err != nil {
-							logger.Default().Warn("set db config in import", zap.Error(err))
+							logger.Ctx(ctx).Warn("set db config in import", zap.Error(err))
 						}
 					}
 				case a.IsRedis() && a.Config != "":
@@ -198,13 +198,13 @@ func Import(ctx context.Context, data *BackupData, opts *ImportOptions, crypto C
 						if data.IncludesCredentials && cfg.Password != "" && crypto != nil {
 							encrypted, encErr := crypto.Encrypt(cfg.Password)
 							if encErr != nil {
-								logger.Default().Warn("re-encrypt redis password", zap.Error(encErr))
+								logger.Ctx(ctx).Warn("re-encrypt redis password", zap.Error(encErr))
 							} else {
 								cfg.Password = encrypted
 							}
 						}
 						if err := a.SetRedisConfig(cfg); err != nil {
-							logger.Default().Warn("set redis config in import", zap.Error(err))
+							logger.Ctx(ctx).Warn("set redis config in import", zap.Error(err))
 						}
 					}
 				}

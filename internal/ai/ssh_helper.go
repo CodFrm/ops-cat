@@ -58,7 +58,7 @@ func dialAssetSSH(ctx context.Context, assetID int64) (*ssh.Client, func(), erro
 	}
 	cleanup := func() {
 		if err := client.Close(); err != nil && !isExpectedCloseErr(err) {
-			logger.Default().Warn("close SSH client", zap.Error(err))
+			logger.Ctx(ctx).Warn("close SSH client", zap.Error(err))
 		}
 		closeExtras(extraClosers)
 	}
@@ -111,7 +111,7 @@ func runSSHCommand(ctx context.Context, client *ssh.Client, command string) (str
 	defer func() {
 		// ctx 取消路径下 session 已经被主动关闭，defer 再次 Close 会拿到已关闭错误，静默跳过。
 		if err := session.Close(); err != nil && !isExpectedCloseErr(err) {
-			logger.Default().Warn("close SSH session", zap.Error(err))
+			logger.Ctx(ctx).Warn("close SSH session", zap.Error(err))
 		}
 	}()
 
@@ -136,10 +136,10 @@ func runSSHCommand(ctx context.Context, client *ssh.Client, command string) (str
 		// 仅关闭 session 可能不足以唤醒底层 Run/Wait，这里连 client 一并关闭来打断阻塞。
 		// 上层 defer 会再次 Close，已通过 isExpectedCloseErr 过滤预期错误。
 		if err := session.Close(); err != nil && !isExpectedCloseErr(err) {
-			logger.Default().Warn("close SSH session on cancel", zap.Error(err))
+			logger.Ctx(ctx).Warn("close SSH session on cancel", zap.Error(err))
 		}
 		if err := client.Close(); err != nil && !isExpectedCloseErr(err) {
-			logger.Default().Warn("close SSH client on cancel", zap.Error(err))
+			logger.Ctx(ctx).Warn("close SSH client on cancel", zap.Error(err))
 		}
 		return "", ctx.Err()
 	}
@@ -167,7 +167,7 @@ func executeWithSFTP(ctx context.Context, assetID int64, fn func(*sftp.Client) e
 	}
 	defer func() {
 		if err := sftpClient.Close(); err != nil && !isExpectedCloseErr(err) {
-			logger.Default().Warn("close SFTP client", zap.Error(err))
+			logger.Ctx(ctx).Warn("close SFTP client", zap.Error(err))
 		}
 	}()
 
@@ -205,7 +205,7 @@ func ExecWithStdio(ctx context.Context, assetID int64, command string, stdin io.
 	}
 	defer func() {
 		if err := session.Close(); err != nil {
-			logger.Default().Warn("close ExecWithStdio SSH session", zap.Error(err))
+			logger.Ctx(ctx).Warn("close ExecWithStdio SSH session", zap.Error(err))
 		}
 	}()
 
@@ -238,7 +238,7 @@ func CopyBetweenAssets(ctx context.Context, srcAssetID int64, srcPath string, ds
 	}
 	defer func() {
 		if err := srcSFTP.Close(); err != nil && !isExpectedCloseErr(err) {
-			logger.Default().Warn("close source SFTP client", zap.Error(err))
+			logger.Ctx(ctx).Warn("close source SFTP client", zap.Error(err))
 		}
 	}()
 
@@ -248,7 +248,7 @@ func CopyBetweenAssets(ctx context.Context, srcAssetID int64, srcPath string, ds
 	}
 	defer func() {
 		if err := dstSFTP.Close(); err != nil && !isExpectedCloseErr(err) {
-			logger.Default().Warn("close destination SFTP client", zap.Error(err))
+			logger.Ctx(ctx).Warn("close destination SFTP client", zap.Error(err))
 		}
 	}()
 
@@ -263,7 +263,7 @@ func CopyBetweenAssets(ctx context.Context, srcAssetID int64, srcPath string, ds
 	}
 	defer func() {
 		if err := srcFile.Close(); err != nil && !isExpectedCloseErr(err) {
-			logger.Default().Warn("close source file", zap.String("path", srcPath), zap.Error(err))
+			logger.Ctx(ctx).Warn("close source file", zap.String("path", srcPath), zap.Error(err))
 		}
 	}()
 
@@ -273,7 +273,7 @@ func CopyBetweenAssets(ctx context.Context, srcAssetID int64, srcPath string, ds
 	}
 	defer func() {
 		if err := dstFile.Close(); err != nil && !isExpectedCloseErr(err) {
-			logger.Default().Warn("close destination file", zap.String("path", dstPath), zap.Error(err))
+			logger.Ctx(ctx).Warn("close destination file", zap.String("path", dstPath), zap.Error(err))
 		}
 	}()
 

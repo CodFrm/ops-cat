@@ -148,11 +148,11 @@ func (p *Pool) Get(ctx context.Context, assetID int64) (*ssh.Client, error) {
 		p.mu.Unlock()
 		// 关闭我们刚创建的，使用已存在的
 		if err := client.Close(); err != nil {
-			logger.Default().Warn("close duplicate ssh client", zap.Int64("assetID", assetID), zap.Error(err))
+			logger.Ctx(ctx).Warn("close duplicate ssh client", zap.Int64("assetID", assetID), zap.Error(err))
 		}
 		for _, c := range closers {
 			if err := c.Close(); err != nil {
-				logger.Default().Warn("close duplicate intermediate connection", zap.Int64("assetID", assetID), zap.Error(err))
+				logger.Ctx(ctx).Warn("close duplicate intermediate connection", zap.Int64("assetID", assetID), zap.Error(err))
 			}
 		}
 		if existing.isAlive() {

@@ -145,7 +145,7 @@ func handleUploadFile(ctx context.Context, args map[string]any) (string, error) 
 		}
 		defer func() {
 			if err := srcFile.Close(); err != nil && !isExpectedCloseErr(err) {
-				logger.Default().Warn("close local file", zap.String("path", localPath), zap.Error(err))
+				logger.Ctx(ctx).Warn("close local file", zap.String("path", localPath), zap.Error(err))
 			}
 		}()
 
@@ -155,7 +155,7 @@ func handleUploadFile(ctx context.Context, args map[string]any) (string, error) 
 		}
 		defer func() {
 			if err := dstFile.Close(); err != nil && !isExpectedCloseErr(err) {
-				logger.Default().Warn("close remote file", zap.String("path", remotePath), zap.Error(err))
+				logger.Ctx(ctx).Warn("close remote file", zap.String("path", remotePath), zap.Error(err))
 			}
 		}()
 
@@ -183,7 +183,7 @@ func handleDownloadFile(ctx context.Context, args map[string]any) (string, error
 		}
 		defer func() {
 			if err := srcFile.Close(); err != nil && !isExpectedCloseErr(err) {
-				logger.Default().Warn("close remote file", zap.String("path", remotePath), zap.Error(err))
+				logger.Ctx(ctx).Warn("close remote file", zap.String("path", remotePath), zap.Error(err))
 			}
 		}()
 
@@ -193,7 +193,7 @@ func handleDownloadFile(ctx context.Context, args map[string]any) (string, error
 		}
 		defer func() {
 			if err := dstFile.Close(); err != nil && !isExpectedCloseErr(err) {
-				logger.Default().Warn("close local file", zap.String("path", localPath), zap.Error(err))
+				logger.Ctx(ctx).Warn("close local file", zap.String("path", localPath), zap.Error(err))
 			}
 		}()
 

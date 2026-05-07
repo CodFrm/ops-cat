@@ -264,7 +264,7 @@ func (d *appPoolDialer) DialAsset(ctx context.Context, assetID int64) (*ssh.Clie
 func (a *App) resolveSSHCredentialsFull(sshCfg *asset_entity.SSHConfig) (password, key, passphrase string) {
 	p, k, pp, err := credential_resolver.Default().ResolveSSHCredentials(a.langCtx(), sshCfg)
 	if err != nil {
-		logger.Default().Warn("resolve SSH credentials", zap.Error(err))
+		logger.Ctx(a.ctx).Warn("resolve SSH credentials", zap.Error(err))
 	}
 	return p, k, pp
 }

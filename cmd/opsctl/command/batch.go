@@ -363,7 +363,7 @@ func requireBatchApproval(ctx context.Context, items []approval.BatchItem, sessi
 	if session == "" {
 		id := newSessionID()
 		if err := writeActiveSession(id); err != nil {
-			logger.Default().Warn("write active session", zap.Error(err))
+			logger.Ctx(ctx).Warn("write active session", zap.Error(err))
 		}
 		session = id
 	}
@@ -373,7 +373,7 @@ func requireBatchApproval(ctx context.Context, items []approval.BatchItem, sessi
 
 	authToken, err := bootstrap.ReadAuthToken(dataDir)
 	if err != nil {
-		logger.Default().Warn("read auth token", zap.Error(err))
+		logger.Ctx(ctx).Warn("read auth token", zap.Error(err))
 	}
 
 	// Build detail string for the request
