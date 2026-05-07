@@ -59,7 +59,14 @@ func main() {
 		PluginMarketplaceJSON: skillplugin.PluginMarketplaceJSON,
 	})
 
-	err := wails.Run(&options.App{
+	err := wails.Run(newAppOptions(a, windowWidth, windowHeight))
+	if err != nil {
+		log.Fatalf("Wails启动失败: %v", err)
+	}
+}
+
+func newAppOptions(a *app.App, windowWidth, windowHeight int) *options.App {
+	return &options.App{
 		Title:     "OpsKat",
 		Width:     windowWidth,
 		Height:    windowHeight,
@@ -71,9 +78,6 @@ func main() {
 			Handler: app.NewExtensionAssetHandler(filepath.Join(bootstrap.AppDataDir(), "extensions"), nil),
 		},
 		OnStartup: a.Startup,
-		OnDomReady: func(ctx context.Context) {
-			wailsRuntime.WindowCenter(ctx)
-		},
 		// OnBeforeClose 在窗口真正关闭前触发：emit ai:flush-all 让前端落盘所有活跃会话，
 		// 前端完成后 EventsEmit("ai:flush-done") 回执，后端从 flushAckCh 收到信号立刻放行；
 		// 超时 2s 兜底避免前端异常时永久阻塞。返回 false 允许关闭；返回 true 则阻止关闭。
@@ -105,9 +109,6 @@ func main() {
 			TitleBar:             mac.TitleBarHiddenInset(),
 			WebviewIsTransparent: true,
 		},
-	})
-	if err != nil {
-		log.Fatalf("Wails启动失败: %v", err)
 	}
 }
 
