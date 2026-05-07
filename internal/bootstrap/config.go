@@ -25,6 +25,8 @@ type AppConfig struct {
 	WebDAVToken     string `json:"webdav_token,omitempty"`      // 加密后的 Bearer token（仅 bearer）
 	LastUpdateCheck int64  `json:"last_update_check,omitempty"` // 上次自动检查更新的 Unix 时间戳
 	DebugMode       bool   `json:"debug_mode,omitempty"`        // 开启后日志级别降为 debug
+	WindowWidth     int    `json:"window_width,omitempty"`      // 上次正常窗口宽度
+	WindowHeight    int    `json:"window_height,omitempty"`     // 上次正常窗口高度
 }
 
 var (
