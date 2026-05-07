@@ -623,12 +623,13 @@
     "modelDefaultsApplied": "Applied defaults for this model",
     "reasoningEffort": "Thinking depth",
     "reasoningEffortNone": "Off",
-    "reasoningEffortHint": "Off: no reasoning. Low: fast, fewer tokens. Medium: balanced (default). High: deep reasoning. XHigh: deepest reasoning, highest latency & cost.",
+    "reasoningEffortHint": "Off: no reasoning. Low: fast, fewer tokens. Medium: balanced (default). High: deep reasoning. XHigh: deepest reasoning, highest latency & cost. Max (Anthropic only): no token-spend cap.",
     "reasoningEffortUnsupportedHint": "This model may not support this setting; it only applies on compatible models.",
     "reasoningEffortLow": "Low",
     "reasoningEffortMedium": "Medium",
     "reasoningEffortHigh": "High",
-    "reasoningEffortXHigh": "XHigh"
+    "reasoningEffortXHigh": "XHigh",
+    "reasoningEffortMax": "Max"
   },
   "backup": {
     "title": "Backup",

@@ -57,7 +57,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
-import { AIProviderForm, type AIProviderFormValues } from "@/components/ai/AIProviderForm";
+import { AIProviderForm, type AIProviderFormValues, type ReasoningEffort } from "@/components/ai/AIProviderForm";
 import { useAIStore } from "@/stores/aiStore";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -532,12 +532,7 @@ export function AISettingsSection() {
                     maxOutputTokens: editingProvider.maxOutputTokens,
                     contextWindow: editingProvider.contextWindow,
                     reasoningEffort: (editingProvider.reasoningEffort ||
-                      (editingProvider.reasoningEnabled ? "medium" : "none")) as
-                      | "none"
-                      | "low"
-                      | "medium"
-                      | "high"
-                      | "xhigh",
+                      (editingProvider.reasoningEnabled ? "medium" : "none")) as ReasoningEffort,
                   }
                 : undefined
             }

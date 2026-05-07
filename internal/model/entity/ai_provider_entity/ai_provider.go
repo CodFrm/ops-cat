@@ -11,7 +11,7 @@ type AIProvider struct {
 	MaxOutputTokens  int    `gorm:"column:max_output_tokens;default:0" json:"maxOutputTokens"` // 0 表示使用默认值
 	ContextWindow    int    `gorm:"column:context_window;default:0" json:"contextWindow"`      // 0 表示使用默认值
 	ReasoningEnabled bool   `gorm:"column:reasoning_enabled;default:false" json:"reasoningEnabled"`
-	ReasoningEffort  string `gorm:"column:reasoning_effort;type:varchar(20);default:''" json:"reasoningEffort"` // 仅 OpenAI reasoning 模型使用
+	ReasoningEffort  string `gorm:"column:reasoning_effort;type:varchar(20);default:''" json:"reasoningEffort"` // OpenAI/Anthropic 共用：low/medium/high/xhigh/max（max 仅 Anthropic）
 	IsActive         bool   `gorm:"column:is_active;default:false" json:"isActive"`
 	Createtime       int64  `gorm:"column:createtime" json:"createtime"`
 	Updatetime       int64  `gorm:"column:updatetime" json:"updatetime"`

@@ -26,6 +26,7 @@ type AIProviderInfo struct {
 }
 
 func toProviderInfo(p *ai_provider_entity.AIProvider, apiKey string) AIProviderInfo {
+	enabled, effort := normalizeProviderReasoningConfig(p.Type, p.ReasoningEnabled, p.ReasoningEffort)
 	return AIProviderInfo{
 		ID:               p.ID,
 		Name:             p.Name,
@@ -36,24 +37,31 @@ func toProviderInfo(p *ai_provider_entity.AIProvider, apiKey string) AIProviderI
 		Model:            p.Model,
 		MaxOutputTokens:  p.MaxOutputTokens,
 		ContextWindow:    p.ContextWindow,
-		ReasoningEnabled: p.ReasoningEnabled,
-		ReasoningEffort:  p.ReasoningEffort,
+		ReasoningEnabled: enabled,
+		ReasoningEffort:  effort,
 		IsActive:         p.IsActive,
 	}
 }
 
 func normalizeProviderReasoningConfig(providerType string, reasoningEnabled bool, reasoningEffort string) (bool, string) {
-	if providerType != "openai" {
+	switch providerType {
+	case "openai", "anthropic":
+	default:
 		return false, ""
 	}
 	effort := strings.ToLower(strings.TrimSpace(reasoningEffort))
+	// max 仅 Anthropic 暴露；OpenAI 收到 max 视为非法，落回 medium
+	if effort == "max" && providerType != "anthropic" {
+		effort = "medium"
+	}
 	switch effort {
-	case "low", "medium", "high", "xhigh":
+	case "low", "medium", "high", "xhigh", "max":
 		return true, effort
 	case "none":
 		return false, ""
 	default:
-		// Backwards compat: old data with toggle=true but no effort → medium
+		// 老 OpenAI 数据：toggle=true 但 effort 空 → medium。
+		// Anthropic legacy 兜底由 migration 202605070001 一次性处理，这里无需特例。
 		if reasoningEnabled {
 			return true, "medium"
 		}

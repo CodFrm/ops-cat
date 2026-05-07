@@ -24,6 +24,8 @@ function getDefaultApiBase(providerType: string): string {
   return "https://api.openai.com/v1";
 }
 
+export type ReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh" | "max";
+
 export interface AIProviderFormValues {
   name: string;
   type: string;
@@ -33,7 +35,7 @@ export interface AIProviderFormValues {
   maxOutputTokens: number;
   contextWindow: number;
   reasoningEnabled: boolean;
-  reasoningEffort: "none" | "low" | "medium" | "high" | "xhigh";
+  reasoningEffort: ReasoningEffort;
 }
 
 function supportsOpenAIReasoningModel(model: string): boolean {
@@ -57,7 +59,7 @@ export interface AIProviderFormProps {
     model: string;
     maxOutputTokens: number;
     contextWindow: number;
-    reasoningEffort: "none" | "low" | "medium" | "high" | "xhigh";
+    reasoningEffort: ReasoningEffort;
   };
   isEditing?: boolean;
   /** Locks the provider type (used by wizard where cards handle type selection) */
@@ -88,7 +90,7 @@ export function AIProviderForm({
   const [formModel, setFormModel] = useState(initialValues?.model ?? "");
   const [formMaxOutputTokens, setFormMaxOutputTokens] = useState(initialValues?.maxOutputTokens ?? 0);
   const [formContextWindow, setFormContextWindow] = useState(initialValues?.contextWindow ?? 0);
-  const [formReasoningEffort, setFormReasoningEffort] = useState<"none" | "low" | "medium" | "high" | "xhigh">(
+  const [formReasoningEffort, setFormReasoningEffort] = useState<ReasoningEffort>(
     initialValues?.reasoningEffort ?? "none"
   );
 
@@ -97,7 +99,17 @@ export function AIProviderForm({
   const [modelSearch, setModelSearch] = useState("");
   const [fetchingModels, setFetchingModels] = useState(false);
   const isOpenAIProvider = formType === "openai";
+  const isAnthropicProvider = formType === "anthropic";
+  const showReasoningPanel = isOpenAIProvider || isAnthropicProvider;
+  // OpenAI 的 hint 区分模型是否支持 reasoning；Anthropic 不做模型校验，由 API 自行裁定。
   const currentModelSupportsReasoning = supportsOpenAIReasoningModel(formModel);
+
+  // 切到非 Anthropic 时，max 档不再可见，降级到 high 避免 Select 显示空值。
+  useEffect(() => {
+    if (formType !== "anthropic" && formReasoningEffort === "max") {
+      setFormReasoningEffort("high");
+    }
+  }, [formType, formReasoningEffort]);
 
   // When external providerType prop changes (wizard card click), reset relevant fields
   useEffect(() => {
@@ -181,7 +193,7 @@ export function AIProviderForm({
       model: formModel,
       maxOutputTokens: formMaxOutputTokens,
       contextWindow: formContextWindow,
-      reasoningEnabled: isOpenAIProvider && formReasoningEffort !== "none",
+      reasoningEnabled: showReasoningPanel && formReasoningEffort !== "none",
       reasoningEffort: formReasoningEffort,
     });
   };
@@ -326,12 +338,12 @@ export function AIProviderForm({
         </div>
       </div>
 
-      {isOpenAIProvider && (
+      {showReasoningPanel && (
         <div className="rounded-lg border p-4 space-y-2">
           <Label>{t("settings.reasoningEffort")}</Label>
           <Select
             value={formReasoningEffort}
-            onValueChange={(value) => setFormReasoningEffort(value as "none" | "low" | "medium" | "high" | "xhigh")}
+            onValueChange={(value) => setFormReasoningEffort(value as ReasoningEffort)}
           >
             <SelectTrigger>
               <SelectValue />
@@ -342,10 +354,11 @@ export function AIProviderForm({
               <SelectItem value="medium">{t("settings.reasoningEffortMedium")}</SelectItem>
               <SelectItem value="high">{t("settings.reasoningEffortHigh")}</SelectItem>
               <SelectItem value="xhigh">{t("settings.reasoningEffortXHigh")}</SelectItem>
+              {isAnthropicProvider && <SelectItem value="max">{t("settings.reasoningEffortMax")}</SelectItem>}
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            {currentModelSupportsReasoning || !formModel
+            {isAnthropicProvider || currentModelSupportsReasoning || !formModel
               ? t("settings.reasoningEffortHint")
               : t("settings.reasoningEffortUnsupportedHint")}
           </p>

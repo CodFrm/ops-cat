@@ -16,25 +16,50 @@ import (
 
 // AnthropicProvider Anthropic Messages API provider
 type AnthropicProvider struct {
-	apiBase         string
-	apiKey          string
-	model           string
-	name            string
-	maxOutputTokens int
+	apiBase          string
+	apiKey           string
+	model            string
+	name             string
+	maxOutputTokens  int
+	reasoningEnabled bool
+	reasoningEffort  string
 }
 
 // NewAnthropicProvider 创建 Anthropic provider
-func NewAnthropicProvider(name, apiBase, apiKey, model string, maxOutputTokens int) *AnthropicProvider {
+func NewAnthropicProvider(name, apiBase, apiKey, model string, maxOutputTokens int, reasoningEnabled bool, reasoningEffort string) *AnthropicProvider {
 	if apiBase == "" {
 		apiBase = "https://api.anthropic.com"
 	}
 	return &AnthropicProvider{
-		name:            name,
-		apiBase:         strings.TrimRight(apiBase, "/"),
-		apiKey:          apiKey,
-		model:           model,
-		maxOutputTokens: maxOutputTokens,
+		name:             name,
+		apiBase:          strings.TrimRight(apiBase, "/"),
+		apiKey:           apiKey,
+		model:            model,
+		maxOutputTokens:  maxOutputTokens,
+		reasoningEnabled: reasoningEnabled,
+		reasoningEffort:  normalizeAnthropicReasoningEffort(reasoningEffort),
 	}
+}
+
+// normalizeAnthropicReasoningEffort 归一化 effort，未识别值落回 medium。
+func normalizeAnthropicReasoningEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "low", "medium", "high", "xhigh", "max":
+		return strings.ToLower(strings.TrimSpace(effort))
+	case "none", "":
+		return ""
+	default:
+		return "medium"
+	}
+}
+
+// reasoningConfig 决定是否下发 adaptive thinking 与 effort。
+// 模型是否实际支持由 Anthropic API 自行裁定（老模型会返回错误）。
+func (p *AnthropicProvider) reasoningConfig() (*anthropicThinking, *anthropicOutputConfig) {
+	if !p.reasoningEnabled || p.reasoningEffort == "" {
+		return nil, nil
+	}
+	return &anthropicThinking{Type: "adaptive"}, &anthropicOutputConfig{Effort: p.reasoningEffort}
 }
 
 func (p *AnthropicProvider) Name() string { return p.name }
@@ -48,18 +73,22 @@ type anthropicCacheControl struct {
 }
 
 type anthropicRequest struct {
-	Model     string                 `json:"model"`
-	System    []anthropicSystemBlock `json:"system,omitempty"`
-	Messages  []anthropicMessage     `json:"messages"`
-	Tools     []anthropicTool        `json:"tools,omitempty"`
-	MaxTokens int                    `json:"max_tokens"`
-	Stream    bool                   `json:"stream"`
-	Thinking  *anthropicThinking     `json:"thinking,omitempty"`
+	Model        string                 `json:"model"`
+	System       []anthropicSystemBlock `json:"system,omitempty"`
+	Messages     []anthropicMessage     `json:"messages"`
+	Tools        []anthropicTool        `json:"tools,omitempty"`
+	MaxTokens    int                    `json:"max_tokens"`
+	Stream       bool                   `json:"stream"`
+	Thinking     *anthropicThinking     `json:"thinking,omitempty"`
+	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
 }
 
 type anthropicThinking struct {
-	Type         string `json:"type"` // "enabled"
-	BudgetTokens int    `json:"budget_tokens"`
+	Type string `json:"type"` // "adaptive" | "disabled"
+}
+
+type anthropicOutputConfig struct {
+	Effort string `json:"effort,omitempty"` // "low" | "medium" | "high" | "xhigh" | "max"
 }
 
 type anthropicSystemBlock struct {
@@ -160,17 +189,16 @@ func (p *AnthropicProvider) Chat(ctx context.Context, messages []Message, tools 
 		anthropicTools[len(anthropicTools)-1].CacheControl = &anthropicCacheControl{Type: "ephemeral"}
 	}
 
+	thinking, outputCfg := p.reasoningConfig()
 	reqBody := anthropicRequest{
-		Model:     p.model,
-		System:    systemBlocks,
-		Messages:  anthropicMsgs,
-		Tools:     anthropicTools,
-		MaxTokens: p.maxOutputTokens,
-		Stream:    true,
-		Thinking: &anthropicThinking{
-			Type:         "enabled",
-			BudgetTokens: min(p.maxOutputTokens/2, 8000),
-		},
+		Model:        p.model,
+		System:       systemBlocks,
+		Messages:     anthropicMsgs,
+		Tools:        anthropicTools,
+		MaxTokens:    p.maxOutputTokens,
+		Stream:       true,
+		Thinking:     thinking,
+		OutputConfig: outputCfg,
 	}
 
 	body, err := json.Marshal(reqBody)

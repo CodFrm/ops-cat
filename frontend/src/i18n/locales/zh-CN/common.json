@@ -608,12 +608,13 @@
     "modelDefaultsApplied": "已应用该模型的默认参数",
     "reasoningEffort": "思考深度",
     "reasoningEffortNone": "关闭",
-    "reasoningEffortHint": "关闭：不使用推理；低：快速省 token；中：均衡（默认）；高：深度推理；极深：最深度推理，延迟和成本最高。",
+    "reasoningEffortHint": "关闭：不使用推理；低：快速省 token；中：均衡（默认）；高：深度推理；极深：最深度推理，延迟和成本最高；最大（仅 Anthropic）：不限 token 消耗。",
     "reasoningEffortUnsupportedHint": "该模型可能不支持此设置，仅在兼容模型上生效。",
     "reasoningEffortLow": "低",
     "reasoningEffortMedium": "中",
     "reasoningEffortHigh": "高",
-    "reasoningEffortXHigh": "极深"
+    "reasoningEffortXHigh": "极深",
+    "reasoningEffortMax": "最大"
   },
   "backup": {
     "title": "备份",
