@@ -38,7 +38,9 @@ export function AISetupWizard() {
         values.apiKey,
         values.model,
         values.maxOutputTokens,
-        values.contextWindow
+        values.contextWindow,
+        values.reasoningEnabled,
+        values.reasoningEffort
       );
       await SetActiveAIProvider(created.id);
       await useAIStore.getState().checkConfigured();

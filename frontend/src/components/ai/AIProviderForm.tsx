@@ -19,7 +19,7 @@ import { FetchAIModels, GetModelDefaults } from "../../../wailsjs/go/app/App";
 import { app } from "../../../wailsjs/go/models";
 import { toast } from "sonner";
 
-export function getDefaultApiBase(providerType: string): string {
+function getDefaultApiBase(providerType: string): string {
   if (providerType === "anthropic") return "https://api.anthropic.com";
   return "https://api.openai.com/v1";
 }
@@ -32,6 +32,19 @@ export interface AIProviderFormValues {
   model: string;
   maxOutputTokens: number;
   contextWindow: number;
+  reasoningEnabled: boolean;
+  reasoningEffort: "none" | "low" | "medium" | "high" | "xhigh";
+}
+
+function supportsOpenAIReasoningModel(model: string): boolean {
+  const lower = model.trim().toLowerCase();
+  return (
+    lower.startsWith("o1") ||
+    lower.startsWith("o3") ||
+    lower.startsWith("o4") ||
+    lower.startsWith("gpt-5") ||
+    lower.startsWith("deepseek")
+  );
 }
 
 export interface AIProviderFormProps {
@@ -44,6 +57,7 @@ export interface AIProviderFormProps {
     model: string;
     maxOutputTokens: number;
     contextWindow: number;
+    reasoningEffort: "none" | "low" | "medium" | "high" | "xhigh";
   };
   isEditing?: boolean;
   /** Locks the provider type (used by wizard where cards handle type selection) */
@@ -74,11 +88,16 @@ export function AIProviderForm({
   const [formModel, setFormModel] = useState(initialValues?.model ?? "");
   const [formMaxOutputTokens, setFormMaxOutputTokens] = useState(initialValues?.maxOutputTokens ?? 0);
   const [formContextWindow, setFormContextWindow] = useState(initialValues?.contextWindow ?? 0);
+  const [formReasoningEffort, setFormReasoningEffort] = useState<"none" | "low" | "medium" | "high" | "xhigh">(
+    initialValues?.reasoningEffort ?? "none"
+  );
 
   const [modelOptions, setModelOptions] = useState<app.AIModelInfo[]>([]);
   const [modelPopoverOpen, setModelPopoverOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
   const [fetchingModels, setFetchingModels] = useState(false);
+  const isOpenAIProvider = formType === "openai";
+  const currentModelSupportsReasoning = supportsOpenAIReasoningModel(formModel);
 
   // When external providerType prop changes (wizard card click), reset relevant fields
   useEffect(() => {
@@ -90,6 +109,7 @@ export function AIProviderForm({
       setFormModel("");
       setFormMaxOutputTokens(0);
       setFormContextWindow(0);
+      setFormReasoningEffort("none");
       setModelOptions([]);
     }
   }, [externalType, t]);
@@ -161,6 +181,8 @@ export function AIProviderForm({
       model: formModel,
       maxOutputTokens: formMaxOutputTokens,
       contextWindow: formContextWindow,
+      reasoningEnabled: isOpenAIProvider && formReasoningEffort !== "none",
+      reasoningEffort: formReasoningEffort,
     });
   };
 
@@ -207,6 +229,8 @@ export function AIProviderForm({
                   <button
                     type="button"
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    aria-label={t("settings.selectModel")}
+                    title={t("settings.selectModel")}
                     onClick={() => setModelPopoverOpen(!modelPopoverOpen)}
                   >
                     <ChevronsUpDown className="h-4 w-4" />
@@ -301,6 +325,32 @@ export function AIProviderForm({
           <p className="text-xs text-muted-foreground">{t("settings.contextWindowHint")}</p>
         </div>
       </div>
+
+      {isOpenAIProvider && (
+        <div className="rounded-lg border p-4 space-y-2">
+          <Label>{t("settings.reasoningEffort")}</Label>
+          <Select
+            value={formReasoningEffort}
+            onValueChange={(value) => setFormReasoningEffort(value as "none" | "low" | "medium" | "high" | "xhigh")}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">{t("settings.reasoningEffortNone")}</SelectItem>
+              <SelectItem value="low">{t("settings.reasoningEffortLow")}</SelectItem>
+              <SelectItem value="medium">{t("settings.reasoningEffortMedium")}</SelectItem>
+              <SelectItem value="high">{t("settings.reasoningEffortHigh")}</SelectItem>
+              <SelectItem value="xhigh">{t("settings.reasoningEffortXHigh")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {currentModelSupportsReasoning || !formModel
+              ? t("settings.reasoningEffortHint")
+              : t("settings.reasoningEffortUnsupportedHint")}
+          </p>
+        </div>
+      )}
 
       <Button
         onClick={handleSubmit}
