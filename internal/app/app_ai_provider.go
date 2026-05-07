@@ -43,18 +43,27 @@ func toProviderInfo(p *ai_provider_entity.AIProvider, apiKey string) AIProviderI
 }
 
 func normalizeProviderReasoningConfig(providerType string, reasoningEnabled bool, reasoningEffort string) (bool, string) {
-	if providerType != "openai" {
+	switch providerType {
+	case "openai", "anthropic":
+	default:
 		return false, ""
 	}
 	effort := strings.ToLower(strings.TrimSpace(reasoningEffort))
+	// max 仅 Anthropic 暴露；OpenAI 收到 max 视为非法，落回 medium
+	if effort == "max" && providerType != "anthropic" {
+		effort = "medium"
+	}
 	switch effort {
-	case "low", "medium", "high", "xhigh":
+	case "low", "medium", "high", "xhigh", "max":
 		return true, effort
 	case "none":
 		return false, ""
 	default:
-		// Backwards compat: old data with toggle=true but no effort → medium
-		if reasoningEnabled {
+		// Backwards compat:
+		// - 老 OpenAI 数据：toggle=true 但 effort 空 → medium
+		// - 老 Anthropic 数据：升级前 thinking 是硬编码常开的，effort 字段从未写入；
+		//   兜底成 enabled+medium，保留原产品观感
+		if reasoningEnabled || providerType == "anthropic" {
 			return true, "medium"
 		}
 		return false, ""

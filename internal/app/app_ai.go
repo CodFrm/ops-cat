@@ -56,7 +56,15 @@ func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
 	var provider ai.Provider
 	switch p.Type {
 	case "anthropic":
-		provider = ai.NewAnthropicProvider(p.Name, p.APIBase, apiKey, p.Model, maxOutputTokens)
+		provider = ai.NewAnthropicProvider(
+			p.Name,
+			p.APIBase,
+			apiKey,
+			p.Model,
+			maxOutputTokens,
+			p.ReasoningEnabled,
+			p.ReasoningEffort,
+		)
 	default: // "openai"
 		provider = ai.NewOpenAIProvider(
 			p.Name,
