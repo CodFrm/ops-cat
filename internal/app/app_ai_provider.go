@@ -26,6 +26,7 @@ type AIProviderInfo struct {
 }
 
 func toProviderInfo(p *ai_provider_entity.AIProvider, apiKey string) AIProviderInfo {
+	enabled, effort := normalizeProviderReasoningConfig(p.Type, p.ReasoningEnabled, p.ReasoningEffort)
 	return AIProviderInfo{
 		ID:               p.ID,
 		Name:             p.Name,
@@ -36,8 +37,8 @@ func toProviderInfo(p *ai_provider_entity.AIProvider, apiKey string) AIProviderI
 		Model:            p.Model,
 		MaxOutputTokens:  p.MaxOutputTokens,
 		ContextWindow:    p.ContextWindow,
-		ReasoningEnabled: p.ReasoningEnabled,
-		ReasoningEffort:  p.ReasoningEffort,
+		ReasoningEnabled: enabled,
+		ReasoningEffort:  effort,
 		IsActive:         p.IsActive,
 	}
 }
@@ -59,11 +60,9 @@ func normalizeProviderReasoningConfig(providerType string, reasoningEnabled bool
 	case "none":
 		return false, ""
 	default:
-		// Backwards compat:
-		// - 老 OpenAI 数据：toggle=true 但 effort 空 → medium
-		// - 老 Anthropic 数据：升级前 thinking 是硬编码常开的，effort 字段从未写入；
-		//   兜底成 enabled+medium，保留原产品观感
-		if reasoningEnabled || providerType == "anthropic" {
+		// 老 OpenAI 数据：toggle=true 但 effort 空 → medium。
+		// Anthropic legacy 兜底由 migration 202605070001 一次性处理，这里无需特例。
+		if reasoningEnabled {
 			return true, "medium"
 		}
 		return false, ""
