@@ -6,7 +6,7 @@ import (
 )
 
 // 升级前 Anthropic provider 的 thinking 是硬编码常开；引入 reasoning_enabled/effort
-// 字段后，老数据均为 0/''，会让 thinking 静默关闭。这里把存量 anthropic 行兜底为
+// 字段后，老数据均为 0/空字符串，会让 thinking 静默关闭。这里把存量 anthropic 行兜底为
 // enabled+medium，保留原产品观感。
 func migration202605070001() *gormigrate.Migration {
 	return &gormigrate.Migration{
