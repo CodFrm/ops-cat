@@ -33,7 +33,7 @@ func (f *fakeConvStore) Get(_ context.Context, id int64) (*conversation_entity.C
 	return &cp, nil
 }
 
-func (f *fakeConvStore) UpsertCagoMessages(_ context.Context, id int64, msgs []*conversation_entity.Message) error {
+func (f *fakeConvStore) UpsertMessages(_ context.Context, id int64, msgs []*conversation_entity.Message) error {
 	if f.upsErr != nil {
 		return f.upsErr
 	}

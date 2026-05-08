@@ -343,6 +343,29 @@ describe("AIChatInput", () => {
     expect(submittedMentions).toEqual(draftMentions);
   });
 
+  it("loadDraft 必须触发 onEmptyChange(false)，否则上层发送按钮在编辑同内容时仍是 disabled 状态", async () => {
+    const handleRef = createRef<AIChatInputHandle>();
+    const editorRef = { current: null as Editor | null };
+    const onEmptyChange = vi.fn();
+
+    render(
+      <AIChatInput
+        ref={handleRef}
+        onSubmit={vi.fn()}
+        sendOnEnter={true}
+        onEmptyChange={onEmptyChange}
+        editorRef={editorRef}
+      />
+    );
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+
+    onEmptyChange.mockClear();
+    handleRef.current?.loadDraft("已存在的内容");
+
+    await waitFor(() => expect(editorRef.current!.getText()).toBe("已存在的内容"));
+    await waitFor(() => expect(onEmptyChange).toHaveBeenCalledWith(false));
+  });
+
   it("resets the history cursor after loading an external draft so ArrowUp restarts from latest", async () => {
     const handleRef = createRef<AIChatInputHandle>();
     const editorRef = { current: null as Editor | null };

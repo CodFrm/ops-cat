@@ -373,28 +373,16 @@ export function AIChatContent({
       }
       if (editTarget && conversationId != null) {
         const activeTarget = editTarget;
-        // 编辑模式改走 conversation 级 replay，提交成功后只在目标仍未变化时退出编辑态。
-        void editAndResendConversation(conversationId, activeTarget.messageIndex, text, nextMentions).then(() => {
-          if (sideTabId) {
-            const currentEditTarget = useAIStore.getState().sidebarTabs.find((tab) => tab.id === sideTabId)
-              ?.uiState.editTarget;
-            if (
-              currentEditTarget &&
-              currentEditTarget.conversationId === activeTarget.conversationId &&
-              currentEditTarget.messageIndex === activeTarget.messageIndex
-            ) {
-              setSidebarTabEditTarget(sideTabId, null);
-            }
-            return;
-          }
-          setLocalEditTarget((current) =>
-            current &&
-            current.conversationId === activeTarget.conversationId &&
-            current.messageIndex === activeTarget.messageIndex
-              ? null
-              : current
-          );
-        });
+        // 编辑模式改走 conversation 级 replay。提交即承诺：同步退出编辑态，
+        // 不等 replay promise resolve——它要等到 SendAIMessage 流式完成才返回，
+        // 中间窗口里编辑横幅会一直挂着；同内容提交时下方 messages effect 也无法
+        // 通过比较内容退出（新 user 消息和 draft 完全一致），用户会卡在编辑态里。
+        if (sideTabId) {
+          setSidebarTabEditTarget(sideTabId, null);
+        } else {
+          setLocalEditTarget(null);
+        }
+        void editAndResendConversation(conversationId, activeTarget.messageIndex, text, nextMentions);
         return;
       }
       if (onSendOverride) {

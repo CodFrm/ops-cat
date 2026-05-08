@@ -201,8 +201,8 @@ func TestConversationSvc_Delete(t *testing.T) {
 	})
 }
 
-func TestConversationSvc_UpsertCagoMessages(t *testing.T) {
-	convey.Convey("UpsertCagoMessages 包装 cago gormStore 的快照写入", t, func() {
+func TestConversationSvc_UpsertMessages(t *testing.T) {
+	convey.Convey("UpsertMessages 包装 cago gormStore 的快照写入", t, func() {
 		convey.Convey("成功写入：填充 ConversationID/SortOrder/Createtime", func() {
 			ctx, mockRepo := setupTest(t)
 
@@ -210,7 +210,7 @@ func TestConversationSvc_UpsertCagoMessages(t *testing.T) {
 				{Role: "user", Content: "你好"},
 				{Role: "assistant", Content: "你好！"},
 			}
-			mockRepo.EXPECT().UpsertMessagesByCagoID(gomock.Any(), int64(1), msgs).DoAndReturn(
+			mockRepo.EXPECT().UpsertMessagesByID(gomock.Any(), int64(1), msgs).DoAndReturn(
 				func(_ context.Context, _ int64, msgs []*conversation_entity.Message) error {
 					for i, msg := range msgs {
 						assert.Equal(t, int64(1), msg.ConversationID)
@@ -221,7 +221,7 @@ func TestConversationSvc_UpsertCagoMessages(t *testing.T) {
 				},
 			)
 
-			err := Conversation().UpsertCagoMessages(ctx, 1, msgs)
+			err := Conversation().UpsertMessages(ctx, 1, msgs)
 			assert.NoError(t, err)
 		})
 
@@ -231,10 +231,10 @@ func TestConversationSvc_UpsertCagoMessages(t *testing.T) {
 			msgs := []*conversation_entity.Message{
 				{Role: "user", Content: "test"},
 			}
-			mockRepo.EXPECT().UpsertMessagesByCagoID(gomock.Any(), int64(1), gomock.Any()).
+			mockRepo.EXPECT().UpsertMessagesByID(gomock.Any(), int64(1), gomock.Any()).
 				Return(errors.New("db"))
 
-			err := Conversation().UpsertCagoMessages(ctx, 1, msgs)
+			err := Conversation().UpsertMessages(ctx, 1, msgs)
 			assert.Error(t, err)
 		})
 
@@ -243,7 +243,7 @@ func TestConversationSvc_UpsertCagoMessages(t *testing.T) {
 
 			var inFlight atomic.Int32
 			var maxInFlight atomic.Int32
-			mockRepo.EXPECT().UpsertMessagesByCagoID(gomock.Any(), int64(7), gomock.Any()).Times(5).DoAndReturn(
+			mockRepo.EXPECT().UpsertMessagesByID(gomock.Any(), int64(7), gomock.Any()).Times(5).DoAndReturn(
 				func(_ context.Context, _ int64, _ []*conversation_entity.Message) error {
 					n := inFlight.Add(1)
 					for {
@@ -263,14 +263,14 @@ func TestConversationSvc_UpsertCagoMessages(t *testing.T) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					_ = Conversation().UpsertCagoMessages(ctx, 7,
+					_ = Conversation().UpsertMessages(ctx, 7,
 						[]*conversation_entity.Message{{Role: "user", Content: "x"}})
 				}()
 			}
 			wg.Wait()
 
 			assert.LessOrEqual(t, maxInFlight.Load(), int32(1),
-				"同一 conversationID 的 UpsertCagoMessages 应串行")
+				"同一 conversationID 的 UpsertMessages 应串行")
 		})
 	})
 }

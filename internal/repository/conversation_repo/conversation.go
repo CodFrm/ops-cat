@@ -25,13 +25,16 @@ type ConversationRepo interface {
 	ListMessages(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error)
 	DeleteMessages(ctx context.Context, conversationID int64) error
 
-	// UpsertMessagesByCagoID 按 (conversation_id, cago_id) 自然键行级 upsert：
+	// UpsertMessagesByID 按 (conversation_id, cago_id) 自然键行级 upsert：
 	// - 删除当前快照里没有的旧行（history rewrite/compact 场景的收敛）
-	// - 已存在的 cago_id 行更新 cago 字段 + role/content/sort_order；不动
+	// - 已存在的 cago_id 行更新 framework 字段 + role/content/sort_order；不动
 	//   mentions/token_usage 这两个由 System pending 缓存写的扩展列
 	// - 新行直接 Create
 	// 整体在事务内完成。
-	UpsertMessagesByCagoID(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error
+	//
+	// 注：cago_id 列存的是 agent.Message.ID，cago framework 端保证非空唯一；
+	// 列名沿用 cago_id 是 schema 历史，函数名按一般化的 ByID 暴露。
+	UpsertMessagesByID(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error
 
 	// UpdateState 写入 cago Session 的 thread_id / state_values，并刷新 updatetime。
 	// stateValuesJSON 已是序列化好的 JSON 字符串（service 层负责 marshal）；
@@ -142,7 +145,7 @@ func (r *conversationRepo) DeleteMessages(ctx context.Context, conversationID in
 		Delete(&conversation_entity.Message{}).Error
 }
 
-func (r *conversationRepo) UpsertMessagesByCagoID(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error {
+func (r *conversationRepo) UpsertMessagesByID(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error {
 	return db.Ctx(ctx).Transaction(func(tx *gorm.DB) error {
 		keep := make([]string, 0, len(msgs))
 		for _, m := range msgs {

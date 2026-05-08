@@ -27,11 +27,11 @@ type ConversationSvc interface {
 	// 消息持久化
 	LoadMessages(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error)
 
-	// UpsertCagoMessages 是 cago gormStore 的写入入口（替代旧的 SaveMessages）。
+	// UpsertMessages 是 cago gormStore 的写入入口（替代旧的 SaveMessages）。
 	// 同 conversation 的并发调用通过 saveLocks 串行化；行级 upsert 委托给
-	// conversation_repo.UpsertMessagesByCagoID。msgs 的 ConversationID 与
+	// conversation_repo.UpsertMessagesByID。msgs 的 ConversationID 与
 	// SortOrder/Createtime 由本方法填充——调用方无需预设。
-	UpsertCagoMessages(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error
+	UpsertMessages(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error
 
 	// UpdateConversationState 把 cago Session 的 ThreadID + State.Values 写入
 	// conversations 表的 thread_id / state_values 列。values 序列化为 JSON；
@@ -108,7 +108,7 @@ func (s *conversationSvc) LoadMessages(ctx context.Context, conversationID int64
 	return conversation_repo.Conversation().ListMessages(ctx, conversationID)
 }
 
-func (s *conversationSvc) UpsertCagoMessages(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error {
+func (s *conversationSvc) UpsertMessages(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error {
 	// 复用 saveLocks：同会话的 cago Save 并发到来时串行化，避免 upsert 间的快照交错
 	// （cago 每次 Save 发的是全量快照，后到的应当 last-write-wins）。
 	lockI, _ := s.saveLocks.LoadOrStore(conversationID, &sync.Mutex{})
@@ -126,7 +126,7 @@ func (s *conversationSvc) UpsertCagoMessages(ctx context.Context, conversationID
 			m.Createtime = now
 		}
 	}
-	return conversation_repo.Conversation().UpsertMessagesByCagoID(ctx, conversationID, msgs)
+	return conversation_repo.Conversation().UpsertMessagesByID(ctx, conversationID, msgs)
 }
 
 func (s *conversationSvc) UpdateConversationState(ctx context.Context, conversationID int64, threadID string, values map[string]string) error {

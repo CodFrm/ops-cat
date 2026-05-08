@@ -184,6 +184,47 @@ describe("AIChatContent", () => {
     await waitFor(() => expect(screen.queryByText(editingBannerName)).not.toBeInTheDocument());
   });
 
+  it("exits edit mode synchronously on submit, even when content is unchanged and the resend promise has not resolved", async () => {
+    const user = userEvent.setup();
+    let resolveResend: (() => void) | undefined;
+    const editAndResendConversation = vi.fn().mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveResend = () => resolve();
+      })
+    );
+    const tabId = "ai-7";
+
+    useTabStore.setState({
+      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 7, title: "t" } }],
+      activeTabId: tabId,
+    });
+    useAIStore.setState({
+      tabStates: { [tabId]: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null } },
+      conversationMessages: {
+        7: [{ role: "user", content: "same text", blocks: [] }],
+      },
+      conversationStreaming: {
+        7: { sending: false, pendingQueue: [] },
+      },
+      sendToTab: vi.fn(),
+      editAndResendConversation,
+    } as Partial<ReturnType<typeof useAIStore.getState>>);
+
+    render(<AIChatContent tabId={tabId} />);
+
+    await user.click(screen.getByRole("button", { name: editButtonName }));
+    expect(screen.getByText(editingBannerName)).toBeInTheDocument();
+
+    // 不修改输入框内容，直接以"同内容"提交。
+    await user.click(screen.getByRole("button", { name: "mock-submit" }));
+
+    expect(editAndResendConversation).toHaveBeenCalledWith(7, 0, "same text", undefined);
+    // 不等 resend promise resolve，编辑模式就应当立即退出。
+    expect(screen.queryByText(editingBannerName)).not.toBeInTheDocument();
+
+    resolveResend?.();
+  });
+
   it("canceling edit clears the prefetched draft and exits edit mode", async () => {
     const user = userEvent.setup();
 

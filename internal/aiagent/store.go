@@ -19,7 +19,7 @@ import (
 // fake 实现，避免起 DB。
 type convStore interface {
 	Get(ctx context.Context, id int64) (*conversation_entity.Conversation, error)
-	UpsertCagoMessages(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error
+	UpsertMessages(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error
 	UpdateConversationState(ctx context.Context, conversationID int64, threadID string, values map[string]string) error
 	LoadMessages(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error)
 	UpdateMessageTokenUsage(ctx context.Context, conversationID int64, cagoID, tokenUsageJSON string) error
@@ -104,7 +104,7 @@ func (g *gormStore) Save(ctx context.Context, sessionID string, data agent.Sessi
 		}
 	}
 
-	if err := g.store.UpsertCagoMessages(ctx, convID, rows); err != nil {
+	if err := g.store.UpsertMessages(ctx, convID, rows); err != nil {
 		return fmt.Errorf("gormStore.Save: upsert messages: %w", err)
 	}
 	if err := g.store.UpdateConversationState(ctx, convID, data.State.ThreadID, data.State.Values); err != nil {
@@ -160,7 +160,7 @@ func (g *gormStore) Delete(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return err
 	}
-	if err := g.store.UpsertCagoMessages(ctx, convID, nil); err != nil {
+	if err := g.store.UpsertMessages(ctx, convID, nil); err != nil {
 		return fmt.Errorf("gormStore.Delete: clear messages: %w", err)
 	}
 	if err := g.store.UpdateConversationState(ctx, convID, "", nil); err != nil {

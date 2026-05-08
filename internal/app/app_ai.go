@@ -228,49 +228,149 @@ func (a *App) LoadConversationMessages(id int64) ([]ConversationDisplayMessage, 
 	return a.loadConversationDisplayMessages(ctx, id)
 }
 
-// deriveBlocks 把单条 cago Message 行（以及紧跟其后的 tool_result，如果是 tool_call）
-// 映射成前端 ContentBlock 列表。i 是 msgs 中当前行的下标；skip[j]=true 标记 j
-// 已被吸收（外层循环跳过）。
-func deriveBlocks(msgs []*conversation_entity.Message, i int, skip map[int]bool) []conversation_entity.ContentBlock {
-	row := msgs[i]
-	switch row.Kind {
-	case "tool_call":
-		var tc struct {
-			ID   string          `json:"id"`
-			Name string          `json:"name"`
-			Args json.RawMessage `json:"args"`
+// buildDisplayMessages 把按 sort_order 排好的 cago-shape conversation_messages 行
+// 聚合成前端展示用的 ConversationDisplayMessage 列表。
+//
+// 关键不变量：
+//   - 一条 user/text 行 → 一条 user 显示消息；同一 user 行同时承载 mentions
+//   - origin=model/tool 的 text/tool_call/tool_result 行属于"当前 assistant 回合"，
+//     连续聚合为一条 assistant 显示消息；下一条 user 行或末尾关闭该回合
+//   - tool_call 行按其 ToolCallJSON.id 在整轮 rows 范围内查 tool_result 行配对
+//     （tool_result.ToolCallJSON.id 同值），不再依赖 i+1 邻接，多 tool 回合下
+//     结果归位严格正确
+//   - tool_result 行被 tool_call 消费，自身不产出独立气泡
+//   - assistant 回合内 token_usage 取最后一条带 token_usage 的行（与 cago
+//     event_bridge.lastAssistantMsgID 语义一致：usage 跟到回合最后一条 cago 消息）
+//   - 跳过非展示 kind（system / compaction_summary / steering / follow_up /
+//     hook_context / transcript_only）与非展示 origin（hook / framework）
+func buildDisplayMessages(rows []*conversation_entity.Message) []ConversationDisplayMessage {
+	// 索引所有 tool_result 行：call_id → row。tool_call 行据此查结果。
+	resultByCallID := make(map[string]*conversation_entity.Message, len(rows))
+	for _, r := range rows {
+		if r.Kind != "tool_result" {
+			continue
 		}
-		_ = json.Unmarshal([]byte(row.ToolCallJSON), &tc)
-		block := conversation_entity.ContentBlock{
-			Type:       "tool",
-			ToolName:   tc.Name,
-			ToolInput:  string(tc.Args),
-			ToolCallID: tc.ID,
-			Status:     "completed",
+		if id := callIDFromToolJSON(r.ToolCallJSON); id != "" {
+			resultByCallID[id] = r
 		}
-		if i+1 < len(msgs) && msgs[i+1].Kind == "tool_result" {
-			var tr struct {
-				Result any    `json:"result"`
-				Err    string `json:"err"`
-			}
-			_ = json.Unmarshal([]byte(msgs[i+1].ToolResultJSON), &tr)
-			if tr.Err != "" {
-				block.Status = "error"
-				block.Content = tr.Err
-			} else if s, ok := tr.Result.(string); ok {
-				block.Content = s
-			} else if tr.Result != nil {
-				b, _ := json.Marshal(tr.Result)
-				block.Content = string(b)
-			}
-			skip[i+1] = true
-		}
-		return []conversation_entity.ContentBlock{block}
-	case "text":
-		return []conversation_entity.ContentBlock{{Type: "text", Content: row.Content}}
-	default:
-		return nil
 	}
+
+	var out []ConversationDisplayMessage
+	var pending *ConversationDisplayMessage // 正在累积的 assistant 回合（如果有）
+
+	flushPending := func() {
+		if pending != nil {
+			out = append(out, *pending)
+			pending = nil
+		}
+	}
+
+	for _, row := range rows {
+		// kind 过滤：只看展示用 kind
+		switch row.Kind {
+		case "text", "tool_call":
+			// 通过
+		case "tool_result":
+			continue // 由其 tool_call 行消费
+		default:
+			continue
+		}
+		// origin 过滤：hook / framework 等纯协议消息不进 UI
+		if row.Origin != "" && row.Origin != "model" && row.Origin != "user" && row.Origin != "tool" {
+			continue
+		}
+
+		// user 行：关闭当前 assistant 回合（如果有），开一条 user 显示消息
+		if row.Origin == "user" || (row.Origin == "" && row.Role == "user") {
+			flushPending()
+			mentions, err := row.GetMentions()
+			if err != nil {
+				logger.Default().Warn("get message mentions", zap.Error(err))
+			}
+			out = append(out, ConversationDisplayMessage{
+				Role:     row.Role,
+				Content:  row.Content,
+				Blocks:   []conversation_entity.ContentBlock{{Type: "text", Content: row.Content}},
+				Mentions: mentions,
+			})
+			continue
+		}
+
+		// model/tool origin → 当前 assistant 回合
+		if pending == nil {
+			pending = &ConversationDisplayMessage{Role: row.Role}
+			if pending.Role == "" {
+				pending.Role = "assistant"
+			}
+		}
+		switch row.Kind {
+		case "text":
+			pending.Blocks = append(pending.Blocks, conversation_entity.ContentBlock{
+				Type: "text", Content: row.Content,
+			})
+		case "tool_call":
+			pending.Blocks = append(pending.Blocks, toolBlockFromCall(row, resultByCallID))
+		}
+		// token_usage：cago 把它写到回合最后一条 cago 消息上，但为容错允许任何
+		// 一行带 token_usage 都覆盖到当前回合（last wins）
+		if usage, err := row.GetTokenUsage(); err != nil {
+			logger.Default().Warn("get message token usage", zap.Error(err))
+		} else if usage != nil {
+			pending.TokenUsage = usage
+		}
+	}
+	flushPending()
+	return out
+}
+
+// callIDFromToolJSON 从 row.ToolCallJSON 抽 id 字段；解析失败返回空串。
+func callIDFromToolJSON(s string) string {
+	if s == "" {
+		return ""
+	}
+	var tc struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal([]byte(s), &tc)
+	return tc.ID
+}
+
+// toolBlockFromCall 把一条 tool_call 行 + 配对到的 tool_result 行（如有）合成一个
+// 前端 tool ContentBlock。未配对到 result 的 tool_call → status="running"。
+func toolBlockFromCall(callRow *conversation_entity.Message, results map[string]*conversation_entity.Message) conversation_entity.ContentBlock {
+	var tc struct {
+		ID   string          `json:"id"`
+		Name string          `json:"name"`
+		Args json.RawMessage `json:"args"`
+	}
+	_ = json.Unmarshal([]byte(callRow.ToolCallJSON), &tc)
+	block := conversation_entity.ContentBlock{
+		Type:       "tool",
+		ToolName:   tc.Name,
+		ToolInput:  string(tc.Args),
+		ToolCallID: tc.ID,
+		Status:     "running",
+	}
+	resRow, ok := results[tc.ID]
+	if !ok {
+		return block
+	}
+	block.Status = "completed"
+	var tr struct {
+		Result any    `json:"result,omitempty"`
+		Err    string `json:"err,omitempty"`
+	}
+	_ = json.Unmarshal([]byte(resRow.ToolResultJSON), &tr)
+	if tr.Err != "" {
+		block.Status = "error"
+		block.Content = tr.Err
+	} else if s, ok := tr.Result.(string); ok {
+		block.Content = s
+	} else if tr.Result != nil {
+		b, _ := json.Marshal(tr.Result)
+		block.Content = string(b)
+	}
+	return block
 }
 
 func (a *App) loadConversationDisplayMessages(ctx context.Context, id int64) ([]ConversationDisplayMessage, error) {
@@ -278,73 +378,7 @@ func (a *App) loadConversationDisplayMessages(ctx context.Context, id int64) ([]
 	if err != nil {
 		return nil, err
 	}
-	skip := make(map[int]bool, len(msgs))
-	var displayMsgs []ConversationDisplayMessage
-	for i, row := range msgs {
-		if skip[i] {
-			continue
-		}
-		// Legacy 行（202605080010 之前由前端 SaveConversationMessages 写入）：
-		// kind/origin/cago_id 全空，但带旧的 blocks JSON 列与 role/content。这些行
-		// 不能按 cago kind 派生——一个 assistant 回合是单行多 block，按行派生会丢
-		// tool 段并把一个回合炸成多个气泡。直接读 GetBlocks() 作为权威渲染数据。
-		if row.Kind == "" && row.CagoID == "" {
-			legacyBlocks, err := row.GetBlocks()
-			if err != nil {
-				logger.Default().Warn("get legacy message blocks", zap.Error(err))
-			}
-			mentions, err := row.GetMentions()
-			if err != nil {
-				logger.Default().Warn("get message mentions", zap.Error(err))
-			}
-			usage, err := row.GetTokenUsage()
-			if err != nil {
-				logger.Default().Warn("get message token usage", zap.Error(err))
-			}
-			displayMsgs = append(displayMsgs, ConversationDisplayMessage{
-				Role:       row.Role,
-				Content:    row.Content,
-				Blocks:     legacyBlocks,
-				Mentions:   mentions,
-				TokenUsage: usage,
-			})
-			continue
-		}
-		// 跳过非展示类的 cago kinds（system / compaction_summary / follow_up / hook_context …）。
-		// 同时跳过 origin=hook/framework 的纯协议消息——这些是给 LLM 的上下文，不该出现在 UI。
-		switch row.Kind {
-		case "tool_result":
-			continue // 孤儿 tool_result，外层循环不应到达；防御性跳过
-		case "text", "tool_call":
-			// continue → 走下面构造逻辑
-		default:
-			continue
-		}
-		if row.Origin != "" && row.Origin != "model" && row.Origin != "user" && row.Origin != "tool" {
-			continue
-		}
-		dm := ConversationDisplayMessage{
-			Role:    row.Role,
-			Content: row.Content,
-		}
-		mentions, err := row.GetMentions()
-		if err != nil {
-			logger.Default().Warn("get message mentions", zap.Error(err))
-		}
-		dm.Mentions = mentions
-		usage, err := row.GetTokenUsage()
-		if err != nil {
-			logger.Default().Warn("get message token usage", zap.Error(err))
-		}
-		dm.TokenUsage = usage
-		dm.Blocks = deriveBlocks(msgs, i, skip)
-		// tool_call 行 Content 是空的，前端的 placeholder 期望 Content == "" 时只渲染 Blocks
-		if row.Kind == "tool_call" {
-			dm.Content = ""
-		}
-		displayMsgs = append(displayMsgs, dm)
-	}
-	return displayMsgs, nil
+	return buildDisplayMessages(msgs), nil
 }
 
 // switchToConversation 内部切换会话逻辑

@@ -398,7 +398,9 @@ function getInputHistoryNavigationState({
 
 // 把历史消息写回编辑器，并把光标定位到末尾，保证连续切换时体验稳定。
 function applyInputHistoryMessage(editor: Editor, nextMessage: string | AIChatInputDraft) {
-  editor.commands.setContent(buildEditorDocFromMessage(nextMessage));
+  // emitUpdate=true：tiptap setContent 默认不触发 onUpdate，外层 onEmptyChange 不会更新，
+  // 进入编辑态/恢复历史时发送按钮会一直处于 disabled，必须改一下文本才能发出去。
+  editor.commands.setContent(buildEditorDocFromMessage(nextMessage), true);
   editor.commands.focus("end");
 }
 

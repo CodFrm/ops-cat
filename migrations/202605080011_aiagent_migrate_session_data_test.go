@@ -59,6 +59,7 @@ func allMigrationsForTest() []*gormigrate.Migration {
 		migration202605080001(),
 		migration202605080010(),
 		migration202605080011(),
+		migration202605080012(),
 	}
 }
 

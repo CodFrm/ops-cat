@@ -198,16 +198,16 @@ func (mr *MockConversationRepoMockRecorder) UpdateWorkDir(ctx, id, workDir, upda
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateWorkDir", reflect.TypeOf((*MockConversationRepo)(nil).UpdateWorkDir), ctx, id, workDir, updatetime)
 }
 
-// UpsertMessagesByCagoID mocks base method.
-func (m *MockConversationRepo) UpsertMessagesByCagoID(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error {
+// UpsertMessagesByID mocks base method.
+func (m *MockConversationRepo) UpsertMessagesByID(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UpsertMessagesByCagoID", ctx, conversationID, msgs)
+	ret := m.ctrl.Call(m, "UpsertMessagesByID", ctx, conversationID, msgs)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// UpsertMessagesByCagoID indicates an expected call of UpsertMessagesByCagoID.
-func (mr *MockConversationRepoMockRecorder) UpsertMessagesByCagoID(ctx, conversationID, msgs any) *gomock.Call {
+// UpsertMessagesByID indicates an expected call of UpsertMessagesByID.
+func (mr *MockConversationRepoMockRecorder) UpsertMessagesByID(ctx, conversationID, msgs any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertMessagesByCagoID", reflect.TypeOf((*MockConversationRepo)(nil).UpsertMessagesByCagoID), ctx, conversationID, msgs)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertMessagesByID", reflect.TypeOf((*MockConversationRepo)(nil).UpsertMessagesByID), ctx, conversationID, msgs)
 }

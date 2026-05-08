@@ -56,14 +56,14 @@ func msg(convID int64, cagoID, role, content string, sortOrder int) *conversatio
 	}
 }
 
-func TestUpsertMessagesByCagoID_FirstSaveCreatesRows(t *testing.T) {
+func TestUpsertMessagesByID_FirstSaveCreatesRows(t *testing.T) {
 	ctx, r, _ := setupConvRepo(t)
 	c := newConv(t, ctx, r)
 
 	m1 := msg(c.ID, "cago-1", "user", "hello", 1)
 	m2 := msg(c.ID, "cago-2", "assistant", "hi there", 2)
 
-	require.NoError(t, r.UpsertMessagesByCagoID(ctx, c.ID, []*conversation_entity.Message{m1, m2}))
+	require.NoError(t, r.UpsertMessagesByID(ctx, c.ID, []*conversation_entity.Message{m1, m2}))
 
 	got, err := r.ListMessages(ctx, c.ID)
 	require.NoError(t, err)
@@ -74,18 +74,18 @@ func TestUpsertMessagesByCagoID_FirstSaveCreatesRows(t *testing.T) {
 	assert.Equal(t, "hi there", got[1].Content)
 }
 
-func TestUpsertMessagesByCagoID_SecondSaveUpsertsAndRemovesAbsent(t *testing.T) {
+func TestUpsertMessagesByID_SecondSaveUpsertsAndRemovesAbsent(t *testing.T) {
 	ctx, r, _ := setupConvRepo(t)
 	c := newConv(t, ctx, r)
 
 	m1 := msg(c.ID, "cago-1", "user", "hello", 1)
 	m2 := msg(c.ID, "cago-2", "assistant", "hi there", 2)
-	require.NoError(t, r.UpsertMessagesByCagoID(ctx, c.ID, []*conversation_entity.Message{m1, m2}))
+	require.NoError(t, r.UpsertMessagesByID(ctx, c.ID, []*conversation_entity.Message{m1, m2}))
 
 	// 第二次：m1 内容修改、m2 缺席（应被删除）、m3 新增
 	m1Edited := msg(c.ID, "cago-1", "user", "hello-edited", 1)
 	m3 := msg(c.ID, "cago-3", "assistant", "third", 2)
-	require.NoError(t, r.UpsertMessagesByCagoID(ctx, c.ID, []*conversation_entity.Message{m1Edited, m3}))
+	require.NoError(t, r.UpsertMessagesByID(ctx, c.ID, []*conversation_entity.Message{m1Edited, m3}))
 
 	got, err := r.ListMessages(ctx, c.ID)
 	require.NoError(t, err)
@@ -97,12 +97,12 @@ func TestUpsertMessagesByCagoID_SecondSaveUpsertsAndRemovesAbsent(t *testing.T) 
 	assert.Equal(t, "third", got[1].Content)
 }
 
-func TestUpsertMessagesByCagoID_PreservesExtensionColumns(t *testing.T) {
+func TestUpsertMessagesByID_PreservesExtensionColumns(t *testing.T) {
 	ctx, r, gdb := setupConvRepo(t)
 	c := newConv(t, ctx, r)
 
 	m1 := msg(c.ID, "cago-1", "user", "hello", 1)
-	require.NoError(t, r.UpsertMessagesByCagoID(ctx, c.ID, []*conversation_entity.Message{m1}))
+	require.NoError(t, r.UpsertMessagesByID(ctx, c.ID, []*conversation_entity.Message{m1}))
 
 	// 模拟 System pending 缓存写入 mentions / token_usage 扩展列
 	require.NoError(t, gdb.Model(&conversation_entity.Message{}).
@@ -114,7 +114,7 @@ func TestUpsertMessagesByCagoID_PreservesExtensionColumns(t *testing.T) {
 
 	// 第二次 upsert：同一 cago_id，content 变化，但 mentions/token_usage 不应被清空
 	m1Edited := msg(c.ID, "cago-1", "user", "hello-edited", 1)
-	require.NoError(t, r.UpsertMessagesByCagoID(ctx, c.ID, []*conversation_entity.Message{m1Edited}))
+	require.NoError(t, r.UpsertMessagesByID(ctx, c.ID, []*conversation_entity.Message{m1Edited}))
 
 	got, err := r.ListMessages(ctx, c.ID)
 	require.NoError(t, err)
@@ -124,15 +124,15 @@ func TestUpsertMessagesByCagoID_PreservesExtensionColumns(t *testing.T) {
 	assert.Equal(t, `{"inputTokens":10,"outputTokens":20}`, got[0].TokenUsage, "token_usage must be preserved")
 }
 
-func TestUpsertMessagesByCagoID_EmptyClearsAll(t *testing.T) {
+func TestUpsertMessagesByID_EmptyClearsAll(t *testing.T) {
 	ctx, r, _ := setupConvRepo(t)
 	c := newConv(t, ctx, r)
 
 	m1 := msg(c.ID, "cago-1", "user", "hello", 1)
 	m2 := msg(c.ID, "cago-2", "assistant", "hi", 2)
-	require.NoError(t, r.UpsertMessagesByCagoID(ctx, c.ID, []*conversation_entity.Message{m1, m2}))
+	require.NoError(t, r.UpsertMessagesByID(ctx, c.ID, []*conversation_entity.Message{m1, m2}))
 
-	require.NoError(t, r.UpsertMessagesByCagoID(ctx, c.ID, nil))
+	require.NoError(t, r.UpsertMessagesByID(ctx, c.ID, nil))
 
 	got, err := r.ListMessages(ctx, c.ID)
 	require.NoError(t, err)
@@ -172,7 +172,7 @@ func TestUpdateMessageTokenUsage(t *testing.T) {
 	ctx, r, _ := setupConvRepo(t)
 	c := newConv(t, ctx, r)
 	m1 := msg(c.ID, "cago-1", "user", "hi", 1)
-	require.NoError(t, r.UpsertMessagesByCagoID(ctx, c.ID, []*conversation_entity.Message{m1}))
+	require.NoError(t, r.UpsertMessagesByID(ctx, c.ID, []*conversation_entity.Message{m1}))
 
 	require.NoError(t, r.UpdateMessageTokenUsage(ctx, c.ID, "cago-1", `{"inputTokens":12}`))
 
