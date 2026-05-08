@@ -2,6 +2,8 @@ package conversation_repo
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
 
@@ -23,6 +25,19 @@ type ConversationRepo interface {
 	ListMessages(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error)
 	CreateMessages(ctx context.Context, msgs []*conversation_entity.Message) error
 	DeleteMessages(ctx context.Context, conversationID int64) error
+
+	// UpsertMessagesByCagoID 按 (conversation_id, cago_id) 自然键行级 upsert：
+	// - 删除当前快照里没有的旧行（history rewrite/compact 场景的收敛）
+	// - 已存在的 cago_id 行更新 cago 字段 + role/content/sort_order；不动
+	//   mentions/token_usage 这两个由 System pending 缓存写的扩展列
+	// - 新行直接 Create
+	// 整体在事务内完成。
+	UpsertMessagesByCagoID(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error
+
+	// UpdateState 写入 cago Session 的 thread_id / state_values，并刷新 updatetime。
+	// stateValuesJSON 已是序列化好的 JSON 字符串（service 层负责 marshal）；
+	// 空字符串视为清空（GetStateValues 返回 nil）。
+	UpdateState(ctx context.Context, conversationID int64, threadID, stateValuesJSON string) error
 }
 
 var defaultConversation ConversationRepo
@@ -128,4 +143,66 @@ func (r *conversationRepo) CreateMessages(ctx context.Context, msgs []*conversat
 func (r *conversationRepo) DeleteMessages(ctx context.Context, conversationID int64) error {
 	return db.Ctx(ctx).Where("conversation_id = ?", conversationID).
 		Delete(&conversation_entity.Message{}).Error
+}
+
+func (r *conversationRepo) UpsertMessagesByCagoID(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error {
+	return db.Ctx(ctx).Transaction(func(tx *gorm.DB) error {
+		keep := make([]string, 0, len(msgs))
+		for _, m := range msgs {
+			keep = append(keep, m.CagoID)
+		}
+		// 删除本次快照不再包含的旧行。当 keep 为空时（Delete 路径），删除所有该会话的 message 行。
+		del := tx.Where("conversation_id = ?", conversationID)
+		if len(keep) > 0 {
+			del = del.Where("cago_id NOT IN ?", keep)
+		}
+		if err := del.Delete(&conversation_entity.Message{}).Error; err != nil {
+			return err
+		}
+		// 逐行 upsert
+		for _, m := range msgs {
+			var existing conversation_entity.Message
+			err := tx.Where("conversation_id = ? AND cago_id = ?", conversationID, m.CagoID).
+				First(&existing).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				if err := tx.Create(m).Error; err != nil {
+					return err
+				}
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			updates := map[string]any{
+				"role":             m.Role,
+				"content":          m.Content,
+				"parent_id":        m.ParentID,
+				"kind":             m.Kind,
+				"origin":           m.Origin,
+				"thinking":         m.Thinking,
+				"tool_call_json":   m.ToolCallJSON,
+				"tool_result_json": m.ToolResultJSON,
+				"persist":          m.Persist,
+				"raw":              m.Raw,
+				"msg_time":         m.MsgTime,
+				"sort_order":       m.SortOrder,
+			}
+			if err := tx.Model(&conversation_entity.Message{}).
+				Where("conversation_id = ? AND cago_id = ?", conversationID, m.CagoID).
+				Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (r *conversationRepo) UpdateState(ctx context.Context, conversationID int64, threadID, stateValuesJSON string) error {
+	return db.Ctx(ctx).Model(&conversation_entity.Conversation{}).
+		Where("id = ?", conversationID).
+		Updates(map[string]any{
+			"thread_id":    threadID,
+			"state_values": stateValuesJSON,
+			"updatetime":   time.Now().Unix(),
+		}).Error
 }
