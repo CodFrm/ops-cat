@@ -11,6 +11,7 @@ import {
   DeleteConversation,
   SaveConversationMessages,
   UpdateConversationTitle,
+  PickConversationCwd,
 } from "../../wailsjs/go/app/App";
 import { ai, conversation_entity, app } from "../../wailsjs/go/models";
 import { EventsOn, EventsEmit } from "../../wailsjs/runtime/runtime";
@@ -1617,6 +1618,7 @@ interface AIState {
   // 会话管理
   fetchConversations: () => Promise<void>;
   renameConversation: (id: number, title: string) => Promise<boolean>;
+  pickConversationCwd: (convId: number) => Promise<string | null>;
   deleteConversation: (id: number) => Promise<void>;
 
   // 侧边助手 actions
@@ -1713,6 +1715,23 @@ export const useAIStore = create<AIState>((set, get) => {
 
     renameConversation: async (id: number, title: string) => {
       return renameConversationInternal(id, title, { waitForListRefresh: true });
+    },
+
+    pickConversationCwd: async (convId: number) => {
+      try {
+        const cwd = await PickConversationCwd(convId);
+        if (!cwd) return null; // user cancelled
+
+        // Refresh the conversation list so the cwd row reflects the new value.
+        const convs = await ListConversations();
+        if (Array.isArray(convs)) {
+          useAIStore.setState({ conversations: convs });
+        }
+        return cwd;
+      } catch (err) {
+        console.error("选择工作目录失败:", err);
+        return null;
+      }
     },
 
     deleteConversation: async (id: number) => {

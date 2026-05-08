@@ -220,6 +220,37 @@ func (a *App) UpdateConversationCwd(id int64, cwd string) error {
 	return nil
 }
 
+// PickConversationCwd opens a native folder dialog seeded with the conversation's
+// current cwd (or user home if unset), persists the selection, and returns the
+// chosen path. Returns "" if the user cancelled.
+func (a *App) PickConversationCwd(id int64) (string, error) {
+	conv, err := conversation_svc.Conversation().Get(a.langCtx(), id)
+	if err != nil {
+		return "", fmt.Errorf("会话不存在: %w", err)
+	}
+	defaultDir := conv.WorkDir
+	if defaultDir == "" {
+		if home, herr := os.UserHomeDir(); herr == nil {
+			defaultDir = home
+		}
+	}
+	chosen, err := wailsRuntime.OpenDirectoryDialog(a.ctx, wailsRuntime.OpenDialogOptions{
+		Title:                "选择工作目录",
+		DefaultDirectory:     defaultDir,
+		CanCreateDirectories: true,
+	})
+	if err != nil {
+		return "", fmt.Errorf("打开目录对话框失败: %w", err)
+	}
+	if chosen == "" {
+		return "", nil // user cancelled
+	}
+	if err := a.UpdateConversationCwd(id, chosen); err != nil {
+		return "", err
+	}
+	return chosen, nil
+}
+
 // SwitchConversation 切换到指定会话，返回显示消息
 func (a *App) SwitchConversation(id int64) ([]ConversationDisplayMessage, error) {
 	ctx := a.langCtx()

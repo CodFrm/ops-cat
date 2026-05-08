@@ -765,6 +765,7 @@
     "permissionRequestHint": "AI 正在申请命令执行权限，可编辑模式后批准",
     "permissionPatternPlaceholder": "命令模式，支持 * 通配符",
     "permissionApprove": "批准",
+    "changeWorkDir": "更改工作目录",
     "renameConversation": "重命名对话",
     "renameConversationPlaceholder": "输入对话标题",
     "deleteConversationTitle": "删除对话",
@@ -802,6 +803,7 @@
       "tooltip": "本次回复 token 使用量"
     },
     "retrying": "重试中",
+    "workDirNotSet": "(工作目录未设置)",
     "newConversation": "新对话",
     "sidebar": {
       "title": "AI 助手",

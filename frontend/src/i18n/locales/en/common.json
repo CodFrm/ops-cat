@@ -780,6 +780,7 @@
     "permissionRequestHint": "AI is requesting command execution permission. You can edit the pattern before approving.",
     "permissionPatternPlaceholder": "Command pattern, supports * wildcard",
     "permissionApprove": "Approve",
+    "changeWorkDir": "Change working directory",
     "renameConversation": "Rename conversation",
     "renameConversationPlaceholder": "Enter conversation title",
     "deleteConversationTitle": "Delete Conversation",
@@ -817,6 +818,7 @@
       "tooltip": "Token usage for this reply"
     },
     "retrying": "Retrying",
+    "workDirNotSet": "(workdir not set)",
     "newConversation": "New conversation",
     "sidebar": {
       "title": "AI Assistant",

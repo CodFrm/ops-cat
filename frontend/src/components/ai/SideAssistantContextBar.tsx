@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Input } from "@opskat/ui";
-import { Check, Pencil, X } from "lucide-react";
+import { Check, Folder, Pencil, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAIStore } from "@/stores/aiStore";
 
@@ -12,6 +12,7 @@ export function SideAssistantContextBar({ conversationId }: SideAssistantContext
   const { t } = useTranslation();
   const conversations = useAIStore((s) => s.conversations);
   const renameConversation = useAIStore((s) => s.renameConversation);
+  const pickConversationCwd = useAIStore((s) => s.pickConversationCwd);
   const conv = conversationId != null ? conversations.find((c) => c.ID === conversationId) : null;
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
@@ -123,21 +124,37 @@ export function SideAssistantContextBar({ conversationId }: SideAssistantContext
   }
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground border-b border-panel-divider">
-      <span className="truncate flex-1 text-foreground" onDoubleClick={startRename}>
-        {conv?.Title || t("ai.newConversation")}
-      </span>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-6 w-6 shrink-0"
-        onClick={startRename}
-        title={t("ai.renameConversation")}
-        aria-label={t("ai.renameConversation")}
-        disabled={!conv}
-      >
-        <Pencil className="h-3.5 w-3.5" />
-      </Button>
+    <div className="border-b border-panel-divider">
+      {/* Title row (existing) */}
+      <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground">
+        <span className="truncate flex-1 text-foreground" onDoubleClick={startRename}>
+          {conv?.Title || t("ai.newConversation")}
+        </span>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 shrink-0"
+          onClick={startRename}
+          title={t("ai.renameConversation")}
+          aria-label={t("ai.renameConversation")}
+          disabled={!conv}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
+      {/* Cwd row (new) */}
+      {conv && (
+        <button
+          type="button"
+          onClick={() => void pickConversationCwd(conv.ID)}
+          title={t("ai.changeWorkDir")}
+          className="flex w-full items-center gap-1.5 px-3 pb-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Folder className="h-3 w-3 shrink-0" />
+          <span className="truncate text-left">{conv.WorkDir || t("ai.workDirNotSet")}</span>
+        </button>
+      )}
     </div>
   );
 }
