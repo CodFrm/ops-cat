@@ -2,8 +2,6 @@ package aiagent
 
 import (
 	"context"
-	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -129,39 +127,21 @@ func TestSystem_RunSlash_NonSlashPassesThrough(t *testing.T) {
 	}
 }
 
-// TestSystem_RunSlash_BuiltinHelp invokes the always-registered /help builtin
-// and asserts the SlashResult shape: IsSlash=true, Notice non-empty (UI text),
-// Prompt empty (no follow-up user message).
-func TestSystem_RunSlash_BuiltinHelp(t *testing.T) {
+// TestSystem_RunSlash_DisabledPassesThrough 守住「OpsKat 显式关掉 cago slash 注册表」
+// 的回归：NewSystem 用 coding.WithoutSlashCommands() 关掉了 SlashRegistry，
+// RunSlash 应当对所有以 "/" 开头的输入都返回 IsSlash=false（包括默认的 /help、/compact），
+// 让前端走普通消息路径，不暴露 cago 内置 builtin 也不扫 ~/.claude/commands。
+func TestSystem_RunSlash_DisabledPassesThrough(t *testing.T) {
 	sys := newSmokeSystem(t, EmitterFunc(func(int64, ai.StreamEvent) {}))
 
-	res, err := sys.RunSlash(context.Background(), "/help")
-	if err != nil {
-		t.Fatalf("RunSlash(/help): %v", err)
-	}
-	if !res.IsSlash {
-		t.Fatal("/help should be IsSlash=true")
-	}
-	if res.Prompt != "" {
-		t.Errorf("/help should not produce a follow-up prompt, got %q", res.Prompt)
-	}
-	if !strings.Contains(res.Notice, "compact") || !strings.Contains(res.Notice, "help") {
-		t.Errorf("/help notice should list builtins, got %q", res.Notice)
-	}
-}
-
-// TestSystem_RunSlash_UnknownReturnsSentinel checks that callers can use
-// errors.Is(err, ErrUnknownSlashCommand) to drive UI behavior. The constant is
-// re-exported from cago precisely so callers don't need to import app/coding.
-func TestSystem_RunSlash_UnknownReturnsSentinel(t *testing.T) {
-	sys := newSmokeSystem(t, EmitterFunc(func(int64, ai.StreamEvent) {}))
-
-	_, err := sys.RunSlash(context.Background(), "/nopesnotreal")
-	if err == nil {
-		t.Fatal("expected error for unknown slash command")
-	}
-	if !errors.Is(err, ErrUnknownSlashCommand) {
-		t.Fatalf("expected ErrUnknownSlashCommand, got %v", err)
+	for _, line := range []string{"/help", "/compact", "/nopesnotreal"} {
+		res, err := sys.RunSlash(context.Background(), line)
+		if err != nil {
+			t.Fatalf("RunSlash(%q): %v (slash should be disabled, expected no error)", line, err)
+		}
+		if res.IsSlash {
+			t.Fatalf("RunSlash(%q): IsSlash=true, want false (slash registry should be off)", line)
+		}
 	}
 }
 
@@ -244,26 +224,16 @@ func TestSystem_Close_ThenStopStreamSafe(t *testing.T) {
 
 // TestSystem_CompactionEnabled 是 OpsKat 这层能做的唯一压缩回归：
 // 老 compress.go 已删，新系统通过 coding.WithCompactionThreshold(80000) 委托给
-// cago。要锁住"压缩开关没被关掉"——RunSlash("/compact") 是 cago 默认 builtin
-// （cago/agents/app/coding/system.go:registerBuiltins），其内部调 sys.Compact，
+// cago。要锁住"压缩开关没被关掉"——直接调 cago 的 *coding.System.Compact，
 // 如果 OpsKat 误传了 WithoutCompaction 会返回 ErrCompactionDisabled。
 //
-// 在内存 store + 空 history 下，cago 走"history 太短"分支返回
-// `Notice: "No compaction needed (history too short)."`，err == nil。
-// 这就证明 NewSystem 启用了 compactor。
+// 老版本通过 RunSlash("/compact") 间接触发，但 OpsKat 已用 WithoutSlashCommands
+// 关掉 slash 注册表，必须直接打 Compact API。空 history 走 "too short" 分支返回
+// (nil, nil)；只要不是 ErrCompactionDisabled 就证明 compactor 已经挂上。
 func TestSystem_CompactionEnabled(t *testing.T) {
 	sys := newSmokeSystem(t, EmitterFunc(func(int64, ai.StreamEvent) {}))
-	res, err := sys.RunSlash(context.Background(), "/compact")
-	if err != nil {
-		t.Fatalf("RunSlash(/compact) returned err — compactor may have been disabled: %v", err)
-	}
-	if !res.IsSlash {
-		t.Fatal("/compact should be IsSlash=true")
-	}
-	// 对 Notice 做包含断言而不是精确匹配——cago 改提示文本不应破坏我们的回归。
-	if !strings.Contains(strings.ToLower(res.Notice), "compaction") &&
-		!strings.Contains(strings.ToLower(res.Notice), "compact") {
-		t.Errorf("/compact notice should mention compaction, got %q", res.Notice)
+	if _, err := sys.cs.Compact(context.Background(), sys.sess); err != nil {
+		t.Fatalf("System.Compact returned err — compactor may have been disabled: %v", err)
 	}
 }
 

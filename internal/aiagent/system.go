@@ -3,7 +3,6 @@ package aiagent
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sync"
 
 	"github.com/cago-frame/agents/agent"
@@ -123,15 +122,17 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 		OpsReadOnlyEntry(opts.Provider, opts.Deps, opts.Cwd, opts.Model),
 	}
 
-	// Confine skill discovery to the conversation's cwd; do NOT scan ~/.claude
-	// (those are the user's personal skills, not project-scoped).
-	skillsDir := filepath.Join(opts.Cwd, ".claude", "skills")
-
+	// OpsKat 不是 Claude Code：cwd 是 ~/.opskat（非 git 仓），cago 默认会扫
+	// ~/.claude/CLAUDE.md + chain 把用户全局编码上下文塞进 system prompt，并把
+	// ~/.claude/commands 下的私人 slash 命令暴露给 AI。这些「Claude Code 风格」
+	// 的高级能力对 OpsKat 既无用也是隐私泄漏，统一关闭。
 	codingOpts := []coding.Option{
 		coding.AppendSystem(StaticSystemPrompt(opts.Lang)),
 		coding.WithExtraTools(parentTools...),
 		coding.WithExtraSubagents(subEntries...),
-		coding.WithSkillDirs(skillsDir),
+		coding.WithoutContextFiles(),
+		coding.WithoutSkills(),
+		coding.WithoutSlashCommands(),
 		coding.WithCompactionThreshold(80000), // matches legacy heuristic
 		coding.WithAgentOpts(
 			agent.SessionStart(rounds.ResetHook()),
