@@ -145,6 +145,32 @@ func TestConversationSvc_UpdateTitle(t *testing.T) {
 	})
 }
 
+func TestConversationSvc_UpdateWorkDir(t *testing.T) {
+	ctx, mockRepo := setupTest(t)
+
+	convey.Convey("更新会话工作目录", t, func() {
+		convey.Convey("写入 workDir 与新 updatetime", func() {
+			mockRepo.EXPECT().UpdateWorkDir(gomock.Any(), int64(1), "/tmp/cwd", gomock.Any()).DoAndReturn(
+				func(_ context.Context, _ int64, _ string, updatetime int64) error {
+					assert.Greater(t, updatetime, int64(0))
+					return nil
+				},
+			)
+
+			err := Conversation().UpdateWorkDir(ctx, 1, "/tmp/cwd")
+			assert.NoError(t, err)
+		})
+
+		convey.Convey("repo 返回错误时透传", func() {
+			mockRepo.EXPECT().UpdateWorkDir(gomock.Any(), int64(2), "/x", gomock.Any()).
+				Return(errors.New("not found"))
+
+			err := Conversation().UpdateWorkDir(ctx, 2, "/x")
+			assert.Error(t, err)
+		})
+	})
+}
+
 func TestConversationSvc_Delete(t *testing.T) {
 	ctx, mockRepo := setupTest(t)
 
