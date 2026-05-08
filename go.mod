@@ -3,9 +3,10 @@ module github.com/opskat/opskat
 go 1.26.0
 
 require (
+	github.com/cago-frame/agents v0.0.0-00010101000000-000000000000
 	github.com/cago-frame/cago v0.0.0-20260307042250-c4ff92923947
 	github.com/coder/websocket v1.8.14
-	github.com/fsnotify/fsnotify v1.9.0
+	github.com/fsnotify/fsnotify v1.10.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-gormigrate/gormigrate/v2 v2.1.2
 	github.com/go-sql-driver/mysql v1.9.3
@@ -26,7 +27,7 @@ require (
 	go.uber.org/mock v0.6.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.50.0
-	golang.org/x/net v0.52.0
+	golang.org/x/net v0.53.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.43.0
 	golang.org/x/term v0.42.0
@@ -173,3 +174,5 @@ require (
 )
 
 // replace github.com/wailsapp/wails/v2 v2.10.2 => /Users/codfrm/go/pkg/mod
+
+replace github.com/cago-frame/agents => /Users/codfrm/Code/cago/agents
