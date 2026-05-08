@@ -33,37 +33,6 @@ func (Conversation) TableName() string {
 	return "conversations"
 }
 
-// SessionInfo 会话数据（JSON）
-type SessionInfo struct {
-	SessionID string `json:"session_id,omitempty"` // Claude CLI session ID
-}
-
-// GetSessionInfo 获取会话数据
-func (c *Conversation) GetSessionInfo() (*SessionInfo, error) {
-	if c.SessionData == "" {
-		return &SessionInfo{}, nil
-	}
-	var info SessionInfo
-	if err := json.Unmarshal([]byte(c.SessionData), &info); err != nil {
-		return nil, fmt.Errorf("解析会话数据失败: %w", err)
-	}
-	return &info, nil
-}
-
-// SetSessionInfo 设置会话数据
-func (c *Conversation) SetSessionInfo(info *SessionInfo) error {
-	data, err := json.Marshal(info)
-	if err != nil {
-		return fmt.Errorf("序列化会话数据失败: %w", err)
-	}
-	c.SessionData = string(data)
-	return nil
-}
-
-// IsLocalCLI 是否为本地 CLI 模式
-func (c *Conversation) IsLocalCLI() bool {
-	return c.ProviderType == "local_cli"
-}
 
 // GetStateValues 反序列化 cago Session State.Values。
 func (c *Conversation) GetStateValues() (map[string]string, error) {
