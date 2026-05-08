@@ -284,6 +284,32 @@ func (a *App) loadConversationDisplayMessages(ctx context.Context, id int64) ([]
 		if skip[i] {
 			continue
 		}
+		// Legacy 行（202605080010 之前由前端 SaveConversationMessages 写入）：
+		// kind/origin/cago_id 全空，但带旧的 blocks JSON 列与 role/content。这些行
+		// 不能按 cago kind 派生——一个 assistant 回合是单行多 block，按行派生会丢
+		// tool 段并把一个回合炸成多个气泡。直接读 GetBlocks() 作为权威渲染数据。
+		if row.Kind == "" && row.CagoID == "" {
+			legacyBlocks, err := row.GetBlocks()
+			if err != nil {
+				logger.Default().Warn("get legacy message blocks", zap.Error(err))
+			}
+			mentions, err := row.GetMentions()
+			if err != nil {
+				logger.Default().Warn("get message mentions", zap.Error(err))
+			}
+			usage, err := row.GetTokenUsage()
+			if err != nil {
+				logger.Default().Warn("get message token usage", zap.Error(err))
+			}
+			displayMsgs = append(displayMsgs, ConversationDisplayMessage{
+				Role:       row.Role,
+				Content:    row.Content,
+				Blocks:     legacyBlocks,
+				Mentions:   mentions,
+				TokenUsage: usage,
+			})
+			continue
+		}
 		// 跳过非展示类的 cago kinds（system / compaction_summary / follow_up / hook_context …）。
 		// 同时跳过 origin=hook/framework 的纯协议消息——这些是给 LLM 的上下文，不该出现在 UI。
 		switch row.Kind {
