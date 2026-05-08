@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -227,33 +228,95 @@ func (a *App) LoadConversationMessages(id int64) ([]ConversationDisplayMessage, 
 	return a.loadConversationDisplayMessages(ctx, id)
 }
 
+// deriveBlocks 把单条 cago Message 行（以及紧跟其后的 tool_result，如果是 tool_call）
+// 映射成前端 ContentBlock 列表。i 是 msgs 中当前行的下标；skip[j]=true 标记 j
+// 已被吸收（外层循环跳过）。
+func deriveBlocks(msgs []*conversation_entity.Message, i int, skip map[int]bool) []conversation_entity.ContentBlock {
+	row := msgs[i]
+	switch row.Kind {
+	case "tool_call":
+		var tc struct {
+			ID   string          `json:"id"`
+			Name string          `json:"name"`
+			Args json.RawMessage `json:"args"`
+		}
+		_ = json.Unmarshal([]byte(row.ToolCallJSON), &tc)
+		block := conversation_entity.ContentBlock{
+			Type:       "tool",
+			ToolName:   tc.Name,
+			ToolInput:  string(tc.Args),
+			ToolCallID: tc.ID,
+			Status:     "completed",
+		}
+		if i+1 < len(msgs) && msgs[i+1].Kind == "tool_result" {
+			var tr struct {
+				Result any    `json:"result"`
+				Err    string `json:"err"`
+			}
+			_ = json.Unmarshal([]byte(msgs[i+1].ToolResultJSON), &tr)
+			if tr.Err != "" {
+				block.Status = "error"
+				block.Content = tr.Err
+			} else if s, ok := tr.Result.(string); ok {
+				block.Content = s
+			} else if tr.Result != nil {
+				b, _ := json.Marshal(tr.Result)
+				block.Content = string(b)
+			}
+			skip[i+1] = true
+		}
+		return []conversation_entity.ContentBlock{block}
+	case "text":
+		return []conversation_entity.ContentBlock{{Type: "text", Content: row.Content}}
+	default:
+		return nil
+	}
+}
+
 func (a *App) loadConversationDisplayMessages(ctx context.Context, id int64) ([]ConversationDisplayMessage, error) {
 	msgs, err := conversation_svc.Conversation().LoadMessages(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-
+	skip := make(map[int]bool, len(msgs))
 	var displayMsgs []ConversationDisplayMessage
-	for _, msg := range msgs {
-		blocks, err := msg.GetBlocks()
-		if err != nil {
-			logger.Default().Warn("get message blocks", zap.Error(err))
+	for i, row := range msgs {
+		if skip[i] {
+			continue
 		}
-		mentions, err := msg.GetMentions()
+		// 跳过非展示类的 cago kinds（system / compaction_summary / follow_up / hook_context …）。
+		// 同时跳过 origin=hook/framework 的纯协议消息——这些是给 LLM 的上下文，不该出现在 UI。
+		switch row.Kind {
+		case "tool_result":
+			continue // 孤儿 tool_result，外层循环不应到达；防御性跳过
+		case "text", "tool_call":
+			// continue → 走下面构造逻辑
+		default:
+			continue
+		}
+		if row.Origin != "" && row.Origin != "model" && row.Origin != "user" && row.Origin != "tool" {
+			continue
+		}
+		dm := ConversationDisplayMessage{
+			Role:    row.Role,
+			Content: row.Content,
+		}
+		mentions, err := row.GetMentions()
 		if err != nil {
 			logger.Default().Warn("get message mentions", zap.Error(err))
 		}
-		usage, err := msg.GetTokenUsage()
+		dm.Mentions = mentions
+		usage, err := row.GetTokenUsage()
 		if err != nil {
 			logger.Default().Warn("get message token usage", zap.Error(err))
 		}
-		displayMsgs = append(displayMsgs, ConversationDisplayMessage{
-			Role:       msg.Role,
-			Content:    msg.Content,
-			Blocks:     blocks,
-			Mentions:   mentions,
-			TokenUsage: usage,
-		})
+		dm.TokenUsage = usage
+		dm.Blocks = deriveBlocks(msgs, i, skip)
+		// tool_call 行 Content 是空的，前端的 placeholder 期望 Content == "" 时只渲染 Blocks
+		if row.Kind == "tool_call" {
+			dm.Content = ""
+		}
+		displayMsgs = append(displayMsgs, dm)
 	}
 	return displayMsgs, nil
 }
@@ -491,36 +554,6 @@ func (a *App) StopAIGeneration(convID int64) error {
 	eventName := fmt.Sprintf("ai:event:%d", convID)
 	wailsRuntime.EventsEmit(a.ctx, eventName, ai.StreamEvent{Type: "stopped"})
 	return nil
-}
-
-// SaveConversationMessages 前端调用，保存显示消息到数据库
-// convID 指定目标会话，支持多会话独立保存
-func (a *App) SaveConversationMessages(convID int64, displayMsgs []ConversationDisplayMessage) error {
-	if convID == 0 {
-		return nil
-	}
-	ctx := a.langCtx()
-	var msgs []*conversation_entity.Message
-	for i, dm := range displayMsgs {
-		msg := &conversation_entity.Message{
-			ConversationID: convID,
-			Role:           dm.Role,
-			Content:        dm.Content,
-			SortOrder:      i,
-			Createtime:     time.Now().Unix(),
-		}
-		if err := msg.SetBlocks(dm.Blocks); err != nil {
-			logger.Default().Error("set message blocks", zap.Error(err))
-		}
-		if err := msg.SetMentions(dm.Mentions); err != nil {
-			logger.Default().Error("set message mentions", zap.Error(err))
-		}
-		if err := msg.SetTokenUsage(dm.TokenUsage); err != nil {
-			logger.Default().Error("set message token usage", zap.Error(err))
-		}
-		msgs = append(msgs, msg)
-	}
-	return conversation_svc.Conversation().SaveMessages(ctx, convID, msgs)
 }
 
 // GetCurrentConversationID 获取当前会话ID

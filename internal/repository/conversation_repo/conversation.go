@@ -23,7 +23,6 @@ type ConversationRepo interface {
 
 	// 消息操作
 	ListMessages(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error)
-	CreateMessages(ctx context.Context, msgs []*conversation_entity.Message) error
 	DeleteMessages(ctx context.Context, conversationID int64) error
 
 	// UpsertMessagesByCagoID 按 (conversation_id, cago_id) 自然键行级 upsert：
@@ -136,13 +135,6 @@ func (r *conversationRepo) ListMessages(ctx context.Context, conversationID int6
 		return nil, err
 	}
 	return msgs, nil
-}
-
-func (r *conversationRepo) CreateMessages(ctx context.Context, msgs []*conversation_entity.Message) error {
-	if len(msgs) == 0 {
-		return nil
-	}
-	return db.Ctx(ctx).Create(&msgs).Error
 }
 
 func (r *conversationRepo) DeleteMessages(ctx context.Context, conversationID int64) error {

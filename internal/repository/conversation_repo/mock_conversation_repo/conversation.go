@@ -55,20 +55,6 @@ func (mr *MockConversationRepoMockRecorder) Create(ctx, conv any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Create", reflect.TypeOf((*MockConversationRepo)(nil).Create), ctx, conv)
 }
 
-// CreateMessages mocks base method.
-func (m *MockConversationRepo) CreateMessages(ctx context.Context, msgs []*conversation_entity.Message) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CreateMessages", ctx, msgs)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// CreateMessages indicates an expected call of CreateMessages.
-func (mr *MockConversationRepoMockRecorder) CreateMessages(ctx, msgs any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateMessages", reflect.TypeOf((*MockConversationRepo)(nil).CreateMessages), ctx, msgs)
-}
-
 // Delete mocks base method.
 func (m *MockConversationRepo) Delete(ctx context.Context, id int64) error {
 	m.ctrl.T.Helper()

@@ -25,7 +25,6 @@ type ConversationSvc interface {
 	Delete(ctx context.Context, id int64) error
 
 	// 消息持久化
-	SaveMessages(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error
 	LoadMessages(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error)
 
 	// UpsertCagoMessages 是 cago gormStore 的写入入口（替代旧的 SaveMessages）。
@@ -46,10 +45,8 @@ type ConversationSvc interface {
 
 type conversationSvc struct {
 	// saveLocks 为每个 conversationID 维护一把互斥锁。
-	// SaveMessages 实现为 delete-all + insert-all，两个 IPC 并发调用时，
-	// 若不加锁，后到的 delete 可能覆盖先到的 insert，导致数据丢失。
-	// 此外，该锁也让 Save 调用按 IPC 到达顺序落盘，前端依赖这个顺序来保证
-	// 「晚调度的快照覆盖早调度的快照」。
+	// 同会话的 cago Save 并发到来时串行化，避免 upsert 间的快照交错（cago
+	// 每次 Save 发的是全量快照，后到的应当 last-write-wins）。
 	saveLocks sync.Map // map[int64]*sync.Mutex
 }
 
@@ -105,27 +102,6 @@ func (s *conversationSvc) Delete(ctx context.Context, id int64) error {
 	s.saveLocks.Delete(id)
 
 	return nil
-}
-
-func (s *conversationSvc) SaveMessages(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error {
-	// 按 conversationID 加锁，串行化同一会话的 delete+insert，防止并发覆盖丢数据。
-	lockI, _ := s.saveLocks.LoadOrStore(conversationID, &sync.Mutex{})
-	lock := lockI.(*sync.Mutex)
-	lock.Lock()
-	defer lock.Unlock()
-
-	// 先删除旧消息
-	if err := conversation_repo.Conversation().DeleteMessages(ctx, conversationID); err != nil {
-		return err
-	}
-	// 设置排序和时间
-	now := time.Now().Unix()
-	for i, msg := range msgs {
-		msg.ConversationID = conversationID
-		msg.SortOrder = i
-		msg.Createtime = now
-	}
-	return conversation_repo.Conversation().CreateMessages(ctx, msgs)
 }
 
 func (s *conversationSvc) LoadMessages(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error) {
