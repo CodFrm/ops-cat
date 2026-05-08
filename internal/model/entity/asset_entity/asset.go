@@ -239,12 +239,12 @@ func (c *K8sConfig) GetPassword() string    { return c.Kubeconfig }
 
 // SerialConfig 串口（COM/TTY）类型的特定配置
 type SerialConfig struct {
-	PortPath     string `json:"port_path"`               // 串口路径，如 COM3, /dev/ttyUSB0
-	BaudRate     int    `json:"baud_rate"`               // 波特率，如 9600, 115200
-	DataBits     int    `json:"data_bits"`               // 数据位: 5, 6, 7, 8
-	StopBits     string `json:"stop_bits"`               // 停止位: "1", "1.5", "2"
-	Parity       string `json:"parity"`                  // 校验位: "none", "odd", "even", "mark", "space"
-	FlowControl  string `json:"flow_control,omitempty"`  // 流控制: "none", "hardware", "software"
+	PortPath    string `json:"port_path"`              // 串口路径，如 COM3, /dev/ttyUSB0
+	BaudRate    int    `json:"baud_rate"`              // 波特率，如 9600, 115200
+	DataBits    int    `json:"data_bits"`              // 数据位: 5, 6, 7, 8
+	StopBits    string `json:"stop_bits"`              // 停止位: "1", "1.5", "2"
+	Parity      string `json:"parity"`                 // 校验位: "none", "odd", "even", "mark", "space"
+	FlowControl string `json:"flow_control,omitempty"` // 流控制: "none", "hardware", "software"
 }
 
 // DatabaseConfig PasswordSource implementation
