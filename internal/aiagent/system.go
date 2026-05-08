@@ -150,7 +150,7 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 
 	store := opts.Store
 	if store == nil {
-		store = NewGormStore()
+		store = NewGormStore(nil)
 	}
 
 	// 从 store 恢复历史：cago 的 Agent.Session() 不会自动 Load，必须显式
