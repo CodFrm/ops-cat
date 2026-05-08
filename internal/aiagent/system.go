@@ -18,6 +18,7 @@ import (
 // One System per active Conversation.
 type SystemOptions struct {
 	Provider      provider.Provider
+	Model         string // 空字符串 = backend 默认；通常应填 AIProvider.Model，否则 cago 发出去的 req.Model 为空
 	Cwd           string
 	ConvID        int64
 	Lang          string
@@ -32,7 +33,8 @@ type SystemOptions struct {
 
 // System is the OpsKat-facing handle around cago's coding.System. It owns the
 // per-Conversation cago objects (parent agent, sub-agents, the persistent
-// Session) plus OpsKat-side state (PerTurnState, sidecar, bridge).
+// Session) plus OpsKat-side state (PerTurnState, sidecar, bridge, rounds
+// counter).
 //
 // Lifecycle: NewSystem → Stream/Steer (any number of times) → Close.
 // Close is idempotent.
@@ -44,6 +46,7 @@ type System struct {
 	turnState *PerTurnState
 	sidecar   *sidecar
 	bridge    *bridge
+	rounds    *roundsCounter
 
 	mu           sync.Mutex
 	streamCancel context.CancelFunc
@@ -78,7 +81,7 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 
 	policyHook := makePolicyHook(opts.Deps, sc, gw, opts.PolicyChecker)
 	auditHook := makeAuditHook(sc, opts.AuditWriter)
-	roundsHook := makeRoundsHook(opts.MaxRounds)
+	rounds := newRoundsCounter(opts.MaxRounds)
 	promptHook := makePromptHook(turnState)
 	agentEndHook := MakeAgentEndHook(opts.Emitter)
 
@@ -86,29 +89,35 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 	// 子 agent dispatch 通过 cago 的 dispatch_subagent + 下面的 subEntries 实现。
 	parentTools := OpsTools(opts.Deps)
 	subEntries := []subagent.Entry{
-		OpsExplorerEntry(opts.Provider, opts.Deps, opts.Cwd),
-		OpsBatchEntry(opts.Provider, opts.Deps, opts.Cwd),
-		OpsReadOnlyEntry(opts.Provider, opts.Deps, opts.Cwd),
+		OpsExplorerEntry(opts.Provider, opts.Deps, opts.Cwd, opts.Model),
+		OpsBatchEntry(opts.Provider, opts.Deps, opts.Cwd, opts.Model),
+		OpsReadOnlyEntry(opts.Provider, opts.Deps, opts.Cwd, opts.Model),
 	}
 
 	// Confine skill discovery to the conversation's cwd; do NOT scan ~/.claude
 	// (those are the user's personal skills, not project-scoped).
 	skillsDir := filepath.Join(opts.Cwd, ".claude", "skills")
 
-	cs, err := coding.New(ctx, opts.Provider, opts.Cwd,
+	codingOpts := []coding.Option{
 		coding.AppendSystem(StaticSystemPrompt(opts.Lang)),
 		coding.WithExtraTools(parentTools...),
 		coding.WithExtraSubagents(subEntries...),
 		coding.WithSkillDirs(skillsDir),
 		coding.WithCompactionThreshold(80000), // matches legacy heuristic
 		coding.WithAgentOpts(
+			agent.SessionStart(rounds.ResetHook()),
 			agent.PreToolUse("", policyHook),
-			agent.PreToolUse("", roundsHook),
+			agent.PreToolUse("", rounds.Hook()),
 			agent.PostToolUse("", auditHook),
 			agent.PostToolUse("dispatch_subagent", agentEndHook),
 			agent.UserPromptSubmit(promptHook),
 		),
-	)
+	}
+	if opts.Model != "" {
+		codingOpts = append(codingOpts, coding.WithModel(opts.Model))
+	}
+
+	cs, err := coding.New(ctx, opts.Provider, opts.Cwd, codingOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("aiagent.NewSystem: coding.New: %w", err)
 	}
@@ -126,12 +135,14 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 		turnState: turnState,
 		sidecar:   sc,
 		bridge:    newBridge(opts.Emitter),
+		rounds:    rounds,
 	}, nil
 }
 
 // Stream sends a prompt for the next turn, draining cago events through the
 // bridge to Wails and applying the retry policy. Updates per-turn state
-// (open tabs, mentions, ext skills) before opening the stream.
+// (open tabs, mentions, ext skills) before opening the stream. The per-turn
+// rounds budget is reset by the SessionStart hook installed in NewSystem.
 //
 // Returns when the stream completes or all retry attempts fail.
 func (s *System) Stream(ctx context.Context, prompt string, aiCtx ai.AIContext, ext map[string]string) error {

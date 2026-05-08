@@ -36,6 +36,10 @@ cd frontend && pnpm test              # Frontend tests (vitest)
 cd frontend && pnpm test:watch        # Frontend tests in watch mode
 ```
 
+### Fix Workflow
+
+When fixing a bug, first use a focused unit test to identify and reproduce the problem, then make the code change, and finally rerun the relevant tests to confirm the fix.
+
 ### Linting & Formatting
 ```bash
 make lint             # golangci-lint (10m timeout, config in .golangci.yml)

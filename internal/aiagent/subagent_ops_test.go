@@ -10,7 +10,7 @@ func TestOpsExplorerEntry_HasReadOnlyTools(t *testing.T) {
 	mock := providertest.New()
 	deps := &Deps{}
 
-	entry := OpsExplorerEntry(mock, deps, "/")
+	entry := OpsExplorerEntry(mock, deps, "/", "")
 	if entry.Type != "ops-explorer" {
 		t.Fatalf("Type = %q, want ops-explorer", entry.Type)
 	}
@@ -30,7 +30,7 @@ func TestOpsBatchEntry_HasBatchAndExecTools(t *testing.T) {
 	mock := providertest.New()
 	deps := &Deps{}
 
-	entry := OpsBatchEntry(mock, deps, "/")
+	entry := OpsBatchEntry(mock, deps, "/", "")
 	if entry.Type != "ops-batch" {
 		t.Fatalf("Type = %q, want ops-batch", entry.Type)
 	}
@@ -50,7 +50,7 @@ func TestOpsReadOnlyEntry_HasOnlyInventoryTools(t *testing.T) {
 	mock := providertest.New()
 	deps := &Deps{}
 
-	entry := OpsReadOnlyEntry(mock, deps, "/")
+	entry := OpsReadOnlyEntry(mock, deps, "/", "")
 	if entry.Type != "ops-readonly" {
 		t.Fatalf("Type = %q, want ops-readonly", entry.Type)
 	}

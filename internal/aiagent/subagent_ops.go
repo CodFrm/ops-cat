@@ -25,7 +25,9 @@ var entryToolNames sync.Map // map[string][]string
 // OpsExplorerEntry builds the read-leaning sub-agent for "investigate this".
 // Tools: list/get assets+groups, exec_* read-leaning ops, request_permission.
 // No write tools.
-func OpsExplorerEntry(prov provider.Provider, deps *Deps, cwd string) subagent.Entry {
+//
+// model 空字符串 = 走 backend 默认（实际通常会拼成空 model 报错）；正常应传 SystemOptions.Model。
+func OpsExplorerEntry(prov provider.Provider, deps *Deps, cwd, model string) subagent.Entry {
 	tools := filterTools(OpsTools(deps), map[string]bool{
 		"list_assets":          true,
 		"get_asset":            true,
@@ -46,16 +48,20 @@ func OpsExplorerEntry(prov provider.Provider, deps *Deps, cwd string) subagent.E
 		"request_permission":   true,
 	})
 	stampToolNames(roleExplorer, tools)
-	return coding.Explore(prov, cwd,
+	subOpts := []coding.SubagentOption{
 		coding.SubagentWithType(roleExplorer),
 		coding.SubagentWithDescription("Investigate OpsKat infra: list/inspect assets and run read-leaning ops commands. Reports findings; no writes."),
 		coding.SubagentWithTools(tools...),
 		coding.SubagentWithSystem("You are an OpsKat ops-explorer sub-agent. Investigate efficiently and report findings concisely."),
-	)
+	}
+	if model != "" {
+		subOpts = append(subOpts, coding.SubagentWithModel(model))
+	}
+	return coding.Explore(prov, cwd, subOpts...)
 }
 
 // OpsBatchEntry — for "execute the same thing across N assets" tasks.
-func OpsBatchEntry(prov provider.Provider, deps *Deps, cwd string) subagent.Entry {
+func OpsBatchEntry(prov provider.Provider, deps *Deps, cwd, model string) subagent.Entry {
 	tools := filterTools(OpsTools(deps), map[string]bool{
 		"list_assets":        true,
 		"get_asset":          true,
@@ -68,16 +74,20 @@ func OpsBatchEntry(prov provider.Provider, deps *Deps, cwd string) subagent.Entr
 		"request_permission": true,
 	})
 	stampToolNames(roleBatch, tools)
-	return coding.GeneralPurpose(prov, cwd,
+	subOpts := []coding.SubagentOption{
 		coding.SubagentWithType(roleBatch),
 		coding.SubagentWithDescription("Execute the same operation across many OpsKat assets in parallel and consolidate results."),
 		coding.SubagentWithTools(tools...),
 		coding.SubagentWithSystem("You are an OpsKat ops-batch sub-agent. Coordinate parallel ops across multiple assets and consolidate results."),
-	)
+	}
+	if model != "" {
+		subOpts = append(subOpts, coding.SubagentWithModel(model))
+	}
+	return coding.GeneralPurpose(prov, cwd, subOpts...)
 }
 
 // OpsReadOnlyEntry — strictly inventory inspection, no execution.
-func OpsReadOnlyEntry(prov provider.Provider, deps *Deps, cwd string) subagent.Entry {
+func OpsReadOnlyEntry(prov provider.Provider, deps *Deps, cwd, model string) subagent.Entry {
 	tools := filterTools(OpsTools(deps), map[string]bool{
 		"list_assets": true,
 		"get_asset":   true,
@@ -85,12 +95,16 @@ func OpsReadOnlyEntry(prov provider.Provider, deps *Deps, cwd string) subagent.E
 		"get_group":   true,
 	})
 	stampToolNames(roleReadOnly, tools)
-	return coding.Explore(prov, cwd,
+	subOpts := []coding.SubagentOption{
 		coding.SubagentWithType(roleReadOnly),
 		coding.SubagentWithDescription("Inspect OpsKat asset inventory: list/get assets and groups. No command execution."),
 		coding.SubagentWithTools(tools...),
 		coding.SubagentWithSystem("You are an OpsKat ops-readonly sub-agent. Inspect inventory; do not execute commands."),
-	)
+	}
+	if model != "" {
+		subOpts = append(subOpts, coding.SubagentWithModel(model))
+	}
+	return coding.Explore(prov, cwd, subOpts...)
 }
 
 func filterTools(in []tool.Tool, allow map[string]bool) []tool.Tool {

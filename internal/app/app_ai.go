@@ -55,7 +55,8 @@ func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
 	if err != nil {
 		return err
 	}
-	a.aiCagoProvider = prov
+	a.aiProvider = prov
+	a.aiModel = p.Model
 	a.resetAIAgentSystems()
 	return nil
 }
@@ -114,7 +115,7 @@ type ConversationDisplayMessage struct {
 
 // CreateConversation 创建新会话
 func (a *App) CreateConversation() (*conversation_entity.Conversation, error) {
-	if a.aiCagoProvider == nil {
+	if a.aiProvider == nil {
 		return nil, fmt.Errorf("请先配置 AI Provider")
 	}
 	ctx := a.langCtx()
@@ -357,14 +358,14 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 }
 
 // getOrCreateAIAgentSystem returns a cached *aiagent.System for convID or
-// builds a new one. activateProvider eagerly builds aiCagoProvider, so we just
+// builds a new one. activateProvider eagerly builds aiProvider, so we just
 // guard against the no-active-provider case here.
 func (a *App) getOrCreateAIAgentSystem(convID int64) (*aiagent.System, error) {
 	if v, ok := a.aiAgentSystems.Load(convID); ok {
 		return v.(*aiagent.System), nil
 	}
 
-	if a.aiCagoProvider == nil {
+	if a.aiProvider == nil {
 		return nil, fmt.Errorf("请先配置 AI Provider")
 	}
 
@@ -407,7 +408,8 @@ func (a *App) getOrCreateAIAgentSystem(convID int64) (*aiagent.System, error) {
 	})
 
 	sys, err := aiagent.NewSystem(a.ctx, aiagent.SystemOptions{
-		Provider:      a.aiCagoProvider,
+		Provider:      a.aiProvider,
+		Model:         a.aiModel,
 		Cwd:           cwd,
 		ConvID:        convID,
 		Lang:          lang,

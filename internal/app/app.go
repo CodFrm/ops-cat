@@ -69,7 +69,8 @@ type App struct {
 	sshManager              *ssh_svc.Manager
 	sftpService             *sftp_svc.Service
 	forwardManager          *ForwardManager
-	aiCagoProvider          provider.Provider // cago provider，每次激活 AI Provider 时由 activateProvider 重建
+	aiProvider              provider.Provider // 每次激活 AI Provider 时由 activateProvider 重建
+	aiModel                 string            // 当前激活 AIProvider.Model；NewSystem 时透传给底层 WithModel
 	aiAgentSystems          sync.Map          // map[int64]*aiagent.System (one per active conversation)
 	githubAuthCancel        context.CancelFunc
 	permissionChan          chan ai.PermissionResponse // 前端权限响应 channel（CLI 工具用）

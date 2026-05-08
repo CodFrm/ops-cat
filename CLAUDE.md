@@ -75,6 +75,7 @@ Bindings stay thin: parse → service → return. Business rules in `service/`, 
 
 ## Fix policy — root cause, in scope, no parking
 
+- **Reproduce with a test before fixing.** When investigating a bug, first write a failing unit test that pins down the bad behavior — then fix the code so the test goes green. The test is what proves you understood the problem; "looks right now" is not evidence. For Go, place the test next to the code under test (`*_test.go`); for the frontend, add a vitest case under the relevant package. Skip only if the bug is genuinely untestable (e.g. a one-character typo in a static asset) and say so explicitly.
 - **Fix root causes, not symptoms.** Don't guard at the call site to mask a producer that emits bad values — fix the producer. Don't re-normalize a field at multiple consumers — normalize once at the boundary. If the design is wrong, refactor the affected piece; don't route around it. A comment explaining why a workaround is needed usually means the underlying code should change.
 - **Fix in-scope drift in the same change.** Stale docstring, lying CLAUDE.md line, dead reference, obvious one-line bug under your cursor → fix it now, don't TODO it.
 - **Stay in scope.** Multi-day refactors / hot subsystems / design-discussion territory → flag and ask. Genuine out-of-scope workaround → isolate it in one place with a clear comment and surface it; don't normalize patching as the default.
