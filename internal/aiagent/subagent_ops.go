@@ -1,6 +1,7 @@
 package aiagent
 
 import (
+	"slices"
 	"sync"
 
 	"github.com/cago-frame/agents/app/coding"
@@ -117,10 +118,5 @@ func entryHasTool(e subagent.Entry, name string) bool {
 	if !ok {
 		return false
 	}
-	for _, n := range v.([]string) {
-		if n == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(v.([]string), name)
 }
