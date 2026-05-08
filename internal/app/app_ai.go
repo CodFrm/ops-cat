@@ -113,6 +113,22 @@ func (a *App) resetRunners() {
 		return true
 	})
 
+	// Cago systems: close in parallel, on the same 3s budget as runners.
+	a.aiAgentSystems.Range(func(key, value any) bool {
+		if sys, ok := value.(*aiagent.System); ok {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_ = sys.Close(a.ctx)
+			}()
+		}
+		a.aiAgentSystems.Delete(key)
+		return true
+	})
+	// Invalidate the cached cago provider — next dispatch will rebuild from
+	// the (potentially newly activated) AI provider config.
+	a.aiCagoProvider = nil
+
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
@@ -250,7 +266,14 @@ func (a *App) switchToConversation(conv *conversation_entity.Conversation) {
 
 // DeleteConversation 删除会话
 func (a *App) DeleteConversation(id int64) error {
-	// 先停止正在运行的生成
+	// Cago path: close the system, removing it from the cache.
+	// Not gated on aiagent.Enabled() — LoadAndDelete is a no-op on an empty map,
+	// and we want to handle the case where someone toggles the flag mid-session.
+	if v, ok := a.aiAgentSystems.LoadAndDelete(id); ok {
+		_ = v.(*aiagent.System).Close(a.ctx)
+	}
+
+	// Legacy path: existing logic, unchanged
 	if v, ok := a.runners.Load(id); ok {
 		v.(*ai.ConversationRunner).Stop()
 		a.runners.Delete(id)
