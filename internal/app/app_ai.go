@@ -581,6 +581,19 @@ func (a *App) QueueAIMessage(convID int64, content string, mentions []ai.Mention
 
 // StopAIGeneration 停止指定会话的 AI 生成
 func (a *App) StopAIGeneration(convID int64) error {
+	if aiagent.Enabled() {
+		if v, ok := a.aiAgentSystems.Load(convID); ok {
+			v.(*aiagent.System).StopStream()
+		}
+		// Emit "stopped" so the frontend can clear the in-flight tool block UI.
+		// Idempotent: a cancelled Stream also emits its own done/error events;
+		// this just guarantees the legacy contract on the cago path.
+		eventName := fmt.Sprintf("ai:event:%d", convID)
+		wailsRuntime.EventsEmit(a.ctx, eventName, ai.StreamEvent{Type: "stopped"})
+		return nil
+	}
+
+	// Legacy path
 	v, ok := a.runners.Load(convID)
 	if !ok {
 		return nil
