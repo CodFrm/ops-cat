@@ -47,73 +47,25 @@ func normalizeConversationTitle(title string) string {
 	return title
 }
 
-// activateProvider 根据 Provider 配置创建 AI Agent
+// activateProvider 根据激活的 AI Provider 配置构建 cago provider 并清空旧 Systems。
+// 切换 provider 时若不重置 aiAgentSystems，旧 *aiagent.System 会继续持有旧 provider
+// 引用，必须重启软件才能生效。
 func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
-	apiKey, err := ai_provider_svc.AIProvider().DecryptAPIKey(p)
+	prov, err := a.buildCagoProvider(p)
 	if err != nil {
-		return fmt.Errorf("解密 API Key 失败: %w", err)
+		return err
 	}
-
-	checker := ai.NewCommandPolicyChecker(a.makeCommandConfirmFunc())
-	checker.SetGrantRequestFunc(a.makeGrantRequestFunc())
-
-	maxOutputTokens := ai.ResolveMaxOutputTokens(p.MaxOutputTokens, p.Model)
-	contextWindow := ai.ResolveContextWindow(p.ContextWindow, p.Model)
-
-	var provider ai.Provider
-	switch p.Type {
-	case "anthropic":
-		provider = ai.NewAnthropicProvider(
-			p.Name,
-			p.APIBase,
-			apiKey,
-			p.Model,
-			maxOutputTokens,
-			p.ReasoningEnabled,
-			p.ReasoningEffort,
-		)
-	default: // "openai"
-		provider = ai.NewOpenAIProvider(
-			p.Name,
-			p.APIBase,
-			apiKey,
-			p.Model,
-			maxOutputTokens,
-			p.ReasoningEnabled,
-			p.ReasoningEffort,
-		)
-	}
-
-	config := ai.NewDefaultConfig()
-	config.ContextWindow = contextWindow
-	a.aiAgent = ai.NewAgent(provider, func() ai.ToolExecutor {
-		return ai.NewAuditingExecutor(ai.NewDefaultToolExecutor(), ai.NewDefaultAuditWriter())
-	}, checker, config)
-	a.resetRunners()
+	a.aiCagoProvider = prov
+	a.resetAIAgentSystems()
 	return nil
 }
 
-// resetRunners 停止并清空所有缓存的 ConversationRunner。
-// Why: runner 在创建时会捕获当时的 aiAgent 引用，供应商切换后若不清空，
-// 已有会话会继续使用旧 provider，必须重启软件才生效。
-// 并发调用 Stop 避免串行累计阻塞 UI；另外设 3s 上限——Runner.Stop 会阻塞等
-// goroutine 退出，若某个 Stop 被卡住（ctx 不被及时响应等），
-// 超时后放行，泄漏的 goroutine 只是持有旧 agent 引用，不会导致正确性问题。
-func (a *App) resetRunners() {
+// resetAIAgentSystems 关闭并清空所有缓存的 *aiagent.System。
+// 并发 Close 配 3s 超时上限：cago Close 是幂等的且通常很快，但若某个 Close 因
+// goroutine 调度问题卡住，超时后放行避免阻塞 UI；泄漏的 System 只持有旧 provider
+// 引用，不影响正确性。
+func (a *App) resetAIAgentSystems() {
 	var wg sync.WaitGroup
-	a.runners.Range(func(key, value any) bool {
-		if r, ok := value.(*ai.ConversationRunner); ok {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				r.Stop()
-			}()
-		}
-		a.runners.Delete(key)
-		return true
-	})
-
-	// Cago systems: close in parallel, on the same 3s budget as runners.
 	a.aiAgentSystems.Range(func(key, value any) bool {
 		if sys, ok := value.(*aiagent.System); ok {
 			wg.Add(1)
@@ -125,9 +77,6 @@ func (a *App) resetRunners() {
 		a.aiAgentSystems.Delete(key)
 		return true
 	})
-	// Invalidate the cached cago provider — next dispatch will rebuild from
-	// the (potentially newly activated) AI provider config.
-	a.aiCagoProvider = nil
 
 	done := make(chan struct{})
 	go func() {
@@ -137,7 +86,7 @@ func (a *App) resetRunners() {
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
-		logger.Default().Warn("resetRunners: 部分 runner Stop 未在 3s 内完成，放行关闭")
+		logger.Default().Warn("resetAIAgentSystems: 部分 System Close 未在 3s 内完成，放行关闭")
 	}
 }
 
@@ -165,7 +114,7 @@ type ConversationDisplayMessage struct {
 
 // CreateConversation 创建新会话
 func (a *App) CreateConversation() (*conversation_entity.Conversation, error) {
-	if a.aiAgent == nil {
+	if a.aiCagoProvider == nil {
 		return nil, fmt.Errorf("请先配置 AI Provider")
 	}
 	ctx := a.langCtx()
@@ -311,17 +260,8 @@ func (a *App) switchToConversation(conv *conversation_entity.Conversation) {
 
 // DeleteConversation 删除会话
 func (a *App) DeleteConversation(id int64) error {
-	// Cago path: close the system, removing it from the cache.
-	// Not gated on aiagent.Enabled() — LoadAndDelete is a no-op on an empty map,
-	// and we want to handle the case where someone toggles the flag mid-session.
 	if v, ok := a.aiAgentSystems.LoadAndDelete(id); ok {
 		_ = v.(*aiagent.System).Close(a.ctx)
-	}
-
-	// Legacy path: existing logic, unchanged
-	if v, ok := a.runners.Load(id); ok {
-		v.(*ai.ConversationRunner).Stop()
-		a.runners.Delete(id)
 	}
 
 	err := conversation_svc.Conversation().Delete(a.langCtx(), id)
@@ -334,125 +274,7 @@ func (a *App) DeleteConversation(id int64) error {
 	return nil
 }
 
-// SendAIMessage routes to legacy or cago backend depending on the feature flag.
-func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AIContext) error {
-	if aiagent.Enabled() {
-		return a.sendAIMessageCago(convID, messages, aiCtx)
-	}
-	return a.sendAIMessageLegacy(convID, messages, aiCtx)
-}
-
-// sendAIMessageLegacy is the existing SendAIMessage body, unchanged.
-func (a *App) sendAIMessageLegacy(convID int64, messages []ai.Message, aiCtx ai.AIContext) error {
-	if a.aiAgent == nil {
-		return fmt.Errorf("请先配置 AI Provider")
-	}
-
-	ctx := a.langCtx()
-
-	// 自动创建会话（首次发消息时）
-	if convID == 0 {
-		conv, err := a.CreateConversation()
-		if err != nil {
-			return fmt.Errorf("创建会话失败: %w", err)
-		}
-		convID = conv.ID
-	}
-
-	// 更新会话标题（如果仍是默认标题"新对话"）
-	if conv, err := conversation_svc.Conversation().Get(ctx, convID); err == nil && conv.Title == "新对话" {
-		for _, msg := range messages {
-			if msg.Role == ai.RoleUser {
-				title := normalizeConversationTitle(string(msg.Content))
-				if err := conversation_svc.Conversation().UpdateTitle(ctx, convID, title); err != nil {
-					logger.Default().Error("update conversation title", zap.Error(err))
-				}
-				break
-			}
-		}
-	}
-
-	eventName := fmt.Sprintf("ai:event:%d", convID)
-
-	// 构建动态系统提示
-	lang := "en"
-	if a.lang == "zh-cn" {
-		lang = "zh-cn"
-	}
-	builder := ai.NewPromptBuilder(lang, aiCtx)
-
-	// Inject extension SKILL.md based on connected asset types
-	if a.extSvc != nil {
-		bridge := a.extSvc.Bridge()
-		mds := make(map[string]string)
-		seen := make(map[string]bool)
-		for _, tab := range aiCtx.OpenTabs {
-			if seen[tab.Type] {
-				continue
-			}
-			seen[tab.Type] = true
-			if skillMD := bridge.GetSkillMDWithExtension(tab.Type); skillMD.Content != "" {
-				mds[skillMD.ExtensionName] = skillMD.Content
-			}
-		}
-		if len(mds) > 0 {
-			builder.SetExtensionSkillMDs(mds)
-		}
-	}
-
-	fullMessages := make([]ai.Message, 0, 1+len(messages))
-	fullMessages = append(fullMessages, ai.Message{
-		Role:    ai.RoleSystem,
-		Content: builder.Build(),
-	})
-	fullMessages = append(fullMessages, messages...)
-
-	// 注入审计上下文
-	chatCtx := ai.WithAuditSource(a.ctx, "ai")
-	chatCtx = ai.WithConversationID(chatCtx, convID)
-	chatCtx = ai.WithSessionID(chatCtx, fmt.Sprintf("conv_%d", convID))
-	chatCtx = logger.WithContextField(chatCtx, zap.Int64("conv_id", convID))
-	if a.sshPool != nil {
-		chatCtx = ai.WithSSHPool(chatCtx, a.sshPool)
-	}
-
-	// 注入 Sub Agent 依赖
-	chatCtx = ai.WithSpawnAgentDeps(chatCtx, &ai.SpawnAgentDeps{
-		Provider: a.aiAgent.GetProvider(),
-		Checker:  a.aiAgent.GetPolicyChecker(),
-		OnEvent: func(event ai.StreamEvent) {
-			wailsRuntime.EventsEmit(a.ctx, eventName, event)
-		},
-		NewExecutor: func() ai.ToolExecutor {
-			return ai.NewAuditingExecutor(ai.NewDefaultToolExecutor(), ai.NewDefaultAuditWriter())
-		},
-	})
-
-	onEvent := func(event ai.StreamEvent) {
-		wailsRuntime.EventsEmit(a.ctx, eventName, event)
-
-		// done/stopped 时更新会话时间
-		if event.Type == "done" || event.Type == "stopped" {
-			if conv, err := conversation_svc.Conversation().Get(a.ctx, convID); err == nil {
-				if err := conversation_svc.Conversation().Update(a.ctx, conv); err != nil {
-					logger.Default().Warn("update conversation time", zap.Error(err))
-				}
-			}
-		}
-	}
-
-	runner := a.getOrCreateRunner(convID)
-	return runner.Start(chatCtx, fullMessages, onEvent)
-}
-
-func (a *App) getOrCreateRunner(convID int64) *ai.ConversationRunner {
-	v, _ := a.runners.LoadOrStore(convID, ai.NewConversationRunner(a.aiAgent))
-	return v.(*ai.ConversationRunner)
-}
-
-// buildCagoProvider constructs a cago-side provider.Provider from an OpsKat
-// AIProvider config. Used only on the cago path — the legacy *ai.Agent stays
-// driven by ai.Provider.
+// buildCagoProvider 用 OpsKat 的 AIProvider 配置构建 cago provider.Provider。
 func (a *App) buildCagoProvider(p *ai_provider_entity.AIProvider) (provider.Provider, error) {
 	apiKey, err := ai_provider_svc.AIProvider().DecryptAPIKey(p)
 	if err != nil {
@@ -473,10 +295,9 @@ func (a *App) buildCagoProvider(p *ai_provider_entity.AIProvider) (provider.Prov
 	}
 }
 
-// sendAIMessageCago routes a Send through the cago backend. Mirrors
-// sendAIMessageLegacy's effects (title set on first turn, Wails event emission)
-// but uses *aiagent.System under the hood.
-func (a *App) sendAIMessageCago(convID int64, messages []ai.Message, aiCtx ai.AIContext) error {
+// SendAIMessage 发送一轮对话到 cago 后端。首条消息时自动创建会话 + 设置标题；
+// cago Session 持久化历史，因此只把最后一条 user 消息当作 prompt 传入。
+func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AIContext) error {
 	ctx := a.langCtx()
 
 	if convID == 0 {
@@ -536,23 +357,15 @@ func (a *App) sendAIMessageCago(convID int64, messages []ai.Message, aiCtx ai.AI
 }
 
 // getOrCreateAIAgentSystem returns a cached *aiagent.System for convID or
-// builds a new one. The cago provider is built lazily on first call after
-// activateProvider; it's invalidated by resetRunners.
+// builds a new one. activateProvider eagerly builds aiCagoProvider, so we just
+// guard against the no-active-provider case here.
 func (a *App) getOrCreateAIAgentSystem(convID int64) (*aiagent.System, error) {
 	if v, ok := a.aiAgentSystems.Load(convID); ok {
 		return v.(*aiagent.System), nil
 	}
 
 	if a.aiCagoProvider == nil {
-		active, err := ai_provider_svc.AIProvider().GetActive(a.langCtx())
-		if err != nil || active == nil {
-			return nil, fmt.Errorf("请先配置 AI Provider")
-		}
-		prov, err := a.buildCagoProvider(active)
-		if err != nil {
-			return nil, fmt.Errorf("build cago provider: %w", err)
-		}
-		a.aiCagoProvider = prov
+		return nil, fmt.Errorf("请先配置 AI Provider")
 	}
 
 	conv, err := conversation_svc.Conversation().Get(a.langCtx(), convID)
@@ -616,35 +429,18 @@ func (a *App) getOrCreateAIAgentSystem(convID int64) (*aiagent.System, error) {
 	return sys, nil
 }
 
-// QueueAIMessage 在生成过程中追加用户消息到队列，
-// 会在下一次工具调用结束后被注入到对话上下文。
-// 若消息带 @ 提及的资产，将资产上下文渲染后 prepend 到消息正文，
-// 以便 agent 在后续轮次看到 mention 信息（系统提示在 Start 时已定型，无法再次重建）。
+// QueueAIMessage 在生成过程中通过 cago Steer 注入用户消息。
+// 若消息带 @ 提及的资产，将资产上下文渲染后 prepend 到消息正文。
 func (a *App) QueueAIMessage(convID int64, content string, mentions []ai.MentionedAsset) error {
 	body := content
 	if mentionCtx := ai.RenderMentionContext(mentions); mentionCtx != "" {
 		body = mentionCtx + "\n\n" + content
 	}
-
-	if aiagent.Enabled() {
-		v, ok := a.aiAgentSystems.Load(convID)
-		if !ok {
-			return fmt.Errorf("会话 %d 没有正在运行的生成", convID)
-		}
-		return v.(*aiagent.System).Steer(a.ctx, body, content)
-	}
-
-	// Legacy path
-	v, ok := a.runners.Load(convID)
+	v, ok := a.aiAgentSystems.Load(convID)
 	if !ok {
 		return fmt.Errorf("会话 %d 没有正在运行的生成", convID)
 	}
-	runner := v.(*ai.ConversationRunner)
-	runner.QueueMessage(content, ai.Message{
-		Role:    ai.RoleUser,
-		Content: body,
-	})
-	return nil
+	return v.(*aiagent.System).Steer(a.ctx, body, content)
 }
 
 // RunAISlashResult mirrors aiagent.SlashResult shape for Wails type generation.
@@ -654,21 +450,13 @@ type RunAISlashResult struct {
 	Notice  string `json:"notice"`
 }
 
-// RunAISlash resolves a /slash command for the active cago Session.
-//   - IsSlash=false → frontend should fall through to SendAIMessage with the
-//     original line.
-//   - Prompt non-empty → frontend should call SendAIMessage with Prompt as the
-//     user message (template expansion).
-//   - Notice non-empty → frontend should render it as a synthesized system
-//     message (e.g., /help output, /compact summary).
+// RunAISlash 解析 /slash 命令。
+//   - IsSlash=false → 前端把 line 当普通消息走 SendAIMessage。
+//   - Prompt 非空 → 前端用 Prompt 调 SendAIMessage（模板展开）。
+//   - Notice 非空 → 前端把它作为合成的 system 消息渲染（/help、/compact 摘要）。
 //
-// Errors: cago path disabled, conversation has no active System, or the
-// resolved builtin returned an error. Unknown /commands return
-// aiagent.ErrUnknownSlashCommand.
+// 未识别的 /command 返回 aiagent.ErrUnknownSlashCommand。
 func (a *App) RunAISlash(convID int64, line string) (*RunAISlashResult, error) {
-	if !aiagent.Enabled() {
-		return nil, fmt.Errorf("slash 命令仅在 cago 后端启用时可用")
-	}
 	v, ok := a.aiAgentSystems.Load(convID)
 	if !ok {
 		return nil, fmt.Errorf("会话 %d 没有活跃的 AI System", convID)
@@ -685,27 +473,14 @@ func (a *App) RunAISlash(convID int64, line string) (*RunAISlashResult, error) {
 	}, nil
 }
 
-// StopAIGeneration 停止指定会话的 AI 生成
+// StopAIGeneration 停止指定会话的 AI 生成。
+// 即使 sys 不存在也会 emit stopped，让前端清掉进行中的 tool block。
 func (a *App) StopAIGeneration(convID int64) error {
-	if aiagent.Enabled() {
-		if v, ok := a.aiAgentSystems.Load(convID); ok {
-			v.(*aiagent.System).StopStream()
-		}
-		// Emit "stopped" so the frontend can clear the in-flight tool block UI.
-		// Idempotent: a cancelled Stream also emits its own done/error events;
-		// this just guarantees the legacy contract on the cago path.
-		eventName := fmt.Sprintf("ai:event:%d", convID)
-		wailsRuntime.EventsEmit(a.ctx, eventName, ai.StreamEvent{Type: "stopped"})
-		return nil
+	if v, ok := a.aiAgentSystems.Load(convID); ok {
+		v.(*aiagent.System).StopStream()
 	}
-
-	// Legacy path
-	v, ok := a.runners.Load(convID)
-	if !ok {
-		return nil
-	}
-	runner := v.(*ai.ConversationRunner)
-	runner.Stop()
+	eventName := fmt.Sprintf("ai:event:%d", convID)
+	wailsRuntime.EventsEmit(a.ctx, eventName, ai.StreamEvent{Type: "stopped"})
 	return nil
 }
 
