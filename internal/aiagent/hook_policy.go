@@ -112,10 +112,6 @@ func extractAssetAndCommand(toolName string, raw json.RawMessage) (int64, string
 	return 0, "", "", false
 }
 
-// Local placeholders — Task 1.13 will replace these with real ctx-keyed accessors.
-func getConvID(ctx context.Context) int64     { return 0 }
-func getAgentRole(ctx context.Context) string { return "" }
-
 func saveGrantPatternFromResponse(ctx context.Context, convID, assetID int64,
 	item ai.ApprovalItem, resp ai.ApprovalResponse) {
 	pattern := item.Command
