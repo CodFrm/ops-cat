@@ -6,7 +6,14 @@ import (
 	"github.com/cago-frame/agents/agent"
 
 	"github.com/opskat/opskat/internal/ai"
+	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
 )
+
+// usageStasher 是 *System 的子集接口（避免 bridge 反向依赖 *System 全部 API）。
+// 测试时传 nil 跳过 usage 缓存写入，bridge 仍照常 emit 给前端的 "usage" 事件。
+type usageStasher interface {
+	stashPendingUsage(cagoID string, u *conversation_entity.TokenUsage)
+}
 
 // bridge translates cago agent.Event values into OpsKat ai.StreamEvent values
 // and emits them through the EventEmitter. One bridge instance per Stream.
@@ -20,18 +27,25 @@ import (
 //     placeholder（避免逐条 push 出一串空 assistant 气泡）。
 //   - popDisplay: 从 *System 的 displayContent FIFO 拿展示原文。cago Message.Text
 //     是带 mention 上下文的 LLM body，不能直接给前端展示。
+//   - usage：把 EventUsage 的 token 统计 stash 进 *System 的 pendingUsage 缓存，
+//     键为 lastAssistantMsgID。下一次 cago Save 触发 gormStore.Save 时 drain。
+//   - lastAssistantMsgID：最近一条 EventMessageEnd 中 origin=model 的 Message.ID。
+//     EventUsage 不带 Message — 用这个回填 cago_id。多轮 stream 复用同一 bridge
+//     实例，仅由后续 EventMessageEnd 覆盖；EventUsage 不清空它。
 type bridge struct {
-	emit             EventEmitter
-	popDisplay       func() string
-	thinkingActive   bool
-	pendingFollowUps []string
+	emit               EventEmitter
+	popDisplay         func() string
+	usage              usageStasher
+	thinkingActive     bool
+	pendingFollowUps   []string
+	lastAssistantMsgID string
 }
 
-func newBridge(em EventEmitter, popDisplay func() string) *bridge {
+func newBridge(em EventEmitter, popDisplay func() string, usage usageStasher) *bridge {
 	if popDisplay == nil {
 		popDisplay = func() string { return "" }
 	}
-	return &bridge{emit: em, popDisplay: popDisplay}
+	return &bridge{emit: em, popDisplay: popDisplay, usage: usage}
 }
 
 func (b *bridge) translate(convID int64, ev agent.Event) {
@@ -100,6 +114,16 @@ func (b *bridge) translate(convID int64, ev agent.Event) {
 				ToolCallID: ev.Tool.ID,
 			})
 		}
+	case agent.EventMessageEnd:
+		// cago 内部观察事件：每条 assistant model 消息收尾时触发，紧跟着的
+		// EventUsage 会用这条 ID 回填 cago_id。bridge 不向前端 emit —
+		// 文本/工具调用已通过 TextDelta/PreToolUse 等流式事件展示，
+		// MessageEnd 只是为 usage 提供锚点。
+		if ev.Message != nil &&
+			ev.Message.Role == agent.RoleAssistant &&
+			ev.Message.Origin == agent.MessageOriginModel {
+			b.lastAssistantMsgID = ev.Message.ID
+		}
 	case agent.EventUsage:
 		u := ev.Usage
 		b.emit.Emit(convID, ai.StreamEvent{
@@ -111,6 +135,14 @@ func (b *bridge) translate(convID int64, ev agent.Event) {
 				CacheCreationTokens: u.CacheCreationTokens,
 			},
 		})
+		if b.usage != nil && b.lastAssistantMsgID != "" {
+			b.usage.stashPendingUsage(b.lastAssistantMsgID, &conversation_entity.TokenUsage{
+				InputTokens:         u.PromptTokens,
+				OutputTokens:        u.CompletionTokens,
+				CacheReadTokens:     u.CachedTokens,
+				CacheCreationTokens: u.CacheCreationTokens,
+			})
+		}
 	case agent.EventDone:
 		b.emit.Emit(convID, ai.StreamEvent{Type: "done"})
 	case agent.EventError:

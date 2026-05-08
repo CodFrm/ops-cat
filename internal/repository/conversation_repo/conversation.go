@@ -38,6 +38,11 @@ type ConversationRepo interface {
 	// stateValuesJSON 已是序列化好的 JSON 字符串（service 层负责 marshal）；
 	// 空字符串视为清空（GetStateValues 返回 nil）。
 	UpdateState(ctx context.Context, conversationID int64, threadID, stateValuesJSON string) error
+
+	// UpdateMessageTokenUsage 把序列化好的 token_usage JSON 写到指定 (conversationID, cagoID) 行。
+	// 由 gormStore.Save drain System.pendingUsage 时调用；
+	// 写不存在的 cago_id 是 no-op（行未被 upsert 创建则跳过）。
+	UpdateMessageTokenUsage(ctx context.Context, conversationID int64, cagoID, tokenUsageJSON string) error
 }
 
 var defaultConversation ConversationRepo
@@ -205,4 +210,10 @@ func (r *conversationRepo) UpdateState(ctx context.Context, conversationID int64
 			"state_values": stateValuesJSON,
 			"updatetime":   time.Now().Unix(),
 		}).Error
+}
+
+func (r *conversationRepo) UpdateMessageTokenUsage(ctx context.Context, conversationID int64, cagoID, tokenUsageJSON string) error {
+	return db.Ctx(ctx).Model(&conversation_entity.Message{}).
+		Where("conversation_id = ? AND cago_id = ?", conversationID, cagoID).
+		Update("token_usage", tokenUsageJSON).Error
 }

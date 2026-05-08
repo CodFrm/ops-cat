@@ -73,7 +73,7 @@ func TestSystem_StreamCompletesAfterToolCall(t *testing.T) {
 	sess := a.Session()
 
 	rec := &recordEmitter{}
-	br := newBridge(rec, nil)
+	br := newBridge(rec, nil, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -185,7 +185,7 @@ func TestSystem_NeedConfirm_EmitsExactlyOneApprovalRequest(t *testing.T) {
 	)
 	sess := a.Session()
 
-	br := newBridge(rec, nil)
+	br := newBridge(rec, nil, nil)
 
 	ctx, cancel := context.WithTimeout(WithConvID(context.Background(), 1), 5*time.Second)
 	defer cancel()
@@ -288,7 +288,7 @@ func TestRoundsHook_FreshCounterPerStream(t *testing.T) {
 
 	// Stream 1.
 	rec1 := &recordEmitter{}
-	br1 := newBridge(rec1, nil)
+	br1 := newBridge(rec1, nil, nil)
 	if _, err := RunWithRetry(ctx, sess, "do it", rec1, 1, func(stream *agent.Stream) {
 		for stream.Next() {
 			br1.translate(1, stream.Event())
@@ -299,7 +299,7 @@ func TestRoundsHook_FreshCounterPerStream(t *testing.T) {
 
 	// Stream 2 — the moment of truth.
 	rec2 := &recordEmitter{}
-	br2 := newBridge(rec2, nil)
+	br2 := newBridge(rec2, nil, nil)
 	if _, err := RunWithRetry(ctx, sess, "again", rec2, 1, func(stream *agent.Stream) {
 		for stream.Next() {
 			br2.translate(1, stream.Event())

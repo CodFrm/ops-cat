@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/opskat/opskat/internal/ai"
+	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
 )
 
 // SystemOptions wires together the dependencies for one *coding.System.
@@ -68,6 +69,15 @@ type System struct {
 	// EventUserPromptSubmit 时 pop 头部，emit 给前端的 queue_consumed_batch 事件。
 	displayMu       sync.Mutex
 	pendingDisplays []string
+
+	// pendingMu 保护 pendingMentions / pendingUsage：由 SendAIMessage 入口写入
+	// （mentions）与 event_bridge.EventUsage 写入（usage），由 gormStore.Save 在
+	// cago internalObserver.persist 触发时 drain。这两个缓存的生命周期被
+	// "Stream 入口 stash → cago 触发 persist → gormStore.Save drain" 这一对
+	// 严格夹紧；读写都在 main goroutine（cago observer 是同步调用）。
+	pendingMu       sync.Mutex
+	pendingMentions []ai.MentionedAsset
+	pendingUsage    map[string]*conversation_entity.TokenUsage // cago_id → usage
 }
 
 // NewSystem assembles the per-Conversation cago System.
@@ -148,9 +158,21 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 		return nil, fmt.Errorf("aiagent.NewSystem: coding.New: %w", err)
 	}
 
+	// 先构造 sys（不带 sess），因为 store 需要 sys 实现 pendingMentionsProvider /
+	// pendingUsageProvider，而 sess 需要 store。这样可以把 sys 作为两个 provider
+	// 注入 NewGormStore，保持单一所有者。
+	sys := &System{
+		cs:        cs,
+		convID:    opts.ConvID,
+		emitter:   opts.Emitter,
+		turnState: turnState,
+		sidecar:   sc,
+		rounds:    rounds,
+	}
+
 	store := opts.Store
 	if store == nil {
-		store = NewGormStore(nil)
+		store = NewGormStore(sys, sys)
 	}
 
 	// 从 store 恢复历史：cago 的 Agent.Session() 不会自动 Load，必须显式
@@ -172,19 +194,13 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 		agent.WithInitialHistory(prior.Messages),
 		agent.WithInitialState(prior.State),
 	)
+	sys.sess = sess
 
-	sys := &System{
-		cs:        cs,
-		sess:      sess,
-		convID:    opts.ConvID,
-		emitter:   opts.Emitter,
-		turnState: turnState,
-		sidecar:   sc,
-		rounds:    rounds,
-	}
-	// bridge 持回调拿 follow-up 展示原文：避免循环依赖（bridge 不引用 *System），
-	// 且测试时可注入 fake popDisplay 单独覆盖 bridge 行为。
-	sys.bridge = newBridge(opts.Emitter, sys.popPendingDisplay)
+	// bridge 持回调拿 follow-up 展示原文：避免循环依赖（bridge 不引用 *System
+	// 全部 API），且测试时可注入 fake popDisplay/usageStasher 单独覆盖 bridge
+	// 行为。usage 这一项让 bridge 能在 EventUsage 时把 token usage stash 进
+	// System pending 缓存。
+	sys.bridge = newBridge(opts.Emitter, sys.popPendingDisplay, sys)
 	return sys, nil
 }
 
@@ -195,6 +211,9 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 //
 // Returns when the stream completes or all retry attempts fail.
 func (s *System) Stream(ctx context.Context, prompt string, aiCtx ai.AIContext, ext map[string]string) error {
+	// 把当前轮的 mentions stash 进 System pending 缓存；下一次 cago Save 触发时
+	// gormStore drain 出来绑到刚 upsert 的 user 行的 mentions 列。
+	s.stashPendingMentions(aiCtx)
 	s.turnState.Set(aiCtx, ext)
 	// keyConvID 只给 aiagent 内部 hook 用；ai.WithConversationID / WithSessionID 给老路径
 	// （batch_command + tool handler in-handler check + audit）兜底，不然它们 Get 出来全是 0/""，
@@ -281,6 +300,53 @@ func (s *System) popMatchingDisplay(content string) {
 		return
 	}
 	s.pendingDisplays = s.pendingDisplays[:n-1]
+}
+
+// stashPendingMentions 把当前轮的 mentions 暂存；下一次 cago Save 触发时 gormStore
+// 把它绑到刚出现的 user 行的 mentions 列。覆盖式语义：每次 Stream 入口 stash 一次。
+func (s *System) stashPendingMentions(aiCtx ai.AIContext) {
+	if len(aiCtx.MentionedAssets) == 0 {
+		s.pendingMu.Lock()
+		s.pendingMentions = nil
+		s.pendingMu.Unlock()
+		return
+	}
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	s.pendingMentions = append(s.pendingMentions[:0], aiCtx.MentionedAssets...)
+}
+
+// popPendingMentions drain 出当前缓存（move 语义），由 gormStore.Save 调用。
+func (s *System) popPendingMentions() []ai.MentionedAsset {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	out := s.pendingMentions
+	s.pendingMentions = nil
+	return out
+}
+
+// stashPendingUsage 把一条 EventUsage 的 token usage 关联到对应 cago_id 缓存起来；
+// 下一次 cago Save 触发时由 gormStore.Save drain 到 conversation_messages.token_usage。
+// 同 cago_id 多次 stash 取最新值（应当不会发生，但此语义安全）。
+func (s *System) stashPendingUsage(cagoID string, u *conversation_entity.TokenUsage) {
+	if cagoID == "" || u == nil {
+		return
+	}
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	if s.pendingUsage == nil {
+		s.pendingUsage = make(map[string]*conversation_entity.TokenUsage)
+	}
+	s.pendingUsage[cagoID] = u
+}
+
+// drainPendingUsage 拿走全部缓存（move 语义），由 gormStore.Save 调用。
+func (s *System) drainPendingUsage() map[string]*conversation_entity.TokenUsage {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	out := s.pendingUsage
+	s.pendingUsage = nil
+	return out
 }
 
 // StopStream cancels the in-flight stream (if any). Safe to call from another

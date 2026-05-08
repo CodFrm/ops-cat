@@ -38,6 +38,10 @@ type ConversationSvc interface {
 	// conversations 表的 thread_id / state_values 列。values 序列化为 JSON；
 	// 空 map / nil 映射到空字符串（GetStateValues 返回 nil）。
 	UpdateConversationState(ctx context.Context, conversationID int64, threadID string, values map[string]string) error
+
+	// UpdateMessageTokenUsage 把已序列化的 token_usage JSON 写到指定 (conversationID, cagoID)
+	// 消息行。由 gormStore.Save drain System.pendingUsage 时调用，纯透传。
+	UpdateMessageTokenUsage(ctx context.Context, conversationID int64, cagoID, tokenUsageJSON string) error
 }
 
 type conversationSvc struct {
@@ -159,4 +163,8 @@ func (s *conversationSvc) UpdateConversationState(ctx context.Context, conversat
 		jsonStr = string(b)
 	}
 	return conversation_repo.Conversation().UpdateState(ctx, conversationID, threadID, jsonStr)
+}
+
+func (s *conversationSvc) UpdateMessageTokenUsage(ctx context.Context, conversationID int64, cagoID, tokenUsageJSON string) error {
+	return conversation_repo.Conversation().UpdateMessageTokenUsage(ctx, conversationID, cagoID, tokenUsageJSON)
 }

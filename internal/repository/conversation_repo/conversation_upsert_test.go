@@ -167,3 +167,20 @@ func TestUpdateState(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, values)
 }
+
+func TestUpdateMessageTokenUsage(t *testing.T) {
+	ctx, r, _ := setupConvRepo(t)
+	c := newConv(t, ctx, r)
+	m1 := msg(c.ID, "cago-1", "user", "hi", 1)
+	require.NoError(t, r.UpsertMessagesByCagoID(ctx, c.ID, []*conversation_entity.Message{m1}))
+
+	require.NoError(t, r.UpdateMessageTokenUsage(ctx, c.ID, "cago-1", `{"inputTokens":12}`))
+
+	got, err := r.ListMessages(ctx, c.ID)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, `{"inputTokens":12}`, got[0].TokenUsage)
+
+	// missing cago_id is a silent no-op
+	require.NoError(t, r.UpdateMessageTokenUsage(ctx, c.ID, "missing", `{}`))
+}

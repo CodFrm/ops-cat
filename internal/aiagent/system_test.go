@@ -11,8 +11,11 @@ import (
 	"github.com/cago-frame/agents/agent"
 	"github.com/cago-frame/agents/provider"
 	"github.com/cago-frame/agents/provider/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/opskat/opskat/internal/ai"
+	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
 )
 
 func newSmokeSystem(t *testing.T, em EventEmitter) *System {
@@ -261,6 +264,48 @@ func TestSystem_CompactionEnabled(t *testing.T) {
 	if !strings.Contains(strings.ToLower(res.Notice), "compaction") &&
 		!strings.Contains(strings.ToLower(res.Notice), "compact") {
 		t.Errorf("/compact notice should mention compaction, got %q", res.Notice)
+	}
+}
+
+// TestSystem_StashPopMentions covers the mentions cache lifecycle: stash by
+// SendAIMessage entry, drain by gormStore.Save. Move-out semantics — second
+// pop returns empty.
+func TestSystem_StashPopMentions(t *testing.T) {
+	sys := &System{}
+	sys.stashPendingMentions(ai.AIContext{MentionedAssets: []ai.MentionedAsset{{AssetID: 9, Name: "edge"}}})
+	got := sys.popPendingMentions()
+	require.Len(t, got, 1)
+	assert.Equal(t, int64(9), got[0].AssetID)
+	if extra := sys.popPendingMentions(); len(extra) != 0 {
+		t.Fatalf("popPendingMentions should drain, got %+v", extra)
+	}
+}
+
+// TestSystem_StashDrainUsage covers the usage cache lifecycle: stash by
+// event_bridge.EventUsage (keyed by lastAssistantMsgID), drain by
+// gormStore.Save. Move-out semantics.
+func TestSystem_StashDrainUsage(t *testing.T) {
+	sys := &System{}
+	sys.stashPendingUsage("a1", &conversation_entity.TokenUsage{InputTokens: 100, OutputTokens: 20})
+	sys.stashPendingUsage("a2", &conversation_entity.TokenUsage{InputTokens: 50})
+	got := sys.drainPendingUsage()
+	require.Len(t, got, 2)
+	assert.Equal(t, 100, got["a1"].InputTokens)
+	assert.Equal(t, 50, got["a2"].InputTokens)
+	if extra := sys.drainPendingUsage(); len(extra) != 0 {
+		t.Fatalf("drainPendingUsage should clear, got %+v", extra)
+	}
+}
+
+// TestSystem_StashEmptyMentionsClears 守住 stashPendingMentions 覆盖式语义：
+// 第二次空 stash 应当清掉之前 stash 的 mentions（避免上一轮残留泄漏到下一轮的
+// user 行）。
+func TestSystem_StashEmptyMentionsClears(t *testing.T) {
+	sys := &System{}
+	sys.stashPendingMentions(ai.AIContext{MentionedAssets: []ai.MentionedAsset{{AssetID: 1}}})
+	sys.stashPendingMentions(ai.AIContext{}) // empty stash should clear
+	if got := sys.popPendingMentions(); len(got) != 0 {
+		t.Fatalf("empty stash should clear, got %+v", got)
 	}
 }
 

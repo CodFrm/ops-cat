@@ -156,6 +156,20 @@ func (mr *MockConversationRepoMockRecorder) Update(ctx, conv any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockConversationRepo)(nil).Update), ctx, conv)
 }
 
+// UpdateMessageTokenUsage mocks base method.
+func (m *MockConversationRepo) UpdateMessageTokenUsage(ctx context.Context, conversationID int64, cagoID, tokenUsageJSON string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateMessageTokenUsage", ctx, conversationID, cagoID, tokenUsageJSON)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateMessageTokenUsage indicates an expected call of UpdateMessageTokenUsage.
+func (mr *MockConversationRepoMockRecorder) UpdateMessageTokenUsage(ctx, conversationID, cagoID, tokenUsageJSON any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateMessageTokenUsage", reflect.TypeOf((*MockConversationRepo)(nil).UpdateMessageTokenUsage), ctx, conversationID, cagoID, tokenUsageJSON)
+}
+
 // UpdateState mocks base method.
 func (m *MockConversationRepo) UpdateState(ctx context.Context, conversationID int64, threadID, stateValuesJSON string) error {
 	m.ctrl.T.Helper()

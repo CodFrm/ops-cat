@@ -441,6 +441,15 @@ func TestConversationSvc_UpdateConversationState(t *testing.T) {
 	})
 }
 
+func TestConversationSvc_UpdateMessageTokenUsage(t *testing.T) {
+	ctx, mockRepo := setupTest(t)
+	convey.Convey("UpdateMessageTokenUsage 透传给 repo", t, func() {
+		mockRepo.EXPECT().UpdateMessageTokenUsage(gomock.Any(), int64(7), "cago-1", `{"inputTokens":12}`).Return(nil)
+		err := Conversation().UpdateMessageTokenUsage(ctx, 7, "cago-1", `{"inputTokens":12}`)
+		assert.NoError(t, err)
+	})
+}
+
 func TestConversationSvc_LoadMessages(t *testing.T) {
 	ctx, mockRepo := setupTest(t)
 

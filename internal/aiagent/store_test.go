@@ -111,6 +111,17 @@ func (f *fakeConvStore) LoadMessages(_ context.Context, id int64) ([]*conversati
 	return out, nil
 }
 
+func (f *fakeConvStore) UpdateMessageTokenUsage(_ context.Context, id int64, cagoID, tokenUsageJSON string) error {
+	for _, m := range f.messages {
+		if m.ConversationID == id && m.CagoID == cagoID {
+			m.TokenUsage = tokenUsageJSON
+			return nil
+		}
+	}
+	// missing cago_id is silent no-op (matches repo semantics)
+	return nil
+}
+
 func TestGormStore_RoundTripsCagoMessages(t *testing.T) {
 	fake := &fakeConvStore{row: &conversation_entity.Conversation{ID: 42}}
 	st := newGormStore(fake)

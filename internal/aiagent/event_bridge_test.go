@@ -6,9 +6,22 @@ import (
 
 	"github.com/cago-frame/agents/agent"
 	"github.com/cago-frame/agents/provider"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/opskat/opskat/internal/ai"
+	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
 )
+
+type fakeUsageStasher struct {
+	saved map[string]*conversation_entity.TokenUsage
+}
+
+func (f *fakeUsageStasher) stashPendingUsage(id string, u *conversation_entity.TokenUsage) {
+	if f.saved == nil {
+		f.saved = map[string]*conversation_entity.TokenUsage{}
+	}
+	f.saved[id] = u
+}
 
 type recordEmitter struct {
 	mu     sync.Mutex
@@ -23,7 +36,7 @@ func (r *recordEmitter) Emit(_ int64, ev ai.StreamEvent) {
 
 func TestBridge_TextDeltaToContent(t *testing.T) {
 	rec := &recordEmitter{}
-	br := newBridge(rec, nil)
+	br := newBridge(rec, nil, nil)
 	br.translate(99, agent.Event{Kind: agent.EventTextDelta, Text: "hello"})
 	if len(rec.events) != 1 || rec.events[0].Type != "content" || rec.events[0].Content != "hello" {
 		t.Fatalf("got %+v", rec.events)
@@ -32,7 +45,7 @@ func TestBridge_TextDeltaToContent(t *testing.T) {
 
 func TestBridge_ThinkingThenTextSynthesizesThinkingDone(t *testing.T) {
 	rec := &recordEmitter{}
-	br := newBridge(rec, nil)
+	br := newBridge(rec, nil, nil)
 	br.translate(1, agent.Event{Kind: agent.EventThinkingDelta, Text: "reflecting"})
 	br.translate(1, agent.Event{Kind: agent.EventTextDelta, Text: "answer"})
 
@@ -46,7 +59,7 @@ func TestBridge_ThinkingThenTextSynthesizesThinkingDone(t *testing.T) {
 
 func TestBridge_UsageMappingExposesCacheCreation(t *testing.T) {
 	rec := &recordEmitter{}
-	br := newBridge(rec, nil)
+	br := newBridge(rec, nil, nil)
 	br.translate(1, agent.Event{Kind: agent.EventUsage, Usage: provider.Usage{
 		PromptTokens: 100, CompletionTokens: 20, CachedTokens: 50, CacheCreationTokens: 30,
 	}})
@@ -61,7 +74,7 @@ func TestBridge_UsageMappingExposesCacheCreation(t *testing.T) {
 
 func TestBridge_ToolEventsCarryToolCallID(t *testing.T) {
 	rec := &recordEmitter{}
-	br := newBridge(rec, nil)
+	br := newBridge(rec, nil, nil)
 	br.translate(1, agent.Event{Kind: agent.EventPreToolUse, Tool: &agent.ToolEvent{ID: "abc", Name: "run_command", Input: []byte(`{"x":1}`)}})
 	br.translate(1, agent.Event{Kind: agent.EventPostToolUse, Tool: &agent.ToolEvent{ID: "abc", Name: "run_command", Response: []byte(`"ok"`)}})
 	if rec.events[0].ToolCallID != "abc" || rec.events[1].ToolCallID != "abc" {
@@ -84,7 +97,7 @@ func TestBridge_FollowUpsMergedIntoBatchOnNextEvent(t *testing.T) {
 		out := displays[idx]
 		idx++
 		return out
-	})
+	}, nil)
 
 	// 三条 follow-up：bridge 不应立刻 emit 任何事件
 	for range displays {
@@ -139,7 +152,7 @@ func TestBridge_HistoricalFollowUpReplayDoesNotEmitGhostBatch(t *testing.T) {
 	br := newBridge(rec, func() string {
 		popCount++
 		return "" // 模拟历史回放：FIFO 没有对应推送
-	})
+	}, nil)
 
 	// 3 条历史 follow-up 重放
 	for range 3 {
@@ -173,7 +186,7 @@ func TestBridge_MixedHistoricalAndLiveFollowUpsOnlyEmitLive(t *testing.T) {
 		v := queue[0]
 		queue = queue[1:]
 		return v
-	})
+	}, nil)
 
 	for range 4 {
 		br.translate(1, agent.Event{
@@ -209,7 +222,7 @@ func TestBridge_MixedHistoricalAndLiveFollowUpsOnlyEmitLive(t *testing.T) {
 func TestBridge_NonFollowUpUserPromptSubmitNotBuffered(t *testing.T) {
 	rec := &recordEmitter{}
 	popCount := 0
-	br := newBridge(rec, func() string { popCount++; return "should-not-be-popped" })
+	br := newBridge(rec, func() string { popCount++; return "should-not-be-popped" }, nil)
 	br.translate(1, agent.Event{
 		Kind:    agent.EventUserPromptSubmit,
 		Message: &agent.Message{Kind: agent.MessageKindText, Text: "initial"},
@@ -223,5 +236,70 @@ func TestBridge_NonFollowUpUserPromptSubmitNotBuffered(t *testing.T) {
 		if ev.Type == "queue_consumed_batch" {
 			t.Fatalf("unexpected queue_consumed_batch emitted: %+v", ev)
 		}
+	}
+}
+
+// EventUsage 在 cago runloop 一轮中紧跟 EventMessageEnd 之后到达；bridge 用最近
+// 一条 assistant model MessageEnd 的 ID 作为 usage 缓存键。stash 进 *System 的
+// pendingUsage 后由 gormStore.Save drain 出来写到 conversation_messages.token_usage
+// 列。bridge 仍照常 emit 给前端的 "usage" 流事件——前端实时显示开销不依赖持久化。
+func TestBridge_StashesUsageKeyedByLastAssistantMessageEnd(t *testing.T) {
+	rec := &recordEmitter{}
+	stash := &fakeUsageStasher{}
+	br := newBridge(rec, nil, stash)
+	br.translate(7, agent.Event{Kind: agent.EventMessageEnd, Message: &agent.Message{
+		ID: "asst-1", Role: agent.RoleAssistant, Origin: agent.MessageOriginModel,
+	}})
+	br.translate(7, agent.Event{Kind: agent.EventUsage, Usage: provider.Usage{
+		PromptTokens: 100, CompletionTokens: 20, CachedTokens: 5, CacheCreationTokens: 3,
+	}})
+	got, ok := stash.saved["asst-1"]
+	if !ok {
+		t.Fatalf("usage not stashed under asst-1: %+v", stash.saved)
+	}
+	assert.Equal(t, 100, got.InputTokens)
+	assert.Equal(t, 20, got.OutputTokens)
+	assert.Equal(t, 5, got.CacheReadTokens)
+	assert.Equal(t, 3, got.CacheCreationTokens)
+	// EventUsage still emits "usage" stream event for the frontend
+	found := false
+	for _, ev := range rec.events {
+		if ev.Type == "usage" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "usage stream event must still emit for frontend")
+}
+
+// EventMessageEnd 自身不应该 emit 任何前端事件（cago internalObserver 已经把
+// assistant 文本/工具调用通过 TextDelta/PreToolUse 实时流过去了；MessageEnd 只
+// 是给 bridge 提供 lastAssistantMsgID 锚点）。
+func TestBridge_MessageEndDoesNotEmit(t *testing.T) {
+	rec := &recordEmitter{}
+	br := newBridge(rec, nil, nil)
+	br.translate(1, agent.Event{Kind: agent.EventMessageEnd, Message: &agent.Message{
+		ID: "asst-1", Role: agent.RoleAssistant, Origin: agent.MessageOriginModel, Text: "hi",
+	}})
+	if len(rec.events) != 0 {
+		t.Fatalf("EventMessageEnd should not emit anything; got %+v", rec.events)
+	}
+}
+
+// 非 assistant model 的 MessageEnd（user / tool 角色）不应被记入
+// lastAssistantMsgID。否则 EventUsage 可能错误地把 usage 绑到 user/tool 行。
+func TestBridge_MessageEndIgnoresNonAssistantModel(t *testing.T) {
+	stash := &fakeUsageStasher{}
+	br := newBridge(&recordEmitter{}, nil, stash)
+	// user origin → 不更新 lastAssistantMsgID
+	br.translate(1, agent.Event{Kind: agent.EventMessageEnd, Message: &agent.Message{
+		ID: "user-1", Role: agent.RoleUser, Origin: agent.MessageOriginUser,
+	}})
+	br.translate(1, agent.Event{Kind: agent.EventUsage, Usage: provider.Usage{PromptTokens: 1}})
+	if _, ok := stash.saved["user-1"]; ok {
+		t.Fatalf("usage stashed under user-1; want skipped because no prior assistant model MessageEnd")
+	}
+	if len(stash.saved) != 0 {
+		t.Fatalf("stash should be empty: %+v", stash.saved)
 	}
 }

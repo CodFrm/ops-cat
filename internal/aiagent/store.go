@@ -22,6 +22,7 @@ type convStore interface {
 	UpsertCagoMessages(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error
 	UpdateConversationState(ctx context.Context, conversationID int64, threadID string, values map[string]string) error
 	LoadMessages(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error)
+	UpdateMessageTokenUsage(ctx context.Context, conversationID int64, cagoID, tokenUsageJSON string) error
 }
 
 // pendingMentionsProvider 由 *System 实现：SendAIMessage 入口把当前轮的 mentions
@@ -29,6 +30,13 @@ type convStore interface {
 // 只定义这个接口与挂载点；System 端的 stash/pop 在 Task 6 实现。
 type pendingMentionsProvider interface {
 	popPendingMentions() []ai.MentionedAsset
+}
+
+// pendingUsageProvider 由 *System 实现：event_bridge.EventUsage 把每轮的 token usage
+// stash 进 System；gormStore.Save drain map 后按 cago_id 写到对应 message 行的
+// token_usage 列。和 mentions 一样，所有持久化都在 cago 框架保护的 saveCtx 下完成。
+type pendingUsageProvider interface {
+	drainPendingUsage() map[string]*conversation_entity.TokenUsage
 }
 
 // gormStore 把 cago agent.SessionData 平铺到 conversation_messages（按 cago_id
@@ -45,14 +53,16 @@ type pendingMentionsProvider interface {
 type gormStore struct {
 	store    convStore
 	mentions pendingMentionsProvider // 可为 nil（Task 5 阶段、纯单测场景）
+	usage    pendingUsageProvider    // 可为 nil（纯单测场景）
 }
 
-// NewGormStore 接 service 单例。mentions 可传 nil；Task 6 把 *System 注进来。
-func NewGormStore(mentions pendingMentionsProvider) agent.Store {
-	return &gormStore{store: conversation_svc.Conversation(), mentions: mentions}
+// NewGormStore 接 service 单例。mentions / usage 都由 *System 提供；
+// 单测场景可传 nil 跳过对应 drain。
+func NewGormStore(mentions pendingMentionsProvider, usage pendingUsageProvider) agent.Store {
+	return &gormStore{store: conversation_svc.Conversation(), mentions: mentions, usage: usage}
 }
 
-// newGormStore 是测试构造器，接 fake convStore；mentions 默认 nil。
+// newGormStore 是测试构造器，接 fake convStore；mentions / usage 默认 nil。
 func newGormStore(s convStore) *gormStore { return &gormStore{store: s} }
 
 func (g *gormStore) Save(ctx context.Context, sessionID string, data agent.SessionData) error {
@@ -99,6 +109,20 @@ func (g *gormStore) Save(ctx context.Context, sessionID string, data agent.Sessi
 	}
 	if err := g.store.UpdateConversationState(ctx, convID, data.State.ThreadID, data.State.Values); err != nil {
 		return fmt.Errorf("gormStore.Save: update state: %w", err)
+	}
+	// drain pendingUsage：bridge.EventUsage 已按 lastAssistantMsgID 把 usage stash
+	// 进 System；这里按 cago_id 把对应行的 token_usage 列写一次。写不存在的
+	// cago_id 在 repo 层是 silent no-op，符合预期（行未被 upsert 时跳过）。
+	if g.usage != nil {
+		for cagoID, u := range g.usage.drainPendingUsage() {
+			b, err := json.Marshal(u)
+			if err != nil {
+				return fmt.Errorf("gormStore.Save: marshal token_usage for %s: %w", cagoID, err)
+			}
+			if err := g.store.UpdateMessageTokenUsage(ctx, convID, cagoID, string(b)); err != nil {
+				return fmt.Errorf("gormStore.Save: update token_usage for %s: %w", cagoID, err)
+			}
+		}
 	}
 	return nil
 }

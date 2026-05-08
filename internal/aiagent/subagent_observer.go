@@ -16,7 +16,10 @@ func makeSubagentObserver(em EventEmitter, convID int64, role, task string) agen
 	// 子 agent 不会被前端 Steer 进来 follow-up（cago dispatch_subagent 给子 agent 派
 	// 单一 prompt + tool 循环，没有用户中途插话路径），bridge 的 popDisplay 走默认
 	// 空实现即可。万一未来有 follow-up，会 emit 不带 content 的 batch，前端会忽略。
-	br := newBridge(taggingEmitter{inner: em, role: role, task: task}, nil)
+	// 子 agent 的 EventUsage 不需要 stash 进父 System 的 pendingUsage —— 它没有对应
+	// 的 conversation_messages 行（子 agent assistant message ID 不会出现在父 Save
+	// 快照里）；usage 传 nil 即可。前端仍照常收到 "usage" 流事件。
+	br := newBridge(taggingEmitter{inner: em, role: role, task: task}, nil, nil)
 	return func(_ context.Context, ev agent.Event) {
 		br.translate(convID, ev)
 	}
