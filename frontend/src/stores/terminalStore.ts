@@ -360,6 +360,7 @@ interface TerminalState {
     opts?: { initialInput?: string }
   ) => Promise<string>;
   reconnect: (tabId: string) => void;
+  reconnectBySession: (sessionId: string) => void;
   disconnect: (sessionId: string) => void;
   markClosed: (sessionId: string) => void;
 
@@ -627,6 +628,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       .catch((err) => {
         console.error("Reconnect failed:", err);
       });
+  },
+
+  reconnectBySession: (sessionId) => {
+    const { tabData } = get();
+    const tabId = Object.keys(tabData).find((id) => Boolean(tabData[id]?.panes[sessionId]));
+    if (tabId) get().reconnect(tabId);
   },
 
   retryConnect: (connectionId, password) => {
