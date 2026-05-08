@@ -23,6 +23,9 @@ type Conversation struct {
 	Status       int    `gorm:"column:status;default:1"`
 	Createtime   int64  `gorm:"column:createtime"`
 	Updatetime   int64  `gorm:"column:updatetime"`
+	// cago State 平铺字段（202605080010 迁移之后写入；gormStore 单源）
+	ThreadID    string `gorm:"column:thread_id;type:varchar(255)"`
+	StateValues string `gorm:"column:state_values;type:text"`
 }
 
 // TableName GORM表名
@@ -62,6 +65,32 @@ func (c *Conversation) IsLocalCLI() bool {
 	return c.ProviderType == "local_cli"
 }
 
+// GetStateValues 反序列化 cago Session State.Values。
+func (c *Conversation) GetStateValues() (map[string]string, error) {
+	if c.StateValues == "" {
+		return nil, nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(c.StateValues), &m); err != nil {
+		return nil, fmt.Errorf("解析 state_values 失败: %w", err)
+	}
+	return m, nil
+}
+
+// SetStateValues 序列化 cago Session State.Values；nil/空 map 视为清空。
+func (c *Conversation) SetStateValues(v map[string]string) error {
+	if len(v) == 0 {
+		c.StateValues = ""
+		return nil
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("序列化 state_values 失败: %w", err)
+	}
+	c.StateValues = string(data)
+	return nil
+}
+
 // Message 会话消息实体
 type Message struct {
 	ID             int64  `gorm:"column:id;primaryKey;autoIncrement"`
@@ -75,6 +104,17 @@ type Message struct {
 	TokenUsage     string `gorm:"column:token_usage;type:text"` // JSON: TokenUsage，仅 assistant 消息可能有
 	SortOrder      int    `gorm:"column:sort_order;default:0"`
 	Createtime     int64  `gorm:"column:createtime"`
+	// cago.Message 平铺字段（202605080010 迁移之后写入；gormStore 单源）
+	CagoID         string `gorm:"column:cago_id;type:varchar(64);index"`
+	ParentID       string `gorm:"column:parent_id;type:varchar(64)"`
+	Kind           string `gorm:"column:kind;type:varchar(32)"`
+	Origin         string `gorm:"column:origin;type:varchar(32)"`
+	Thinking       string `gorm:"column:thinking;type:text"`
+	ToolCallJSON   string `gorm:"column:tool_call_json;type:text"`
+	ToolResultJSON string `gorm:"column:tool_result_json;type:text"`
+	Persist        bool   `gorm:"column:persist;default:true"`
+	Raw            string `gorm:"column:raw;type:text"`
+	MsgTime        int64  `gorm:"column:msg_time"`
 }
 
 // TableName GORM表名
