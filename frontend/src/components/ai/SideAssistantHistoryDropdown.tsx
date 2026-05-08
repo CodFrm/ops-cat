@@ -40,7 +40,11 @@ export function SideAssistantHistoryDropdown({
 }: SideAssistantHistoryDropdownProps) {
   const { t, i18n } = useTranslation();
   const locale = i18n.language || "zh-CN";
-  const { conversations, deleteConversation, renameConversation, sidebarTabs } = useAIStore();
+  // 单字段 selector：避免整库订阅，下拉打开期间不会因别处 store 改动反复重渲。
+  const conversations = useAIStore((s) => s.conversations);
+  const deleteConversation = useAIStore((s) => s.deleteConversation);
+  const renameConversation = useAIStore((s) => s.renameConversation);
+  const sidebarTabs = useAIStore((s) => s.sidebarTabs);
   const workspaceTabs = useTabStore((s) => s.tabs);
   const openInTabIds = useMemo(() => {
     const ids = new Set<number>();

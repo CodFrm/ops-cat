@@ -18,21 +18,21 @@ interface SideAssistantPanelProps {
 
 export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelProps) {
   const isFullscreen = useFullscreen();
-  const {
-    sidebarTabs,
-    activeSidebarTabId,
-    configured,
-    fetchConversations,
-    getSidebarTabStatus,
-    openNewSidebarTab,
-    bindSidebarTabToConversation,
-    openSidebarConversationInSidebar,
-    activateSidebarTab,
-    closeSidebarTab,
-    promoteSidebarToTab,
-    sendFromSidebarTab,
-    stopSidebarTab,
-  } = useAIStore();
+  // 单字段 selector：避免整库订阅导致面板在每次按键写 inputDraft 时重渲。
+  // 重渲会重新创建 handleSendOverride / handleStopOverride 闭包，进而打掉 AIChatContent 的 memo。
+  const sidebarTabs = useAIStore((s) => s.sidebarTabs);
+  const activeSidebarTabId = useAIStore((s) => s.activeSidebarTabId);
+  const configured = useAIStore((s) => s.configured);
+  const fetchConversations = useAIStore((s) => s.fetchConversations);
+  const getSidebarTabStatus = useAIStore((s) => s.getSidebarTabStatus);
+  const openNewSidebarTab = useAIStore((s) => s.openNewSidebarTab);
+  const bindSidebarTabToConversation = useAIStore((s) => s.bindSidebarTabToConversation);
+  const openSidebarConversationInSidebar = useAIStore((s) => s.openSidebarConversationInSidebar);
+  const activateSidebarTab = useAIStore((s) => s.activateSidebarTab);
+  const closeSidebarTab = useAIStore((s) => s.closeSidebarTab);
+  const promoteSidebarToTab = useAIStore((s) => s.promoteSidebarToTab);
+  const sendFromSidebarTab = useAIStore((s) => s.sendFromSidebarTab);
+  const stopSidebarTab = useAIStore((s) => s.stopSidebarTab);
   const activeSidebarTab = sidebarTabs.find((tab) => tab.id === activeSidebarTabId) ?? null;
   const activeConversationId = activeSidebarTab?.conversationId ?? null;
 

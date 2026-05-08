@@ -216,6 +216,42 @@ func TestSystem_RehydratesSessionHistoryFromStore(t *testing.T) {
 	}
 }
 
+// TestSystem_Close_ThenStopStreamSafe 守住关闭顺序 robustness：用户关 app 时
+// AppShutdown → System.Close 已经把 streamCancel 重置为 nil；如果某条遗漏路径
+// 还在调 StopStream（比如 emitter 上的"stop"按钮事件晚到一拍），不能 panic。
+func TestSystem_Close_ThenStopStreamSafe(t *testing.T) {
+	sys := newSmokeSystem(t, EmitterFunc(func(int64, ai.StreamEvent) {}))
+	if err := sys.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	sys.StopStream() // 不能 panic
+}
+
+// TestSystem_CompactionEnabled 是 OpsKat 这层能做的唯一压缩回归：
+// 老 compress.go 已删，新系统通过 coding.WithCompactionThreshold(80000) 委托给
+// cago。要锁住"压缩开关没被关掉"——RunSlash("/compact") 是 cago 默认 builtin
+// （cago/agents/app/coding/system.go:registerBuiltins），其内部调 sys.Compact，
+// 如果 OpsKat 误传了 WithoutCompaction 会返回 ErrCompactionDisabled。
+//
+// 在内存 store + 空 history 下，cago 走"history 太短"分支返回
+// `Notice: "No compaction needed (history too short)."`，err == nil。
+// 这就证明 NewSystem 启用了 compactor。
+func TestSystem_CompactionEnabled(t *testing.T) {
+	sys := newSmokeSystem(t, EmitterFunc(func(int64, ai.StreamEvent) {}))
+	res, err := sys.RunSlash(context.Background(), "/compact")
+	if err != nil {
+		t.Fatalf("RunSlash(/compact) returned err — compactor may have been disabled: %v", err)
+	}
+	if !res.IsSlash {
+		t.Fatal("/compact should be IsSlash=true")
+	}
+	// 对 Notice 做包含断言而不是精确匹配——cago 改提示文本不应破坏我们的回归。
+	if !strings.Contains(strings.ToLower(res.Notice), "compaction") &&
+		!strings.Contains(strings.ToLower(res.Notice), "compact") {
+		t.Errorf("/compact notice should mention compaction, got %q", res.Notice)
+	}
+}
+
 // TestSystem_Stream_HappyPathEmitsContentAndDone wires NewSystem to a scripted
 // mock provider, calls Stream once, and asserts that bridged events make it to
 // the emitter (content + done). This is the integration the sub-tests can't

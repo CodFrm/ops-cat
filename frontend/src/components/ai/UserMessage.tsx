@@ -44,11 +44,13 @@ async function copyUserMessageText(text: string, copiedText: string, failedText:
 }
 
 interface UserMessageProps {
+  index: number;
   msg: ChatMessage;
-  onEdit?: () => void;
+  // 让父组件传入稳定的 (index, msg) 回调，避免每次渲染创建新闭包打掉 memo。
+  onEdit?: (index: number, msg: ChatMessage) => void;
 }
 
-export const UserMessage = memo(function UserMessage({ msg, onEdit }: UserMessageProps) {
+export const UserMessage = memo(function UserMessage({ index, msg, onEdit }: UserMessageProps) {
   const compact = useCompact();
   const maxWidthClass = compact ? "max-w-[95%]" : "max-w-[85%]";
   const segments = buildSegments(msg.content, msg.mentions);
@@ -67,8 +69,8 @@ export const UserMessage = memo(function UserMessage({ msg, onEdit }: UserMessag
   }, [msg.content, t]);
 
   const handleEdit = useCallback(() => {
-    onEdit?.();
-  }, [onEdit]);
+    onEdit?.(index, msg);
+  }, [onEdit, index, msg]);
 
   return (
     <div className="flex flex-col items-end gap-1.5 group/user">

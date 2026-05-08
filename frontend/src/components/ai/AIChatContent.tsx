@@ -134,19 +134,19 @@ export function AIChatContent({
   onStopOverride,
 }: AIChatContentProps) {
   const { t } = useTranslation();
-  const {
-    configured,
-    sendToTab,
-    stopGeneration,
-    regenerate,
-    regenerateConversation,
-    removeFromQueue,
-    clearQueue,
-    editAndResendConversation,
-    setSidebarTabInputDraft,
-    setSidebarTabEditTarget,
-    setSidebarTabScrollTop,
-  } = useAIStore();
+  // 拆成单字段 selector 拿稳定函数引用 / 仅订阅必要字段。
+  // 之前 `useAIStore()` 整库订阅，每次按键写 inputDraft 都会重渲整棵消息树。
+  const configured = useAIStore((s) => s.configured);
+  const sendToTab = useAIStore((s) => s.sendToTab);
+  const stopGeneration = useAIStore((s) => s.stopGeneration);
+  const regenerate = useAIStore((s) => s.regenerate);
+  const regenerateConversation = useAIStore((s) => s.regenerateConversation);
+  const removeFromQueue = useAIStore((s) => s.removeFromQueue);
+  const clearQueue = useAIStore((s) => s.clearQueue);
+  const editAndResendConversation = useAIStore((s) => s.editAndResendConversation);
+  const setSidebarTabInputDraft = useAIStore((s) => s.setSidebarTabInputDraft);
+  const setSidebarTabEditTarget = useAIStore((s) => s.setSidebarTabEditTarget);
+  const setSidebarTabScrollTop = useAIStore((s) => s.setSidebarTabScrollTop);
   const derivedConvId = useTabStore((s) => {
     if (!tabId) return null;
     const tab = s.tabs.find((x) => x.id === tabId);
@@ -182,14 +182,20 @@ export function AIChatContent({
   const [regenerateTarget, setRegenerateTarget] = useState<number | null>(null);
   const [localEditTarget, setLocalEditTarget] = useState<EditTarget | null>(null);
   const [empty, setEmpty] = useState(true);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<AIChatInputHandle>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const previousConversationIdRef = useRef<number | null | undefined>(conversationId);
   const editTarget = sideTabId ? sidebarEditTarget : localEditTarget;
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // 仅当用户已经在接近底部时才跟随，避免向上翻看历史被强行拽回；
+    // 用 scrollTop 直写代替 scrollIntoView({behavior:"smooth"})，避免流式 token 期间与渲染抢主线程。
+    const viewport = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]") as HTMLDivElement | null;
+    if (!viewport) return;
+    const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    if (distanceFromBottom < 80) {
+      viewport.scrollTop = viewport.scrollHeight;
+    }
   }, [messages]);
 
   useEffect(() => {
@@ -381,14 +387,13 @@ export function AIChatContent({
               return (
                 <div key={i} className="text-sm" style={cvStyle}>
                   {msg.role === "user" ? (
-                    <UserMessage msg={msg} onEdit={() => handleEditMessage(i, msg)} />
+                    <UserMessage index={i} msg={msg} onEdit={handleEditMessage} />
                   ) : (
                     <AssistantMessage msg={msg} index={i} sending={sending} onRegenerate={handleRegenerate} />
                   )}
                 </div>
               );
             })}
-            <div ref={bottomRef} />
           </div>
         </ScrollArea>
 
