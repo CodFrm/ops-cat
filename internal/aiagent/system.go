@@ -82,8 +82,8 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 	promptHook := makePromptHook(turnState)
 	agentEndHook := MakeAgentEndHook(opts.Emitter)
 
-	// OpsTools already includes exec_tool and excludes spawn_agent (Task 1.4).
-	// Sub-agent Entries are wired separately via WithExtraSubagents.
+	// OpsTools 包含全部 OpsKat 工具（exec_tool / run_command / batch_command / 等）。
+	// 子 agent dispatch 通过 cago 的 dispatch_subagent + 下面的 subEntries 实现。
 	parentTools := OpsTools(opts.Deps)
 	subEntries := []subagent.Entry{
 		OpsExplorerEntry(opts.Provider, opts.Deps, opts.Cwd),

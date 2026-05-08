@@ -479,7 +479,6 @@ func handleKafkaMessage(ctx context.Context, args map[string]any) (string, error
 func checkKafkaToolPermission(ctx context.Context, assetID int64, command string) (CheckResult, bool) {
 	if checker := GetPolicyChecker(ctx); checker != nil {
 		result := checker.CheckForAsset(ctx, assetID, asset_entity.AssetTypeKafka, command)
-		setCheckResult(ctx, result)
 		if result.Decision != Allow {
 			return result, false
 		}

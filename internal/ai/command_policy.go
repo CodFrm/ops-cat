@@ -57,22 +57,6 @@ func (r CheckResult) DecisionString() string {
 	}
 }
 
-// --- CheckResult context（供 AuditingExecutor 读取决策信息）---
-
-type checkResultKey struct{}
-
-// withCheckResult 注入 CheckResult 占位指针（由 AuditingExecutor 调用）
-func withCheckResult(ctx context.Context, r *CheckResult) context.Context {
-	return context.WithValue(ctx, checkResultKey{}, r)
-}
-
-// setCheckResult 在工具 handler 中设置决策结果
-func setCheckResult(ctx context.Context, result CheckResult) {
-	if r, ok := ctx.Value(checkResultKey{}).(*CheckResult); ok && r != nil {
-		*r = result
-	}
-}
-
 // CommandConfirmFunc 命令确认回调，发送审批请求并阻塞等待前端响应
 // ctx 携带会话 ID 等上下文（通过 GetConversationID 获取）
 // kind: "single", "batch", "grant"

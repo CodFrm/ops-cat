@@ -54,7 +54,6 @@ func handleExecRedis(ctx context.Context, args map[string]any) (string, error) {
 	// 权限检查
 	if checker := GetPolicyChecker(ctx); checker != nil {
 		result := checker.CheckForAsset(ctx, assetID, asset_entity.AssetTypeRedis, command)
-		setCheckResult(ctx, result)
 		if result.Decision != Allow {
 			return result.Message, nil
 		}

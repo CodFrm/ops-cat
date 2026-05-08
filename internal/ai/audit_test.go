@@ -97,32 +97,6 @@ func TestCheckResult_DecisionString(t *testing.T) {
 	})
 }
 
-func TestCheckResult_Context(t *testing.T) {
-	convey.Convey("CheckResult context 传递", t, func() {
-		convey.Convey("setCheckResult 填充占位指针", func() {
-			holder := &CheckResult{}
-			ctx := withCheckResult(context.Background(), holder)
-
-			setCheckResult(ctx, CheckResult{
-				Decision:       Allow,
-				DecisionSource: SourceGrantAllow,
-				MatchedPattern: "cat *",
-			})
-
-			assert.Equal(t, Allow, holder.Decision)
-			assert.Equal(t, SourceGrantAllow, holder.DecisionSource)
-			assert.Equal(t, "cat *", holder.MatchedPattern)
-		})
-
-		convey.Convey("无占位指针时 setCheckResult 不 panic", func() {
-			ctx := context.Background()
-			assert.NotPanics(t, func() {
-				setCheckResult(ctx, CheckResult{Decision: Allow})
-			})
-		})
-	})
-}
-
 func TestExtractCommandForAudit(t *testing.T) {
 	convey.Convey("从工具参数提取命令", t, func() {
 		convey.Convey("run_command 提取 command 字段", func() {

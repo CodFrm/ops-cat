@@ -58,7 +58,6 @@ func handleExecK8s(ctx context.Context, args map[string]any) (string, error) {
 
 	if checker := GetPolicyChecker(ctx); checker != nil {
 		result := checker.CheckForAsset(ctx, assetID, asset_entity.AssetTypeK8s, plan.EffectiveCommand)
-		setCheckResult(ctx, result)
 		if result.Decision != Allow {
 			return result.Message, nil
 		}

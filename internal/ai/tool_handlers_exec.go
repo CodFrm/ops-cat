@@ -62,7 +62,6 @@ func handleRequestGrant(ctx context.Context, args map[string]any) (string, error
 	}
 
 	result := checker.SubmitGrantMulti(ctx, grantItems, reason)
-	setCheckResult(ctx, result)
 	return result.Message, nil
 }
 
@@ -76,10 +75,9 @@ func handleRunCommand(ctx context.Context, args map[string]any) (string, error) 
 		return "", fmt.Errorf("missing required parameter: command")
 	}
 
-	// 权限检查（两条路径共用）
+	// 权限检查
 	if checker := GetPolicyChecker(ctx); checker != nil {
 		result := checker.Check(ctx, assetID, command)
-		setCheckResult(ctx, result)
 		if result.Decision != Allow {
 			return result.Message, nil
 		}
