@@ -553,15 +553,25 @@ func (a *App) getOrCreateAIAgentSystem(convID int64) (*aiagent.System, error) {
 // 若消息带 @ 提及的资产，将资产上下文渲染后 prepend 到消息正文，
 // 以便 agent 在后续轮次看到 mention 信息（系统提示在 Start 时已定型，无法再次重建）。
 func (a *App) QueueAIMessage(convID int64, content string, mentions []ai.MentionedAsset) error {
+	body := content
+	if mentionCtx := ai.RenderMentionContext(mentions); mentionCtx != "" {
+		body = mentionCtx + "\n\n" + content
+	}
+
+	if aiagent.Enabled() {
+		v, ok := a.aiAgentSystems.Load(convID)
+		if !ok {
+			return fmt.Errorf("会话 %d 没有正在运行的生成", convID)
+		}
+		return v.(*aiagent.System).Steer(a.ctx, body, content)
+	}
+
+	// Legacy path
 	v, ok := a.runners.Load(convID)
 	if !ok {
 		return fmt.Errorf("会话 %d 没有正在运行的生成", convID)
 	}
 	runner := v.(*ai.ConversationRunner)
-	body := content
-	if mentionCtx := ai.RenderMentionContext(mentions); mentionCtx != "" {
-		body = mentionCtx + "\n\n" + content
-	}
 	runner.QueueMessage(content, ai.Message{
 		Role:    ai.RoleUser,
 		Content: body,
