@@ -27,6 +27,8 @@ func newSmokeSystem(t *testing.T, em EventEmitter) *System {
 		Emitter:  em,
 		// CheckPerm 留空 → 默认 ai.CheckPermission；本 smoke 测不实际触发工具调用，
 		// hook 不会被命中，所以走默认即可。
+		// Store 注入 in-memory，避免 gormStore 默认走 conversation_svc → 真 DB。
+		Store: agent.NewMemoryStore(),
 	})
 	if err != nil {
 		t.Fatalf("NewSystem: %v", err)
@@ -156,6 +158,64 @@ func TestSystem_StopStream_NoActiveStreamSafe(t *testing.T) {
 	sys.StopStream() // must not panic
 }
 
+// fakeStore is a minimal agent.Store that returns a preset SessionData on Load.
+// Used to assert NewSystem rehydrates Session.History from prior persisted data
+// — without this, app restart silently drops every conversation's context.
+type fakeStore struct {
+	id   string
+	data agent.SessionData
+}
+
+func (f *fakeStore) Save(_ context.Context, _ string, _ agent.SessionData) error { return nil }
+func (f *fakeStore) Load(_ context.Context, id string) (agent.SessionData, error) {
+	if id != f.id {
+		return agent.SessionData{}, nil
+	}
+	return f.data, nil
+}
+func (f *fakeStore) Delete(_ context.Context, _ string) error { return nil }
+
+// TestSystem_RehydratesSessionHistoryFromStore is the OpsKat-side companion to
+// the cago session_test.go fix: NewSystem must Load prior SessionData from the
+// Store and seed it into the new Session, otherwise app restart (or any path
+// that rebuilds *aiagent.System) starts from an empty history and the LLM has
+// no memory of earlier turns in the conversation.
+func TestSystem_RehydratesSessionHistoryFromStore(t *testing.T) {
+	prior := agent.SessionData{
+		Messages: []agent.Message{
+			{Kind: agent.MessageKindText, Role: agent.RoleUser, Origin: agent.MessageOriginUser, Text: "earlier turn", Persist: true},
+			{Kind: agent.MessageKindText, Role: agent.RoleAssistant, Origin: agent.MessageOriginModel, Text: "earlier reply", Persist: true},
+		},
+		State: agent.State{ThreadID: "thread-7"},
+	}
+	store := &fakeStore{id: "conv_7", data: prior}
+
+	sys, err := NewSystem(context.Background(), SystemOptions{
+		Provider: providertest.New(),
+		Cwd:      t.TempDir(),
+		ConvID:   7,
+		Lang:     "en",
+		Deps:     &Deps{},
+		Emitter:  EmitterFunc(func(int64, ai.StreamEvent) {}),
+		Store:    store,
+	})
+	if err != nil {
+		t.Fatalf("NewSystem: %v", err)
+	}
+	t.Cleanup(func() { _ = sys.Close(context.Background()) })
+
+	hist := sys.sess.History()
+	if len(hist) != 2 {
+		t.Fatalf("History len = %d, want 2 (rehydrated from store)\n  got: %+v", len(hist), hist)
+	}
+	if hist[0].Text != "earlier turn" || hist[1].Text != "earlier reply" {
+		t.Errorf("History contents wrong: %+v", hist)
+	}
+	if got := sys.sess.State().ThreadID; got != "thread-7" {
+		t.Errorf("State.ThreadID = %q, want \"thread-7\" (rehydrated)", got)
+	}
+}
+
 // TestSystem_Stream_HappyPathEmitsContentAndDone wires NewSystem to a scripted
 // mock provider, calls Stream once, and asserts that bridged events make it to
 // the emitter (content + done). This is the integration the sub-tests can't
@@ -175,6 +235,7 @@ func TestSystem_Stream_HappyPathEmitsContentAndDone(t *testing.T) {
 		Lang:     "en",
 		Deps:     &Deps{},
 		Emitter:  em,
+		Store:    agent.NewMemoryStore(),
 	})
 	if err != nil {
 		t.Fatalf("NewSystem: %v", err)

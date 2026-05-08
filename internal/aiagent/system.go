@@ -10,6 +10,8 @@ import (
 	"github.com/cago-frame/agents/app/coding"
 	"github.com/cago-frame/agents/provider"
 	"github.com/cago-frame/agents/tool/subagent"
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 
 	"github.com/opskat/opskat/internal/ai"
 )
@@ -29,8 +31,9 @@ type SystemOptions struct {
 	CheckPerm   CheckPermissionFunc
 	AuditWriter ai.AuditWriter // nil → ai.NewDefaultAuditWriter()
 	Resolver    PendingResolver
-	Activate    func() // window activation; may be nil
-	MaxRounds   int    // 0 → 50
+	Activate    func()      // window activation; may be nil
+	MaxRounds   int         // 0 → 50
+	Store       agent.Store // nil → NewGormStore() (production default)
 }
 
 // System is the OpsKat-facing handle around cago's coding.System. It owns the
@@ -131,9 +134,29 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 		return nil, fmt.Errorf("aiagent.NewSystem: coding.New: %w", err)
 	}
 
+	store := opts.Store
+	if store == nil {
+		store = NewGormStore()
+	}
+
+	// 从 store 恢复历史：cago 的 Agent.Session() 不会自动 Load，必须显式
+	// WithInitialHistory/State 才能让重建的 Session 看见之前的轮次。否则 app
+	// 重启或 *aiagent.System 被 evict（resetAIAgentSystems / DeleteConversation
+	// 重新创建）后，新 Session 历史为空，LLM 完全失忆。
+	// Load 失败按 warn 处理，让用户至少能继续聊新一轮，而不是直接报错卡住。
+	sessionID := fmt.Sprintf("conv_%d", opts.ConvID)
+	prior, loadErr := store.Load(ctx, sessionID)
+	if loadErr != nil {
+		logger.Default().Warn("aiagent.NewSystem: store.Load failed; starting with empty history",
+			zap.Int64("conv_id", opts.ConvID), zap.Error(loadErr))
+		prior = agent.SessionData{}
+	}
+
 	sess := cs.Agent().Session(
-		agent.WithStore(NewGormStore()),
-		agent.WithID(fmt.Sprintf("conv_%d", opts.ConvID)),
+		agent.WithStore(store),
+		agent.WithID(sessionID),
+		agent.WithInitialHistory(prior.Messages),
+		agent.WithInitialState(prior.State),
 	)
 
 	return &System{
