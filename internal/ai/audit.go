@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"strings"
 	"time"
 
@@ -155,46 +154,6 @@ func (w *DefaultAuditWriter) WriteToolCall(ctx context.Context, info ToolCallInf
 			logger.Default().Error("audit log write failed", zap.Error(err))
 		}
 	}
-}
-
-// --- AuditingExecutor ---
-
-// AuditingExecutor 包装 ToolExecutor，自动记录审计日志
-type AuditingExecutor struct {
-	inner  ToolExecutor
-	writer AuditWriter
-}
-
-// NewAuditingExecutor 创建审计执行器
-func NewAuditingExecutor(inner ToolExecutor, writer AuditWriter) *AuditingExecutor {
-	return &AuditingExecutor{inner: inner, writer: writer}
-}
-
-func (a *AuditingExecutor) Execute(ctx context.Context, name string, argsJSON string) (string, error) {
-	// 注入 CheckResult 占位指针，handler 在权限检查后通过 setCheckResult 填充
-	decision := &CheckResult{}
-	callCtx := withCheckResult(ctx, decision)
-
-	result, err := a.inner.Execute(callCtx, name, argsJSON)
-
-	// 写审计日志（fire-and-forget），携带原始 ctx（含 session/conversation 信息）
-	go a.writer.WriteToolCall(ctx, ToolCallInfo{
-		ToolName: name,
-		ArgsJSON: argsJSON,
-		Result:   result,
-		Error:    err,
-		Decision: decision,
-	})
-
-	return result, err
-}
-
-// Close 代理到 inner
-func (a *AuditingExecutor) Close() error {
-	if closer, ok := a.inner.(io.Closer); ok {
-		return closer.Close()
-	}
-	return nil
 }
 
 // --- 会话模式审计 ---

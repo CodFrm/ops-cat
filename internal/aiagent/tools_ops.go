@@ -98,15 +98,12 @@ func injectDeps(ctx context.Context, deps *Deps) context.Context {
 }
 
 // OpsTools returns the full set of OpsKat ops tools as cago tool.Tool values,
-// bound to the given Deps. The legacy spawn_agent is excluded — sub-agent
-// dispatch is now handled by cago's dispatch_subagent + custom Entries.
+// bound to the given Deps. Sub-agent dispatch is provided by cago's
+// dispatch_subagent + custom Entries (see subagent_ops.go).
 func OpsTools(deps *Deps) []tool.Tool {
 	defs := ai.AllToolDefs()
 	out := make([]tool.Tool, 0, len(defs))
 	for _, d := range defs {
-		if d.Name == "spawn_agent" {
-			continue
-		}
 		out = append(out, wrapToolDef(d, deps))
 	}
 	return out

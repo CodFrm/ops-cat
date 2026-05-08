@@ -109,11 +109,3 @@ func TestOpsTools_HasAllExpectedNames(t *testing.T) {
 	}
 }
 
-func TestOpsTools_ExcludesSpawnAgent(t *testing.T) {
-	tools := OpsTools(&Deps{})
-	for _, tt := range tools {
-		if tt.Name() == "spawn_agent" {
-			t.Fatal("spawn_agent must be excluded — replaced by dispatch_subagent")
-		}
-	}
-}
