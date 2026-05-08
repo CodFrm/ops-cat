@@ -31,13 +31,17 @@ OpsKat
 
 ## About
 
-Managing servers often means juggling multiple tools — SSH clients, database GUIs, Redis managers, and Kafka consoles — constantly switching between them. OpsKat brings everything together in one place. With its AI agent, you can describe what you need in natural language, and it handles the rest. Even without the AI features, all common asset operations are unified in a single interface.
+Managing infrastructure often means juggling multiple tools — SSH clients, database GUIs, Redis and MongoDB managers, Kafka consoles, and K8s dashboards — constantly switching between them. OpsKat brings the core operations workflow into one desktop workspace. With its AI agent, you can describe what you need in natural language, and it handles multi-step operations with policy enforcement and full audit logging.
 
-Currently supports SSH servers, MySQL/PostgreSQL databases, Redis, MongoDB, and Kafka, with more asset types planned via a plugin system.
+OpsKat currently supports SSH, Redis, MongoDB, MySQL, PostgreSQL/PGSQL, Kafka, and K8s clusters, with more operational asset types planned.
 
 **If you find it useful, please give us a Star ⭐ — it means a lot!**
 
-## Demo
+## Intro Video
+
+[docs/videos/opskat-feature-promo/renders/opskat-feature-promo-en.mp4](docs/videos/opskat-feature-promo/renders/opskat-feature-promo-en.mp4)
+
+## Demo Video
 
 https://github.com/user-attachments/assets/035fc0df-230c-456b-87bd-8a4a125feaec
 
@@ -52,26 +56,20 @@ https://github.com/user-attachments/assets/035fc0df-230c-456b-87bd-8a4a125feaec
 
 Giving AI permission to operate on your servers — how do you keep it safe?
 
-- **Operation policies** — SSH commands, SQL statements, Redis operations, MongoDB operations, and Kafka actions all support allow/deny lists. SQL is analyzed by a parser that automatically blocks dangerous operations like DELETE/UPDATE without WHERE clauses
+- **Operation policies** — SSH commands, SQL statements, Redis/MongoDB operations, Kafka actions, and K8s-related operations go through policy and approval controls. SQL is analyzed by a parser that automatically blocks dangerous operations like DELETE/UPDATE without WHERE clauses
 - **Policy groups** — Built-in templates (Linux read-only, dangerous command deny, etc.) plus custom user-defined groups
 - **Pre-approved permissions** — AI or opsctl can request a batch of command patterns upfront. Once approved, matching commands execute automatically without per-command confirmation
 - **Audit logs** — Every operation is automatically recorded: who, when, which server, what command, and the full decision trail
 
-## 🖥️ Also a Full-Featured Terminal & Asset Manager
+## 🧩 Core Capabilities
 
-Beyond the AI, OpsKat is a complete terminal and asset management tool:
+Beyond the AI, OpsKat is a desktop workspace for day-to-day operations:
 
-- Tree-structured grouping for SSH servers, databases, Redis, MongoDB, and Kafka
-- Split pane terminal with customizable themes
-- SFTP file browser
-- Jump host chain connections
-- SQL query editor (MySQL/PostgreSQL via SSH tunnel)
-- Redis command execution with key browser
-- MongoDB collection browsing and query execution
-- Kafka cluster, topic, message, consumer group, ACL, Schema Registry, and Kafka Connect management
-- Port forwarding and SOCKS proxy
-- Encrypted credential storage
-- Import from SSH config / Tabby
+- **Unified asset management** — Tree-structured grouping for SSH, Redis, MongoDB, MySQL, PostgreSQL/PGSQL, Kafka, and K8s clusters, with room to add more asset types over time
+- **Terminal and connectivity** — Split pane terminals, custom themes, SFTP, jump host chains, port forwarding, and SOCKS proxy support
+- **Data and middleware operations** — MySQL/PGSQL queries, Redis key browsing and command execution, MongoDB collection browsing and queries, and Kafka topic/message/consumer group/ACL/Schema Registry/Kafka Connect management
+- **K8s cluster operations** — A unified entry point for checking clusters, nodes, pods, and common runtime state alongside SSH, logs, and database queries
+- **Security foundations** — Encrypted credential storage, SSH config / Tabby import, and policy plus audit coverage for AI and opsctl operations
 
 ## ⌨️ opsctl CLI + AI Coding Tool Integration
 

@@ -1,0 +1,1152 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #071016;
+        color: #eef4f7;
+        font-family: "Microsoft YaHei UI", "Bahnschrift", sans-serif;
+      }
+
+      body {
+        font-variant-numeric: tabular-nums;
+      }
+
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 12% 18%, rgba(77, 124, 254, 0.28), rgba(77, 124, 254, 0) 28%),
+          radial-gradient(circle at 83% 72%, rgba(88, 217, 128, 0.18), rgba(88, 217, 128, 0) 24%),
+          #071016;
+      }
+
+      .clip {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+      }
+
+      .scene {
+        background:
+          linear-gradient(120deg, rgba(7, 16, 22, 0.96), rgba(13, 23, 32, 0.98)),
+          #071016;
+      }
+
+      .scene-content {
+        width: 100%;
+        height: 100%;
+        padding: 78px 92px;
+        display: flex;
+        flex-direction: column;
+        gap: 34px;
+        position: relative;
+        z-index: 3;
+      }
+
+      .grid {
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(238, 244, 247, 0.045) 1px, rgba(238, 244, 247, 0) 1px),
+          linear-gradient(90deg, rgba(238, 244, 247, 0.045) 1px, rgba(238, 244, 247, 0) 1px);
+        background-size: 80px 80px;
+        mask-image: radial-gradient(circle at 50% 50%, #000 0%, rgba(0, 0, 0, 0.7) 46%, rgba(0, 0, 0, 0) 78%);
+        opacity: 0.85;
+      }
+
+      .grain {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.22;
+        background-image:
+          radial-gradient(circle at 10% 20%, rgba(255, 255, 255, 0.12) 0 1px, rgba(255, 255, 255, 0) 1px),
+          radial-gradient(circle at 60% 80%, rgba(255, 255, 255, 0.08) 0 1px, rgba(255, 255, 255, 0) 1px);
+        background-size: 38px 42px, 56px 64px;
+        mix-blend-mode: screen;
+      }
+
+      .orb {
+        position: absolute;
+        width: 560px;
+        height: 560px;
+        border-radius: 999px;
+        filter: blur(36px);
+        opacity: 0.45;
+      }
+
+      .orb.blue {
+        background: rgba(77, 124, 254, 0.32);
+      }
+
+      .orb.green {
+        background: rgba(88, 217, 128, 0.22);
+      }
+
+      .orb.amber {
+        background: rgba(245, 192, 74, 0.18);
+      }
+
+      .ghost-word {
+        position: absolute;
+        color: rgba(238, 244, 247, 0.055);
+        font-family: "Bahnschrift", "Microsoft YaHei UI", sans-serif;
+        font-size: 156px;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      .ghost-word::before {
+        content: attr(data-text);
+      }
+
+      .eyebrow {
+        color: #58d980;
+        font-family: "Cascadia Code", monospace;
+        font-size: 24px;
+        font-weight: 600;
+        letter-spacing: 0;
+      }
+
+      .headline {
+        max-width: 900px;
+        color: #eef4f7;
+        font-family: "Bahnschrift", "Microsoft YaHei UI", sans-serif;
+        font-size: 104px;
+        line-height: 1.02;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+
+      .subcopy {
+        max-width: 760px;
+        color: #aab5bd;
+        font-size: 36px;
+        line-height: 1.42;
+        font-weight: 350;
+      }
+
+      .logo-lockup {
+        display: flex;
+        align-items: center;
+        gap: 22px;
+        width: fit-content;
+        padding: 14px 18px;
+        border-radius: 28px;
+        background: rgba(7, 16, 22, 0.74);
+        border: 2px solid rgba(238, 244, 247, 0.1);
+      }
+
+      .logo-box {
+        width: 86px;
+        height: 86px;
+        display: grid;
+        place-items: center;
+        border-radius: 26px;
+        background: linear-gradient(145deg, rgba(77, 124, 254, 0.28), rgba(88, 217, 128, 0.12));
+        border: 2px solid rgba(238, 244, 247, 0.14);
+        box-shadow: 0 28px 82px rgba(77, 124, 254, 0.28);
+      }
+
+      .logo-box img {
+        width: 62px;
+        height: 62px;
+        object-fit: contain;
+      }
+
+      .brand-name {
+        display: inline-block;
+        padding: 0 10px 2px;
+        border-radius: 10px;
+        background: #eef4f7;
+        color: #071016;
+        font-family: "Bahnschrift", "Microsoft YaHei UI", sans-serif;
+        font-size: 52px;
+        font-weight: 800;
+      }
+
+      .brand-note {
+        display: inline-block;
+        margin-top: 4px;
+        padding: 4px 9px;
+        border-radius: 8px;
+        background: #eef4f7;
+        color: #071016;
+        font-size: 24px;
+      }
+
+      .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 18px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 54px;
+        padding: 12px 20px;
+        border-radius: 999px;
+        background: rgba(16, 25, 35, 0.78);
+        border: 2px solid rgba(238, 244, 247, 0.12);
+        color: #eef4f7;
+        font-size: 24px;
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+        backdrop-filter: blur(8px);
+      }
+
+      .pill .dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #4d7cfe;
+        box-shadow: 0 0 20px rgba(77, 124, 254, 0.75);
+      }
+
+      .pill.green .dot {
+        background: #58d980;
+        box-shadow: 0 0 20px rgba(88, 217, 128, 0.7);
+      }
+
+      .pill.amber .dot {
+        background: #f5c04a;
+        box-shadow: 0 0 20px rgba(245, 192, 74, 0.7);
+      }
+
+      .device {
+        position: relative;
+        border-radius: 28px;
+        overflow: hidden;
+        background: #101923;
+        border: 2px solid #243241;
+        box-shadow: 0 42px 120px rgba(0, 0, 0, 0.48);
+      }
+
+      .device::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        pointer-events: none;
+        border-radius: inherit;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0) 28%),
+          linear-gradient(90deg, rgba(77, 124, 254, 0.1), rgba(88, 217, 128, 0.06));
+      }
+
+      .device img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .mac-dots {
+        position: absolute;
+        top: 22px;
+        left: 24px;
+        display: flex;
+        gap: 12px;
+        z-index: 4;
+      }
+
+      .mac-dots span {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+      }
+
+      .mac-dots span:nth-child(1) {
+        background: #f07067;
+      }
+
+      .mac-dots span:nth-child(2) {
+        background: #f5c04a;
+      }
+
+      .mac-dots span:nth-child(3) {
+        background: #58d980;
+      }
+
+      .prompt-card,
+      .metric-card,
+      .command-card,
+      .policy-card,
+      .terminal-strip {
+        background: rgba(16, 25, 35, 0.86);
+        border: 2px solid rgba(238, 244, 247, 0.12);
+        border-radius: 26px;
+        box-shadow: 0 28px 80px rgba(0, 0, 0, 0.35);
+        backdrop-filter: blur(10px);
+      }
+
+      .prompt-card {
+        width: 720px;
+        padding: 22px 26px;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        color: #eef4f7;
+        font-size: 28px;
+      }
+
+      .prompt-icon {
+        width: 48px;
+        height: 48px;
+        display: grid;
+        place-items: center;
+        border-radius: 16px;
+        color: #58d980;
+        border: 2px solid rgba(88, 217, 128, 0.36);
+        font-family: "Cascadia Code", monospace;
+        font-size: 24px;
+      }
+
+      .mono {
+        font-family: "Cascadia Code", monospace;
+      }
+
+      .scene-one .layout {
+        display: grid;
+        grid-template-columns: 0.95fr 1.05fr;
+        align-items: center;
+        gap: 74px;
+        flex: 1;
+      }
+
+      .scene-one .copy-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 32px;
+      }
+
+      #hero-window {
+        width: 880px;
+        height: 552px;
+        transform: perspective(1200px) rotateY(-7deg) rotateX(2deg);
+        transform-origin: center;
+      }
+
+      .scene-one .floating-proof {
+        position: absolute;
+        right: 112px;
+        bottom: 114px;
+        width: 448px;
+        padding: 22px 24px;
+      }
+
+      .proof-title {
+        color: #58d980;
+        font-family: "Cascadia Code", monospace;
+        font-size: 22px;
+        font-weight: 650;
+      }
+
+      .proof-copy {
+        margin-top: 10px;
+        color: #eef4f7;
+        font-size: 27px;
+        line-height: 1.34;
+      }
+
+      .scene-two .scene-content {
+        padding: 64px 78px 70px;
+      }
+
+      .top-band {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 36px;
+      }
+
+      .section-title {
+        max-width: 980px;
+        color: #eef4f7;
+        font-family: "Bahnschrift", "Microsoft YaHei UI", sans-serif;
+        font-size: 74px;
+        line-height: 1.06;
+        font-weight: 800;
+      }
+
+      .section-subtitle {
+        margin-top: 14px;
+        max-width: 780px;
+        color: #aab5bd;
+        font-size: 30px;
+        line-height: 1.38;
+      }
+
+      .asset-stage {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+      }
+
+      #asset-window {
+        position: absolute;
+        left: 260px;
+        top: 0;
+        width: 1180px;
+        height: 696px;
+      }
+
+      .feature-chip {
+        position: absolute;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 18px 22px;
+        border-radius: 24px;
+        background: rgba(11, 18, 26, 0.88);
+        border: 2px solid rgba(238, 244, 247, 0.13);
+        box-shadow: 0 22px 62px rgba(0, 0, 0, 0.34);
+      }
+
+      .chip-mark {
+        width: 44px;
+        height: 44px;
+        border-radius: 15px;
+        display: grid;
+        place-items: center;
+        color: #eef4f7;
+        font-family: "Cascadia Code", monospace;
+        font-size: 20px;
+        font-weight: 700;
+        background: rgba(77, 124, 254, 0.22);
+        border: 2px solid rgba(77, 124, 254, 0.5);
+      }
+
+      .feature-chip strong {
+        display: block;
+        color: #eef4f7;
+        font-size: 28px;
+      }
+
+      .feature-chip span {
+        display: block;
+        color: #aab5bd;
+        font-size: 20px;
+        margin-top: 3px;
+      }
+
+      .chip-ssh {
+        left: 86px;
+        top: 112px;
+      }
+
+      .chip-db {
+        right: 90px;
+        top: 134px;
+      }
+
+      .chip-redis {
+        left: 110px;
+        bottom: 104px;
+      }
+
+      .chip-kafka {
+        right: 98px;
+        bottom: 122px;
+      }
+
+      .metric-strip {
+        position: absolute;
+        left: 420px;
+        bottom: 28px;
+        width: 700px;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+      }
+
+      .metric-card {
+        padding: 20px 22px;
+      }
+
+      .metric-value {
+        color: #eef4f7;
+        font-family: "Bahnschrift", sans-serif;
+        font-size: 42px;
+        font-weight: 800;
+      }
+
+      .metric-label {
+        margin-top: 6px;
+        color: #aab5bd;
+        font-size: 19px;
+      }
+
+      .scene-three .layout {
+        display: grid;
+        grid-template-columns: 0.84fr 1.16fr;
+        gap: 64px;
+        align-items: stretch;
+        flex: 1;
+      }
+
+      .assistant-panel {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 26px;
+      }
+
+      .large-request {
+        padding: 30px 34px;
+      }
+
+      .request-label {
+        color: #58d980;
+        font-family: "Cascadia Code", monospace;
+        font-size: 22px;
+        font-weight: 650;
+      }
+
+      .request-label::before,
+      .command-index::before,
+      .shield::before,
+      .decision::before {
+        content: attr(data-text);
+      }
+
+      .request-copy {
+        margin-top: 14px;
+        color: #eef4f7;
+        font-size: 44px;
+        line-height: 1.22;
+        font-weight: 700;
+      }
+
+      .result-card {
+        padding: 28px 32px;
+        border-left: 5px solid #58d980;
+      }
+
+      .result-card .status {
+        color: #58d980;
+        font-family: "Cascadia Code", monospace;
+        font-size: 24px;
+        font-weight: 650;
+      }
+
+      .result-card p {
+        margin-top: 12px;
+        color: #eef4f7;
+        font-size: 30px;
+        line-height: 1.35;
+      }
+
+      .execution-stack {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 20px;
+      }
+
+      .command-card {
+        width: 780px;
+        padding: 24px 28px;
+        display: grid;
+        grid-template-columns: 78px 1fr auto;
+        gap: 22px;
+        align-items: center;
+      }
+
+      .command-index {
+        width: 58px;
+        height: 58px;
+        border-radius: 18px;
+        display: grid;
+        place-items: center;
+        color: #071016;
+        background: #58d980;
+        font-family: "Bahnschrift", sans-serif;
+        font-size: 28px;
+        font-weight: 800;
+      }
+
+      .command-title {
+        color: #eef4f7;
+        font-size: 30px;
+        font-weight: 700;
+      }
+
+      .command-code {
+        margin-top: 8px;
+        color: #aab5bd;
+        font-family: "Cascadia Code", monospace;
+        font-size: 20px;
+      }
+
+      .command-badge {
+        color: #58d980;
+        font-family: "Cascadia Code", monospace;
+        font-size: 20px;
+        font-weight: 650;
+      }
+
+      .path-line {
+        position: absolute;
+        left: 28px;
+        top: 270px;
+        width: 6px;
+        height: 280px;
+        background: linear-gradient(180deg, #4d7cfe, #58d980, #f5c04a);
+        border-radius: 99px;
+        box-shadow: 0 0 34px rgba(77, 124, 254, 0.45);
+      }
+
+      .scene-four .layout {
+        display: grid;
+        grid-template-columns: 1.05fr 0.95fr;
+        gap: 54px;
+        flex: 1;
+        align-items: center;
+      }
+
+      .policy-board {
+        padding: 34px;
+        min-height: 642px;
+      }
+
+      .board-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 26px;
+      }
+
+      .board-title {
+        color: #eef4f7;
+        font-size: 38px;
+        font-weight: 800;
+      }
+
+      .shield {
+        width: 72px;
+        height: 72px;
+        display: grid;
+        place-items: center;
+        border-radius: 24px;
+        color: #071016;
+        background: #58d980;
+        font-family: "Bahnschrift", sans-serif;
+        font-size: 36px;
+        font-weight: 800;
+        box-shadow: 0 0 48px rgba(88, 217, 128, 0.34);
+      }
+
+      .policy-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 24px;
+        align-items: center;
+        padding: 20px 0;
+        border-top: 2px solid rgba(238, 244, 247, 0.1);
+      }
+
+      .policy-row strong {
+        display: block;
+        color: #eef4f7;
+        font-size: 28px;
+      }
+
+      .policy-row span {
+        display: block;
+        color: #aab5bd;
+        margin-top: 6px;
+        font-size: 21px;
+      }
+
+      .decision {
+        min-width: 132px;
+        padding: 12px 16px;
+        border-radius: 999px;
+        text-align: center;
+        color: #071016;
+        font-family: "Cascadia Code", monospace;
+        font-size: 20px;
+        font-weight: 750;
+      }
+
+      .decision.allow {
+        background: #58d980;
+      }
+
+      .decision.review {
+        background: #f5c04a;
+      }
+
+      .decision.block {
+        background: #f07067;
+      }
+
+      .audit-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+
+      .audit-entry {
+        display: grid;
+        grid-template-columns: 104px 1fr;
+        gap: 22px;
+        padding: 24px 26px;
+        border-radius: 24px;
+        background: rgba(11, 18, 26, 0.82);
+        border: 2px solid rgba(238, 244, 247, 0.11);
+      }
+
+      .audit-time {
+        color: #58d980;
+        font-family: "Cascadia Code", monospace;
+        font-size: 20px;
+        font-weight: 650;
+      }
+
+      .audit-copy {
+        color: #eef4f7;
+        font-size: 26px;
+        line-height: 1.34;
+      }
+
+      .audit-copy span {
+        color: #aab5bd;
+      }
+
+      .scene-five .scene-content {
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        gap: 34px;
+      }
+
+      .final-logo {
+        width: 138px;
+        height: 138px;
+        display: grid;
+        place-items: center;
+        border-radius: 40px;
+        background: linear-gradient(145deg, rgba(77, 124, 254, 0.34), rgba(88, 217, 128, 0.16));
+        border: 2px solid rgba(238, 244, 247, 0.16);
+        box-shadow: 0 36px 110px rgba(77, 124, 254, 0.28);
+      }
+
+      .final-logo img {
+        width: 94px;
+        height: 94px;
+      }
+
+      .final-title {
+        color: #eef4f7;
+        font-family: "Bahnschrift", "Microsoft YaHei UI", sans-serif;
+        font-size: 96px;
+        font-weight: 800;
+        line-height: 1.04;
+      }
+
+      .final-copy {
+        max-width: 1060px;
+        color: #aab5bd;
+        font-size: 34px;
+        line-height: 1.38;
+      }
+
+      .final-chips {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 18px;
+        width: 1180px;
+      }
+
+      .final-chip {
+        padding: 24px 18px;
+        border-radius: 24px;
+        background: rgba(16, 25, 35, 0.82);
+        border: 2px solid rgba(238, 244, 247, 0.12);
+      }
+
+      .final-chip strong {
+        color: #eef4f7;
+        display: block;
+        font-size: 28px;
+      }
+
+      .final-chip span {
+        color: #aab5bd;
+        display: block;
+        margin-top: 8px;
+        font-size: 20px;
+      }
+
+      .terminal-strip {
+        width: 980px;
+        padding: 20px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 26px;
+        color: #eef4f7;
+        font-family: "Cascadia Code", monospace;
+        font-size: 24px;
+        text-align: left;
+      }
+
+      .terminal-strip .ok {
+        color: #58d980;
+      }
+
+      .web-line {
+        color: #eef4f7;
+        font-family: "Cascadia Code", monospace;
+        font-size: 24px;
+      }
+
+      .transition-wipe {
+        pointer-events: none;
+        z-index: 20;
+        background: transparent;
+      }
+
+      .wipe-block {
+        display: none;
+      }
+
+      .accent-line {
+        height: 4px;
+        width: 180px;
+        border-radius: 99px;
+        background: linear-gradient(90deg, #4d7cfe, #58d980);
+        box-shadow: 0 0 24px rgba(77, 124, 254, 0.38);
+      }
+
+      .corner-label {
+        position: absolute;
+        color: #aab5bd;
+        font-family: "Cascadia Code", monospace;
+        font-size: 17px;
+        text-transform: uppercase;
+      }
+
+      .label-top {
+        top: 34px;
+        right: 54px;
+      }
+
+      .label-bottom {
+        bottom: 34px;
+        left: 54px;
+      }
+
+      .ring {
+        position: absolute;
+        border-radius: 999px;
+        border: 2px solid rgba(77, 124, 254, 0.18);
+      }
+
+      .ring.one {
+        width: 820px;
+        height: 820px;
+        right: -160px;
+        top: -210px;
+      }
+
+      .ring.two {
+        width: 520px;
+        height: 520px;
+        left: -120px;
+        bottom: -140px;
+        border-color: rgba(88, 217, 128, 0.16);
+      }
+
+      .mini-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: #aab5bd;
+        font-family: "Cascadia Code", monospace;
+        font-size: 18px;
+      }
+
+      .mini-label::before {
+        content: "";
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: #58d980;
+      }
+
+      .scene-five .ghost-word {
+        font-size: 210px;
+        opacity: 0.75;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="20"
+      data-width="1920"
+      data-height="1080"
+    >
+      <section id="scene1" class="clip scene scene-one" data-start="0" data-duration="4.08" data-track-index="1">
+        <div class="grid" data-layout-ignore></div>
+        <div class="grain" data-layout-ignore></div>
+        <div class="orb blue" data-layout-ignore style="left: -180px; top: -180px"></div>
+        <div class="orb green" data-layout-ignore style="right: -160px; bottom: -210px"></div>
+        <div class="ghost-word" data-text="OPS AUTOMATION" data-layout-ignore style="left: 70px; bottom: 38px"></div>
+        <div class="corner-label label-top">desktop control plane</div>
+        <div class="corner-label label-bottom">policy guarded ai agent</div>
+        <div class="scene-content">
+          <div class="logo-lockup">
+            <div class="logo-box"><img src="assets/appicon-brand.png" alt="OpsKat" /></div>
+            <div>
+              <div class="brand-name">OpsKat</div>
+              <div class="brand-note">AI-Powered Intelligent Ops Platform</div>
+            </div>
+          </div>
+          <div class="layout">
+            <div class="copy-stack">
+              <div class="eyebrow">OPEN SOURCE / AI-FIRST OPS</div>
+              <h1 class="headline">让 AI 接管重复运维</h1>
+              <p class="subcopy">描述你的需求，AI Agent 连接 SSH、Redis、MongoDB、MySQL、PGSQL、Kafka 与 K8s 集群，并在策略约束下执行。</p>
+              <div class="prompt-card">
+                <div class="prompt-icon">/</div>
+                <div>检查一下 k3s 集群健康状态，并汇总异常项</div>
+              </div>
+              <div class="pill-row">
+                <div class="pill"><span class="dot"></span>SSH / K8s</div>
+                <div class="pill green"><span class="dot"></span>MySQL / PGSQL</div>
+                <div class="pill amber"><span class="dot"></span>Redis / MongoDB / Kafka</div>
+              </div>
+            </div>
+            <div id="hero-window" class="device">
+              <div class="mac-dots"><span></span><span></span><span></span></div>
+              <img id="hero-shot" src="assets/screenshot-hero.png" alt="OpsKat application screenshot" data-layout-allow-overflow />
+            </div>
+          </div>
+          <div class="prompt-card floating-proof">
+            <div>
+              <div class="proof-title">ONE DESKTOP. MANY ASSETS.</div>
+              <div class="proof-copy">终端、资产、AI 会话与审计链路在同一个工作台里完成。</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="scene2" class="clip scene scene-two" data-start="4.08" data-duration="4.08" data-track-index="2">
+        <div class="grid" data-layout-ignore></div>
+        <div class="grain" data-layout-ignore></div>
+        <div class="ring one" data-layout-ignore></div>
+        <div class="ring two" data-layout-ignore></div>
+        <div class="orb amber" data-layout-ignore style="right: 260px; top: -250px"></div>
+        <div class="ghost-word" data-text="ASSETS" data-layout-ignore style="left: 520px; top: 450px"></div>
+        <div class="scene-content">
+          <div class="top-band">
+            <div>
+              <div class="eyebrow">UNIFIED ASSET WORKSPACE</div>
+              <h2 class="section-title">核心资产，一个工作台</h2>
+              <p class="section-subtitle">统一管理 SSH、Redis、MongoDB、MySQL、PGSQL、Kafka 与 K8s 集群，后续还能扩展更多资产类型。</p>
+            </div>
+            <div class="pill-row">
+              <div class="pill"><span class="dot"></span>Windows</div>
+              <div class="pill green"><span class="dot"></span>macOS</div>
+              <div class="pill amber"><span class="dot"></span>Linux</div>
+            </div>
+          </div>
+          <div class="asset-stage">
+            <div id="asset-window" class="device">
+              <div class="mac-dots"><span></span><span></span><span></span></div>
+              <img id="asset-shot" src="assets/screenshot-assets.png" alt="OpsKat asset management screenshot" data-layout-allow-overflow />
+            </div>
+            <div class="feature-chip chip-ssh">
+              <div class="chip-mark">SSH</div>
+              <div><strong>服务器与终端</strong><span>分屏终端 / SFTP / 端口转发</span></div>
+            </div>
+            <div class="feature-chip chip-db">
+              <div class="chip-mark">DB</div>
+              <div><strong>数据库查询</strong><span>MySQL / PGSQL / 隧道</span></div>
+            </div>
+            <div class="feature-chip chip-redis">
+              <div class="chip-mark">KV</div>
+              <div><strong>Redis / MongoDB</strong><span>Key / 集合 / 查询</span></div>
+            </div>
+            <div class="feature-chip chip-kafka">
+              <div class="chip-mark">KF</div>
+              <div><strong>Kafka / K8s</strong><span>Topic / 消费组 / 集群检查</span></div>
+            </div>
+            <div class="metric-strip">
+              <div class="metric-card"><div class="metric-value">7</div><div class="metric-label">当前资产能力</div></div>
+              <div class="metric-card"><div class="metric-value">1</div><div class="metric-label">统一工作台</div></div>
+              <div class="metric-card"><div class="metric-value">+</div><div class="metric-label">可继续扩展</div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="scene3" class="clip scene scene-three" data-start="8.16" data-duration="4.08" data-track-index="1">
+        <div class="grid" data-layout-ignore></div>
+        <div class="grain" data-layout-ignore></div>
+        <div class="orb blue" data-layout-ignore style="left: 620px; top: -300px"></div>
+        <div class="orb green" data-layout-ignore style="right: -150px; bottom: -160px"></div>
+        <div class="ghost-word" data-text="AGENT RUN" data-layout-ignore style="left: -80px; top: 350px"></div>
+        <div class="scene-content">
+          <div class="top-band">
+            <div>
+              <div class="eyebrow">NATURAL LANGUAGE TO ACTION</div>
+              <h2 class="section-title">一句话，串起多步排障</h2>
+            </div>
+            <div class="mini-label">live execution trace</div>
+          </div>
+          <div class="layout">
+            <div class="assistant-panel">
+              <div class="prompt-card large-request">
+                <div>
+                  <div class="request-label" data-text="USER REQUEST"></div>
+                  <div class="request-copy">帮我看 web-01 上 nginx 最近的错误日志，再查相关数据库状态。</div>
+                </div>
+              </div>
+              <div class="prompt-card result-card">
+                <div>
+                  <div class="status">SUMMARY READY</div>
+                  <p>AI 返回异常摘要、影响范围和下一步建议，命令与结果全程留痕。</p>
+                </div>
+              </div>
+            </div>
+            <div class="execution-stack">
+              <div class="path-line"></div>
+              <div class="command-card">
+                <div class="command-index" data-text="1"></div>
+                <div><div class="command-title">SSH 进入目标资产</div><div class="command-code">opsctl exec web-01 -- tail -n 100 error.log</div></div>
+                <div class="command-badge">ALLOW</div>
+              </div>
+              <div class="command-card">
+                <div class="command-index" data-text="2"></div>
+                <div><div class="command-title">通过隧道执行 SQL</div><div class="command-code">SELECT status, COUNT(*) FROM users GROUP BY status</div></div>
+                <div class="command-badge">CHECKED</div>
+              </div>
+              <div class="command-card">
+                <div class="command-index" data-text="3"></div>
+                <div><div class="command-title">汇总上下文</div><div class="command-code">nginx / database / redis signals merged</div></div>
+                <div class="command-badge">DONE</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="scene4" class="clip scene scene-four" data-start="12.24" data-duration="4.08" data-track-index="2">
+        <div class="grid" data-layout-ignore></div>
+        <div class="grain" data-layout-ignore></div>
+        <div class="orb green" data-layout-ignore style="left: -190px; top: 120px"></div>
+        <div class="orb amber" data-layout-ignore style="right: 60px; bottom: -260px"></div>
+        <div class="ghost-word" data-text="POLICY" data-layout-ignore style="right: -160px; top: 42px"></div>
+        <div class="scene-content">
+          <div class="top-band">
+            <div>
+              <div class="eyebrow">POLICY / APPROVAL / AUDIT</div>
+              <h2 class="section-title">AI 能执行，也必须被约束</h2>
+              <p class="section-subtitle">SSH 命令、SQL、Redis、MongoDB、Kafka 与 K8s 操作都经过策略判断，审批和审计贯穿全链路。</p>
+            </div>
+            <div class="accent-line"></div>
+          </div>
+          <div class="layout">
+            <div class="policy-card policy-board">
+              <div class="board-header">
+                <div class="board-title">Operation Gate</div>
+                <div class="shield" data-text="✓"></div>
+              </div>
+              <div class="policy-row">
+                <div><strong>Linux 只读策略</strong><span>允许查看日志、进程、端口与系统状态</span></div>
+                <div class="decision allow" data-text="ALLOW"></div>
+              </div>
+              <div class="policy-row">
+                <div><strong>SQL Parser 检查</strong><span>拦截无 WHERE 的 UPDATE / DELETE</span></div>
+                <div class="decision block" data-text="BLOCK"></div>
+              </div>
+              <div class="policy-row">
+                <div><strong>预申请权限</strong><span>批量审批一组匹配命令，减少重复确认</span></div>
+                <div class="decision review" data-text="REVIEW"></div>
+              </div>
+              <div class="policy-row">
+                <div><strong>凭据加密存储</strong><span>本地密钥链 + AES-256-GCM</span></div>
+                <div class="decision allow" data-text="SECURE"></div>
+              </div>
+            </div>
+            <div class="audit-panel">
+              <div class="audit-entry"><div class="audit-time">14:22</div><div class="audit-copy">web-01 <span>tail nginx error log</span></div></div>
+              <div class="audit-entry"><div class="audit-time">14:23</div><div class="audit-copy">db-prod <span>SELECT status count</span></div></div>
+              <div class="audit-entry"><div class="audit-time">14:24</div><div class="audit-copy">policy <span>dangerous SQL blocked</span></div></div>
+              <div class="audit-entry"><div class="audit-time">14:25</div><div class="audit-copy">report <span>decision trail exported</span></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="scene5" class="clip scene scene-five" data-start="16.32" data-duration="3.68" data-track-index="1">
+        <div class="grid" data-layout-ignore></div>
+        <div class="grain" data-layout-ignore></div>
+        <div class="ring one" data-layout-ignore></div>
+        <div class="ring two" data-layout-ignore></div>
+        <div class="orb blue" data-layout-ignore style="left: 220px; top: -240px"></div>
+        <div class="orb green" data-layout-ignore style="right: 160px; bottom: -260px"></div>
+        <div class="ghost-word" data-text="OPSKAT" data-layout-ignore style="left: 165px; bottom: 90px"></div>
+        <div class="scene-content">
+          <div class="final-logo"><img src="assets/appicon-final.png" alt="OpsKat" /></div>
+          <h2 class="final-title">OpsKat</h2>
+          <p class="final-copy">开源的 AI 优先桌面运维工具。把资产管理、AI Agent、策略审批和 opsctl CLI 放到同一个工作流里。</p>
+          <div class="final-chips">
+            <div class="final-chip"><strong>统一资产</strong><span>SSH / Redis / MongoDB / MySQL / PGSQL / Kafka / K8s</span></div>
+            <div class="final-chip"><strong>AI Agent</strong><span>自然语言执行多步任务</span></div>
+            <div class="final-chip"><strong>安全审计</strong><span>策略组、审批、全链路日志</span></div>
+            <div class="final-chip"><strong>opsctl CLI</strong><span>连接 AI 编程助手</span></div>
+          </div>
+          <div class="terminal-strip">
+            <span>opsctl exec web-01 -- tail -n 100 /var/log/nginx/error.log</span>
+            <span class="ok">ready</span>
+          </div>
+          <div class="web-line">opskat.dev / github.com/opskat/opskat</div>
+        </div>
+      </section>
+
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      tl.to(".orb.blue", { x: 18, y: 8, scale: 1.04, duration: 7.2, yoyo: true, repeat: 2, ease: "sine.inOut" }, 0);
+      tl.to(".orb.green", { x: -16, y: -10, scale: 1.035, duration: 7.6, yoyo: true, repeat: 2, ease: "sine.inOut" }, 0.2);
+      tl.to(".orb.amber", { x: 14, y: 12, scale: 1.035, duration: 7.8, yoyo: true, repeat: 2, ease: "sine.inOut" }, 0.4);
+      tl.fromTo("#hero-shot", { x: -6, y: -4, scale: 1.012 }, { x: 8, y: 5, scale: 1.026, duration: 3.2, ease: "sine.inOut", immediateRender: false }, 0.18);
+      tl.fromTo("#asset-shot", { x: -5, y: -3, scale: 1.006 }, { x: 7, y: 4, scale: 1.018, duration: 3.1, ease: "sine.inOut", immediateRender: false }, 4.18);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

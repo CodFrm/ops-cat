@@ -31,13 +31,17 @@ OpsKat
 
 ## 关于
 
-平时操作服务器环境，经常要打开好几个工具来回切换：SSH、数据库、Redis、Kafka 控制台来回跳。OpsKat 把常用的资产操作都集成在一起，不用再在好几个工具之间跳了。加上 AI Agent，直接跟它说一句话就能搞定，当然每一步都有策略管控和审计日志。
+平时操作服务器环境，经常要打开好几个工具来回切换：SSH、数据库、Redis、MongoDB、Kafka、K8s 控制台来回跳。OpsKat 把核心运维能力集成在一个桌面工作台里，不用再在好几个工具之间跳。加上 AI Agent，直接跟它说一句话就能完成多步操作，每一步都有策略管控和审计日志。
 
-目前支持管理 SSH 服务器、MySQL/PostgreSQL 数据库、Redis、MongoDB 和 Kafka，后续还会考虑使用插件模式集成其它常用运维资产。
+目前核心支持 SSH、Redis、MongoDB、MySQL、PostgreSQL/PGSQL、Kafka 和 K8s 集群，后续还可以扩展支持更多常用运维资产。
 
 **如果觉得有用，求个 Star ⭐ 这是对我们最大的支持！**
 
-## 演示
+## 介绍视频
+
+[docs/videos/opskat-feature-promo/renders/opskat-feature-promo.mp4](docs/videos/opskat-feature-promo/renders/opskat-feature-promo.mp4)
+
+## 演示视频
 
 https://github.com/user-attachments/assets/035fc0df-230c-456b-87bd-8a4a125feaec
 
@@ -52,26 +56,20 @@ https://github.com/user-attachments/assets/035fc0df-230c-456b-87bd-8a4a125feaec
 
 给 AI 操作服务器的权限，怎么保证安全？
 
-- **操作策略** — SSH 命令、SQL 语句、Redis 操作、MongoDB 操作和 Kafka 动作都支持白名单/黑名单，SQL 还会基于 Parser 自动拦截无 WHERE 的 DELETE/UPDATE 等危险操作
+- **操作策略** — SSH 命令、SQL 语句、Redis/MongoDB 操作、Kafka 动作和 K8s 相关操作都会进入策略判断与审批链路，SQL 还会基于 Parser 自动拦截无 WHERE 的 DELETE/UPDATE 等危险操作
 - **策略组** — 内置常用模板（Linux 只读、危险命令拒绝等），也可以自定义
 - **预申请权限** — AI 或 opsctl 可以提前申请一批命令的执行权限，用户一次审批后，后续匹配的命令自动放行，不用每条都确认
 - **审计日志** — 所有操作自动记录，谁在什么时候对哪台服务器执行了什么命令，决策来源全部可追溯
 
-## 🖥️ 也是个好用的终端和资产管理工具
+## 🧩 核心能力
 
-抛开 AI 部分，OpsKat 本身也是一个功能完整的终端和资产管理工具：
+抛开 AI 部分，OpsKat 本身也是一个面向日常运维的桌面工作台：
 
-- 树形分组管理 SSH 服务器、数据库、Redis、MongoDB 和 Kafka
-- 分屏终端，自定义主题
-- SFTP 文件浏览器
-- 跳板机链式连接
-- 数据库查询编辑器（MySQL/PostgreSQL，支持 SSH 隧道）
-- Redis 命令执行与 Key 浏览器
-- MongoDB 集合浏览与查询执行
-- Kafka 集群、Topic、消息、消费组、ACL、Schema Registry 和 Kafka Connect 管理
-- 端口转发、SOCKS 代理
-- 凭据加密存储
-- 从 SSH config / Tabby 导入
+- **统一资产管理** — 树形分组管理 SSH、Redis、MongoDB、MySQL、PostgreSQL/PGSQL、Kafka 和 K8s 集群，后续可继续接入更多资产类型
+- **终端与连接能力** — 分屏终端、自定义主题、SFTP、跳板机链式连接、端口转发和 SOCKS 代理
+- **数据与中间件操作** — MySQL/PGSQL 查询、Redis Key 浏览与命令执行、MongoDB 集合浏览与查询、Kafka Topic/消息/消费组/ACL/Schema Registry/Kafka Connect 管理
+- **K8s 集群运维** — 通过统一入口检查集群、节点、Pod 与常见运行状态，适合和 SSH、日志、数据库查询一起串联排障
+- **安全基础设施** — 凭据加密存储，支持从 SSH config / Tabby 导入，所有 AI 与 opsctl 操作都纳入审批和审计链路
 
 ## ⌨️ opsctl CLI + AI 编程工具集成
 
