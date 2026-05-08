@@ -150,8 +150,6 @@ func TestConversationSvc_Delete(t *testing.T) {
 
 	convey.Convey("删除会话", t, func() {
 		convey.Convey("删除成功（软删除+删除消息）", func() {
-			conv := &conversation_entity.Conversation{ID: 1, Title: "测试"}
-			mockRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(conv, nil)
 			mockRepo.EXPECT().Delete(gomock.Any(), int64(1)).Return(nil)
 			mockRepo.EXPECT().DeleteMessages(gomock.Any(), int64(1)).Return(nil)
 
@@ -159,16 +157,14 @@ func TestConversationSvc_Delete(t *testing.T) {
 			assert.NoError(t, err)
 		})
 
-		convey.Convey("会话不存在时删除失败", func() {
-			mockRepo.EXPECT().Find(gomock.Any(), int64(999)).Return(nil, errors.New("not found"))
+		convey.Convey("软删除失败时返回错误", func() {
+			mockRepo.EXPECT().Delete(gomock.Any(), int64(999)).Return(errors.New("db error"))
 
 			err := Conversation().Delete(ctx, 999)
 			assert.Error(t, err)
 		})
 
 		convey.Convey("删除消息失败不影响会话删除结果", func() {
-			conv := &conversation_entity.Conversation{ID: 2, Title: "测试2"}
-			mockRepo.EXPECT().Find(gomock.Any(), int64(2)).Return(conv, nil)
 			mockRepo.EXPECT().Delete(gomock.Any(), int64(2)).Return(nil)
 			mockRepo.EXPECT().DeleteMessages(gomock.Any(), int64(2)).Return(errors.New("msg delete error"))
 

@@ -169,3 +169,17 @@ func (mr *MockConversationRepoMockRecorder) UpdateTitle(ctx, id, title, updateti
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateTitle", reflect.TypeOf((*MockConversationRepo)(nil).UpdateTitle), ctx, id, title, updatetime)
 }
+
+// UpdateWorkDir mocks base method.
+func (m *MockConversationRepo) UpdateWorkDir(ctx context.Context, id int64, workDir string, updatetime int64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateWorkDir", ctx, id, workDir, updatetime)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateWorkDir indicates an expected call of UpdateWorkDir.
+func (mr *MockConversationRepoMockRecorder) UpdateWorkDir(ctx, id, workDir, updatetime any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateWorkDir", reflect.TypeOf((*MockConversationRepo)(nil).UpdateWorkDir), ctx, id, workDir, updatetime)
+}

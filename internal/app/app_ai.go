@@ -177,9 +177,11 @@ func (a *App) CreateConversation() (*conversation_entity.Conversation, error) {
 		providerID = activeProvider.ID
 	}
 
+	home, _ := os.UserHomeDir()
 	conv := &conversation_entity.Conversation{
 		Title:      "新对话",
 		ProviderID: providerID,
+		WorkDir:    home, // user-chosen via UpdateConversationCwd; default = home
 	}
 	if err := conversation_svc.Conversation().Create(ctx, conv); err != nil {
 		return nil, err
@@ -204,6 +206,18 @@ func (a *App) UpdateConversationTitle(id int64, title string) error {
 		return fmt.Errorf("会话不存在: %w", err)
 	}
 	return fmt.Errorf("更新会话标题失败: %w", err)
+}
+
+// UpdateConversationCwd 更新会话工作目录（cwd 由前端选择器设置）
+func (a *App) UpdateConversationCwd(id int64, cwd string) error {
+	ctx := a.langCtx()
+	if err := conversation_svc.Conversation().UpdateWorkDir(ctx, id, cwd); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("会话不存在: %w", err)
+		}
+		return fmt.Errorf("更新会话工作目录失败: %w", err)
+	}
+	return nil
 }
 
 // SwitchConversation 切换到指定会话，返回显示消息

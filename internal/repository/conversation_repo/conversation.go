@@ -16,6 +16,7 @@ type ConversationRepo interface {
 	Create(ctx context.Context, conv *conversation_entity.Conversation) error
 	Update(ctx context.Context, conv *conversation_entity.Conversation) error
 	UpdateTitle(ctx context.Context, id int64, title string, updatetime int64) error
+	UpdateWorkDir(ctx context.Context, id int64, workDir string, updatetime int64) error
 	Delete(ctx context.Context, id int64) error
 
 	// 消息操作
@@ -75,6 +76,23 @@ func (r *conversationRepo) UpdateTitle(ctx context.Context, id int64, title stri
 		Where("id = ? AND status = ?", id, conversation_entity.StatusActive).
 		Updates(map[string]any{
 			"title":      title,
+			"updatetime": updatetime,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (r *conversationRepo) UpdateWorkDir(ctx context.Context, id int64, workDir string, updatetime int64) error {
+	result := db.Ctx(ctx).
+		Model(&conversation_entity.Conversation{}).
+		Where("id = ? AND status = ?", id, conversation_entity.StatusActive).
+		Updates(map[string]any{
+			"work_dir":   workDir,
 			"updatetime": updatetime,
 		})
 	if result.Error != nil {

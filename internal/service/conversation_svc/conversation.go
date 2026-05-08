@@ -2,7 +2,6 @@ package conversation_svc
 
 import (
 	"context"
-	"os"
 	"sync"
 	"time"
 
@@ -20,6 +19,7 @@ type ConversationSvc interface {
 	Get(ctx context.Context, id int64) (*conversation_entity.Conversation, error)
 	Update(ctx context.Context, conv *conversation_entity.Conversation) error
 	UpdateTitle(ctx context.Context, id int64, title string) error
+	UpdateWorkDir(ctx context.Context, id int64, workDir string) error
 	Delete(ctx context.Context, id int64) error
 
 	// 消息持久化
@@ -69,13 +69,11 @@ func (s *conversationSvc) UpdateTitle(ctx context.Context, id int64, title strin
 	return conversation_repo.Conversation().UpdateTitle(ctx, id, title, time.Now().Unix())
 }
 
-func (s *conversationSvc) Delete(ctx context.Context, id int64) error {
-	// 获取会话信息以清理工作目录
-	conv, err := conversation_repo.Conversation().Find(ctx, id)
-	if err != nil {
-		return err
-	}
+func (s *conversationSvc) UpdateWorkDir(ctx context.Context, id int64, workDir string) error {
+	return conversation_repo.Conversation().UpdateWorkDir(ctx, id, workDir, time.Now().Unix())
+}
 
+func (s *conversationSvc) Delete(ctx context.Context, id int64) error {
 	// 软删除
 	if err := conversation_repo.Conversation().Delete(ctx, id); err != nil {
 		return err
@@ -88,13 +86,6 @@ func (s *conversationSvc) Delete(ctx context.Context, id int64) error {
 
 	// 清理 saveLocks，避免删除后的 conversationID 继续占用 mutex。
 	s.saveLocks.Delete(id)
-
-	// 清理工作目录
-	if conv.WorkDir != "" {
-		if err := os.RemoveAll(conv.WorkDir); err != nil {
-			logger.Default().Warn("remove conversation work dir", zap.String("dir", conv.WorkDir), zap.Error(err))
-		}
-	}
 
 	return nil
 }
