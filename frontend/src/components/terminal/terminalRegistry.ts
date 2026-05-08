@@ -2,7 +2,7 @@ import { Terminal as XTerminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
-import { WriteSSH } from "../../../wailsjs/go/app/App";
+import { WriteSSH, WriteSerial } from "../../../wailsjs/go/app/App";
 import { EventsOn, EventsOff } from "../../../wailsjs/runtime/runtime";
 import { bytesToBase64 } from "@/lib/terminalEncode";
 import { useTerminalStore } from "@/stores/terminalStore";
@@ -48,11 +48,15 @@ export function getOrCreateTerminal(
   term.loadAddon(searchAddon);
   term.open(container);
 
+  const isSerial = sessionId.startsWith("serial-");
+  const writeFn = isSerial ? WriteSerial : WriteSSH;
+  const eventPrefix = isSerial ? "serial" : "ssh";
+
   const onDataDispose = term.onData((data) => {
-    WriteSSH(sessionId, bytesToBase64(new TextEncoder().encode(data))).catch(console.error);
+    writeFn(sessionId, bytesToBase64(new TextEncoder().encode(data))).catch(console.error);
   });
 
-  const dataEvent = "ssh:data:" + sessionId;
+  const dataEvent = `${eventPrefix}:data:${sessionId}`;
   EventsOn(dataEvent, (dataB64: string) => {
     const binary = atob(dataB64);
     const bytes = new Uint8Array(binary.length);
@@ -60,7 +64,7 @@ export function getOrCreateTerminal(
     term.write(bytes);
   });
 
-  const closedEvent = "ssh:closed:" + sessionId;
+  const closedEvent = `${eventPrefix}:closed:${sessionId}`;
   EventsOn(closedEvent, () => {
     term.write("\r\n\x1b[31m[Connection closed]\x1b[0m\r\n");
     useTerminalStore.getState().markClosed(sessionId);

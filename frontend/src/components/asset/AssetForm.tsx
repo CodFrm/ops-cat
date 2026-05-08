@@ -46,6 +46,7 @@ import {
   type KafkaSchemaRegistryForm,
 } from "@/components/asset/KafkaConfigSection";
 import { K8sConfigSection } from "@/components/asset/K8sConfigSection";
+import { SerialConfigSection } from "@/components/asset/SerialConfigSection";
 import { useExtensionStore } from "@/extension";
 import { ExtensionConfigForm } from "@/components/asset/ExtensionConfigForm";
 
@@ -179,7 +180,7 @@ interface KafkaConnectClusterConfig {
   tls_key_file?: string;
 }
 
-type AssetType = "ssh" | "database" | "redis" | "mongodb" | "kafka" | "k8s" | (string & {});
+type AssetType = "ssh" | "database" | "redis" | "mongodb" | "kafka" | "k8s" | "serial" | (string & {});
 
 const DEFAULT_PORTS: Record<string, number> = {
   ssh: 22,
@@ -378,6 +379,14 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   const [k8sContext, setK8sContext] = useState("");
   const [showKubeconfig, setShowKubeconfig] = useState(false);
 
+  // Serial fields
+  const [serialPortPath, setSerialPortPath] = useState("");
+  const [serialBaudRate, setSerialBaudRate] = useState(115200);
+  const [serialDataBits, setSerialDataBits] = useState(8);
+  const [serialStopBits, setSerialStopBits] = useState("1");
+  const [serialParity, setSerialParity] = useState("none");
+  const [serialFlowControl, setSerialFlowControl] = useState("none");
+
   // Extension config
   const [extConfig, setExtConfig] = useState<Record<string, unknown>>({});
 
@@ -426,6 +435,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
           loadKafkaConfig(editAsset);
         } else if (editType === "k8s") {
           loadK8sConfig(editAsset);
+        } else if (editType === "serial") {
+          loadSerialConfig(editAsset);
         } else {
           // Extension type: load decrypted config
           const extInfo = useExtensionStore.getState().getExtensionForAssetType(editType);
@@ -450,6 +461,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         resetMongoDBFields();
         resetKafkaFields();
         resetK8sFields();
+        resetSerialFields();
         setExtConfig({});
       }
     }
@@ -763,6 +775,29 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setShowKubeconfig(false);
   };
 
+  const loadSerialConfig = (asset: asset_entity.Asset) => {
+    try {
+      const cfg = JSON.parse(asset.Config || "{}");
+      setSerialPortPath(cfg.port_path || "");
+      setSerialBaudRate(cfg.baud_rate || 115200);
+      setSerialDataBits(cfg.data_bits || 8);
+      setSerialStopBits(cfg.stop_bits || "1");
+      setSerialParity(cfg.parity || "none");
+      setSerialFlowControl(cfg.flow_control || "none");
+    } catch {
+      resetSerialFields();
+    }
+  };
+
+  const resetSerialFields = () => {
+    setSerialPortPath("");
+    setSerialBaudRate(115200);
+    setSerialDataBits(8);
+    setSerialStopBits("1");
+    setSerialParity("none");
+    setSerialFlowControl("none");
+  };
+
   const handleTypeChange = (newType: AssetType) => {
     if (newType === assetType) return;
     setAssetType(newType);
@@ -777,6 +812,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     setPasswordCredentialId(0);
     setIcon(newType === "database" ? DEFAULT_ICONS[driver] || "mysql" : DEFAULT_ICONS[newType] || "server");
     if (newType === "k8s") setHost("");
+    if (newType === "serial") setHost("");
   };
 
   const handleDriverChange = (newDriver: string) => {
@@ -1249,6 +1285,16 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       if (k8sNamespace) k8sConfig.namespace = k8sNamespace;
       if (k8sContext) k8sConfig.context = k8sContext;
       config = JSON.stringify(k8sConfig);
+    } else if (assetType === "serial") {
+      const serialConfig: Record<string, unknown> = {
+        port_path: serialPortPath,
+        baud_rate: serialBaudRate,
+        data_bits: serialDataBits,
+        stop_bits: serialStopBits,
+        parity: serialParity,
+      };
+      if (serialFlowControl !== "none") serialConfig.flow_control = serialFlowControl;
+      config = JSON.stringify(serialConfig);
     } else {
       // Extension type: encrypt password fields from configSchema before saving
       const extInfo = useExtensionStore.getState().getExtensionForAssetType(assetType);
@@ -1631,6 +1677,24 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             />
           )}
 
+          {/* Serial config */}
+          {assetType === "serial" && (
+            <SerialConfigSection
+              portPath={serialPortPath}
+              setPortPath={setSerialPortPath}
+              baudRate={serialBaudRate}
+              setBaudRate={setSerialBaudRate}
+              dataBits={serialDataBits}
+              setDataBits={setSerialDataBits}
+              stopBits={serialStopBits}
+              setStopBits={setSerialStopBits}
+              parity={serialParity}
+              setParity={setSerialParity}
+              flowControl={serialFlowControl}
+              setFlowControl={setSerialFlowControl}
+            />
+          )}
+
           {/* Extension type config */}
           {assetType !== "ssh" &&
             assetType !== "database" &&
@@ -1638,6 +1702,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             assetType !== "mongodb" &&
             assetType !== "kafka" &&
             assetType !== "k8s" &&
+            assetType !== "serial" &&
             (() => {
               const extInfo = useExtensionStore.getState().getExtensionForAssetType(assetType);
               if (!extInfo) return null;

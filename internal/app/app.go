@@ -20,6 +20,7 @@ import (
 	"github.com/opskat/opskat/internal/service/extension_svc"
 	"github.com/opskat/opskat/internal/service/kafka_svc"
 	"github.com/opskat/opskat/internal/service/redis_svc"
+	"github.com/opskat/opskat/internal/service/serial_svc"
 	"github.com/opskat/opskat/internal/service/sftp_svc"
 	"github.com/opskat/opskat/internal/service/snippet_svc"
 	"github.com/opskat/opskat/internal/service/ssh_svc"
@@ -77,6 +78,7 @@ type App struct {
 	sshProxyServer          *sshpool.Server            // SSH 连接池 Unix socket 服务
 	redisService            *redis_svc.Service         // Redis 浏览/编辑服务
 	kafkaService            *kafka_svc.Service         // Kafka 管理服务
+	serialManager           *serial_svc.Manager        // 串口连接管理器
 	shutdownCh              chan struct{}              // 关闭信号，cleanup 时 close 以解除所有阻塞等待
 	pendingAuthResponses    sync.Map                   // map[string]chan []string（keyboard-interactive 认证响应用）
 	pendingHostKeyResponses sync.Map                   // map[string]chan ssh_svc.HostKeyAction（主机密钥校验响应用）
@@ -99,6 +101,7 @@ func NewApp(skill SkillContent) *App {
 		skillContent:   skill,
 		sshManager:     mgr,
 		sftpService:    sftp_svc.NewService(mgr),
+		serialManager:  serial_svc.NewManager(),
 		permissionChan: make(chan ai.PermissionResponse, 1),
 		shutdownCh:     make(chan struct{}),
 		flushAckCh:     make(chan struct{}, 1),

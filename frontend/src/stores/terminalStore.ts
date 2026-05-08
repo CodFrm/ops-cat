@@ -9,6 +9,8 @@ import {
   SplitSSH,
   UpdateAssetPassword,
   WriteSSH,
+  ConnectSerialAsync,
+  DisconnectSerial,
 } from "../../wailsjs/go/app/App";
 import { app, asset_entity } from "../../wailsjs/go/models";
 import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
@@ -211,19 +213,21 @@ function unregisterSessionSyncListener(sessionId: string) {
 // === Connection event listener (shared by connect/reconnect/restore) ===
 
 /**
- * Sets up event listeners for an SSH connection's progress events.
+ * Sets up event listeners for a connection's progress events.
  * Handles progress/error/auth_challenge uniformly; delegates "connected" to callback.
  *
- * @param connectionId - The connection ID from ConnectSSHAsync
- * @param onConnected - Called when SSH session is established (receives sessionId)
- * @param onFinished - Optional cleanup called on both "connected" and "error" (e.g. clear connectingAssetIds)
+ * @param connectionId - The connection ID from ConnectSSHAsync / ConnectSerialAsync
+ * @param onConnected - Called when session is established (receives sessionId)
+ * @param onFinished - Optional cleanup called on both "connected" and "error"
+ * @param transport - "ssh" or "serial" (determines event name prefix)
  */
 function setupConnectionListener(
   connectionId: string,
   onConnected: (sessionId: string) => void,
-  onFinished?: () => void
+  onFinished?: () => void,
+  transport: "ssh" | "serial" = "ssh"
 ) {
-  const eventName = `ssh:connect:${connectionId}`;
+  const eventName = `${transport}:connect:${connectionId}`;
   EventsOn(
     eventName,
     (event: {
@@ -416,15 +420,21 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }));
 
     try {
-      const req = new app.SSHConnectRequest({
-        assetId,
-        password,
-        key: "",
-        cols: 80,
-        rows: 24,
-      });
+      let connectionId: string;
+      const isSerial = asset.Type === "serial";
 
-      const connectionId = await ConnectSSHAsync(req);
+      if (isSerial) {
+        connectionId = await ConnectSerialAsync({ assetId });
+      } else {
+        const req = new app.SSHConnectRequest({
+          assetId,
+          password,
+          key: "",
+          cols: 80,
+          rows: 24,
+        });
+        connectionId = await ConnectSSHAsync(req);
+      }
 
       // Create tab in tabStore
       tabStore.openTab({
@@ -503,7 +513,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
           // Update tab id in tabStore
           tabStore.replaceTabId(connectionId, sessionId);
-          registerSessionSyncListener(sessionId);
+          if (!isSerial) {
+            registerSessionSyncListener(sessionId);
+          }
 
           // Write pending snippet input (no trailing \r — user sees content and decides to execute)
           if (pendingInput) {
@@ -517,7 +529,8 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             next.delete(assetId);
             return { connectingAssetIds: next };
           });
-        }
+        },
+        isSerial ? "serial" : "ssh"
       );
 
       return connectionId;
@@ -732,7 +745,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   disconnect: (sessionId) => {
     unregisterSessionSyncListener(sessionId);
-    DisconnectSSH(sessionId);
+    if (sessionId.startsWith("serial-")) {
+      DisconnectSerial(sessionId);
+    } else {
+      DisconnectSSH(sessionId);
+    }
     set((state) => {
       const newTabData = { ...state.tabData };
       for (const [tabId, data] of Object.entries(newTabData)) {
