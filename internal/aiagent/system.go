@@ -179,6 +179,60 @@ func (s *System) StopStream() {
 	}
 }
 
+// ErrUnknownSlashCommand is returned by RunSlash when the user types a
+// /command that isn't registered. Re-exported from cago so callers can
+// errors.Is against it without importing app/coding.
+var ErrUnknownSlashCommand = coding.ErrUnknownSlashCommand
+
+// SlashResult is the outcome of resolving a /slash line.
+//
+//   - For a non-slash line: IsSlash is false; both Prompt and Notice are empty.
+//     Caller should fall through to the legacy send path.
+//   - For an expanded template: Prompt holds the expanded text; caller should
+//     feed it back through System.Stream as the next prompt.
+//   - For a builtin: Prompt holds output.UserText (often empty), Notice holds
+//     output.Notice (often non-empty). Frontend should render Notice as a
+//     synthesized system message.
+type SlashResult struct {
+	IsSlash bool
+	Prompt  string
+	Notice  string
+}
+
+// RunSlash resolves a chat-input line through the slash registry. See
+// SlashResult for the return semantics. Returns ErrUnknownSlashCommand on
+// unrecognized /commands.
+func (s *System) RunSlash(ctx context.Context, line string) (SlashResult, error) {
+	reg := s.cs.SlashRegistry()
+	if reg == nil {
+		// Slash disabled at System construction — pass through as a normal line.
+		return SlashResult{IsSlash: false}, nil
+	}
+	res, err := reg.Resolve(line)
+	if err != nil {
+		return SlashResult{}, err
+	}
+	if !res.IsSlash {
+		return SlashResult{IsSlash: false}, nil
+	}
+	if res.IsBuiltin {
+		out, runErr := res.Run(ctx, s.sess)
+		if runErr != nil {
+			return SlashResult{}, runErr
+		}
+		return SlashResult{
+			IsSlash: true,
+			Prompt:  out.UserText,
+			Notice:  out.Notice,
+		}, nil
+	}
+	// Template path: caller will feed res.Literal back into Stream.
+	return SlashResult{
+		IsSlash: true,
+		Prompt:  res.Literal,
+	}, nil
+}
+
 // Close releases sub-agents, the parent agent, the session store handle, and
 // per-Conversation Deps (idempotent). Subsequent calls return the same error.
 func (s *System) Close(ctx context.Context) error {

@@ -647,6 +647,44 @@ func (a *App) QueueAIMessage(convID int64, content string, mentions []ai.Mention
 	return nil
 }
 
+// RunAISlashResult mirrors aiagent.SlashResult shape for Wails type generation.
+type RunAISlashResult struct {
+	IsSlash bool   `json:"isSlash"`
+	Prompt  string `json:"prompt"`
+	Notice  string `json:"notice"`
+}
+
+// RunAISlash resolves a /slash command for the active cago Session.
+//   - IsSlash=false → frontend should fall through to SendAIMessage with the
+//     original line.
+//   - Prompt non-empty → frontend should call SendAIMessage with Prompt as the
+//     user message (template expansion).
+//   - Notice non-empty → frontend should render it as a synthesized system
+//     message (e.g., /help output, /compact summary).
+//
+// Errors: cago path disabled, conversation has no active System, or the
+// resolved builtin returned an error. Unknown /commands return
+// aiagent.ErrUnknownSlashCommand.
+func (a *App) RunAISlash(convID int64, line string) (*RunAISlashResult, error) {
+	if !aiagent.Enabled() {
+		return nil, fmt.Errorf("slash 命令仅在 cago 后端启用时可用")
+	}
+	v, ok := a.aiAgentSystems.Load(convID)
+	if !ok {
+		return nil, fmt.Errorf("会话 %d 没有活跃的 AI System", convID)
+	}
+	sys := v.(*aiagent.System)
+	res, err := sys.RunSlash(a.langCtx(), line)
+	if err != nil {
+		return nil, err
+	}
+	return &RunAISlashResult{
+		IsSlash: res.IsSlash,
+		Prompt:  res.Prompt,
+		Notice:  res.Notice,
+	}, nil
+}
+
 // StopAIGeneration 停止指定会话的 AI 生成
 func (a *App) StopAIGeneration(convID int64) error {
 	if aiagent.Enabled() {
