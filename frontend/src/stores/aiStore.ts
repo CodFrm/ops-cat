@@ -9,7 +9,6 @@ import {
   ListConversations,
   LoadConversationMessages,
   DeleteConversation,
-  SaveConversationMessages,
   UpdateConversationTitle,
   PickConversationCwd,
 } from "../../wailsjs/go/app/App";
@@ -335,9 +334,6 @@ function loadInitialSidebarState() {
 const conversationListeners = new Map<number, { cancel: (() => void) | null; generation: number }>();
 const conversationStopRequests = new Set<number>();
 
-// 每个 conversation 只保留一个待执行的落盘定时器。
-// 流式输出期间会持续增量更新消息，如果每次都立即保存，磁盘写入会过于频繁。
-const persistTimers = new Map<number, number>();
 const conversationRenameVersions = new Map<number, number>();
 const conversationRenameInFlight = new Set<number>();
 let conversationListBarrier = 0;
@@ -362,7 +358,6 @@ function cleanupConvListener(convId: number) {
   conversationListeners.delete(convId);
   conversationStopRequests.delete(convId);
   cleanupStreamBuffer(convId);
-  cleanupPersistTimer(convId);
 }
 
 function invalidateConvListenerForReplay(convId: number) {
@@ -374,42 +369,6 @@ function invalidateConvListenerForReplay(convId: number) {
     listener.cancel = null;
   }
   cleanupStreamBuffer(convId);
-}
-
-// cleanupPersistTimer 清理指定 conversation 尚未执行的落盘定时器。
-function cleanupPersistTimer(convId: number) {
-  const timer = persistTimers.get(convId);
-  if (timer !== undefined) {
-    window.clearTimeout(timer);
-    persistTimers.delete(convId);
-  }
-}
-
-// persistConversationSnapshot 将当前 conversation 的消息快照保存到持久化存储。
-function persistConversationSnapshot(convId: number, includeStreaming = false) {
-  const msgs = useAIStore.getState().conversationMessages[convId];
-  if (!msgs) return;
-  SaveConversationMessages(convId, toDisplayMessages(msgs, includeStreaming)).catch(() => {});
-}
-
-// schedulePersist 为 conversation 安排一次短延迟的消息快照保存。
-// 流式输出期间做一次短延迟防抖：
-// 1. 降低高频写入带来的性能开销；
-// 2. 让应用异常退出前，尽量已经落下最近一段对话快照。
-function schedulePersist(convId: number, includeStreaming = false) {
-  cleanupPersistTimer(convId);
-  const timer = window.setTimeout(() => {
-    persistTimers.delete(convId);
-    persistConversationSnapshot(convId, includeStreaming);
-  }, 300);
-  persistTimers.set(convId, timer);
-}
-
-// persistNow 取消 schedulePersist 的防抖定时器，立即落盘一次。
-// 用于低频关键事件（用户发送、工具调用、审批等），避免防抖窗口内崩溃丢数据。
-function persistNow(convId: number, includeStreaming = false) {
-  cleanupPersistTimer(convId);
-  persistConversationSnapshot(convId, includeStreaming);
 }
 
 // === 流式事件缓冲（性能优化：合并高频 content/thinking 事件，按帧刷新）===
@@ -465,9 +424,6 @@ function flushStreamBuffer(convId: number) {
       conversationMessages: { ...state.conversationMessages, [convId]: updated },
     };
   });
-
-  // 增量内容刷入消息列表后，同步安排一次防抖落盘。
-  schedulePersist(convId, true);
 }
 
 function cleanupStreamBuffer(convId: number) {
@@ -498,51 +454,6 @@ function appendText(blocks: ContentBlock[], text: string): ContentBlock[] {
     newBlocks.push({ type: "text", content: text });
   }
   return newBlocks;
-}
-
-// 持久化 streaming 快照时需要归一化的中间态 → 终态。
-// 应用异常退出后重启，这些 block 不会再收到后端事件来结束，保留 running/pending_confirm
-// 会让 UI 上长期显示"运行中/待确认"的 spinner 而没有任何进展。统一归一化为 cancelled。
-const STREAMING_SNAPSHOT_STATUS_OVERRIDES: Record<string, ContentBlock["status"]> = {
-  running: "cancelled",
-  pending_confirm: "cancelled",
-};
-
-function normalizeSnapshotStatus(status: ContentBlock["status"]): ContentBlock["status"] {
-  if (!status) return status;
-  return STREAMING_SNAPSHOT_STATUS_OVERRIDES[status] ?? status;
-}
-
-function toDisplayMessages(msgs: ChatMessage[], includeStreaming = false): app.ConversationDisplayMessage[] {
-  return msgs
-    .filter((m) => includeStreaming || !m.streaming)
-    .map(
-      (m) =>
-        new app.ConversationDisplayMessage({
-          role: m.role,
-          content: m.content,
-          blocks: m.blocks.map(
-            (b) =>
-              new conversation_entity.ContentBlock({
-                type: b.type,
-                content: b.content,
-                toolName: b.toolName,
-                toolInput: b.toolInput,
-                status: includeStreaming ? normalizeSnapshotStatus(b.status) : b.status,
-              })
-          ),
-          mentions: (m.mentions || []).map(
-            (mr) =>
-              new conversation_entity.MentionRef({
-                assetId: mr.assetId,
-                name: mr.name,
-                start: mr.start,
-                end: mr.end,
-              })
-          ),
-          tokenUsage: m.tokenUsage ? new conversation_entity.TokenUsage(m.tokenUsage) : undefined,
-        })
-    );
 }
 
 function convertDisplayMessages(displayMsgs: app.ConversationDisplayMessage[]): ChatMessage[] {
@@ -883,11 +794,6 @@ function updateConversation(
       conversationStreaming: newConvStreaming,
     };
   });
-
-  if (updates.messages !== undefined) {
-    // 消息列表发生变化后，补一轮防抖持久化。
-    schedulePersist(convId, true);
-  }
 }
 
 function drainQueue(convId: number) {
@@ -922,7 +828,6 @@ function drainQueue(convId: number) {
 function prepareConversationForReplay(convId: number) {
   conversationStopRequests.delete(convId);
   invalidateConvListenerForReplay(convId);
-  cleanupPersistTimer(convId);
   updateConversation(convId, { sending: false, pendingQueue: [] });
 }
 
@@ -1019,7 +924,6 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       }));
       if (updated) {
         updateConversation(convId, { messages: updated });
-        persistNow(convId, true);
       }
       break;
     }
@@ -1037,7 +941,6 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       });
       if (updated) {
         updateConversation(convId, { messages: updated });
-        persistNow(convId, true);
       }
       break;
     }
@@ -1084,7 +987,6 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       });
       if (updated) {
         updateConversation(convId, { messages: updated });
-        persistNow(convId, true);
       }
       break;
     }
@@ -1139,7 +1041,6 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       });
       if (updated) {
         updateConversation(convId, { messages: updated });
-        persistNow(convId, true);
       }
       break;
     }
@@ -1162,7 +1063,6 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       });
       if (updated) {
         updateConversation(convId, { messages: updated });
-        persistNow(convId, true);
       }
 
       if (document.hidden) {
@@ -1189,7 +1089,6 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       });
       if (updated) {
         updateConversation(convId, { messages: updated });
-        persistNow(convId, true);
       }
       break;
     }
@@ -1203,7 +1102,6 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       });
       if (updated) {
         updateConversation(convId, { messages: updated });
-        persistNow(convId, true);
       }
       break;
     }
@@ -1234,8 +1132,6 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       });
       const newQueue = curQueue.length > 0 ? curQueue.slice(1) : [];
       updateConversation(convId, { messages: nextMsgs, pendingQueue: newQueue });
-      // 排队消息被消费（插入新 user + 开启新 assistant）属于低频关键事件，立即落盘。
-      persistNow(convId, true);
       break;
     }
 
@@ -1275,7 +1171,6 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       });
       const newQueue = curQueue.length > items.length ? curQueue.slice(items.length) : [];
       updateConversation(convId, { messages: nextMsgs, pendingQueue: newQueue });
-      persistNow(convId, true);
       break;
     }
 
@@ -1308,9 +1203,6 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
         updateConversation(convId, { sending: false });
       }
 
-      // 终态立即落盘
-      cleanupPersistTimer(convId);
-      persistConversationSnapshot(convId);
       useAIStore.getState().fetchConversations();
 
       if (hasConversationHosts(convId)) {
@@ -1347,9 +1239,6 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
         updateConversation(convId, { sending: false });
       }
 
-      // 终态立即落盘，保证标题刷新前后都能恢复到完整会话内容。
-      cleanupPersistTimer(convId);
-      persistConversationSnapshot(convId);
       // Refresh conversations (title may have updated); sync any open tab bound to this conv.
       useAIStore
         .getState()
@@ -1392,9 +1281,6 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
         updateConversation(convId, { sending: false });
       }
 
-      // 错误态同样需要落盘，否则强制重启后会丢掉最后一次失败上下文。
-      cleanupPersistTimer(convId);
-      persistConversationSnapshot(convId, true);
       cleanupConversationIfUnused(convId);
       break;
     }
@@ -1551,9 +1437,6 @@ async function _sendForConversation(convId: number, content: string, mentions?: 
       blocks: [],
     });
     updateConversation(convId, { messages: newMessages, sending: true });
-    // 用户消息是用户亲手输入的内容，最不应该丢；绕过 300ms 防抖立即落盘。
-    // includeStreaming=true 保留历史未完成 block（如有），与 schedulePersist 的默认行为一致。
-    persistNow(convId, true);
   }
 
   const assistantMsg: ChatMessage = {
@@ -1958,12 +1841,6 @@ export const useAIStore = create<AIState>((set, get) => {
       if (index === -1) return;
 
       const closingTab = state.sidebarTabs[index];
-      if (closingTab.conversationId != null) {
-        // 侧边宿主关闭前先把当前会话快照刷盘；
-        // 但真正的 listener / persist timer 回收要等到确认没有其它宿主仍引用该会话。
-        cleanupPersistTimer(closingTab.conversationId);
-        persistConversationSnapshot(closingTab.conversationId, true);
-      }
 
       set((currentState) => {
         const nextSidebarTabs = currentState.sidebarTabs.filter((tab) => tab.id !== tabId);
@@ -2407,11 +2284,6 @@ registerTabCloseHook((tab) => {
   const meta = tab.meta as AITabMeta;
 
   if (meta.conversationId) {
-    // 关闭标签前补一次最终快照，避免最后一段对话未落盘。
-    // 关闭时流式输出可能仍在进行（streaming=true），必须传 includeStreaming=true 才能
-    // 把最后一段 assistant 消息一起落盘；toDisplayMessages 会把未完结的 block 归一为 cancelled。
-    cleanupPersistTimer(meta.conversationId);
-    persistConversationSnapshot(meta.conversationId, true);
     cleanupConversationIfUnused(meta.conversationId, { ignoreMainTabId: tab.id });
   }
 
@@ -2478,48 +2350,13 @@ registerTabRestoreHook("ai", (tabs) => {
   restoreAITabs(tabs).catch(() => {});
 });
 
-// === Shutdown Flush: 关窗前兜底落盘所有活跃会话 ===
-
-// flushAllConversations 同步发起所有会话落盘（fire-and-forget）。
-// beforeunload 场景用这个：页面即将销毁，没法 await Promise，只能靠 postMessage 已经送达 Go 端。
-function flushAllConversations() {
-  const allMsgs = useAIStore.getState().conversationMessages;
-  for (const convIdStr of Object.keys(allMsgs)) {
-    const convId = Number(convIdStr);
-    if (!convId) continue;
-    persistNow(convId, true);
-  }
-}
-
-// flushAllConversationsAsync 等待所有会话落盘完成后返回。
-// Wails OnBeforeClose 场景用这个：后端在等 ai:flush-done 回执再放行。
-async function flushAllConversationsAsync(): Promise<void> {
-  const allMsgs = useAIStore.getState().conversationMessages;
-  const promises: Promise<unknown>[] = [];
-  for (const convIdStr of Object.keys(allMsgs)) {
-    const convId = Number(convIdStr);
-    if (!convId) continue;
-    cleanupPersistTimer(convId);
-    const msgs = allMsgs[convId];
-    if (!msgs) continue;
-    promises.push(SaveConversationMessages(convId, toDisplayMessages(msgs, true)).catch(() => {}));
-  }
-  await Promise.allSettled(promises);
-}
-
-// beforeunload 在 Wails v2 WebView 里通常不会触发（WebView 被直接销毁，不走 navigation 卸载流程），
-// 但保留作为兜底：极端场景（开发者工具刷新、devserver 热更新、WebView 异常重启）下仍可能派发。
-// 主路径是 OnBeforeClose 的 ai:flush-all/ai:flush-done ack 机制，不要依赖 beforeunload。
-if (typeof window !== "undefined") {
-  window.addEventListener("beforeunload", flushAllConversations);
-}
-
-// Wails OnBeforeClose 会 emit ai:flush-all，前端等所有 IPC 回执到位后
-// 再 emit ai:flush-done 通知后端放行，避免后端暴力 sleep。
+// === Shutdown Flush ack: 后端 OnBeforeClose 仍在等 ai:flush-done 回执 ===
+//
+// 消息持久化已下沉到后端（cago gormStore 行级 upsert）。前端不再持有需要落盘的会话快照，
+// 但后端 main.go 的 OnBeforeClose 仍 emit ai:flush-all 并等 ai:flush-done。这里直接回执，
+// 让窗口尽快释放，避免后端等到超时才放行。
 EventsOn("ai:flush-all", () => {
-  flushAllConversationsAsync().finally(() => {
-    EventsEmit("ai:flush-done");
-  });
+  EventsEmit("ai:flush-done");
 });
 
 // === AI Send on Enter 设置 ===

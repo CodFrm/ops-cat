@@ -15,7 +15,6 @@ import {
   LoadConversationMessages,
   SendAIMessage,
   StopAIGeneration,
-  SaveConversationMessages,
   UpdateConversationTitle,
 } from "../../wailsjs/go/app/App";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
@@ -908,7 +907,6 @@ describe("editAndResendConversation", () => {
       activeSidebarTabId: null,
     });
     vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
-    vi.mocked(SaveConversationMessages).mockResolvedValue(undefined as any);
     vi.mocked(StopAIGeneration).mockResolvedValue(undefined as any);
     vi.mocked(UpdateConversationTitle).mockResolvedValue(undefined as any);
   });
@@ -1176,139 +1174,6 @@ describe("editAndResendConversation", () => {
 
     resolveRefresh?.([{ ID: 93, Title: "new first prompt", Updatetime: 1 }] as any);
     await replayPromise;
-  });
-});
-
-describe("persistence debounce & streaming snapshot", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.clearAllMocks();
-    localStorage.clear();
-    useTabStore.setState({ tabs: [], activeTabId: null });
-    useAIStore.setState({
-      tabStates: {},
-      conversations: [],
-      conversationMessages: {},
-      conversationStreaming: {},
-    });
-    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
-    vi.mocked(SaveConversationMessages).mockResolvedValue(undefined as any);
-    vi.mocked(EventsOn).mockReturnValue(() => {});
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("persists user message immediately and debounces follow-up streaming snapshot", async () => {
-    const tabId = "ai-100";
-    useTabStore.setState({
-      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 100, title: "t" } }],
-      activeTabId: tabId,
-    });
-    useAIStore.setState({ tabStates: { [tabId]: createTabState() } });
-
-    // sendToTab 新行为：用户消息立即落盘一次（避免防抖窗口内崩溃丢失用户输入），
-    // 紧接着的 assistant placeholder 更新走 300ms 防抖。
-    await useAIStore.getState().sendToTab(tabId, "hi");
-    expect(SaveConversationMessages).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(SaveConversationMessages).mock.calls[0][0]).toBe(100);
-
-    await vi.advanceTimersByTimeAsync(300);
-    expect(SaveConversationMessages).toHaveBeenCalledTimes(2);
-  });
-
-  it("normalizes running/pending_confirm blocks when persisting a streaming snapshot", async () => {
-    const tabId = "ai-101";
-    useTabStore.setState({
-      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 101, title: "t" } }],
-      activeTabId: tabId,
-    });
-    // Pre-seed an in-progress assistant message with blocks in transient states.
-    useAIStore.setState({
-      tabStates: { [tabId]: createTabState() },
-      conversationMessages: {
-        101: [
-          {
-            role: "assistant",
-            content: "partial",
-            streaming: true,
-            blocks: [
-              { type: "tool", content: "", status: "running", toolName: "ssh" },
-              { type: "approval", content: "", status: "pending_confirm" },
-              { type: "text", content: "ok", status: "completed" },
-            ],
-          },
-        ],
-      },
-      conversationStreaming: { 101: { sending: false, pendingQueue: [] } },
-    });
-
-    await useAIStore.getState().sendToTab(tabId, "next");
-    await vi.advanceTimersByTimeAsync(300);
-
-    expect(SaveConversationMessages).toHaveBeenCalled();
-    const [, displayMsgs] = vi.mocked(SaveConversationMessages).mock.calls[0];
-    const assistant = (displayMsgs as any[]).find((m) => m.role === "assistant" && m.content === "partial");
-    expect(assistant).toBeTruthy();
-    expect(assistant.blocks.map((b: any) => b.status)).toEqual(["cancelled", "cancelled", "completed"]);
-  });
-
-  it("clears pending persist timer when closing the AI tab", async () => {
-    const tabId = "ai-102";
-    useTabStore.setState({
-      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 102, title: "t" } }],
-      activeTabId: tabId,
-    });
-    useAIStore.setState({ tabStates: { [tabId]: createTabState() } });
-
-    // sendToTab 会立即落盘一次（用户消息），后续 assistant placeholder 走 300ms 防抖。
-    await useAIStore.getState().sendToTab(tabId, "hi");
-    expect(SaveConversationMessages).toHaveBeenCalledTimes(1);
-
-    // 关闭标签要取消待定的防抖定时器，并同步 flush 一次最终快照。
-    useTabStore.getState().closeTab(tabId);
-    expect(SaveConversationMessages).toHaveBeenCalledTimes(2);
-
-    // 定时器已被清理，300ms 后不应再产生额外保存。
-    await vi.advanceTimersByTimeAsync(300);
-    expect(SaveConversationMessages).toHaveBeenCalledTimes(2);
-  });
-
-  it("preserves in-flight streaming assistant message when closing tab mid-stream", () => {
-    const tabId = "ai-103";
-    useTabStore.setState({
-      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 103, title: "t" } }],
-      activeTabId: tabId,
-    });
-    useAIStore.setState({
-      tabStates: { [tabId]: createTabState() },
-      conversationMessages: {
-        103: [
-          { role: "user", content: "go", blocks: [] },
-          {
-            role: "assistant",
-            content: "partial",
-            streaming: true,
-            blocks: [
-              { type: "tool", content: "", status: "running", toolName: "ssh" },
-              { type: "text", content: "ok", status: "completed" },
-            ],
-          },
-        ],
-      },
-      conversationStreaming: { 103: { sending: true, pendingQueue: [] } },
-    });
-
-    useTabStore.getState().closeTab(tabId);
-
-    expect(SaveConversationMessages).toHaveBeenCalledTimes(1);
-    const [convIdArg, displayMsgs] = vi.mocked(SaveConversationMessages).mock.calls[0];
-    expect(convIdArg).toBe(103);
-    const assistant = (displayMsgs as any[]).find((m) => m.role === "assistant");
-    expect(assistant).toBeTruthy();
-    expect(assistant.content).toBe("partial");
-    expect(assistant.blocks.map((b: any) => b.status)).toEqual(["cancelled", "completed"]);
   });
 });
 

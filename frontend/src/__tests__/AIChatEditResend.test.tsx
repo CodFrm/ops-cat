@@ -6,7 +6,7 @@ import { AIChatContent } from "@/components/ai/AIChatContent";
 import { useAIStore, type ChatMessage, type MentionRef } from "@/stores/aiStore";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTabStore } from "@/stores/tabStore";
-import { SendAIMessage, StopAIGeneration, SaveConversationMessages } from "../../wailsjs/go/app/App";
+import { SendAIMessage, StopAIGeneration } from "../../wailsjs/go/app/App";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 
 const mockInputSpies = vi.hoisted(() => ({
@@ -152,7 +152,6 @@ describe("AIChat edit-and-resend regression", () => {
 
     vi.mocked(SendAIMessage).mockResolvedValue(undefined as never);
     vi.mocked(StopAIGeneration).mockResolvedValue(undefined as never);
-    vi.mocked(SaveConversationMessages).mockResolvedValue(undefined as never);
     vi.mocked(EventsOn).mockImplementation((() => vi.fn()) as never);
   });
 
