@@ -84,3 +84,36 @@ func TestWrapToolDef_BuildsJSONSchemaFromParamDefs(t *testing.T) {
 		t.Fatalf("required=%v", schema.Required)
 	}
 }
+
+func TestOpsTools_HasAllExpectedNames(t *testing.T) {
+	tools := OpsTools(&Deps{})
+	want := map[string]bool{
+		"list_assets": false, "get_asset": false, "run_command": false,
+		"exec_k8s": false, "add_asset": false, "update_asset": false,
+		"list_groups": false, "get_group": false, "add_group": false, "update_group": false,
+		"upload_file": false, "download_file": false,
+		"exec_sql": false, "exec_redis": false, "exec_mongo": false,
+		"kafka_cluster": false, "kafka_topic": false, "kafka_consumer_group": false,
+		"kafka_acl": false, "kafka_schema": false, "kafka_connect": false, "kafka_message": false,
+		"request_permission": false, "batch_command": false, "exec_tool": false,
+	}
+	for _, tt := range tools {
+		if _, ok := want[tt.Name()]; ok {
+			want[tt.Name()] = true
+		}
+	}
+	for n, seen := range want {
+		if !seen {
+			t.Errorf("missing tool: %s", n)
+		}
+	}
+}
+
+func TestOpsTools_ExcludesSpawnAgent(t *testing.T) {
+	tools := OpsTools(&Deps{})
+	for _, tt := range tools {
+		if tt.Name() == "spawn_agent" {
+			t.Fatal("spawn_agent must be excluded — replaced by dispatch_subagent")
+		}
+	}
+}
