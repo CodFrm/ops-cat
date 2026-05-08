@@ -197,8 +197,11 @@ export function AIChatContent({
   const isStickyBottomRef = useRef(true);
   const scrollPersistTimerRef = useRef<number | null>(null);
 
-  // 滚动初始化 + sticky 状态追踪 + 侧边滚动位置防抖落盘。
-  // 必须放在「按 messages 跟随到底部」effect 之前，保证切换会话时先按保存值定位、再决定跟不跟。
+  // 滚动初始化 + sticky 状态追踪 + 侧边滚动位置防抖落盘 + 内容尺寸跟随。
+  // 之前用 useEffect([messages]) 在 commit 帧设一次 scrollTop = scrollHeight；问题是审批卡片里
+  // Textarea(rows 跟内容)/长 <code whitespace-pre-wrap>/Markdown 在 commit 后还会继续 reflow，
+  // scrollHeight 又长一截但 effect 不再触发，用户停在"老底部"上、新卡片漏在视口下方。
+  // 改用 ResizeObserver 跟随内容真实尺寸，只要还在 sticky 就一直追到底，避开布局 settle 的时序坑。
   useEffect(() => {
     const viewport = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]") as HTMLDivElement | null;
     if (!viewport) return;
@@ -228,21 +231,28 @@ export function AIChatContent({
       }
     };
     viewport.addEventListener("scroll", handleScroll, { passive: true });
+
+    // 监听内容真实尺寸变化（审批卡片初始化、Textarea 自增、Remember 展开、流式 token 等）。
+    // 仍 sticky 时无条件追到底；用户已上滑则 sticky=false，不打断。
+    const content = viewport.firstElementChild as HTMLElement | null;
+    let resizeObserver: ResizeObserver | null = null;
+    if (content && typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(() => {
+        if (!isStickyBottomRef.current) return;
+        viewport.scrollTop = viewport.scrollHeight;
+      });
+      resizeObserver.observe(content);
+    }
+
     return () => {
       viewport.removeEventListener("scroll", handleScroll);
+      resizeObserver?.disconnect();
       if (scrollPersistTimerRef.current !== null) {
         window.clearTimeout(scrollPersistTimerRef.current);
         scrollPersistTimerRef.current = null;
       }
     };
   }, [conversationId, setSidebarTabScrollTop, sideTabId]);
-
-  useEffect(() => {
-    if (!isStickyBottomRef.current) return;
-    const viewport = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]") as HTMLDivElement | null;
-    if (!viewport) return;
-    viewport.scrollTop = viewport.scrollHeight;
-  }, [messages]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -353,6 +363,14 @@ export function AIChatContent({
       const trimmed = text.trim();
       if (!trimmed && mentions.length === 0) return;
       const nextMentions = mentions.length > 0 ? mentions : undefined;
+      // 提交时同步把侧边 tab 的 inputDraft 改空、并取消挂起的防抖 timer。
+      // 否则 sendFromSidebarTab 异步新建会话后 conversationId 一变，
+      // 第 251 行 loadDraft effect 会读到尚未被 250ms 防抖刷掉的旧草稿，
+      // 把刚发送的消息回填到输入框，导致"消息已发出但输入框还有内容"。
+      if (sideTabId) {
+        cancelPendingDraft();
+        setSidebarTabInputDraft(sideTabId, { content: "", mentions: [] });
+      }
       if (editTarget && conversationId != null) {
         const activeTarget = editTarget;
         // 编辑模式改走 conversation 级 replay，提交成功后只在目标仍未变化时退出编辑态。
@@ -386,12 +404,14 @@ export function AIChatContent({
       }
     },
     [
+      cancelPendingDraft,
       conversationId,
       editAndResendConversation,
       editTarget,
       onSendOverride,
       sendToTab,
       setSidebarTabEditTarget,
+      setSidebarTabInputDraft,
       sideTabId,
       tabId,
     ]

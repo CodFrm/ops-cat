@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -127,11 +126,14 @@ func (a *App) CreateConversation() (*conversation_entity.Conversation, error) {
 		providerID = activeProvider.ID
 	}
 
-	home, _ := os.UserHomeDir()
+	workDir, err := defaultConversationWorkDir()
+	if err != nil {
+		return nil, err
+	}
 	conv := &conversation_entity.Conversation{
 		Title:      "新对话",
 		ProviderID: providerID,
-		WorkDir:    home, // user-chosen via UpdateConversationCwd; default = home
+		WorkDir:    workDir, // user-chosen via UpdateConversationCwd; default = ~/.opskat
 	}
 	if err := conversation_svc.Conversation().Create(ctx, conv); err != nil {
 		return nil, err
@@ -171,7 +173,7 @@ func (a *App) UpdateConversationCwd(id int64, cwd string) error {
 }
 
 // PickConversationCwd opens a native folder dialog seeded with the conversation's
-// current cwd (or user home if unset), persists the selection, and returns the
+// current cwd (or ~/.opskat if unset), persists the selection, and returns the
 // chosen path. Returns "" if the user canceled.
 func (a *App) PickConversationCwd(id int64) (string, error) {
 	conv, err := conversation_svc.Conversation().Get(a.langCtx(), id)
@@ -180,8 +182,10 @@ func (a *App) PickConversationCwd(id int64) (string, error) {
 	}
 	defaultDir := conv.WorkDir
 	if defaultDir == "" {
-		if home, herr := os.UserHomeDir(); herr == nil {
-			defaultDir = home
+		var derr error
+		defaultDir, derr = defaultConversationWorkDir()
+		if derr != nil {
+			return "", derr
 		}
 	}
 	chosen, err := wailsRuntime.OpenDirectoryDialog(a.ctx, wailsRuntime.OpenDialogOptions{
@@ -375,10 +379,10 @@ func (a *App) getOrCreateAIAgentSystem(convID int64) (*aiagent.System, error) {
 	}
 	cwd := conv.WorkDir
 	if cwd == "" {
-		if home, herr := os.UserHomeDir(); herr == nil {
-			cwd = home
-		} else {
-			cwd = os.TempDir()
+		var derr error
+		cwd, derr = defaultConversationWorkDir()
+		if derr != nil {
+			return nil, derr
 		}
 	}
 

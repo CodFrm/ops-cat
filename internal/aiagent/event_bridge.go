@@ -38,9 +38,21 @@ func (b *bridge) translate(convID int64, ev agent.Event) {
 	// follow-up 类 UserPromptSubmit 直接累积到 pendingFollowUps，不做后续翻译。
 	// drainInjections 在 runloop 单 goroutine 内连续 emit，期间不会插入其他 Kind
 	// 事件，所以累积窗口安全。
+	//
+	// 注意：cago runloop 在每次 Session.Stream 启动时也会遍历 req.History，对其中
+	// 所有 Kind=MessageKindFollowUp 的历史消息重新 emit EventUserPromptSubmit
+	// （cago/agents/agent/builtin_runloop.go:69-118 — 给 hook/observer 一次"看到所
+	// 有历史 follow-up"的机会）。这些回放没有对应的 Steer 推送，popDisplay 会返回
+	// ""；如果照样累积进 pendingFollowUps，前端会按 FIFO 写出 N 条空 user 气泡。
+	// 真实的 mid-stream Steer 注入一定先 pushPendingDisplay 再 sess.FollowUp，所
+	// 以 popDisplay 返回非空才是 live drain，返回空一律视作历史回放跳过。
 	if ev.Kind == agent.EventUserPromptSubmit && ev.Message != nil &&
 		ev.Message.Kind == agent.MessageKindFollowUp {
-		b.pendingFollowUps = append(b.pendingFollowUps, b.popDisplay())
+		display := b.popDisplay()
+		if display == "" {
+			return
+		}
+		b.pendingFollowUps = append(b.pendingFollowUps, display)
 		return
 	}
 

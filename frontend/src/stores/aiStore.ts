@@ -1244,7 +1244,11 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       // 成单条 batch 事件 → 这里按 FIFO 一次性追加 N 条 user 消息，只保留尾部 1 个
       // assistant placeholder。如果 N 条逐条走 queue_consumed，中间会 push 出空 asst
       // 占位（drain 期间不会有 token delta 进来填它），视觉上是一串空气泡。
-      const items = event.queue_contents || [];
+      //
+      // 防御：bridge 应已过滤历史 follow-up 回放（empty popDisplay → skip），但
+      // 仍兜底跳过空字符串项，避免任何漏网的空气泡渲染。
+      const rawItems = event.queue_contents || [];
+      const items = rawItems.filter((c) => c.length > 0);
       if (items.length === 0) break;
       const curQueue = useAIStore.getState().conversationStreaming[convId]?.pendingQueue || [];
       const nextMsgs = [...msgs];
@@ -1257,7 +1261,7 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
         const localItem = curQueue[i];
         nextMsgs.push({
           role: "user" as const,
-          content: items[i] || "",
+          content: items[i],
           mentions: localItem?.mentions,
           blocks: [],
           streaming: false,

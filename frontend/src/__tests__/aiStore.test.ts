@@ -1859,6 +1859,51 @@ describe("aiStore queue_consumed_batch", () => {
     expect(getMessages(convId).length).toBe(before);
   });
 
+  // 防御：bridge 已修过历史 follow-up 回放（cago runloop 每次 Stream 都会重放
+  // history 中的 MessageKindFollowUp，旧实现 popDisplay 返回 "" 就会把 N 条空串
+  // 累积 emit 出来，前端按 FIFO 写出 N 条空 user 气泡）。即使 bridge 兜不住，
+  // 前端也不应把空字符串项当成"用户消息"渲染。
+  it("queue_contents 含空字符串：跳过空项，仍能正确收尾上一个 asst placeholder", async () => {
+    const convId = 303;
+    const fire = await captureHandler(convId);
+
+    useAIStore.setState((s) => ({
+      conversationStreaming: {
+        ...s.conversationStreaming,
+        [convId]: { sending: true, pendingQueue: [{ text: "live1" }] },
+      },
+    }));
+    fire({ type: "thinking", content: "x" });
+
+    fire({ type: "queue_consumed_batch", queue_contents: ["", "live1", ""] });
+
+    const msgs = getMessages(convId);
+    const roles = msgs.map((m) => m.role);
+    // 只追加 1 条非空 user（"live1"）+ 1 条尾部 streaming asst；不出现空 user 气泡。
+    expect(roles).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(msgs[2]).toMatchObject({ role: "user", content: "live1" });
+    expect(msgs[3]).toMatchObject({ role: "assistant", content: "" });
+    expect(msgs[3].streaming).toBe(true);
+  });
+
+  // 兜底极端：所有 queue_contents 均为空（bridge 老 bug 的典型症状），前端必须
+  // 完全无操作 —— 不追加 user、不刷新 asst placeholder（继续保留当前流的 streaming
+  // 标志）。
+  it("queue_contents 全为空：完全忽略事件", async () => {
+    const convId = 304;
+    const fire = await captureHandler(convId);
+
+    fire({ type: "thinking", content: "x" });
+    const before = [...getMessages(convId)];
+
+    fire({ type: "queue_consumed_batch", queue_contents: ["", "", ""] });
+
+    const after = getMessages(convId);
+    expect(after.length).toBe(before.length);
+    // 上一条 asst 占位仍处于 streaming，而非被错误收尾。
+    expect(after[after.length - 1]).toMatchObject({ role: "assistant", streaming: true });
+  });
+
   it("queue_consumed_batch 后续真正流式 token 落到尾部 asst（中间 asst 不被填）", async () => {
     const convId = 302;
     const fire = await captureHandler(convId);

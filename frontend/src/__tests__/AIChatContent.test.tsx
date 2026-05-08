@@ -252,6 +252,51 @@ describe("AIChatContent", () => {
     expect(editAndResendConversation).not.toHaveBeenCalled();
   });
 
+  it("submitting from a fresh sidebar tab clears the saved draft so the new conversation does not re-load it", async () => {
+    const user = userEvent.setup();
+    const onSendOverride = vi.fn().mockResolvedValue(undefined);
+
+    useAIStore.setState({
+      sidebarTabs: [
+        {
+          id: "sidebar-7",
+          conversationId: null,
+          title: "新会话",
+          createdAt: 0,
+          uiState: {
+            inputDraft: { content: "hello", mentions: [] },
+            scrollTop: 0,
+            editTarget: null,
+          },
+        },
+      ],
+      conversationMessages: { 99: [] },
+      conversationStreaming: { 99: { sending: false, pendingQueue: [] } },
+    } as Partial<ReturnType<typeof useAIStore.getState>>);
+
+    const { rerender } = render(
+      <AIChatContent sideTabId="sidebar-7" conversationId={null} onSendOverride={onSendOverride} compact />
+    );
+
+    // 初次挂载先把保存的 "hello" 草稿回填到编辑器。
+    await waitFor(() => expect(mockInputSpies.loadDraft).toHaveBeenCalledWith({ content: "hello", mentions: [] }));
+    mockInputSpies.loadDraft.mockClear();
+
+    // 点击发送，把 "hello" 提交出去。
+    await user.click(screen.getByRole("button", { name: "mock-submit" }));
+    expect(onSendOverride).toHaveBeenCalledWith("hello", undefined);
+
+    // 模拟 sendFromSidebarTab 完成新建会话后把 conversationId 绑回侧边 tab。
+    useAIStore.setState((state) => ({
+      sidebarTabs: state.sidebarTabs.map((tab) => (tab.id === "sidebar-7" ? { ...tab, conversationId: 99 } : tab)),
+    }));
+    rerender(<AIChatContent sideTabId="sidebar-7" conversationId={99} onSendOverride={onSendOverride} compact />);
+
+    // conversationId 切换触发 loadDraft 时读到的应是空草稿，不是刚发出去的 "hello"。
+    await waitFor(() => expect(mockInputSpies.loadDraft).toHaveBeenLastCalledWith({ content: "", mentions: [] }));
+    expect(useAIStore.getState().sidebarTabs[0].uiState.inputDraft).toEqual({ content: "", mentions: [] });
+  });
+
   it("conversationId regenerate routes through direct mode", async () => {
     const user = userEvent.setup();
     const regenerateConversation = vi.fn().mockResolvedValue(undefined);

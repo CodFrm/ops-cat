@@ -123,6 +123,86 @@ func TestBridge_FollowUpsMergedIntoBatchOnNextEvent(t *testing.T) {
 	}
 }
 
+// 回归：cago runloop 在每次 Session.Stream 启动时会遍历 req.History（来自 store
+// 的持久化历史），对其中所有 Kind=MessageKindFollowUp 的消息重新 emit
+// EventUserPromptSubmit（cago/agents/agent/builtin_runloop.go:69-118 — 给 hook /
+// observer 一次"看到所有历史 follow-up"的机会）。
+// bridge 的 displayContent FIFO 是 per-System 内存结构，对历史回放本来就没有对应
+// 推送 → popDisplay() 返回 ""。如果 bridge 把这些空串累积进 pendingFollowUps 并
+// emit queue_consumed_batch，前端会按 FIFO 写出 N 条空 user 气泡（用户实际看到的
+// 截图症状）。
+//
+// 期望：popDisplay 返回 "" 时跳过该事件，不累积也不 emit。
+func TestBridge_HistoricalFollowUpReplayDoesNotEmitGhostBatch(t *testing.T) {
+	rec := &recordEmitter{}
+	popCount := 0
+	br := newBridge(rec, func() string {
+		popCount++
+		return "" // 模拟历史回放：FIFO 没有对应推送
+	})
+
+	// 3 条历史 follow-up 重放
+	for range 3 {
+		br.translate(1, agent.Event{
+			Kind:    agent.EventUserPromptSubmit,
+			Message: &agent.Message{Kind: agent.MessageKindFollowUp, Text: "history"},
+		})
+	}
+	// 紧跟一个非 follow-up 事件（模拟新 prompt 的 EventUserPromptSubmit 之后会
+	// 进入正常翻译路径；这里用 TextDelta 触发潜在的 flush 时机）。
+	br.translate(1, agent.Event{Kind: agent.EventTextDelta, Text: "hi"})
+
+	// 不应该出现任何 queue_consumed_batch
+	for _, ev := range rec.events {
+		if ev.Type == "queue_consumed_batch" {
+			t.Fatalf("historical replay leaked a ghost queue_consumed_batch: %+v", ev)
+		}
+	}
+}
+
+// 回归：历史回放（empty pop）和真实 Steer 注入（non-empty pop）混合时，bridge
+// 仅累积真实注入。前端 queue_consumed_batch 应只包含 Steer 推送的 displayContent。
+func TestBridge_MixedHistoricalAndLiveFollowUpsOnlyEmitLive(t *testing.T) {
+	rec := &recordEmitter{}
+	// FIFO 模拟：head=空(历史) → "live1" → 空(历史) → "live2"
+	queue := []string{"", "live1", "", "live2"}
+	br := newBridge(rec, func() string {
+		if len(queue) == 0 {
+			return ""
+		}
+		v := queue[0]
+		queue = queue[1:]
+		return v
+	})
+
+	for range 4 {
+		br.translate(1, agent.Event{
+			Kind:    agent.EventUserPromptSubmit,
+			Message: &agent.Message{Kind: agent.MessageKindFollowUp, Text: "x"},
+		})
+	}
+	br.translate(1, agent.Event{Kind: agent.EventTextDelta, Text: "ok"})
+
+	var batch *ai.StreamEvent
+	for i := range rec.events {
+		if rec.events[i].Type == "queue_consumed_batch" {
+			batch = &rec.events[i]
+			break
+		}
+	}
+	if batch == nil {
+		t.Fatalf("expected queue_consumed_batch for live drains, got events: %+v", rec.events)
+	}
+	if got, want := batch.QueueContents, []string{"live1", "live2"}; len(got) != len(want) {
+		t.Fatalf("QueueContents = %v, want %v", got, want)
+	}
+	for i, want := range []string{"live1", "live2"} {
+		if batch.QueueContents[i] != want {
+			t.Fatalf("QueueContents[%d]=%q, want %q", i, batch.QueueContents[i], want)
+		}
+	}
+}
+
 // 非 follow-up 类型的 EventUserPromptSubmit（如初始 prompt 的 system-style submit）
 // 不应进入累积窗口；应该直接放行（bridge 当前没有翻译规则 → silently ignored，但
 // 关键是不会被错放进 pendingFollowUps）。
