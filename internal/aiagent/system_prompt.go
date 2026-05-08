@@ -13,7 +13,7 @@ import "strings"
 //   - opsToolPlaybook: list_assets / exec_* / batch_command / request_permission
 //     的协作模式（每个工具的 description 只描述自己，缺横向搭配指引）
 //   - subagentRouting: 6 种 dispatch_subagent type 的选择策略（cago 默认 3 种
-//     + ops-* 3 种）
+//   - ops-* 3 种）
 //   - mentionProtocol: 解释 @assetname 协议（每轮 mention 由 promptHook 动态注入；
 //     这里给模型一个常驻语义说明）
 //   - approvalContext: 审批 / 拒绝是 first-class 流程，被拒必须停

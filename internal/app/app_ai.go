@@ -172,7 +172,7 @@ func (a *App) UpdateConversationCwd(id int64, cwd string) error {
 
 // PickConversationCwd opens a native folder dialog seeded with the conversation's
 // current cwd (or user home if unset), persists the selection, and returns the
-// chosen path. Returns "" if the user cancelled.
+// chosen path. Returns "" if the user canceled.
 func (a *App) PickConversationCwd(id int64) (string, error) {
 	conv, err := conversation_svc.Conversation().Get(a.langCtx(), id)
 	if err != nil {
@@ -193,7 +193,7 @@ func (a *App) PickConversationCwd(id int64) (string, error) {
 		return "", fmt.Errorf("打开目录对话框失败: %w", err)
 	}
 	if chosen == "" {
-		return "", nil // user cancelled
+		return "", nil // user canceled
 	}
 	if err := a.UpdateConversationCwd(id, chosen); err != nil {
 		return "", err
@@ -408,16 +408,19 @@ func (a *App) getOrCreateAIAgentSystem(convID int64) (*aiagent.System, error) {
 	})
 
 	sys, err := aiagent.NewSystem(a.ctx, aiagent.SystemOptions{
-		Provider:      a.aiProvider,
-		Model:         a.aiModel,
-		Cwd:           cwd,
-		ConvID:        convID,
-		Lang:          lang,
-		Deps:          deps,
-		Emitter:       emitter,
-		PolicyChecker: checker,
-		Resolver:      resolver,
-		Activate:      func() { a.activateWindow() },
+		Provider: a.aiProvider,
+		Model:    a.aiModel,
+		Cwd:      cwd,
+		ConvID:   convID,
+		Lang:     lang,
+		Deps:     deps,
+		Emitter:  emitter,
+		// CheckPerm 默认走 ai.CheckPermission（静态策略，不触发审批回调），审批弹卡走
+		// gw.RequestSingle 通过 emitter 闭包发出，对得上当前会话的 ai:event:<convID>。
+		// 老路径上 deps.PolicyChecker / makeCommandConfirmFunc 仍保留，给 batch_command
+		// 和 tool handler 内部冗余 check 用。
+		Resolver: resolver,
+		Activate: func() { a.activateWindow() },
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create aiagent.System: %w", err)

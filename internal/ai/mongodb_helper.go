@@ -54,13 +54,7 @@ func handleExecMongo(ctx context.Context, args map[string]any) (string, error) {
 		return "", fmt.Errorf("missing required parameters: asset_id, operation")
 	}
 
-	// 权限检查
-	if checker := GetPolicyChecker(ctx); checker != nil {
-		result := checker.CheckForAsset(ctx, assetID, asset_entity.AssetTypeMongoDB, operation)
-		if result.Decision != Allow {
-			return result.Message, nil
-		}
-	}
+	// 权限/审批由 aiagent.policyHook 在 PreToolUse 阶段统一处理；详见 redis_helper.go。
 
 	asset, err := asset_svc.Asset().Get(ctx, assetID)
 	if err != nil {

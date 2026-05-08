@@ -67,13 +67,8 @@ func handleExecSQL(ctx context.Context, args map[string]any) (string, error) {
 		return "", fmt.Errorf("missing required parameters: asset_id, sql")
 	}
 
-	// 权限检查
-	if checker := GetPolicyChecker(ctx); checker != nil {
-		result := checker.CheckForAsset(ctx, assetID, asset_entity.AssetTypeDatabase, sqlText)
-		if result.Decision != Allow {
-			return result.Message, nil
-		}
-	}
+	// 权限/审批由 aiagent.policyHook 在 PreToolUse 阶段统一处理；这里再 check 会
+	// 走 legacy makeCommandConfirmFunc 弹第二张卡。详见 redis_helper.go 同处注释。
 
 	asset, err := asset_svc.Asset().Get(ctx, assetID)
 	if err != nil {

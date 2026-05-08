@@ -55,9 +55,10 @@ func TestSystem_StreamCompletesAfterToolCall(t *testing.T) {
 	auditWriter := &fakeAuditWriter{}
 	auditHook := makeAuditHook(sc, auditWriter)
 	rounds := newRoundsCounter(50)
-	policyHook := makePolicyHook(&Deps{}, sc, nil, newFakeChecker(ai.CheckResult{
-		Decision: ai.Allow, DecisionSource: ai.SourcePolicyAllow,
-	}))
+	allow := func(_ context.Context, _ string, _ int64, _ string) ai.CheckResult {
+		return ai.CheckResult{Decision: ai.Allow, DecisionSource: ai.SourcePolicyAllow}
+	}
+	policyHook := makePolicyHook(sc, nil, allow)
 	promptHook := makePromptHook(&PerTurnState{})
 
 	a := agent.NewWithBackend(
@@ -114,6 +115,109 @@ func TestSystem_StreamCompletesAfterToolCall(t *testing.T) {
 	}
 	if !sawDone {
 		t.Errorf("no done event — agent stuck after tool call")
+	}
+}
+
+// TestSystem_NeedConfirm_EmitsExactlyOneApprovalRequest 是「双卡」用户回归。
+//
+// 历史：
+//   - cago 迁移之后 PreToolUse policyHook 走 ai.CheckPermission + gw.RequestSingle，
+//     emitter 闭包绑定的是当前会话 convID，弹卡 #1 正常显示。
+//   - 但 ops 工具 handler 内部还有一段 in-handler 防御：if checker := GetPolicyChecker(ctx); ...
+//     checker.Check(...)，会进 legacy makeCommandConfirmFunc。该路径之前因 ai.WithConversationID
+//     不再注入 → convID 拿到 0 → 弹卡发到 ai:event:0 → 用户看不到。修复 ctx 注入之后这条
+//     legacy 路径也变得可见 → 出现"双卡"。
+//
+// 当前结构：每个工具只在 PreToolUse 阶段做一次审批 gate，handler 内的 in-handler check
+// 已经从 run_command / exec_sql / exec_redis / exec_mongo / exec_k8s / kafka_* 删掉。
+//
+// 这条测试驱动一次完整 NeedConfirm → 用户 allow → 工具运行 → 模型 wrap up 的流程，
+// 断言整个 stream 里 approval_request / approval_result / tool_start / tool_result / done
+// 各恰好 1 次。如果有人把 in-handler check 加回 handler，cago 又用真实 wrapToolDef
+// 注入 ai.WithPolicyChecker，会触发第二次 confirmFunc → 第二个 approval_request →
+// 该计数变成 2 → 测试失败。这条契约也兜住"policyHook 自己重复发卡"这种独立的回归。
+func TestSystem_NeedConfirm_EmitsExactlyOneApprovalRequest(t *testing.T) {
+	// lookupAssetName 默认查 asset_svc，需要真 DB；测试里 stub 掉。
+	stubLookupAssetName(t, "asset-1")
+
+	mock := providertest.New().
+		QueueStream(
+			provider.StreamChunk{ToolCallDelta: &provider.ToolCallDelta{
+				Index: 0, ID: "call_1", Name: "run_command", ArgsDelta: `{"asset_id":1,"command":"ls"}`,
+			}},
+			provider.StreamChunk{FinishReason: provider.FinishToolCalls},
+		).
+		QueueStream(
+			provider.StreamChunk{ContentDelta: "all done"},
+			provider.StreamChunk{FinishReason: provider.FinishStop},
+		)
+
+	sc := newSidecar()
+	auditWriter := &fakeAuditWriter{}
+	auditHook := makeAuditHook(sc, auditWriter)
+	rounds := newRoundsCounter(50)
+	needConfirm := func(_ context.Context, _ string, _ int64, _ string) ai.CheckResult {
+		return ai.CheckResult{Decision: ai.NeedConfirm}
+	}
+
+	rec := &recordEmitter{}
+
+	// 自动 allow 的 resolver：channel 一开始就装一份 "allow"，gw.RequestSingle 一拉就返回。
+	// 真实路径里 release() 是 sync.Map 删 confirmID 用，测试不需要副作用。
+	resolver := PendingResolver(func(_ string) (chan ai.ApprovalResponse, func()) {
+		ch := make(chan ai.ApprovalResponse, 1)
+		ch <- ai.ApprovalResponse{Decision: "allow"}
+		return ch, func() {}
+	})
+	gw := NewApprovalGateway(rec, resolver)
+	policyHook := makePolicyHook(sc, gw, needConfirm)
+	promptHook := makePromptHook(&PerTurnState{})
+
+	a := agent.NewWithBackend(
+		agent.NewBuiltinBackend(mock),
+		agent.Tools(namedTool{name: "run_command"}),
+		agent.SessionStart(rounds.ResetHook()),
+		// 与 NewSystem 注册方式保持一致：policyHook 关闭 cago 默认 5min 超时。
+		agent.Hooks(agent.Hook{Stage: agent.StagePreToolUse, Fn: policyHook, Timeout: -1}),
+		agent.PreToolUse("", rounds.Hook()),
+		agent.PostToolUse("", auditHook),
+		agent.UserPromptSubmit(promptHook),
+	)
+	sess := a.Session()
+
+	br := newBridge(rec)
+
+	ctx, cancel := context.WithTimeout(WithConvID(context.Background(), 1), 5*time.Second)
+	defer cancel()
+
+	if _, err := RunWithRetry(ctx, sess, "do it", rec, 1, func(stream *agent.Stream) {
+		for stream.Next() {
+			br.translate(1, stream.Event())
+		}
+	}); err != nil {
+		t.Fatalf("RunWithRetry: %v", err)
+	}
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	counts := map[string]int{}
+	for _, ev := range rec.events {
+		counts[ev.Type]++
+	}
+	if got := counts["approval_request"]; got != 1 {
+		t.Errorf("approval_request = %d，want 1（>1 = 双卡回归，PreToolUse 之外又冒出一条审批源）", got)
+	}
+	if got := counts["approval_result"]; got != 1 {
+		t.Errorf("approval_result = %d，want 1", got)
+	}
+	if got := counts["tool_start"]; got != 1 {
+		t.Errorf("tool_start = %d，want 1", got)
+	}
+	if got := counts["tool_result"]; got != 1 {
+		t.Errorf("tool_result = %d，want 1", got)
+	}
+	if got := counts["done"]; got != 1 {
+		t.Errorf("done = %d，want 1（=0 说明 stream 没正常结束）", got)
 	}
 }
 

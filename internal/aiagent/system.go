@@ -17,18 +17,20 @@ import (
 // SystemOptions wires together the dependencies for one *coding.System.
 // One System per active Conversation.
 type SystemOptions struct {
-	Provider      provider.Provider
-	Model         string // 空字符串 = backend 默认；通常应填 AIProvider.Model，否则 cago 发出去的 req.Model 为空
-	Cwd           string
-	ConvID        int64
-	Lang          string
-	Deps          *Deps
-	Emitter       EventEmitter
-	PolicyChecker PolicyChecker
-	AuditWriter   ai.AuditWriter // nil → ai.NewDefaultAuditWriter()
-	Resolver      PendingResolver
-	Activate      func() // window activation; may be nil
-	MaxRounds     int    // 0 → 50
+	Provider provider.Provider
+	Model    string // 空字符串 = backend 默认；通常应填 AIProvider.Model，否则 cago 发出去的 req.Model 为空
+	Cwd      string
+	ConvID   int64
+	Lang     string
+	Deps     *Deps
+	Emitter  EventEmitter
+	// CheckPerm 注入静态策略检查；nil 时走 ai.CheckPermission（生产默认）。
+	// 测试可传 fake 避免拉起 DB / asset 仓库。
+	CheckPerm   CheckPermissionFunc
+	AuditWriter ai.AuditWriter // nil → ai.NewDefaultAuditWriter()
+	Resolver    PendingResolver
+	Activate    func() // window activation; may be nil
+	MaxRounds   int    // 0 → 50
 }
 
 // System is the OpsKat-facing handle around cago's coding.System. It owns the
@@ -79,7 +81,7 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 	sc := newSidecar()
 	turnState := &PerTurnState{}
 
-	policyHook := makePolicyHook(opts.Deps, sc, gw, opts.PolicyChecker)
+	policyHook := makePolicyHook(sc, gw, opts.CheckPerm)
 	auditHook := makeAuditHook(sc, opts.AuditWriter)
 	rounds := newRoundsCounter(opts.MaxRounds)
 	promptHook := makePromptHook(turnState)
@@ -106,7 +108,14 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 		coding.WithCompactionThreshold(80000), // matches legacy heuristic
 		coding.WithAgentOpts(
 			agent.SessionStart(rounds.ResetHook()),
-			agent.PreToolUse("", policyHook),
+			// policyHook 阻塞等用户审批，可能远超 cago 默认 5min 单 hook 超时；用 Hooks
+			// 直接传 Timeout=-1 关掉超时，让取消只受 stream ctx（用户 Stop / 关 app）控制。
+			// 否则 5min 一到 ctx.Done 触发，gw.RequestSingle 静默 deny，UI 上甚至看不到
+			// 审批卡（approval_request 紧跟着 approval_result deny，前端把 block 转成
+			// error 立刻收起），最后模型直接收到「用户拒绝」结果。
+			agent.Hooks(agent.Hook{
+				Stage: agent.StagePreToolUse, Matcher: "", Fn: policyHook, Timeout: -1,
+			}),
 			agent.PreToolUse("", rounds.Hook()),
 			agent.PostToolUse("", auditHook),
 			agent.PostToolUse("dispatch_subagent", agentEndHook),
@@ -147,7 +156,13 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 // Returns when the stream completes or all retry attempts fail.
 func (s *System) Stream(ctx context.Context, prompt string, aiCtx ai.AIContext, ext map[string]string) error {
 	s.turnState.Set(aiCtx, ext)
+	// keyConvID 只给 aiagent 内部 hook 用；ai.WithConversationID / WithSessionID 给老路径
+	// （batch_command + tool handler in-handler check + audit）兜底，不然它们 Get 出来全是 0/""，
+	// 会回退到 App.currentConversationID 或 SaveGrantPattern 静默 no-op。grant session ID
+	// 与 saveGrantPatternsFromResponse 内构造的 conv_<convID> 必须保持一致。
 	ctx = WithConvID(ctx, s.convID)
+	ctx = ai.WithConversationID(ctx, s.convID)
+	ctx = ai.WithSessionID(ctx, fmt.Sprintf("conv_%d", s.convID))
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()

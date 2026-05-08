@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/service/kafka_svc"
 )
 
@@ -476,14 +475,16 @@ func handleKafkaMessage(ctx context.Context, args map[string]any) (string, error
 	}
 }
 
-func checkKafkaToolPermission(ctx context.Context, assetID int64, command string) (CheckResult, bool) {
-	if checker := GetPolicyChecker(ctx); checker != nil {
-		result := checker.CheckForAsset(ctx, assetID, asset_entity.AssetTypeKafka, command)
-		if result.Decision != Allow {
-			return result, false
-		}
-		return result, true
-	}
+// checkKafkaToolPermission 历史上是 in-handler 的策略防御，cago 迁移之后只服务 AI 路径
+// （opsctl 不注 PolicyChecker），且 PreToolUse aiagent.policyHook 已经统一 gate 过；这里
+// 再走 checker.CheckForAsset 会触发 legacy makeCommandConfirmFunc 弹第二张审批卡。
+//
+// 保留函数本体而不是删 7 处 call site 是为了让 kafkaXxxCommand 计算的策略命令字符串
+// 仍然作为 operation 合法性校验用（topic/group 必填等），以及保留未来重新接入策略
+// 时只改一处的余地。
+//
+//nolint:unparam // bool 永远 true，但调用方写法是 if !ok { ... }，签名保留方便回插。
+func checkKafkaToolPermission(_ context.Context, _ int64, _ string) (CheckResult, bool) {
 	return CheckResult{Decision: Allow}, true
 }
 

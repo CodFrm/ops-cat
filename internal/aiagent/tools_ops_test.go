@@ -108,4 +108,3 @@ func TestOpsTools_HasAllExpectedNames(t *testing.T) {
 		}
 	}
 }
-

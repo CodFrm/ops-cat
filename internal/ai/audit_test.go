@@ -2,39 +2,11 @@ package ai
 
 import (
 	"context"
-	"sync"
 	"testing"
-
-	"github.com/opskat/opskat/internal/model/entity/audit_entity"
-	"github.com/opskat/opskat/internal/repository/audit_repo"
 
 	"github.com/smartystreets/goconvey/convey"
 	"github.com/stretchr/testify/assert"
 )
-
-// --- mock audit repo ---
-
-type mockAuditRepo struct {
-	mu   sync.Mutex
-	logs []*audit_entity.AuditLog
-}
-
-func (m *mockAuditRepo) Create(_ context.Context, log *audit_entity.AuditLog) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.logs = append(m.logs, log)
-	return nil
-}
-
-func (m *mockAuditRepo) List(_ context.Context, _ audit_repo.ListOptions) ([]*audit_entity.AuditLog, int64, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.logs, int64(len(m.logs)), nil
-}
-
-func (m *mockAuditRepo) ListSessions(_ context.Context, _ int64) ([]audit_repo.SessionInfo, error) {
-	return nil, nil
-}
 
 func TestContext_AuditSource(t *testing.T) {
 	convey.Convey("审计来源 context", t, func() {
@@ -186,4 +158,3 @@ func TestTruncateString(t *testing.T) {
 		})
 	})
 }
-

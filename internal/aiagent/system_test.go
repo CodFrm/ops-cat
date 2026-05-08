@@ -19,13 +19,14 @@ func newSmokeSystem(t *testing.T, em EventEmitter) *System {
 	t.Helper()
 	mock := providertest.New()
 	sys, err := NewSystem(context.Background(), SystemOptions{
-		Provider:      mock,
-		Cwd:           t.TempDir(),
-		ConvID:        7,
-		Lang:          "en",
-		Deps:          &Deps{},
-		Emitter:       em,
-		PolicyChecker: nil,
+		Provider: mock,
+		Cwd:      t.TempDir(),
+		ConvID:   7,
+		Lang:     "en",
+		Deps:     &Deps{},
+		Emitter:  em,
+		// CheckPerm 留空 → 默认 ai.CheckPermission；本 smoke 测不实际触发工具调用，
+		// hook 不会被命中，所以走默认即可。
 	})
 	if err != nil {
 		t.Fatalf("NewSystem: %v", err)
@@ -168,13 +169,12 @@ func TestSystem_Stream_HappyPathEmitsContentAndDone(t *testing.T) {
 
 	em := &captureEmitter{}
 	sys, err := NewSystem(context.Background(), SystemOptions{
-		Provider:      mock,
-		Cwd:           t.TempDir(),
-		ConvID:        42,
-		Lang:          "en",
-		Deps:          &Deps{},
-		Emitter:       em,
-		PolicyChecker: nil,
+		Provider: mock,
+		Cwd:      t.TempDir(),
+		ConvID:   42,
+		Lang:     "en",
+		Deps:     &Deps{},
+		Emitter:  em,
 	})
 	if err != nil {
 		t.Fatalf("NewSystem: %v", err)

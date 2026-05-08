@@ -56,12 +56,7 @@ func handleExecK8s(ctx context.Context, args map[string]any) (string, error) {
 		return "", err
 	}
 
-	if checker := GetPolicyChecker(ctx); checker != nil {
-		result := checker.CheckForAsset(ctx, assetID, asset_entity.AssetTypeK8s, plan.EffectiveCommand)
-		if result.Decision != Allow {
-			return result.Message, nil
-		}
-	}
+	// 权限/审批由 aiagent.policyHook 在 PreToolUse 阶段统一处理；详见 redis_helper.go 同处注释。
 
 	kubeconfig, err := credential_svc.Default().Decrypt(cfg.Kubeconfig)
 	if err != nil {

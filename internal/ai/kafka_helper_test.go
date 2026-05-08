@@ -5,9 +5,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
-
-	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 )
 
 func TestKafkaToolCommandMapping(t *testing.T) {
@@ -373,146 +370,14 @@ func TestKafkaConnectArgs(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestKafkaMessagePermissionStopsBeforeConnection(t *testing.T) {
-	ctx, mockAsset, _ := setupPolicyTest(t)
-	asset := &asset_entity.Asset{
-		ID:   1,
-		Name: "kafka-prod",
-		Type: asset_entity.AssetTypeKafka,
-		CmdPolicy: mustJSON(asset_entity.KafkaPolicy{
-			DenyList: []string{"message.write *"},
-		}),
-	}
-	mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
-
-	ctx = WithPolicyChecker(ctx, NewCommandPolicyChecker(nil))
-	result, err := handleKafkaMessage(ctx, map[string]any{
-		"asset_id":  float64(1),
-		"operation": "produce",
-		"topic":     "orders",
-		"value":     "hello",
-	})
-	require.NoError(t, err)
-	assert.Contains(t, result, "Kafka")
-}
-
-func TestKafkaACLPermissionStopsBeforeConnection(t *testing.T) {
-	ctx, mockAsset, _ := setupPolicyTest(t)
-	asset := &asset_entity.Asset{
-		ID:   1,
-		Name: "kafka-prod",
-		Type: asset_entity.AssetTypeKafka,
-		CmdPolicy: mustJSON(asset_entity.KafkaPolicy{
-			DenyList: []string{"acl.write *"},
-		}),
-	}
-	mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
-
-	ctx = WithPolicyChecker(ctx, NewCommandPolicyChecker(nil))
-	result, err := handleKafkaACL(ctx, map[string]any{
-		"asset_id":      float64(1),
-		"operation":     "create",
-		"resource_type": "topic",
-		"resource_name": "orders",
-		"principal":     "User:alice",
-		"host":          "*",
-		"acl_operation": "read",
-		"permission":    "allow",
-	})
-	require.NoError(t, err)
-	assert.Contains(t, result, "Kafka")
-}
-
-func TestKafkaSchemaPermissionStopsBeforeConnection(t *testing.T) {
-	ctx, mockAsset, _ := setupPolicyTest(t)
-	asset := &asset_entity.Asset{
-		ID:   1,
-		Name: "kafka-prod",
-		Type: asset_entity.AssetTypeKafka,
-		CmdPolicy: mustJSON(asset_entity.KafkaPolicy{
-			DenyList: []string{"schema.write *"},
-		}),
-	}
-	mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
-
-	ctx = WithPolicyChecker(ctx, NewCommandPolicyChecker(nil))
-	result, err := handleKafkaSchema(ctx, map[string]any{
-		"asset_id":      float64(1),
-		"operation":     "register",
-		"subject":       "orders-value",
-		"schema":        `{"type":"record","name":"Order","fields":[]}`,
-		"schema_type":   "AVRO",
-		"compatibility": "FULL",
-	})
-	require.NoError(t, err)
-	assert.Contains(t, result, "Kafka")
-}
-
-func TestKafkaConnectPermissionStopsBeforeConnection(t *testing.T) {
-	ctx, mockAsset, _ := setupPolicyTest(t)
-	asset := &asset_entity.Asset{
-		ID:   1,
-		Name: "kafka-prod",
-		Type: asset_entity.AssetTypeKafka,
-		CmdPolicy: mustJSON(asset_entity.KafkaPolicy{
-			DenyList: []string{"connect.state.write *"},
-		}),
-	}
-	mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
-
-	ctx = WithPolicyChecker(ctx, NewCommandPolicyChecker(nil))
-	result, err := handleKafkaConnect(ctx, map[string]any{
-		"asset_id":  float64(1),
-		"operation": "restart",
-		"cluster":   "local",
-		"connector": "sink-orders",
-	})
-	require.NoError(t, err)
-	assert.Contains(t, result, "Kafka")
-}
-
-func TestKafkaTopicAdminPermissionStopsBeforeConnection(t *testing.T) {
-	ctx, mockAsset, _ := setupPolicyTest(t)
-	asset := &asset_entity.Asset{
-		ID:   1,
-		Name: "kafka-prod",
-		Type: asset_entity.AssetTypeKafka,
-		CmdPolicy: mustJSON(asset_entity.KafkaPolicy{
-			DenyList: []string{"topic.delete *"},
-		}),
-	}
-	mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
-
-	ctx = WithPolicyChecker(ctx, NewCommandPolicyChecker(nil))
-	result, err := handleKafkaTopic(ctx, map[string]any{
-		"asset_id":  float64(1),
-		"operation": "delete",
-		"topic":     "orders",
-	})
-	require.NoError(t, err)
-	assert.Contains(t, result, "Kafka")
-}
-
-func TestKafkaConsumerGroupAdminPermissionStopsBeforeConnection(t *testing.T) {
-	ctx, mockAsset, _ := setupPolicyTest(t)
-	asset := &asset_entity.Asset{
-		ID:   1,
-		Name: "kafka-prod",
-		Type: asset_entity.AssetTypeKafka,
-		CmdPolicy: mustJSON(asset_entity.KafkaPolicy{
-			DenyList: []string{"consumer_group.offset.write *"},
-		}),
-	}
-	mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
-
-	ctx = WithPolicyChecker(ctx, NewCommandPolicyChecker(nil))
-	result, err := handleKafkaConsumerGroup(ctx, map[string]any{
-		"asset_id":  float64(1),
-		"operation": "reset_offset",
-		"group":     "billing",
-		"topic":     "orders",
-		"mode":      "latest",
-	})
-	require.NoError(t, err)
-	assert.Contains(t, result, "Kafka")
-}
+// 之前这里有 6 个 TestKafkaXxxPermissionStopsBeforeConnection，验证 in-handler
+// checkKafkaToolPermission 在策略 deny 时会在连 kafka 前返回。
+//
+// 那条 in-handler 防御已经从架构里删了：cago 迁移之后 PreToolUse aiagent.policyHook
+// 负责所有 ops tool 的 deny gate（走 ai.CheckPermission + gw.RequestSingle，convID
+// 走 emitter 闭包）；in-handler 再 check 会触发 legacy makeCommandConfirmFunc 弹第二张
+// 审批卡。
+//
+// 策略分类本身（DenyList / AllowList / NeedConfirm 判定）由 kafka_policy_test.go 的
+// TestCheckKafkaPolicy 直接测；端到端 "deny 立即停" 由 aiagent.TestPolicyHook_DenyShortCircuits
+// 看住。所以这几个 wrapper 删掉，避免「测试已删除的代码层」。

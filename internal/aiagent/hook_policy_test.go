@@ -8,34 +8,61 @@ import (
 	"github.com/cago-frame/agents/agent"
 
 	"github.com/opskat/opskat/internal/ai"
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 )
 
-// fakeChecker implements PolicyChecker by returning a fixed result.
-type fakeChecker struct{ result ai.CheckResult }
+// stubLookupAssetName 在测试期把 lookupAssetName 替换成不打 DB 的版本。defer 还原，
+// 让相邻测试之间不串。
+func stubLookupAssetName(t *testing.T, name string) {
+	t.Helper()
+	prev := lookupAssetName
+	lookupAssetName = func(_ context.Context, _ int64) string { return name }
+	t.Cleanup(func() { lookupAssetName = prev })
+}
 
-func newFakeChecker(r ai.CheckResult) *fakeChecker { return &fakeChecker{result: r} }
-func (f *fakeChecker) Check(_ context.Context, _ int64, _ string) ai.CheckResult {
+// fakeCheckPerm 返回固定 CheckResult，规避 ai.CheckPermission 拉起 DB / asset_svc。
+// callKind/callAssetID 记录最后一次调用的入参，用于断言 kind→assetType 映射正确。
+type fakeCheckPerm struct {
+	result        ai.CheckResult
+	callAssetType string
+	callAssetID   int64
+	callCommand   string
+	calls         int
+}
+
+func (f *fakeCheckPerm) fn(_ context.Context, assetType string, assetID int64, command string) ai.CheckResult {
+	f.calls++
+	f.callAssetType = assetType
+	f.callAssetID = assetID
+	f.callCommand = command
 	return f.result
 }
 
 // fakeApprovalRequester captures RequestSingle calls and returns a fixed response.
 type fakeApprovalRequester struct {
-	called bool
-	resp   ai.ApprovalResponse
+	called    bool
+	gotItems  []ai.ApprovalItem
+	gotKind   string
+	gotConvID int64
+	resp      ai.ApprovalResponse
 }
 
-func (f *fakeApprovalRequester) RequestSingle(_ context.Context, _ int64, _ string,
-	_ []ai.ApprovalItem, _ string) ai.ApprovalResponse {
+func (f *fakeApprovalRequester) RequestSingle(_ context.Context, convID int64, kind string,
+	items []ai.ApprovalItem, _ string) ai.ApprovalResponse {
 	f.called = true
+	f.gotConvID = convID
+	f.gotKind = kind
+	f.gotItems = items
 	return f.resp
 }
 
 func TestPolicyHook_AllowResultPlantedInSidecar(t *testing.T) {
 	sc := newSidecar()
 	gw := &fakeApprovalRequester{}
-	hook := makePolicyHook(&Deps{}, sc, gw, newFakeChecker(ai.CheckResult{
+	check := &fakeCheckPerm{result: ai.CheckResult{
 		Decision: ai.Allow, DecisionSource: ai.SourcePolicyAllow,
-	}))
+	}}
+	hook := makePolicyHook(sc, gw, check.fn)
 
 	out, err := hook(context.Background(), agent.HookInput{
 		Stage:      agent.StagePreToolUse,
@@ -52,14 +79,19 @@ func TestPolicyHook_AllowResultPlantedInSidecar(t *testing.T) {
 	if r := sc.drain("call_1"); r == nil || r.Decision != ai.Allow {
 		t.Fatalf("sidecar lost CheckResult: %+v", r)
 	}
+	// run_command 必须被映射成 SSH 类型给 ai.CheckPermission；这条断言看住 kind→assetType 表的回归。
+	if check.callAssetType != asset_entity.AssetTypeSSH {
+		t.Errorf("assetType = %q, want %q", check.callAssetType, asset_entity.AssetTypeSSH)
+	}
 }
 
 func TestPolicyHook_DenyShortCircuits(t *testing.T) {
 	sc := newSidecar()
 	gw := &fakeApprovalRequester{}
-	hook := makePolicyHook(&Deps{}, sc, gw, newFakeChecker(ai.CheckResult{
+	check := &fakeCheckPerm{result: ai.CheckResult{
 		Decision: ai.Deny, Message: "nope",
-	}))
+	}}
+	hook := makePolicyHook(sc, gw, check.fn)
 
 	out, err := hook(context.Background(), agent.HookInput{
 		Stage:      agent.StagePreToolUse,
@@ -76,12 +108,16 @@ func TestPolicyHook_DenyShortCircuits(t *testing.T) {
 	if out.Reason != "nope" {
 		t.Fatalf("reason = %q", out.Reason)
 	}
+	if gw.called {
+		t.Fatal("Deny path must not invoke approval gateway")
+	}
 }
 
 func TestPolicyHook_NonPolicyToolPasses(t *testing.T) {
 	sc := newSidecar()
 	gw := &fakeApprovalRequester{}
-	hook := makePolicyHook(&Deps{}, sc, gw, newFakeChecker(ai.CheckResult{Decision: ai.Allow}))
+	check := &fakeCheckPerm{result: ai.CheckResult{Decision: ai.Allow}}
+	hook := makePolicyHook(sc, gw, check.fn)
 
 	out, err := hook(context.Background(), agent.HookInput{
 		Stage:      agent.StagePreToolUse,
@@ -95,19 +131,22 @@ func TestPolicyHook_NonPolicyToolPasses(t *testing.T) {
 	if out != nil {
 		t.Fatalf("non-policy tool should return nil HookOutput, got %+v", out)
 	}
+	if check.calls != 0 {
+		t.Fatal("非 policy 工具不应调用 checkPerm")
+	}
 }
 
-// TestPolicyHook_NeedConfirm_AllowFromUser exercises the NeedConfirm → gateway →
-// allow path: the user approves once, hook converts the result to Allow, plants
-// it in the sidecar, and returns nil (no Deny).
+// TestPolicyHook_NeedConfirm_AllowFromUser 走完 NeedConfirm → 网关 → user allow 全链路：
+// hook 把结果转成 Allow、写 sidecar、返回 nil；同时核对发给 gw 的 items 带了 Type/AssetID/Command。
 func TestPolicyHook_NeedConfirm_AllowFromUser(t *testing.T) {
+	stubLookupAssetName(t, "asset-2")
 	sc := newSidecar()
 	gw := &fakeApprovalRequester{resp: ai.ApprovalResponse{Decision: "allow"}}
-	hook := makePolicyHook(&Deps{}, sc, gw, newFakeChecker(ai.CheckResult{
-		Decision: ai.NeedConfirm,
-	}))
+	check := &fakeCheckPerm{result: ai.CheckResult{Decision: ai.NeedConfirm}}
+	hook := makePolicyHook(sc, gw, check.fn)
 
-	out, err := hook(context.Background(), agent.HookInput{
+	ctx := WithConvID(context.Background(), 42)
+	out, err := hook(ctx, agent.HookInput{
 		Stage:      agent.StagePreToolUse,
 		ToolName:   "run_command",
 		ToolInput:  json.RawMessage(`{"asset_id":2,"command":"ls"}`),
@@ -119,6 +158,13 @@ func TestPolicyHook_NeedConfirm_AllowFromUser(t *testing.T) {
 	if !gw.called {
 		t.Fatal("approval gateway was not invoked for NeedConfirm")
 	}
+	if gw.gotConvID != 42 {
+		t.Errorf("gw 收到 convID=%d，期望 42（来自 ctx WithConvID）", gw.gotConvID)
+	}
+	if len(gw.gotItems) != 1 || gw.gotItems[0].Type != "exec" ||
+		gw.gotItems[0].AssetID != 2 || gw.gotItems[0].Command != "ls" {
+		t.Errorf("gw items = %+v, 期望 [{Type:exec, AssetID:2, Command:ls}]", gw.gotItems)
+	}
 	if out != nil && out.Decision == agent.DecisionDeny {
 		t.Fatalf("user-allow must not Deny, got %+v", out)
 	}
@@ -128,16 +174,14 @@ func TestPolicyHook_NeedConfirm_AllowFromUser(t *testing.T) {
 	}
 }
 
-// TestPolicyHook_NeedConfirm_AllowAllPersistsGrant verifies the allowAll branch
-// reaches saveGrantPatternFromResponse (currently a stub) and still allows the
-// tool call. Whatever side effects that stub gains later, this test pins down
-// the contract that the hook returns nil and writes Allow to the sidecar.
-func TestPolicyHook_NeedConfirm_AllowAllPersistsGrant(t *testing.T) {
+// TestPolicyHook_NeedConfirm_AllowAllAllowsTool 验证 allowAll 不 Deny；grant 落库本身在 DB 集成
+// 测里看（asset_svc + grant_repo），单测只看 hook 自己的契约：sidecar=Allow，HookOutput≠Deny。
+func TestPolicyHook_NeedConfirm_AllowAllAllowsTool(t *testing.T) {
+	stubLookupAssetName(t, "asset-3")
 	sc := newSidecar()
 	gw := &fakeApprovalRequester{resp: ai.ApprovalResponse{Decision: "allowAll"}}
-	hook := makePolicyHook(&Deps{}, sc, gw, newFakeChecker(ai.CheckResult{
-		Decision: ai.NeedConfirm,
-	}))
+	check := &fakeCheckPerm{result: ai.CheckResult{Decision: ai.NeedConfirm}}
+	hook := makePolicyHook(sc, gw, check.fn)
 
 	out, err := hook(context.Background(), agent.HookInput{
 		Stage:      agent.StagePreToolUse,
@@ -156,14 +200,13 @@ func TestPolicyHook_NeedConfirm_AllowAllPersistsGrant(t *testing.T) {
 	}
 }
 
-// TestPolicyHook_NeedConfirm_DenyFromUser covers the user-deny branch. The hook
-// must Deny and plant SourceUserDeny so the audit log records intent.
+// TestPolicyHook_NeedConfirm_DenyFromUser 覆盖用户 deny 分支。
 func TestPolicyHook_NeedConfirm_DenyFromUser(t *testing.T) {
+	stubLookupAssetName(t, "asset-4")
 	sc := newSidecar()
 	gw := &fakeApprovalRequester{resp: ai.ApprovalResponse{Decision: "deny"}}
-	hook := makePolicyHook(&Deps{}, sc, gw, newFakeChecker(ai.CheckResult{
-		Decision: ai.NeedConfirm,
-	}))
+	check := &fakeCheckPerm{result: ai.CheckResult{Decision: ai.NeedConfirm}}
+	hook := makePolicyHook(sc, gw, check.fn)
 
 	out, err := hook(context.Background(), agent.HookInput{
 		Stage:      agent.StagePreToolUse,
@@ -183,6 +226,26 @@ func TestPolicyHook_NeedConfirm_DenyFromUser(t *testing.T) {
 	r := sc.drain("call_nc3")
 	if r == nil || r.Decision != ai.Deny || r.DecisionSource != ai.SourceUserDeny {
 		t.Fatalf("sidecar should hold user-deny, got %+v", r)
+	}
+}
+
+// TestAssetTypeForKind 锁住 kind→assetType 映射表，避免新增工具类型时漏改导致策略
+// 走错检查路径（比如 redis 命令被当成 SSH 检查会全部 NeedConfirm）。
+func TestAssetTypeForKind(t *testing.T) {
+	cases := map[string]string{
+		"exec":    asset_entity.AssetTypeSSH,
+		"cp":      asset_entity.AssetTypeSSH,
+		"sql":     asset_entity.AssetTypeDatabase,
+		"redis":   asset_entity.AssetTypeRedis,
+		"mongo":   asset_entity.AssetTypeMongoDB,
+		"kafka":   asset_entity.AssetTypeKafka,
+		"k8s":     asset_entity.AssetTypeK8s,
+		"unknown": asset_entity.AssetTypeSSH, // 兜底
+	}
+	for kind, want := range cases {
+		if got := assetTypeForKind(kind); got != want {
+			t.Errorf("assetTypeForKind(%q) = %q, want %q", kind, got, want)
+		}
 	}
 }
 

@@ -75,13 +75,10 @@ func handleRunCommand(ctx context.Context, args map[string]any) (string, error) 
 		return "", fmt.Errorf("missing required parameter: command")
 	}
 
-	// 权限检查
-	if checker := GetPolicyChecker(ctx); checker != nil {
-		result := checker.Check(ctx, assetID, command)
-		if result.Decision != Allow {
-			return result.Message, nil
-		}
-	}
+	// 权限/审批由 aiagent.policyHook 在 PreToolUse 阶段统一处理（走 gw.RequestSingle，
+	// emitter 闭包绑定的是正确 convID）。这里再做一次 checker.Check 会触发 legacy
+	// makeCommandConfirmFunc 弹第二张卡 —— 这条 in-handler 防御从 cago 迁移之后
+	// 就只服务 AI 路径，opsctl 不注 PolicyChecker，删掉零回归。
 
 	// 如果有 SSH 缓存（内置 Agent 模式），使用缓存连接
 	if cache := getSSHCache(ctx); cache != nil {
