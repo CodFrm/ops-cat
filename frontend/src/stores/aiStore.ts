@@ -42,7 +42,9 @@ export interface ContentBlock {
   agentTask?: string;
   childBlocks?: ContentBlock[];
   // approval 块专用
-  approvalKind?: "single" | "batch" | "grant";
+  // single/batch/grant 是资产维度审批；local_* 是 cago built-in 工具（bash/write/edit）
+  // 的本地审批，由 hook_policy.go 的 kindLocal* 常量发出。
+  approvalKind?: "single" | "batch" | "grant" | "local_bash" | "local_write" | "local_edit";
   approvalItems?: Array<{
     type: string;
     asset_id: number;

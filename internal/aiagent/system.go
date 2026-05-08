@@ -34,6 +34,9 @@ type SystemOptions struct {
 	Activate    func()      // window activation; may be nil
 	MaxRounds   int         // 0 → 50
 	Store       agent.Store // nil → NewGormStore() (production default)
+	// LocalGrants 抽象 cago built-in 工具（write / edit）会话级"始终放行"开关。
+	// nil → NewRepoLocalGrantStore()（生产默认，落 local_tool_grant_repo）。
+	LocalGrants LocalGrantStore
 }
 
 // System is the OpsKat-facing handle around cago's coding.System. It owns the
@@ -77,6 +80,9 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 	if opts.MaxRounds == 0 {
 		opts.MaxRounds = 50
 	}
+	if opts.LocalGrants == nil {
+		opts.LocalGrants = NewRepoLocalGrantStore()
+	}
 
 	gw := NewApprovalGateway(opts.Emitter, opts.Resolver)
 	gw.SetActivateFunc(opts.Activate)
@@ -84,7 +90,7 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 	sc := newSidecar()
 	turnState := &PerTurnState{}
 
-	policyHook := makePolicyHook(sc, gw, opts.CheckPerm)
+	policyHook := makePolicyHook(sc, gw, opts.CheckPerm, opts.LocalGrants)
 	auditHook := makeAuditHook(sc, opts.AuditWriter)
 	rounds := newRoundsCounter(opts.MaxRounds)
 	promptHook := makePromptHook(turnState)

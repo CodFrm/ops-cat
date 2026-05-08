@@ -762,6 +762,12 @@
     "approvalAllowAll": "全部允许",
     "approvalDenied": "已拒绝",
     "approvalReasonLabel": "原因：",
+    "approvalLocalTitle": {
+      "local_bash": "执行本机命令？",
+      "local_write": "写入本机文件？",
+      "local_edit": "修改本机文件？"
+    },
+    "approvalAllowToolForSession": "本次会话起永久放行此工具",
     "permissionRequestHint": "AI 正在申请命令执行权限，可编辑模式后批准",
     "permissionPatternPlaceholder": "命令模式，支持 * 通配符",
     "permissionApprove": "批准",

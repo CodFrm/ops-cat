@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ShieldAlert, Terminal, Database, Server, Globe, FolderOpen } from "lucide-react";
+import { ShieldAlert, Terminal, Database, Server, Globe, FolderOpen, FileEdit, FilePlus } from "lucide-react";
 import { Button, Input, Textarea } from "@opskat/ui";
 import { RespondAIApproval } from "../../../wailsjs/go/app/App";
 import { ai } from "../../../wailsjs/go/models";
@@ -10,11 +10,24 @@ interface ApprovalBlockProps {
   block: ContentBlock;
 }
 
+// Local kind 由后端 hook_policy.go 的 kindLocal* 常量发出，对应 cago 内置工具
+// （bash / write / edit）。这一组 kind 不绑资产，弹卡走"本机操作"分支。
+const KIND_LOCAL_BASH = "local_bash";
+const KIND_LOCAL_WRITE = "local_write";
+const KIND_LOCAL_EDIT = "local_edit";
+
+function isLocalKind(kind: string): boolean {
+  return kind === KIND_LOCAL_BASH || kind === KIND_LOCAL_WRITE || kind === KIND_LOCAL_EDIT;
+}
+
 export function ApprovalBlock({ block }: ApprovalBlockProps) {
   const { t } = useTranslation();
   const isPending = block.status === "pending_confirm";
   const items = block.approvalItems || [];
   const kind = block.approvalKind || "single";
+  const localKind = isLocalKind(kind);
+  // bash 永远不开 allowAll；write / edit 走"本次会话起永久放行此工具"。
+  const allowRemember = !localKind || kind === KIND_LOCAL_WRITE || kind === KIND_LOCAL_EDIT;
 
   const [editedCommands, setEditedCommands] = useState<Record<number, string>>(() => {
     const map: Record<number, string> = {};
@@ -63,7 +76,9 @@ export function ApprovalBlock({ block }: ApprovalBlockProps) {
               ? t("ai.approvalGrantTitle")
               : kind === "batch"
                 ? t("ai.approvalBatchTitle", { count: items.length })
-                : t("ai.approvalSingleTitle")}
+                : localKind
+                  ? t(`ai.approvalLocalTitle.${kind}`)
+                  : t("ai.approvalSingleTitle")}
           </span>
           {block.agentRole && (
             <span className="text-[10px] text-muted-foreground bg-muted rounded px-1 py-0.5">{block.agentRole}</span>
@@ -128,8 +143,9 @@ export function ApprovalBlock({ block }: ApprovalBlockProps) {
         </div>
       )}
 
-      {/* Remember mode pattern editor (single only) */}
-      {kind === "single" && rememberMode && (
+      {/* Remember mode pattern editor (asset-bound single only).
+          Local 工具粒度是"整个工具"，没有 pattern 可编辑，所以这块直接不渲染。 */}
+      {kind === "single" && rememberMode && !localKind && (
         <div className="space-y-1.5 pt-0.5">
           <div className="text-[10px] text-muted-foreground">{t("opsctlApproval.patternLabel")}</div>
           {items.map((_item, i) => (
@@ -193,7 +209,17 @@ export function ApprovalBlock({ block }: ApprovalBlockProps) {
             >
               {t("ai.approvalDeny")}
             </Button>
-            {rememberMode ? (
+            {/* bash 不支持 remember—— allowAll 永远不弹此按钮，避免给用户错觉以为可以"放过 bash"。 */}
+            {allowRemember && localKind && (
+              <Button
+                size="sm"
+                className="h-8 rounded-md px-4 text-xs bg-[#3D3520] text-[#D4A94E] hover:bg-[#4D4530]"
+                onClick={() => respond("allowAll")}
+              >
+                {t("ai.approvalAllowToolForSession")}
+              </Button>
+            )}
+            {allowRemember && !localKind && rememberMode && (
               <Button
                 size="sm"
                 className="h-8 rounded-md px-4 text-xs bg-[#3D3520] text-[#D4A94E] hover:bg-[#4D4530]"
@@ -201,7 +227,8 @@ export function ApprovalBlock({ block }: ApprovalBlockProps) {
               >
                 {t("ai.approvalRememberAndAllow")}
               </Button>
-            ) : (
+            )}
+            {allowRemember && !localKind && !rememberMode && (
               <Button
                 size="sm"
                 className="h-8 rounded-md px-4 text-xs bg-[#3D3520] text-[#D4A94E] hover:bg-[#4D4530]"
@@ -217,7 +244,7 @@ export function ApprovalBlock({ block }: ApprovalBlockProps) {
               className="h-8 rounded-md px-4 text-xs bg-amber-500 hover:bg-amber-600 text-[#1A1400] font-semibold"
               onClick={() => respond("allow")}
             >
-              {rememberMode ? t("ai.approvalOnlyOnce") : t("ai.approvalAllow")}
+              {rememberMode && !localKind ? t("ai.approvalOnlyOnce") : t("ai.approvalAllow")}
             </Button>
           </>
         )}
@@ -234,20 +261,30 @@ function TypeBadge({ type, compact }: { type: string; compact?: boolean }) {
     mongo: Database,
     kafka: Database,
     grant: Globe,
+    [KIND_LOCAL_BASH]: Terminal,
+    [KIND_LOCAL_WRITE]: FilePlus,
+    [KIND_LOCAL_EDIT]: FileEdit,
+  };
+  // local_* 在徽标上去掉前缀更直观（"WRITE" 比 "LOCAL_WRITE" 短而且对齐工具名）。
+  const labels: Record<string, string> = {
+    [KIND_LOCAL_BASH]: "BASH",
+    [KIND_LOCAL_WRITE]: "WRITE",
+    [KIND_LOCAL_EDIT]: "EDIT",
   };
   const Icon = icons[type] || Terminal;
+  const label = labels[type] || type.toUpperCase();
   if (compact) {
     return (
       <span className="inline-flex items-center gap-[3px] rounded-[3px] border border-[#F59E0B30] h-[18px] px-[5px] text-[8px] font-bold text-[#D4A94E] bg-background">
         <Icon className="h-[11px] w-[11px]" />
-        {type.toUpperCase()}
+        {label}
       </span>
     );
   }
   return (
     <span className="inline-flex items-center gap-1 rounded border border-[#F59E0B30] h-5 px-1.5 text-[9px] font-bold text-[#D4A94E] bg-background">
       <Icon className="h-3 w-3" />
-      {type.toUpperCase()}
+      {label}
     </span>
   );
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/opskat/opskat/internal/repository/grant_repo"
 	"github.com/opskat/opskat/internal/repository/group_repo"
 	"github.com/opskat/opskat/internal/repository/host_key_repo"
+	"github.com/opskat/opskat/internal/repository/local_tool_grant_repo"
 	"github.com/opskat/opskat/internal/repository/policy_group_repo"
 	"github.com/opskat/opskat/internal/repository/snippet_repo"
 	"github.com/opskat/opskat/internal/service/credential_svc"
@@ -116,6 +117,7 @@ func registerRepositories() {
 	conversation_repo.RegisterConversation(conversation_repo.NewConversation())
 	group_repo.RegisterGroup(group_repo.NewGroup())
 	grant_repo.RegisterGrant(grant_repo.NewGrant())
+	local_tool_grant_repo.Register(local_tool_grant_repo.New())
 	credential_repo.RegisterCredential(credential_repo.NewCredential())
 	host_key_repo.RegisterHostKey(host_key_repo.NewHostKey())
 	forward_repo.RegisterForward(forward_repo.NewForward())

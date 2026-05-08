@@ -58,7 +58,7 @@ func TestSystem_StreamCompletesAfterToolCall(t *testing.T) {
 	allow := func(_ context.Context, _ string, _ int64, _ string) ai.CheckResult {
 		return ai.CheckResult{Decision: ai.Allow, DecisionSource: ai.SourcePolicyAllow}
 	}
-	policyHook := makePolicyHook(sc, nil, allow)
+	policyHook := makePolicyHook(sc, nil, allow, nil)
 	promptHook := makePromptHook(&PerTurnState{})
 
 	a := agent.NewWithBackend(
@@ -170,7 +170,7 @@ func TestSystem_NeedConfirm_EmitsExactlyOneApprovalRequest(t *testing.T) {
 		return ch, func() {}
 	})
 	gw := NewApprovalGateway(rec, resolver)
-	policyHook := makePolicyHook(sc, gw, needConfirm)
+	policyHook := makePolicyHook(sc, gw, needConfirm, nil)
 	promptHook := makePromptHook(&PerTurnState{})
 
 	a := agent.NewWithBackend(

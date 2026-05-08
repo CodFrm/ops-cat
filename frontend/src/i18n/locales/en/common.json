@@ -777,6 +777,12 @@
     "approvalAllowAll": "Allow All",
     "approvalDenied": "Denied",
     "approvalReasonLabel": "Reason: ",
+    "approvalLocalTitle": {
+      "local_bash": "Run local command?",
+      "local_write": "Write local file?",
+      "local_edit": "Edit local file?"
+    },
+    "approvalAllowToolForSession": "Always allow this tool in session",
     "permissionRequestHint": "AI is requesting command execution permission. You can edit the pattern before approving.",
     "permissionPatternPlaceholder": "Command pattern, supports * wildcard",
     "permissionApprove": "Approve",
