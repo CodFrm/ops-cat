@@ -5,6 +5,14 @@ import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger } from "@ops
 import { useAIStore } from "@/stores/aiStore";
 import { useTabStore, type AITabMeta } from "@/stores/tabStore";
 
+// 取路径最后一段作为简短标识（POSIX 与 Windows 分隔符兼容）。
+function basename(path: string): string {
+  if (!path) return "";
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const idx = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
+}
+
 function formatRelativeTime(timestamp: number, locale: string): string {
   const now = Date.now() / 1000;
   const diff = now - timestamp;
@@ -187,8 +195,9 @@ export function SideAssistantHistoryDropdown({
                   ) : (
                     <>
                       <p className="truncate">{conv.Title}</p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-muted-foreground truncate">
                         {formatRelativeTime(conv.Updatetime, locale)}
+                        {conv.WorkDir && ` · ${basename(conv.WorkDir)}`}
                         {isInTab && ` · ${t("ai.sidebar.promoteHint")}`}
                       </p>
                     </>
