@@ -2,6 +2,7 @@ package conversation_svc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -314,6 +315,130 @@ func TestConversationSvc_SaveMessages_ConcurrentDifferentID(t *testing.T) {
 	wg.Wait()
 
 	assert.Equal(t, int32(2), maxInFlight.Load(), "不同 conversationID 的 SaveMessages 应可并发")
+}
+
+func TestConversationSvc_UpsertCagoMessages(t *testing.T) {
+	convey.Convey("UpsertCagoMessages 包装 cago gormStore 的快照写入", t, func() {
+		convey.Convey("成功写入：填充 ConversationID/SortOrder/Createtime", func() {
+			ctx, mockRepo := setupTest(t)
+
+			msgs := []*conversation_entity.Message{
+				{Role: "user", Content: "你好"},
+				{Role: "assistant", Content: "你好！"},
+			}
+			mockRepo.EXPECT().UpsertMessagesByCagoID(gomock.Any(), int64(1), msgs).DoAndReturn(
+				func(_ context.Context, _ int64, msgs []*conversation_entity.Message) error {
+					for i, msg := range msgs {
+						assert.Equal(t, int64(1), msg.ConversationID)
+						assert.Equal(t, i, msg.SortOrder)
+						assert.Greater(t, msg.Createtime, int64(0))
+					}
+					return nil
+				},
+			)
+
+			err := Conversation().UpsertCagoMessages(ctx, 1, msgs)
+			assert.NoError(t, err)
+		})
+
+		convey.Convey("repo 错误透传", func() {
+			ctx, mockRepo := setupTest(t)
+
+			msgs := []*conversation_entity.Message{
+				{Role: "user", Content: "test"},
+			}
+			mockRepo.EXPECT().UpsertMessagesByCagoID(gomock.Any(), int64(1), gomock.Any()).
+				Return(errors.New("db"))
+
+			err := Conversation().UpsertCagoMessages(ctx, 1, msgs)
+			assert.Error(t, err)
+		})
+
+		convey.Convey("同一 conversationID 的并发调用串行", func() {
+			ctx, mockRepo := setupTest(t)
+
+			var inFlight atomic.Int32
+			var maxInFlight atomic.Int32
+			mockRepo.EXPECT().UpsertMessagesByCagoID(gomock.Any(), int64(7), gomock.Any()).Times(5).DoAndReturn(
+				func(_ context.Context, _ int64, _ []*conversation_entity.Message) error {
+					n := inFlight.Add(1)
+					for {
+						m := maxInFlight.Load()
+						if n <= m || maxInFlight.CompareAndSwap(m, n) {
+							break
+						}
+					}
+					time.Sleep(20 * time.Millisecond)
+					inFlight.Add(-1)
+					return nil
+				},
+			)
+
+			var wg sync.WaitGroup
+			for i := 0; i < 5; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					_ = Conversation().UpsertCagoMessages(ctx, 7,
+						[]*conversation_entity.Message{{Role: "user", Content: "x"}})
+				}()
+			}
+			wg.Wait()
+
+			assert.LessOrEqual(t, maxInFlight.Load(), int32(1),
+				"同一 conversationID 的 UpsertCagoMessages 应串行")
+		})
+	})
+}
+
+func TestConversationSvc_UpdateConversationState(t *testing.T) {
+	convey.Convey("UpdateConversationState 写入 thread_id 与 state_values JSON", t, func() {
+		convey.Convey("非空 values 序列化为 JSON", func() {
+			ctx, mockRepo := setupTest(t)
+
+			values := map[string]string{"k1": "v1", "k2": "v2"}
+			mockRepo.EXPECT().UpdateState(gomock.Any(), int64(1), "thread-abc", gomock.Any()).DoAndReturn(
+				func(_ context.Context, _ int64, _ string, jsonStr string) error {
+					assert.NotEmpty(t, jsonStr)
+					var got map[string]string
+					assert.NoError(t, json.Unmarshal([]byte(jsonStr), &got))
+					assert.Equal(t, values, got)
+					return nil
+				},
+			)
+
+			err := Conversation().UpdateConversationState(ctx, 1, "thread-abc", values)
+			assert.NoError(t, err)
+		})
+
+		convey.Convey("nil values 写入空字符串", func() {
+			ctx, mockRepo := setupTest(t)
+
+			mockRepo.EXPECT().UpdateState(gomock.Any(), int64(2), "tid", "").Return(nil)
+
+			err := Conversation().UpdateConversationState(ctx, 2, "tid", nil)
+			assert.NoError(t, err)
+		})
+
+		convey.Convey("空 map 写入空字符串", func() {
+			ctx, mockRepo := setupTest(t)
+
+			mockRepo.EXPECT().UpdateState(gomock.Any(), int64(3), "tid", "").Return(nil)
+
+			err := Conversation().UpdateConversationState(ctx, 3, "tid", map[string]string{})
+			assert.NoError(t, err)
+		})
+
+		convey.Convey("repo 错误透传", func() {
+			ctx, mockRepo := setupTest(t)
+
+			mockRepo.EXPECT().UpdateState(gomock.Any(), int64(4), "tid", gomock.Any()).
+				Return(errors.New("db"))
+
+			err := Conversation().UpdateConversationState(ctx, 4, "tid", map[string]string{"a": "b"})
+			assert.Error(t, err)
+		})
+	})
 }
 
 func TestConversationSvc_LoadMessages(t *testing.T) {
