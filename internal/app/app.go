@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/cago-frame/agents/provider"
+
 	"github.com/opskat/opskat/internal/ai"
 	"github.com/opskat/opskat/internal/approval"
 	_ "github.com/opskat/opskat/internal/assettype"
@@ -68,6 +70,8 @@ type App struct {
 	sftpService             *sftp_svc.Service
 	forwardManager          *ForwardManager
 	aiAgent                 *ai.Agent
+	aiCagoProvider          provider.Provider // cago provider, lazy-built per active AI provider
+	aiAgentSystems          sync.Map          // map[int64]*aiagent.System (one per active conversation)
 	githubAuthCancel        context.CancelFunc
 	permissionChan          chan ai.PermissionResponse // 前端权限响应 channel（CLI 工具用）
 	pendingAIApprovals      sync.Map                   // map[string]chan ai.ApprovalResponse（AI 审批用）

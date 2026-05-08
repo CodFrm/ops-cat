@@ -4,11 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/cago-frame/agents/provider"
+	"github.com/cago-frame/agents/provider/anthropics"
+	openaiCago "github.com/cago-frame/agents/provider/openai"
+	openaiSDK "github.com/sashabaranov/go-openai"
+
 	"github.com/opskat/opskat/internal/ai"
+	"github.com/opskat/opskat/internal/aiagent"
 	"github.com/opskat/opskat/internal/model/entity/ai_provider_entity"
 	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
 	"github.com/opskat/opskat/internal/service/ai_provider_svc"
@@ -259,9 +266,16 @@ func (a *App) DeleteConversation(id int64) error {
 	return nil
 }
 
-// SendAIMessage 发送 AI 消息，通过 Wails Events 流式返回
-// convID 指定目标会话，支持多会话并发发送
+// SendAIMessage routes to legacy or cago backend depending on the feature flag.
 func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AIContext) error {
+	if aiagent.Enabled() {
+		return a.sendAIMessageCago(convID, messages, aiCtx)
+	}
+	return a.sendAIMessageLegacy(convID, messages, aiCtx)
+}
+
+// sendAIMessageLegacy is the existing SendAIMessage body, unchanged.
+func (a *App) sendAIMessageLegacy(convID int64, messages []ai.Message, aiCtx ai.AIContext) error {
 	if a.aiAgent == nil {
 		return fmt.Errorf("请先配置 AI Provider")
 	}
@@ -366,6 +380,172 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 func (a *App) getOrCreateRunner(convID int64) *ai.ConversationRunner {
 	v, _ := a.runners.LoadOrStore(convID, ai.NewConversationRunner(a.aiAgent))
 	return v.(*ai.ConversationRunner)
+}
+
+// buildCagoProvider constructs a cago-side provider.Provider from an OpsKat
+// AIProvider config. Used only on the cago path — the legacy *ai.Agent stays
+// driven by ai.Provider.
+func (a *App) buildCagoProvider(p *ai_provider_entity.AIProvider) (provider.Provider, error) {
+	apiKey, err := ai_provider_svc.AIProvider().DecryptAPIKey(p)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt api key: %w", err)
+	}
+	switch p.Type {
+	case "anthropic":
+		return anthropics.NewProvider(anthropics.Config{
+			APIKey:  apiKey,
+			BaseURL: p.APIBase,
+		}), nil
+	default:
+		cfg := openaiSDK.DefaultConfig(apiKey)
+		if p.APIBase != "" {
+			cfg.BaseURL = p.APIBase
+		}
+		return openaiCago.NewProvider(cfg), nil
+	}
+}
+
+// sendAIMessageCago routes a Send through the cago backend. Mirrors
+// sendAIMessageLegacy's effects (title set on first turn, Wails event emission)
+// but uses *aiagent.System under the hood.
+func (a *App) sendAIMessageCago(convID int64, messages []ai.Message, aiCtx ai.AIContext) error {
+	ctx := a.langCtx()
+
+	if convID == 0 {
+		conv, err := a.CreateConversation()
+		if err != nil {
+			return fmt.Errorf("创建会话失败: %w", err)
+		}
+		convID = conv.ID
+	}
+
+	if conv, err := conversation_svc.Conversation().Get(ctx, convID); err == nil && conv.Title == "新对话" {
+		for _, msg := range messages {
+			if msg.Role == ai.RoleUser {
+				title := normalizeConversationTitle(string(msg.Content))
+				if err := conversation_svc.Conversation().UpdateTitle(ctx, convID, title); err != nil {
+					logger.Default().Error("update conversation title", zap.Error(err))
+				}
+				break
+			}
+		}
+	}
+
+	// Extract the last user turn — cago Session has its own persisted history.
+	var prompt string
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == ai.RoleUser {
+			prompt = string(messages[i].Content)
+			break
+		}
+	}
+	if prompt == "" {
+		return fmt.Errorf("no user message in send")
+	}
+
+	sys, err := a.getOrCreateAIAgentSystem(convID)
+	if err != nil {
+		return err
+	}
+
+	// Per-turn extension skill MD: same logic as legacy path.
+	ext := make(map[string]string)
+	if a.extSvc != nil {
+		bridge := a.extSvc.Bridge()
+		seen := make(map[string]bool)
+		for _, tab := range aiCtx.OpenTabs {
+			if seen[tab.Type] {
+				continue
+			}
+			seen[tab.Type] = true
+			if skillMD := bridge.GetSkillMDWithExtension(tab.Type); skillMD.Content != "" {
+				ext[skillMD.ExtensionName] = skillMD.Content
+			}
+		}
+	}
+
+	return sys.Stream(ctx, prompt, aiCtx, ext)
+}
+
+// getOrCreateAIAgentSystem returns a cached *aiagent.System for convID or
+// builds a new one. The cago provider is built lazily on first call after
+// activateProvider; it's invalidated by resetRunners.
+func (a *App) getOrCreateAIAgentSystem(convID int64) (*aiagent.System, error) {
+	if v, ok := a.aiAgentSystems.Load(convID); ok {
+		return v.(*aiagent.System), nil
+	}
+
+	if a.aiCagoProvider == nil {
+		active, err := ai_provider_svc.AIProvider().GetActive(a.langCtx())
+		if err != nil || active == nil {
+			return nil, fmt.Errorf("请先配置 AI Provider")
+		}
+		prov, err := a.buildCagoProvider(active)
+		if err != nil {
+			return nil, fmt.Errorf("build cago provider: %w", err)
+		}
+		a.aiCagoProvider = prov
+	}
+
+	conv, err := conversation_svc.Conversation().Get(a.langCtx(), convID)
+	if err != nil {
+		return nil, fmt.Errorf("conversation %d not found: %w", convID, err)
+	}
+	cwd := conv.WorkDir
+	if cwd == "" {
+		if home, herr := os.UserHomeDir(); herr == nil {
+			cwd = home
+		} else {
+			cwd = os.TempDir()
+		}
+	}
+
+	lang := "en"
+	if a.lang == "zh-cn" {
+		lang = "zh-cn"
+	}
+
+	checker := ai.NewCommandPolicyChecker(a.makeCommandConfirmFunc())
+	checker.SetGrantRequestFunc(a.makeGrantRequestFunc())
+
+	deps := &aiagent.Deps{
+		SSHPool:       a.sshPool,
+		KafkaService:  a.kafkaService,
+		PolicyChecker: checker,
+	}
+
+	eventName := fmt.Sprintf("ai:event:%d", convID)
+	emitter := aiagent.EmitterFunc(func(_ int64, event ai.StreamEvent) {
+		wailsRuntime.EventsEmit(a.ctx, eventName, event)
+	})
+
+	resolver := aiagent.PendingResolver(func(confirmID string) (chan ai.ApprovalResponse, func()) {
+		ch := make(chan ai.ApprovalResponse, 1)
+		a.pendingAIApprovals.Store(confirmID, ch)
+		return ch, func() { a.pendingAIApprovals.Delete(confirmID) }
+	})
+
+	sys, err := aiagent.NewSystem(a.ctx, aiagent.SystemOptions{
+		Provider:      a.aiCagoProvider,
+		Cwd:           cwd,
+		ConvID:        convID,
+		Lang:          lang,
+		Deps:          deps,
+		Emitter:       emitter,
+		PolicyChecker: checker,
+		Resolver:      resolver,
+		Activate:      func() { a.activateWindow() },
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create aiagent.System: %w", err)
+	}
+
+	if existing, loaded := a.aiAgentSystems.LoadOrStore(convID, sys); loaded {
+		// Race: another goroutine created one first. Discard ours, return the winner.
+		_ = sys.Close(a.ctx)
+		return existing.(*aiagent.System), nil
+	}
+	return sys, nil
 }
 
 // QueueAIMessage 在生成过程中追加用户消息到队列，
