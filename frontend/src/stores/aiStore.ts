@@ -103,6 +103,9 @@ interface StreamEventData {
   }>;
   description?: string;
   session_id?: string;
+  // queue_consumed_batch 专用：cago drainInjections 一次 drain 出多条 follow-up
+  // 时由 bridge 合并 emit，FIFO 顺序与前端 pendingQueue 头部对齐。
+  queue_contents?: string[];
   // usage 事件：后端下发每轮 LLM 调用的 token 使用量
   usage?: {
     input_tokens?: number;
@@ -1064,7 +1067,17 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
           agentBlock.childBlocks = [...(agentBlock.childBlocks || []), toolBlock];
           newBlocks[agentIdx] = agentBlock;
         } else {
-          newBlocks.push(toolBlock);
+          // policy hook 保证 tool_start 逻辑上先于 approval_request：cago dispatcher 把
+          // EventPreToolUse 推 ring buffer，再同步跑 PreToolUse hooks；hook 内 RequestSingle
+          // 直接打 Wails 发 approval_request，绕过 ring buffer。两条路径在不同 goroutine 投递时
+          // 可能颠倒到达前端 → 当末尾已是待确认 approval 时把 tool 插到它前面，让 splitBlocksByApproval
+          // 仍能合成 bubble[..., tool] | approval，而不是 bubble[thinking] | approval | bubble[tool]。
+          const last = newBlocks[newBlocks.length - 1];
+          if (last && last.type === "approval" && last.status === "pending_confirm") {
+            newBlocks.splice(newBlocks.length - 1, 0, toolBlock);
+          } else {
+            newBlocks.push(toolBlock);
+          }
         }
 
         return { ...msg, blocks: newBlocks };
@@ -1196,9 +1209,9 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
     }
 
     case "queue_consumed": {
-      // 后端在工具调用间隙消费了一条排队消息
-      // 结束当前 assistant 消息，插入 user 消息，开启新 assistant 流
-      // event.content 为后端分离出的展示原文；mentions 从本地队列读取用于高亮 chip
+      // 单条兜底路径。当前 cago 后端走 queue_consumed_batch，单条事件保留是为了兼容
+      // 早期 build / 子 agent observer / 未来其他 backend。
+      // event.content 为后端分离出的展示原文；mentions 从本地队列头部读取用于高亮 chip。
       const curQueue = useAIStore.getState().conversationStreaming[convId]?.pendingQueue || [];
       const consumedItem = curQueue[0];
       const nextMsgs = [...msgs];
@@ -1222,6 +1235,42 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       const newQueue = curQueue.length > 0 ? curQueue.slice(1) : [];
       updateConversation(convId, { messages: nextMsgs, pendingQueue: newQueue });
       // 排队消息被消费（插入新 user + 开启新 assistant）属于低频关键事件，立即落盘。
+      persistNow(convId, true);
+      break;
+    }
+
+    case "queue_consumed_batch": {
+      // cago drainInjections 在 safe point 一次 drain 出多条 follow-up，bridge 合并
+      // 成单条 batch 事件 → 这里按 FIFO 一次性追加 N 条 user 消息，只保留尾部 1 个
+      // assistant placeholder。如果 N 条逐条走 queue_consumed，中间会 push 出空 asst
+      // 占位（drain 期间不会有 token delta 进来填它），视觉上是一串空气泡。
+      const items = event.queue_contents || [];
+      if (items.length === 0) break;
+      const curQueue = useAIStore.getState().conversationStreaming[convId]?.pendingQueue || [];
+      const nextMsgs = [...msgs];
+      const lastIdx = nextMsgs.length - 1;
+      if (lastIdx >= 0 && nextMsgs[lastIdx].role === "assistant") {
+        nextMsgs[lastIdx] = { ...nextMsgs[lastIdx], streaming: false };
+      }
+      for (let i = 0; i < items.length; i++) {
+        // 本地 pendingQueue[i] 持有 mentions chip；后端只回传 displayContent。
+        const localItem = curQueue[i];
+        nextMsgs.push({
+          role: "user" as const,
+          content: items[i] || "",
+          mentions: localItem?.mentions,
+          blocks: [],
+          streaming: false,
+        });
+      }
+      nextMsgs.push({
+        role: "assistant" as const,
+        content: "",
+        blocks: [],
+        streaming: true,
+      });
+      const newQueue = curQueue.length > items.length ? curQueue.slice(items.length) : [];
+      updateConversation(convId, { messages: nextMsgs, pendingQueue: newQueue });
       persistNow(convId, true);
       break;
     }

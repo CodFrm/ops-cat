@@ -71,31 +71,43 @@ func (c *captureEmitter) snapshot() []ai.StreamEvent {
 	return out
 }
 
-// TestSystem_Steer_EmitsQueueConsumedAndForwards verifies the contract documented
-// on Steer: the UI sees "queue_consumed" with the user-visible text *before*
-// sess.Steer is invoked, even when sess.Steer ultimately fails (no active
-// stream). The frontend relies on this event to clear its pending banner.
-func TestSystem_Steer_EmitsQueueConsumedAndForwards(t *testing.T) {
+// Steer 走 cago Session.FollowUp（safe-point drain）：不再同步 emit queue_consumed，
+// 改由 bridge 在 cago 发出 EventUserPromptSubmit(Kind=FollowUp) 时合并 emit
+// queue_consumed_batch。Session.FollowUp 不需要 active stream（没有时入队等下次
+// Stream 启动消费），所以 Steer 在 smoke 场景下应当返回 nil 并把展示原文塞进
+// displayContent FIFO。
+func TestSystem_Steer_QueuesIntoDisplayFIFO(t *testing.T) {
 	em := &captureEmitter{}
 	sys := newSmokeSystem(t, em)
 
-	err := sys.Steer(context.Background(), "expanded body", "user-typed text")
-	// No active stream → cago returns ErrNoActiveStream. We don't assert on
-	// the exact sentinel (cago-internal) — just that Steer surfaces an error
-	// rather than silently swallowing it.
-	if err == nil {
-		t.Fatal("Steer with no active stream should return an error")
-	}
-	if !errors.Is(err, agent.ErrNoActiveStream) {
-		t.Fatalf("expected ErrNoActiveStream, got %v", err)
+	if err := sys.Steer(context.Background(), "expanded body", "user-typed text"); err != nil {
+		t.Fatalf("Steer should succeed via Session.FollowUp queue, got %v", err)
 	}
 
-	evs := em.snapshot()
-	if len(evs) == 0 || evs[0].Type != "queue_consumed" {
-		t.Fatalf("first emitted event must be queue_consumed, got %+v", evs)
+	// 不应有任何同步 emit 出去的事件——前端只通过 bridge 在 cago drain 时收到通知。
+	if got := em.snapshot(); len(got) != 0 {
+		t.Fatalf("Steer must not synchronously emit; got %+v", got)
 	}
-	if evs[0].Content != "user-typed text" {
-		t.Errorf("queue_consumed.Content = %q, want display text", evs[0].Content)
+
+	// 展示原文按 push 顺序进入 FIFO 头部。
+	if got := sys.popPendingDisplay(); got != "user-typed text" {
+		t.Fatalf("popPendingDisplay = %q, want %q", got, "user-typed text")
+	}
+}
+
+// 多条 Steer 入队后，displayContent FIFO 必须按 push 顺序 pop（与 cago Session.followUp
+// 的 FIFO 保持一致），bridge 翻译 EventUserPromptSubmit 时才能拿到正确的展示原文。
+func TestSystem_PendingDisplay_FIFOOrder(t *testing.T) {
+	sys := newSmokeSystem(t, EmitterFunc(func(int64, ai.StreamEvent) {}))
+
+	sys.pushPendingDisplay("m1")
+	sys.pushPendingDisplay("m2")
+	sys.pushPendingDisplay("m3")
+
+	for _, want := range []string{"m1", "m2", "m3", ""} {
+		if got := sys.popPendingDisplay(); got != want {
+			t.Fatalf("popPendingDisplay = %q, want %q", got, want)
+		}
 	}
 }
 

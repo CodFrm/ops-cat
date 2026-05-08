@@ -11,16 +11,48 @@ import (
 // bridge translates cago agent.Event values into OpsKat ai.StreamEvent values
 // and emits them through the EventEmitter. One bridge instance per Stream.
 //
-// State: tracks "thinking active" so we can synthesize a thinking_done event
-// when a non-thinking event interrupts a thinking-delta sequence.
+// State:
+//   - thinkingActive: synthesize thinking_done when a non-thinking event
+//     interrupts a thinking-delta sequence.
+//   - pendingFollowUps: cago drainInjections 逐条 emit EventUserPromptSubmit
+//     (Kind=MessageKindFollowUp)；这里把它们累积成一批，等下一个非 follow-up
+//     事件到来时合并 emit 一次 queue_consumed_batch，前端只需追加一个 assistant
+//     placeholder（避免逐条 push 出一串空 assistant 气泡）。
+//   - popDisplay: 从 *System 的 displayContent FIFO 拿展示原文。cago Message.Text
+//     是带 mention 上下文的 LLM body，不能直接给前端展示。
 type bridge struct {
-	emit           EventEmitter
-	thinkingActive bool
+	emit             EventEmitter
+	popDisplay       func() string
+	thinkingActive   bool
+	pendingFollowUps []string
 }
 
-func newBridge(em EventEmitter) *bridge { return &bridge{emit: em} }
+func newBridge(em EventEmitter, popDisplay func() string) *bridge {
+	if popDisplay == nil {
+		popDisplay = func() string { return "" }
+	}
+	return &bridge{emit: em, popDisplay: popDisplay}
+}
 
 func (b *bridge) translate(convID int64, ev agent.Event) {
+	// follow-up 类 UserPromptSubmit 直接累积到 pendingFollowUps，不做后续翻译。
+	// drainInjections 在 runloop 单 goroutine 内连续 emit，期间不会插入其他 Kind
+	// 事件，所以累积窗口安全。
+	if ev.Kind == agent.EventUserPromptSubmit && ev.Message != nil &&
+		ev.Message.Kind == agent.MessageKindFollowUp {
+		b.pendingFollowUps = append(b.pendingFollowUps, b.popDisplay())
+		return
+	}
+
+	// 非 follow-up 事件到来 → 先把累积的 follow-up 一次性 flush 给前端。
+	if len(b.pendingFollowUps) > 0 {
+		b.emit.Emit(convID, ai.StreamEvent{
+			Type:          "queue_consumed_batch",
+			QueueContents: b.pendingFollowUps,
+		})
+		b.pendingFollowUps = nil
+	}
+
 	// Synthesize thinking_done when a non-thinking event arrives after thinking deltas.
 	if b.thinkingActive && ev.Kind != agent.EventThinkingDelta {
 		b.emit.Emit(convID, ai.StreamEvent{Type: "thinking_done"})

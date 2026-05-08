@@ -60,6 +60,14 @@ type System struct {
 	streamCancel context.CancelFunc
 	closeOnce    sync.Once
 	closeErr     error
+
+	// Steer 走 cago Session.FollowUp（FIFO，下一个 safe point 才 drain），cago 通过
+	// EventUserPromptSubmit 通知"这条 follow-up 已被消费"，但只携带 LLM body 文本
+	// （已混入 mention 上下文），拿不到给前端展示的原始用户输入。
+	// 这里旁路一个 displayContent FIFO：Steer 入队时 push，bridge 收到 follow-up 类
+	// EventUserPromptSubmit 时 pop 头部，emit 给前端的 queue_consumed_batch 事件。
+	displayMu       sync.Mutex
+	pendingDisplays []string
 }
 
 // NewSystem assembles the per-Conversation cago System.
@@ -165,16 +173,19 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 		agent.WithInitialState(prior.State),
 	)
 
-	return &System{
+	sys := &System{
 		cs:        cs,
 		sess:      sess,
 		convID:    opts.ConvID,
 		emitter:   opts.Emitter,
 		turnState: turnState,
 		sidecar:   sc,
-		bridge:    newBridge(opts.Emitter),
 		rounds:    rounds,
-	}, nil
+	}
+	// bridge 持回调拿 follow-up 展示原文：避免循环依赖（bridge 不引用 *System），
+	// 且测试时可注入 fake popDisplay 单独覆盖 bridge 行为。
+	sys.bridge = newBridge(opts.Emitter, sys.popPendingDisplay)
+	return sys, nil
 }
 
 // Stream sends a prompt for the next turn, draining cago events through the
@@ -214,13 +225,62 @@ func (s *System) Stream(ctx context.Context, prompt string, aiCtx ai.AIContext, 
 	return err
 }
 
-// Steer injects a mid-cycle user message. Mirrors legacy QueueAIMessage by
-// emitting "queue_consumed" so the frontend can clear its pending banner.
-// displayContent is what the UI showed the user (may differ from body when
-// mentions are expanded server-side).
+// Steer 把用户消息入 cago 的 FollowUp 队列，等到当前轮 tool 批执行完、下一轮 LLM
+// 调用前由 cago drainInjections 一次性 drain 出来。不打断当前 token stream，多条
+// 排队消息会在前端 pendingQueue 里按 FIFO 累积，符合老 ConversationRunner 体验。
+//
+// displayContent 是前端要展示的原文（mention 未展开版本），cago 拿到的 body 可能已
+// 经被 RenderMentionContext 拼接过；这里把 displayContent 推到 System 的 FIFO，由
+// bridge 在收到对应 EventUserPromptSubmit (Kind=MessageKindFollowUp) 时 pop 出来
+// 通过 queue_consumed_batch 通知前端。
+//
+// 函数名沿用旧的 Steer 是为了不破坏 App.QueueAIMessage 调用点；语义已经从 cago 的
+// Steer（mid-cycle 立即注入）切换到 cago 的 FollowUp（safe point drain）。
 func (s *System) Steer(ctx context.Context, body, displayContent string) error {
-	s.emitter.Emit(s.convID, ai.StreamEvent{Type: "queue_consumed", Content: displayContent})
-	return s.sess.Steer(ctx, body, agent.AsUser(), agent.Persist(true))
+	s.pushPendingDisplay(displayContent)
+	if err := s.sess.FollowUp(ctx, body, agent.AsUser(), agent.Persist(true)); err != nil {
+		// FollowUp 入队失败时，回滚 displayContent FIFO，避免 bridge 后续 pop 出
+		// 一条永远不会被 cago 消费的鬼影记录。
+		s.popMatchingDisplay(displayContent)
+		return err
+	}
+	return nil
+}
+
+// pushPendingDisplay 把一条排队消息的展示原文塞到 System 的 displayContent FIFO 末尾。
+// bridge 在收到 cago follow-up 类 EventUserPromptSubmit 时 popPendingDisplay 头部。
+func (s *System) pushPendingDisplay(content string) {
+	s.displayMu.Lock()
+	s.pendingDisplays = append(s.pendingDisplays, content)
+	s.displayMu.Unlock()
+}
+
+// popPendingDisplay 弹出 FIFO 头部，没有时返回空串。bridge 在 EventUserPromptSubmit
+// (Kind=FollowUp) 到来时调用一次。
+func (s *System) popPendingDisplay() string {
+	s.displayMu.Lock()
+	defer s.displayMu.Unlock()
+	if len(s.pendingDisplays) == 0 {
+		return ""
+	}
+	out := s.pendingDisplays[0]
+	s.pendingDisplays = s.pendingDisplays[1:]
+	return out
+}
+
+// popMatchingDisplay 在 FollowUp 入队失败时回滚最后一次 push（必须是尾部对应项；
+// 用 content 校验防止误删并发情况下别人 push 的项）。匹配不上就什么都不做。
+func (s *System) popMatchingDisplay(content string) {
+	s.displayMu.Lock()
+	defer s.displayMu.Unlock()
+	n := len(s.pendingDisplays)
+	if n == 0 {
+		return
+	}
+	if s.pendingDisplays[n-1] != content {
+		return
+	}
+	s.pendingDisplays = s.pendingDisplays[:n-1]
 }
 
 // StopStream cancels the in-flight stream (if any). Safe to call from another

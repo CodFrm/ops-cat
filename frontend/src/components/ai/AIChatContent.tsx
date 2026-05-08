@@ -186,16 +186,62 @@ export function AIChatContent({
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const previousConversationIdRef = useRef<number | null | undefined>(conversationId);
   const editTarget = sideTabId ? sidebarEditTarget : localEditTarget;
+  // 输入草稿的防抖落盘：每次 onUpdate 都直接写 store 会重建 sidebarTabs 数组，
+  // 触发 SideAssistantPanel 等订阅者按键级重渲。这里在本地累积，250ms 静默后写一次。
+  // tab 切换 / 卸载 / 退出编辑态会主动 flush，确保不丢草稿。
+  const draftFlushTimerRef = useRef<number | null>(null);
+  const pendingDraftRef = useRef<AIChatInputDraft | null>(null);
+  // sticky-bottom 跟随：在底部时自动追内容，用户主动滚开后暂停跟随，再回到底部恢复跟随。
+  // 不再用「每次 messages 变更测一次距底距离」——这种方式遇到流式 token 把内容推高、
+  // 用户尚未触发滚动事件时会出现"在底部却跟不上"的状态。改成由 scroll 事件维护一个 ref。
+  const isStickyBottomRef = useRef(true);
+  const scrollPersistTimerRef = useRef<number | null>(null);
 
+  // 滚动初始化 + sticky 状态追踪 + 侧边滚动位置防抖落盘。
+  // 必须放在「按 messages 跟随到底部」effect 之前，保证切换会话时先按保存值定位、再决定跟不跟。
   useEffect(() => {
-    // 仅当用户已经在接近底部时才跟随，避免向上翻看历史被强行拽回；
-    // 用 scrollTop 直写代替 scrollIntoView({behavior:"smooth"})，避免流式 token 期间与渲染抢主线程。
     const viewport = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]") as HTMLDivElement | null;
     if (!viewport) return;
-    const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
-    if (distanceFromBottom < 80) {
+    if (sideTabId) {
+      // 侧边模式恢复每个 tab 自己保存的滚动位置。
+      viewport.scrollTop =
+        useAIStore.getState().sidebarTabs.find((tab) => tab.id === sideTabId)?.uiState.scrollTop ?? 0;
+    } else {
+      // 主工作区 tab：进入会话直接落到底部，让用户看到最新消息。
       viewport.scrollTop = viewport.scrollHeight;
     }
+    isStickyBottomRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 32;
+
+    const handleScroll = () => {
+      const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      // 32px 容差吸收子像素抖动 + 程序滚动的 round-off；离底超过容差视为用户已滚开。
+      isStickyBottomRef.current = distance < 32;
+      if (sideTabId) {
+        // 落盘走 200ms 防抖，避免流式自动滚每帧写 store 触发 sidebarTabs 重建。
+        if (scrollPersistTimerRef.current !== null) {
+          window.clearTimeout(scrollPersistTimerRef.current);
+        }
+        scrollPersistTimerRef.current = window.setTimeout(() => {
+          scrollPersistTimerRef.current = null;
+          setSidebarTabScrollTop(sideTabId, viewport.scrollTop);
+        }, 200);
+      }
+    };
+    viewport.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      viewport.removeEventListener("scroll", handleScroll);
+      if (scrollPersistTimerRef.current !== null) {
+        window.clearTimeout(scrollPersistTimerRef.current);
+        scrollPersistTimerRef.current = null;
+      }
+    };
+  }, [conversationId, setSidebarTabScrollTop, sideTabId]);
+
+  useEffect(() => {
+    if (!isStickyBottomRef.current) return;
+    const viewport = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]") as HTMLDivElement | null;
+    if (!viewport) return;
+    viewport.scrollTop = viewport.scrollHeight;
   }, [messages]);
 
   useEffect(() => {
@@ -209,6 +255,48 @@ export function AIChatContent({
     const uiState = useAIStore.getState().sidebarTabs.find((tab) => tab.id === sideTabId)?.uiState;
     inputRef.current?.loadDraft(uiState?.inputDraft ?? { content: "", mentions: [] });
   }, [conversationId, sideTabId]);
+
+  const flushPendingDraft = useCallback(() => {
+    if (draftFlushTimerRef.current !== null) {
+      window.clearTimeout(draftFlushTimerRef.current);
+      draftFlushTimerRef.current = null;
+    }
+    const pending = pendingDraftRef.current;
+    pendingDraftRef.current = null;
+    if (sideTabId && pending) {
+      setSidebarTabInputDraft(sideTabId, pending);
+    }
+  }, [setSidebarTabInputDraft, sideTabId]);
+
+  const cancelPendingDraft = useCallback(() => {
+    if (draftFlushTimerRef.current !== null) {
+      window.clearTimeout(draftFlushTimerRef.current);
+      draftFlushTimerRef.current = null;
+    }
+    pendingDraftRef.current = null;
+  }, []);
+
+  const handleDraftChange = useCallback(
+    (draft: AIChatInputDraft) => {
+      if (!sideTabId) return;
+      pendingDraftRef.current = draft;
+      if (draftFlushTimerRef.current !== null) return;
+      draftFlushTimerRef.current = window.setTimeout(() => {
+        draftFlushTimerRef.current = null;
+        const pending = pendingDraftRef.current;
+        pendingDraftRef.current = null;
+        if (pending) setSidebarTabInputDraft(sideTabId, pending);
+      }, 250);
+    },
+    [sideTabId, setSidebarTabInputDraft]
+  );
+
+  // 切换 side tab / 卸载时把还没落盘的最新草稿写回 store。
+  useEffect(() => {
+    return () => {
+      flushPendingDraft();
+    };
+  }, [sideTabId, flushPendingDraft]);
 
   // 编辑态依赖 conversationId 和消息索引，切换会话时要显式清掉草稿，避免把旧草稿带到新会话。
   const resetEditMode = useCallback(
@@ -224,11 +312,13 @@ export function AIChatContent({
       if (hadEditTarget && options?.clearDraft) {
         inputRef.current?.clear();
         if (sideTabId) {
+          // 直接把 store 改成空，并丢掉 pending（它持有的是 clear 之前的旧草稿）。
           setSidebarTabInputDraft(sideTabId, { content: "", mentions: [] });
+          cancelPendingDraft();
         }
       }
     },
-    [localEditTarget, setSidebarTabEditTarget, setSidebarTabInputDraft, sideTabId]
+    [cancelPendingDraft, localEditTarget, setSidebarTabEditTarget, setSidebarTabInputDraft, sideTabId]
   );
 
   useEffect(() => {
@@ -257,19 +347,6 @@ export function AIChatContent({
       resetEditMode({ clearDraft: true });
     }
   }, [conversationId, editTarget, messages, resetEditMode]);
-
-  useEffect(() => {
-    if (!sideTabId) return;
-    const viewport = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]") as HTMLDivElement | null;
-    if (!viewport) return;
-    const handleScroll = () => {
-      setSidebarTabScrollTop(sideTabId, viewport.scrollTop);
-    };
-    // 滚动位置同样按宿主维度恢复，保证多个侧边 tab 来回切换时各自停在原来的阅读位置。
-    viewport.scrollTop = useAIStore.getState().sidebarTabs.find((tab) => tab.id === sideTabId)?.uiState.scrollTop ?? 0;
-    viewport.addEventListener("scroll", handleScroll, { passive: true });
-    return () => viewport.removeEventListener("scroll", handleScroll);
-  }, [conversationId, setSidebarTabScrollTop, sideTabId]);
 
   const handleSend = useCallback(
     (text: string, mentions: MentionRef[]) => {
@@ -378,22 +455,15 @@ export function AIChatContent({
             {messages.length === 0 && (
               <p className="text-sm text-muted-foreground text-center mt-16">{t("ai.placeholder")}</p>
             )}
-            {messages.map((msg, i) => {
-              const isLast = i === messages.length - 1;
-              // 最后一条（流式目标）不启用 content-visibility，避免流式过程中被浏览器延迟渲染
-              const cvStyle: React.CSSProperties | undefined = isLast
-                ? undefined
-                : { contentVisibility: "auto", containIntrinsicSize: "auto 120px" };
-              return (
-                <div key={i} className="text-sm" style={cvStyle}>
-                  {msg.role === "user" ? (
-                    <UserMessage index={i} msg={msg} onEdit={handleEditMessage} />
-                  ) : (
-                    <AssistantMessage msg={msg} index={i} sending={sending} onRegenerate={handleRegenerate} />
-                  )}
-                </div>
-              );
-            })}
+            {messages.map((msg, i) => (
+              <div key={i} className="text-sm">
+                {msg.role === "user" ? (
+                  <UserMessage index={i} msg={msg} onEdit={handleEditMessage} />
+                ) : (
+                  <AssistantMessage msg={msg} index={i} sending={sending} onRegenerate={handleRegenerate} />
+                )}
+              </div>
+            ))}
           </div>
         </ScrollArea>
 
@@ -465,11 +535,7 @@ export function AIChatContent({
                 ref={inputRef}
                 onSubmit={handleSend}
                 onEmptyChange={setEmpty}
-                onDraftChange={(draft) => {
-                  if (sideTabId) {
-                    setSidebarTabInputDraft(sideTabId, draft);
-                  }
-                }}
+                onDraftChange={handleDraftChange}
                 sendOnEnter={sendOnEnter}
                 userMessageHistory={userMessageHistory}
                 placeholder={t("ai.sendPlaceholder")}

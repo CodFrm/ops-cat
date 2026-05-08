@@ -58,8 +58,8 @@ type Usage struct {
 
 // StreamEvent 流式响应事件
 type StreamEvent struct {
-	Type       string     `json:"type"`                   // "content" | "tool_start" | "tool_result" | "tool_call" | "approval_request" | "approval_result" | "agent_start" | "agent_end" | "done" | "error" | "thinking" | "thinking_done" | "stopped" | "retry" | "usage"
-	Content    string     `json:"content,omitempty"`      // type=content/tool_result/approval_result/agent_end 时的文本
+	Type       string     `json:"type"`                   // "content" | "tool_start" | "tool_result" | "tool_call" | "approval_request" | "approval_result" | "agent_start" | "agent_end" | "done" | "error" | "thinking" | "thinking_done" | "stopped" | "retry" | "usage" | "queue_consumed" | "queue_consumed_batch"
+	Content    string     `json:"content,omitempty"`      // type=content/tool_result/approval_result/agent_end/queue_consumed 时的文本
 	ToolName   string     `json:"tool_name,omitempty"`    // type=tool_start/tool_result 时的工具名
 	ToolInput  string     `json:"tool_input,omitempty"`   // type=tool_start 时的输入摘要
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // type=tool_call 时的工具调用 (OpenAI)
@@ -73,6 +73,9 @@ type StreamEvent struct {
 	Items       []ApprovalItem `json:"items,omitempty"`       // 审批项列表
 	Description string         `json:"description,omitempty"` // grant 描述
 	SessionID   string         `json:"session_id,omitempty"`  // grant session ID
+	// type=queue_consumed_batch 时承载多条排队消息的展示原文，FIFO 顺序；
+	// 前端按顺序追加 N 条 user 消息，只保留 1 个尾部 assistant placeholder。
+	QueueContents []string `json:"queue_contents,omitempty"`
 	// type=usage 时的 token 统计（前端累加到当前 assistant 消息）
 	Usage *Usage `json:"usage,omitempty"`
 }

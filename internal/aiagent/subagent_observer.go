@@ -13,7 +13,10 @@ import (
 // events to the parent stream's emitter, tagging each event with the
 // sub-agent's role/task. role/task are captured at construction.
 func makeSubagentObserver(em EventEmitter, convID int64, role, task string) agent.Observer {
-	br := newBridge(taggingEmitter{inner: em, role: role, task: task})
+	// 子 agent 不会被前端 Steer 进来 follow-up（cago dispatch_subagent 给子 agent 派
+	// 单一 prompt + tool 循环，没有用户中途插话路径），bridge 的 popDisplay 走默认
+	// 空实现即可。万一未来有 follow-up，会 emit 不带 content 的 batch，前端会忽略。
+	br := newBridge(taggingEmitter{inner: em, role: role, task: task}, nil)
 	return func(_ context.Context, ev agent.Event) {
 		br.translate(convID, ev)
 	}

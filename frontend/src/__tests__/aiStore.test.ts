@@ -1608,3 +1608,276 @@ describe("DeepSeek-v4 多轮 tool 调用历史展开", () => {
     expect(apiMsgs[1].tool_calls).toBeUndefined();
   });
 });
+
+// 回归：tool_start 与 approval_request 在 Wails 投递层的到达顺序竞态。
+// 后端 cago 把 EventPreToolUse 推 ring buffer（goroutine A 生产，goroutine B 消费 → tool_start），
+// PreToolUse hook 紧接着同步跑 RequestSingle 直接打 Wails 发 approval_request，绕过 ring buffer。
+// 当 B 抢不到调度，approval_request 先到 → 旧实现把 approval block 挤到 tool 前面，
+// splitBlocksByApproval 会切出 bubble[thinking] | approval | bubble[tool]，把思考与工具劈成两段气泡。
+// 修复：tool_start handler 看到末尾是 pending_confirm approval 时，把 tool 插到它前面而非追加。
+describe("aiStore tool_start vs approval_request 投递竞态", () => {
+  const buildSidebarTab = (convId: number) => ({
+    id: `sidebar-${convId}`,
+    conversationId: convId,
+    title: "新对话",
+    createdAt: 1,
+    uiState: {
+      inputDraft: { content: "", mentions: [] },
+      scrollTop: 0,
+      editTarget: null,
+    },
+  });
+
+  type StreamEvt = { type: string; [k: string]: unknown };
+
+  async function captureHandler(convId: number) {
+    const callbacks: Array<(event: StreamEvt) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((eventName: string, handler: (event: StreamEvt) => void) => {
+      if (eventName === `ai:event:${convId}`) callbacks.push(handler);
+      return () => {};
+    }) as any);
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+
+    useAIStore.setState({
+      sidebarTabs: [buildSidebarTab(convId)],
+      activeSidebarTabId: `sidebar-${convId}`,
+      conversationMessages: { [convId]: [] },
+      conversationStreaming: { [convId]: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendFromSidebarTab(`sidebar-${convId}`, "执行命令");
+    if (callbacks.length === 0) throw new Error("EventsOn handler not registered");
+    return callbacks[0];
+  }
+
+  function lastAssistantBlocks(convId: number) {
+    const msgs = useAIStore.getState().conversationMessages[convId] || [];
+    const last = msgs[msgs.length - 1];
+    return last?.role === "assistant" ? last.blocks : [];
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useAIStore.setState({
+      tabStates: {},
+      conversations: [],
+      conversationMessages: {},
+      conversationStreaming: {},
+      sidebarTabs: [],
+      activeSidebarTabId: null,
+    });
+  });
+
+  it("到达顺序 tool_start → approval_request：blocks 末尾为 [tool, approval(pending)]", async () => {
+    const convId = 200;
+    const fire = await captureHandler(convId);
+
+    fire({ type: "thinking", content: "我先看一下" });
+    fire({
+      type: "tool_start",
+      tool_name: "bash",
+      tool_input: '{"command":"ls -la"}',
+      tool_call_id: "call_bash_1",
+    });
+    fire({
+      type: "approval_request",
+      kind: "local_bash",
+      confirm_id: "ai_200_42",
+      items: [{ Type: "local_bash", Command: "ls -la" }],
+    });
+
+    const blocks = lastAssistantBlocks(convId);
+    expect(blocks.map((b) => b.type)).toEqual(["thinking", "tool", "approval"]);
+    expect(blocks[1]).toMatchObject({ type: "tool", toolCallId: "call_bash_1", status: "running" });
+    expect(blocks[2]).toMatchObject({ type: "approval", confirmId: "ai_200_42", status: "pending_confirm" });
+  });
+
+  it("到达顺序 approval_request → tool_start（竞态）：tool 仍被插到 pending approval 前面", async () => {
+    const convId = 201;
+    const fire = await captureHandler(convId);
+
+    fire({ type: "thinking", content: "我先看一下" });
+    fire({
+      type: "approval_request",
+      kind: "local_bash",
+      confirm_id: "ai_201_77",
+      items: [{ Type: "local_bash", Command: "ls -la" }],
+    });
+    fire({
+      type: "tool_start",
+      tool_name: "bash",
+      tool_input: '{"command":"ls -la"}',
+      tool_call_id: "call_bash_2",
+    });
+
+    const blocks = lastAssistantBlocks(convId);
+    expect(blocks.map((b) => b.type)).toEqual(["thinking", "tool", "approval"]);
+    expect(blocks[1]).toMatchObject({ type: "tool", toolCallId: "call_bash_2", status: "running" });
+    expect(blocks[2]).toMatchObject({ type: "approval", confirmId: "ai_201_77", status: "pending_confirm" });
+  });
+
+  it("approval_result(allow) 后 approval block 转 running，blocks 顺序保持 [thinking, tool, approval]", async () => {
+    const convId = 202;
+    const fire = await captureHandler(convId);
+
+    fire({ type: "thinking", content: "thinking" });
+    fire({ type: "approval_request", kind: "local_bash", confirm_id: "cid_1", items: [] });
+    fire({ type: "tool_start", tool_name: "bash", tool_input: "{}", tool_call_id: "tc_1" });
+    fire({ type: "approval_result", confirm_id: "cid_1", content: "allow" });
+
+    const blocks = lastAssistantBlocks(convId);
+    expect(blocks.map((b) => b.type)).toEqual(["thinking", "tool", "approval"]);
+    expect(blocks[2]).toMatchObject({ type: "approval", confirmId: "cid_1", status: "running" });
+  });
+
+  it("非 approval 末尾不受影响：tool_start 仍按原 push 到末尾", async () => {
+    const convId = 203;
+    const fire = await captureHandler(convId);
+
+    fire({ type: "thinking", content: "t" });
+    fire({ type: "tool_start", tool_name: "bash", tool_input: "{}", tool_call_id: "tc_first" });
+    fire({ type: "tool_result", tool_name: "bash", tool_call_id: "tc_first", content: "ok" });
+    fire({ type: "tool_start", tool_name: "bash", tool_input: "{}", tool_call_id: "tc_second" });
+
+    const blocks = lastAssistantBlocks(convId);
+    expect(blocks.map((b) => b.type)).toEqual(["thinking", "tool", "tool"]);
+    expect(blocks[1]).toMatchObject({ toolCallId: "tc_first", status: "completed" });
+    expect(blocks[2]).toMatchObject({ toolCallId: "tc_second", status: "running" });
+  });
+});
+
+// 回归：cago drainInjections 在 safe point 一次 drain 出多条 follow-up，bridge 合并
+// 成单条 queue_consumed_batch；前端必须按 FIFO 一次性追加 N 条 user 消息，并只保留
+// 一个尾部 assistant placeholder。逐条 queue_consumed 走的话，drain 期间不会有 token
+// delta 进来填中间的 asst 占位，最终会留下一串空气泡，所以 batch 是必要路径。
+describe("aiStore queue_consumed_batch", () => {
+  const buildSidebarTab = (convId: number) => ({
+    id: `sidebar-${convId}`,
+    conversationId: convId,
+    title: "新对话",
+    createdAt: 1,
+    uiState: {
+      inputDraft: { content: "", mentions: [] },
+      scrollTop: 0,
+      editTarget: null,
+    },
+  });
+
+  type StreamEvt = { type: string; [k: string]: unknown };
+
+  async function captureHandler(convId: number) {
+    const callbacks: Array<(event: StreamEvt) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((eventName: string, handler: (event: StreamEvt) => void) => {
+      if (eventName === `ai:event:${convId}`) callbacks.push(handler);
+      return () => {};
+    }) as any);
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+
+    useAIStore.setState({
+      sidebarTabs: [buildSidebarTab(convId)],
+      activeSidebarTabId: `sidebar-${convId}`,
+      conversationMessages: { [convId]: [] },
+      conversationStreaming: { [convId]: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendFromSidebarTab(`sidebar-${convId}`, "首条消息");
+    if (callbacks.length === 0) throw new Error("EventsOn handler not registered");
+    return callbacks[0];
+  }
+
+  function getMessages(convId: number) {
+    return useAIStore.getState().conversationMessages[convId] || [];
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useAIStore.setState({
+      tabStates: {},
+      conversations: [],
+      conversationMessages: {},
+      conversationStreaming: {},
+      sidebarTabs: [],
+      activeSidebarTabId: null,
+    });
+  });
+
+  it("3 条 batch：依次追加 3 条 user + 1 条尾部 streaming asst（无中间空气泡）", async () => {
+    const convId = 300;
+    const fire = await captureHandler(convId);
+
+    // 模拟用户已经把 m1/m2/m3 排进 pendingQueue（_sendForConversation 在 sending=true
+    // 时会做这件事；这里直接置位绕过具体调用路径）。
+    useAIStore.setState((s) => ({
+      conversationStreaming: {
+        ...s.conversationStreaming,
+        [convId]: {
+          sending: true,
+          pendingQueue: [
+            { text: "m1", mentions: [{ assetId: 1, name: "a", start: 0, end: 2 }] },
+            { text: "m2" },
+            { text: "m3" },
+          ],
+        },
+      },
+    }));
+
+    // 起一些工具/思考事件，给上一个 asst 至少塞一个 block，确保它会被收尾而不是被压扁
+    fire({ type: "thinking", content: "考虑中" });
+
+    fire({
+      type: "queue_consumed_batch",
+      queue_contents: ["m1", "m2", "m3"],
+    });
+
+    const msgs = getMessages(convId);
+    // 期望布局：[首条 user, 上轮 asst(closed), user(m1), user(m2), user(m3), asst(streaming)]
+    const roles = msgs.map((m) => m.role);
+    expect(roles).toEqual(["user", "assistant", "user", "user", "user", "assistant"]);
+    expect(msgs[1].streaming).toBe(false);
+    expect(msgs[2]).toMatchObject({ role: "user", content: "m1" });
+    expect(msgs[2].mentions).toEqual([{ assetId: 1, name: "a", start: 0, end: 2 }]);
+    expect(msgs[3]).toMatchObject({ role: "user", content: "m2" });
+    expect(msgs[4]).toMatchObject({ role: "user", content: "m3" });
+    expect(msgs[5]).toMatchObject({ role: "assistant", content: "" });
+    expect(msgs[5].streaming).toBe(true);
+
+    // pendingQueue 应被清空（3 条都被消费）
+    const queue = useAIStore.getState().conversationStreaming[convId]?.pendingQueue || [];
+    expect(queue).toEqual([]);
+  });
+
+  it("空 queue_contents：忽略事件（防止 bridge bug 写出空 user）", async () => {
+    const convId = 301;
+    const fire = await captureHandler(convId);
+
+    const before = getMessages(convId).length;
+    fire({ type: "queue_consumed_batch", queue_contents: [] });
+    expect(getMessages(convId).length).toBe(before);
+  });
+
+  it("queue_consumed_batch 后续真正流式 token 落到尾部 asst（中间 asst 不被填）", async () => {
+    const convId = 302;
+    const fire = await captureHandler(convId);
+
+    useAIStore.setState((s) => ({
+      conversationStreaming: {
+        ...s.conversationStreaming,
+        [convId]: { sending: true, pendingQueue: [{ text: "m1" }, { text: "m2" }] },
+      },
+    }));
+
+    fire({ type: "queue_consumed_batch", queue_contents: ["m1", "m2"] });
+    fire({ type: "content", content: "回应内容" });
+
+    const msgs = getMessages(convId);
+    const tail = msgs[msgs.length - 1];
+    expect(tail.role).toBe("assistant");
+    // content 走 RAF 缓冲；这里只断言尾部 asst 的 blocks/content 还在 streaming，
+    // 至少把 batch 的尾 asst 视为活跃流目标即可。
+    expect(tail.streaming).toBe(true);
+  });
+});
