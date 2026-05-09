@@ -51,6 +51,7 @@ export function SerialConfigSection({
   const { t } = useTranslation();
   const [ports, setPorts] = useState<SerialPortInfo[]>([]);
   const [loadingPorts, setLoadingPorts] = useState(false);
+  const [customMode, setCustomMode] = useState(false);
 
   const fetchPorts = useCallback(async () => {
     setLoadingPorts(true);
@@ -68,14 +69,22 @@ export function SerialConfigSection({
     fetchPorts();
   }, [fetchPorts]);
 
+  // Auto-enable custom mode if the current portPath is not in the detected list
+  useEffect(() => {
+    if (ports.length > 0 && portPath && !ports.some((p) => p.name === portPath)) {
+      setCustomMode(true);
+    }
+  }, [ports, portPath]);
+
   // Determine if current portPath matches a detected port
-  const isDetectedPort = ports.some((p) => p.name === portPath);
-  const selectValue = !portPath || isDetectedPort ? portPath : CUSTOM_PORT;
+  const selectValue = customMode ? CUSTOM_PORT : portPath;
 
   const handlePortSelect = (value: string) => {
     if (value === CUSTOM_PORT) {
+      setCustomMode(true);
       setPortPath("");
     } else {
+      setCustomMode(false);
       setPortPath(value);
     }
   };
@@ -116,7 +125,7 @@ export function SerialConfigSection({
             <SelectItem value={CUSTOM_PORT}>{t("asset.serialManualInput")}</SelectItem>
           </SelectContent>
         </Select>
-        {(selectValue === CUSTOM_PORT || (portPath && !isDetectedPort)) && (
+        {customMode && (
           <Input
             value={portPath}
             onChange={(e) => setPortPath(e.target.value)}

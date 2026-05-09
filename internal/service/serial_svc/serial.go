@@ -56,6 +56,7 @@ func (s *Session) Close() {
 		go s.onClosed(s.ID)
 	}
 }
+
 // ExecCommand 向串口发送命令并收集输出。
 // 适用于 AI 工具调用场景：写入命令后等待输出静默（silenceTimeout）或达到最大等待时间。
 func (s *Session) ExecCommand(command string, silenceTimeout, maxTimeout time.Duration) (string, error) {
@@ -107,6 +108,7 @@ func (s *Session) ExecCommand(command string, silenceTimeout, maxTimeout time.Du
 		}
 	}
 }
+
 // IsClosed 检查是否已关闭
 func (s *Session) IsClosed() bool {
 	s.mu.Lock()

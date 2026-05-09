@@ -227,7 +227,7 @@ type DefaultToolExecutor struct {
 	sshCache      *SSHClientCache
 	sshPool       *sshpool.Pool // SSH 连接池，供 Redis/Database 隧道使用
 	mongoDBCache  *MongoDBClientCache
-	kafkaService  *kafka_svc.Service // 同一次 Chat 内复用 Kafka client，避免每次工具调用重新 dial+ping
+	kafkaService  *kafka_svc.Service  // 同一次 Chat 内复用 Kafka client，避免每次工具调用重新 dial+ping
 	serialManager *serial_svc.Manager // 串口会话管理器，供 AI 串口命令执行
 }
 
