@@ -32,7 +32,7 @@ const BAUD_RATES = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
 const DATA_BITS_OPTIONS = [5, 6, 7, 8];
 const STOP_BITS_OPTIONS = ["1", "1.5", "2"];
 const PARITY_OPTIONS = ["none", "odd", "even", "mark", "space"];
-const FLOW_CONTROL_OPTIONS = ["none", "hardware", "software"];
+const FLOW_CONTROL_OPTIONS = ["none", "hardware"];
 
 export function SerialConfigSection({
   portPath,

@@ -283,7 +283,9 @@ func (e *DefaultToolExecutor) Execute(ctx context.Context, name string, argsJSON
 	ctx = WithMongoDBCache(ctx, e.mongoDBCache)
 	// 注入 Kafka service，kafka_* handler 会复用其内部 KafkaClientManager 的缓存
 	ctx = WithKafkaService(ctx, e.kafkaService)
-	// 注入串口管理器，run_serial_command 会自动使用
-	ctx = WithSerialManager(ctx, e.serialManager)
+	// 注入串口管理器，run_serial_command 会自动使用（仅在非 nil 时注入，避免 typed-nil 接口陷阱）
+	if e.serialManager != nil {
+		ctx = WithSerialManager(ctx, e.serialManager)
+	}
 	return handler(ctx, args)
 }

@@ -1,6 +1,7 @@
 package serial_svc
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -225,6 +226,18 @@ func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
 		if err := port.SetRTS(true); err != nil {
 			logger.Default().Warn("set RTS", zap.Error(err))
 		}
+	case "software":
+		if closeErr := port.Close(); closeErr != nil && !isPortClosedError(closeErr) {
+			logger.Default().Warn("close serial port after unsupported flow control", zap.Error(closeErr))
+		}
+		return "", fmt.Errorf("software flow control (XON/XOFF) is not supported; use 'hardware' or 'none'")
+	case "", "none":
+		// no flow control
+	default:
+		if closeErr := port.Close(); closeErr != nil && !isPortClosedError(closeErr) {
+			logger.Default().Warn("close serial port after unsupported flow control", zap.Error(closeErr))
+		}
+		return "", fmt.Errorf("unsupported flow control mode: %q (supported: 'none', 'hardware')", cfg.FlowControl)
 	}
 
 	// 生成 session ID
@@ -259,45 +272,76 @@ func (m *Manager) SetCallbacks(sessionID string, onData func(data []byte), onClo
 	sess.mu.Unlock()
 }
 
-// readOutput 持续从串口读取数据并回调
+// readOutput 持续从串口读取数据并回调。
+// 使用 10ms ticker 合并输出，减少高频 EventsEmit 调用导致前端事件队列阻塞。
+// cmdOutputCh（AI 命令执行）仍按每个 chunk 即时转发，确保 ExecCommand 能及时收到数据。
 func (m *Manager) readOutput(sess *Session) {
+	defer func() {
+		m.sessions.Delete(sess.ID)
+		sess.Close()
+	}()
+
+	var pending bytes.Buffer
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	flush := func() {
+		if pending.Len() == 0 {
+			return
+		}
+		sess.mu.Lock()
+		handler := sess.onData
+		sess.mu.Unlock()
+		if handler != nil {
+			data := make([]byte, pending.Len())
+			copy(data, pending.Bytes())
+			pending.Reset()
+			handler(data)
+		} else {
+			pending.Reset()
+		}
+	}
+
 	buf := make([]byte, 4096)
 	for {
 		if sess.IsClosed() {
-			m.sessions.Delete(sess.ID)
+			flush()
 			return
 		}
 		n, err := sess.port.Read(buf)
 		if n > 0 {
 			data := make([]byte, n)
 			copy(data, buf[:n])
+			pending.Write(data)
+			// AI 命令执行：即时转发每个 chunk（ExecCommand 依赖 channel 实时性）
 			sess.mu.Lock()
-			handler := sess.onData
 			cmdCh := sess.cmdOutputCh
 			sess.mu.Unlock()
-			if handler != nil {
-				handler(data)
-			}
-			// AI 命令执行：同时向收集 channel 发送副本
 			if cmdCh != nil {
 				select {
 				case cmdCh <- data:
 				default: // 避免阻塞
 				}
 			}
+			// 缓冲超过 32KB 时立即刷新，避免延迟过大
+			if pending.Len() >= 32*1024 {
+				flush()
+			}
 		}
 		if err != nil {
 			if err == io.EOF || isPortClosedError(err) || sess.IsClosed() {
-				m.sessions.Delete(sess.ID)
+				flush()
 				return
 			}
 			logger.Default().Warn("serial read failed", zap.String("sessionID", sess.ID), zap.Error(err))
-			m.closeSession(sess.ID)
+			flush()
 			return
 		}
-		if n == 0 {
-			// SetReadTimeout 超时返回 (0, nil)，继续轮询即可。
-			continue
+		// n == 0: SetReadTimeout 超时，继续轮询
+		select {
+		case <-ticker.C:
+			flush()
+		default:
 		}
 	}
 }
