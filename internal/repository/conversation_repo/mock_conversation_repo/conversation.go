@@ -83,6 +83,20 @@ func (mr *MockConversationRepoMockRecorder) DeleteMessages(ctx, conversationID a
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteMessages", reflect.TypeOf((*MockConversationRepo)(nil).DeleteMessages), ctx, conversationID)
 }
 
+// DeleteMessagesFrom mocks base method.
+func (m *MockConversationRepo) DeleteMessagesFrom(ctx context.Context, conversationID int64, fromSortOrder int) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteMessagesFrom", ctx, conversationID, fromSortOrder)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteMessagesFrom indicates an expected call of DeleteMessagesFrom.
+func (mr *MockConversationRepoMockRecorder) DeleteMessagesFrom(ctx, conversationID, fromSortOrder any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteMessagesFrom", reflect.TypeOf((*MockConversationRepo)(nil).DeleteMessagesFrom), ctx, conversationID, fromSortOrder)
+}
+
 // Find mocks base method.
 func (m *MockConversationRepo) Find(ctx context.Context, id int64) (*conversation_entity.Conversation, error) {
 	m.ctrl.T.Helper()
