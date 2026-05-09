@@ -1365,8 +1365,10 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
               ? t("asset.typeKafka")
               : assetType === "k8s"
                 ? t("asset.typeK8s")
-                : (() => {
-                    const found = availableTypes.find((at) => at.type === assetType);
+                : assetType === "serial"
+                  ? t("asset.typeSerial")
+                  : (() => {
+                      const found = availableTypes.find((at) => at.type === assetType);
                     return found ? resolveExtDisplayName(found) : assetType;
                   })();
 
@@ -1394,6 +1396,7 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                   <SelectItem value="mongodb">{t("asset.typeMongoDB")}</SelectItem>
                   <SelectItem value="kafka">{t("asset.typeKafka")}</SelectItem>
                   <SelectItem value="k8s">{t("asset.typeK8s")}</SelectItem>
+                  <SelectItem value="serial">{t("asset.typeSerial")}</SelectItem>
                   {availableTypes
                     .filter((at) => !!at.extensionName)
                     .map((at) => (
