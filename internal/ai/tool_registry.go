@@ -48,7 +48,7 @@ func AllToolDefs() []ToolDef {
 			Name:        "list_assets",
 			Description: "List managed remote server assets. Returns an array of assets (with ID, name, type, group, etc.). This is typically the first step to discover asset IDs for other operations. Supports filtering by type and group. Use get_asset to view asset description and connection details.",
 			Params: []ParamDef{
-				{Name: "asset_type", Type: ParamString, Description: `Filter by asset type. Supported: "ssh", "database", "redis", "mongodb", "kafka", "k8s". Omit to return all types.`},
+				{Name: "asset_type", Type: ParamString, Description: `Filter by asset type. Supported: "ssh", "database", "redis", "mongodb", "kafka", "k8s", "serial". Omit to return all types.`},
 				{Name: "group_id", Type: ParamNumber, Description: "Filter by group ID. Omit or set to 0 to list all groups."},
 			},
 			Handler: handleListAssets,
@@ -69,6 +69,16 @@ func AllToolDefs() []ToolDef {
 				{Name: "command", Type: ParamString, Description: "Shell command to execute on the remote server.", Required: true},
 			},
 			Handler:          handleRunCommand,
+			CommandExtractor: func(args map[string]any) string { return argString(args, "command") },
+		},
+		{
+			Name:        "run_serial_command",
+			Description: "Send a command to a serial port device (e.g. network switch, firewall console) and return the output. The serial session must already be connected by the user in the terminal tab. The command is sent over the existing serial connection and output is collected until silence (2s) or max timeout (15s). Use this for H3C, Huawei, Cisco and other console-connected devices.",
+			Params: []ParamDef{
+				{Name: "asset_id", Type: ParamNumber, Description: "Target serial asset ID. Use list_assets with asset_type='serial' to find it.", Required: true},
+				{Name: "command", Type: ParamString, Description: "Command to send to the serial device (e.g. 'display version', 'show ip interface brief').", Required: true},
+			},
+			Handler:          handleRunSerialCommand,
 			CommandExtractor: func(args map[string]any) string { return argString(args, "command") },
 		},
 		{

@@ -20,6 +20,9 @@ type Session struct {
 	closed   bool
 	onData   func(data []byte)      // 终端输出回调
 	onClosed func(sessionID string) // 会话关闭回调
+
+	// AI 命令执行辅助：当 cmdOutputCh 非 nil 时，readOutput 会同时向此 channel 发送数据副本
+	cmdOutputCh chan []byte
 }
 
 // Write 向串口写入数据（用户输入）
@@ -53,7 +56,57 @@ func (s *Session) Close() {
 		go s.onClosed(s.ID)
 	}
 }
+// ExecCommand 向串口发送命令并收集输出。
+// 适用于 AI 工具调用场景：写入命令后等待输出静默（silenceTimeout）或达到最大等待时间。
+func (s *Session) ExecCommand(command string, silenceTimeout, maxTimeout time.Duration) (string, error) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return "", fmt.Errorf("session is closed")
+	}
+	// 设置命令输出收集 channel
+	ch := make(chan []byte, 256)
+	s.cmdOutputCh = ch
+	s.mu.Unlock()
 
+	defer func() {
+		s.mu.Lock()
+		s.cmdOutputCh = nil
+		s.mu.Unlock()
+	}()
+
+	// 写入命令 + 回车
+	if _, err := s.port.Write([]byte(command + "\r\n")); err != nil {
+		return "", fmt.Errorf("write command: %w", err)
+	}
+
+	var output []byte
+	silenceTimer := time.NewTimer(silenceTimeout)
+	maxTimer := time.NewTimer(maxTimeout)
+	defer silenceTimer.Stop()
+	defer maxTimer.Stop()
+
+	for {
+		select {
+		case data := <-ch:
+			output = append(output, data...)
+			// 收到数据后重置静默计时器
+			if !silenceTimer.Stop() {
+				select {
+				case <-silenceTimer.C:
+				default:
+				}
+			}
+			silenceTimer.Reset(silenceTimeout)
+		case <-silenceTimer.C:
+			// 输出静默，认为命令执行完毕
+			return string(output), nil
+		case <-maxTimer.C:
+			// 超过最大等待时间
+			return string(output), nil
+		}
+	}
+}
 // IsClosed 检查是否已关闭
 func (s *Session) IsClosed() bool {
 	s.mu.Lock()
@@ -190,13 +243,21 @@ func (m *Manager) readOutput(sess *Session) {
 		}
 		n, err := sess.port.Read(buf)
 		if n > 0 {
+			data := make([]byte, n)
+			copy(data, buf[:n])
 			sess.mu.Lock()
 			handler := sess.onData
+			cmdCh := sess.cmdOutputCh
 			sess.mu.Unlock()
 			if handler != nil {
-				data := make([]byte, n)
-				copy(data, buf[:n])
 				handler(data)
+			}
+			// AI 命令执行：同时向收集 channel 发送副本
+			if cmdCh != nil {
+				select {
+				case cmdCh <- data:
+				default: // 避免阻塞
+				}
 			}
 		}
 		if err != nil {
@@ -224,6 +285,20 @@ func (m *Manager) GetSession(sessionID string) (*Session, bool) {
 		return nil, false
 	}
 	return sess, true
+}
+
+// GetSessionByAssetID 根据资产 ID 查找活跃的串口会话
+func (m *Manager) GetSessionByAssetID(assetID int64) (*Session, bool) {
+	var found *Session
+	m.sessions.Range(func(_, value any) bool {
+		sess := value.(*Session)
+		if sess.AssetID == assetID && !sess.IsClosed() {
+			found = sess
+			return false
+		}
+		return true
+	})
+	return found, found != nil
 }
 
 // Disconnect 断开串口连接
