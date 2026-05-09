@@ -1,5 +1,16 @@
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@opskat/ui";
+import { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@opskat/ui";
+import { RefreshCw } from "lucide-react";
+import { ListSerialPorts } from "@/../wailsjs/go/app/App";
+
+interface SerialPortInfo {
+  name: string;
+  displayName: string;
+  productId?: string;
+  vendorId?: string;
+  serialNumber?: string;
+}
 
 export interface SerialConfigSectionProps {
   portPath: string;
@@ -16,6 +27,7 @@ export interface SerialConfigSectionProps {
   setFlowControl: (v: string) => void;
 }
 
+const CUSTOM_PORT = "__custom__";
 const BAUD_RATES = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
 const DATA_BITS_OPTIONS = [5, 6, 7, 8];
 const STOP_BITS_OPTIONS = ["1", "1.5", "2"];
@@ -37,17 +49,81 @@ export function SerialConfigSection({
   setFlowControl,
 }: SerialConfigSectionProps) {
   const { t } = useTranslation();
+  const [ports, setPorts] = useState<SerialPortInfo[]>([]);
+  const [loadingPorts, setLoadingPorts] = useState(false);
+
+  const fetchPorts = useCallback(async () => {
+    setLoadingPorts(true);
+    try {
+      const list = await ListSerialPorts();
+      setPorts(list || []);
+    } catch {
+      setPorts([]);
+    } finally {
+      setLoadingPorts(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPorts();
+  }, [fetchPorts]);
+
+  // Determine if current portPath matches a detected port
+  const isDetectedPort = ports.some((p) => p.name === portPath);
+  const selectValue = !portPath || isDetectedPort ? portPath : CUSTOM_PORT;
+
+  const handlePortSelect = (value: string) => {
+    if (value === CUSTOM_PORT) {
+      setPortPath("");
+    } else {
+      setPortPath(value);
+    }
+  };
 
   return (
     <div className="grid gap-3 border rounded-lg p-4">
       <div className="grid gap-2">
-        <Label>{t("asset.serialPortPath")}</Label>
-        <Input
-          value={portPath}
-          onChange={(e) => setPortPath(e.target.value)}
-          placeholder={t("asset.serialPortPathPlaceholder")}
-          className="font-mono"
-        />
+        <div className="flex items-center justify-between">
+          <Label>{t("asset.serialPortPath")}</Label>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs"
+            onClick={fetchPorts}
+            disabled={loadingPorts}
+          >
+            <RefreshCw className={`h-3 w-3 mr-1 ${loadingPorts ? "animate-spin" : ""}`} />
+            {t("asset.serialRefreshPorts")}
+          </Button>
+        </div>
+        <Select value={selectValue} onValueChange={handlePortSelect}>
+          <SelectTrigger>
+            <SelectValue placeholder={t("asset.serialPortPathPlaceholder")} />
+          </SelectTrigger>
+          <SelectContent>
+            {ports.map((p) => (
+              <SelectItem key={p.name} value={p.name}>
+                {p.displayName}
+                {p.serialNumber ? ` (${p.serialNumber})` : ""}
+              </SelectItem>
+            ))}
+            {ports.length === 0 && !loadingPorts && (
+              <SelectItem value={CUSTOM_PORT} disabled>
+                {t("asset.serialNoPortsDetected")}
+              </SelectItem>
+            )}
+            <SelectItem value={CUSTOM_PORT}>{t("asset.serialManualInput")}</SelectItem>
+          </SelectContent>
+        </Select>
+        {(selectValue === CUSTOM_PORT || (portPath && !isDetectedPort)) && (
+          <Input
+            value={portPath}
+            onChange={(e) => setPortPath(e.target.value)}
+            placeholder={t("asset.serialPortPathPlaceholder")}
+            className="font-mono"
+          />
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3">
