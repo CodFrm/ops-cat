@@ -146,6 +146,7 @@ describe("terminalStore.connect", () => {
           connectionId: "conn-pending",
           assetId: 2,
           assetName: "Server 2",
+          transport: "ssh",
           password: "",
           logs: [],
           status: "connecting",

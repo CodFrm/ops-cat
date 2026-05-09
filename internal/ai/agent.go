@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/opskat/opskat/internal/service/kafka_svc"
+	"github.com/opskat/opskat/internal/service/serial_svc"
 	"github.com/opskat/opskat/internal/sshpool"
 
 	"github.com/cago-frame/cago/pkg/logger"
@@ -222,11 +223,12 @@ func (a *Agent) Chat(ctx context.Context, messages []Message, onEvent func(Strea
 
 // DefaultToolExecutor 默认工具执行器，通过统一注册表调度，缓存 SSH 连接供同一次 Chat 复用
 type DefaultToolExecutor struct {
-	handlers     map[string]ToolHandlerFunc
-	sshCache     *SSHClientCache
-	sshPool      *sshpool.Pool // SSH 连接池，供 Redis/Database 隧道使用
-	mongoDBCache *MongoDBClientCache
-	kafkaService *kafka_svc.Service // 同一次 Chat 内复用 Kafka client，避免每次工具调用重新 dial+ping
+	handlers      map[string]ToolHandlerFunc
+	sshCache      *SSHClientCache
+	sshPool       *sshpool.Pool // SSH 连接池，供 Redis/Database 隧道使用
+	mongoDBCache  *MongoDBClientCache
+	kafkaService  *kafka_svc.Service  // 同一次 Chat 内复用 Kafka client，避免每次工具调用重新 dial+ping
+	serialManager *serial_svc.Manager // 串口会话管理器，供 AI 串口命令执行
 }
 
 func NewDefaultToolExecutor() *DefaultToolExecutor {
@@ -242,6 +244,12 @@ func NewDefaultToolExecutor() *DefaultToolExecutor {
 		mongoDBCache: NewMongoDBClientCache(),
 		kafkaService: kafka_svc.New(pool),
 	}
+}
+
+// WithSerialManager 设置串口管理器（在 App 层创建 executor 后调用）
+func (e *DefaultToolExecutor) WithSerialManager(mgr *serial_svc.Manager) *DefaultToolExecutor {
+	e.serialManager = mgr
+	return e
 }
 
 // Close 关闭所有缓存的连接
@@ -275,5 +283,9 @@ func (e *DefaultToolExecutor) Execute(ctx context.Context, name string, argsJSON
 	ctx = WithMongoDBCache(ctx, e.mongoDBCache)
 	// 注入 Kafka service，kafka_* handler 会复用其内部 KafkaClientManager 的缓存
 	ctx = WithKafkaService(ctx, e.kafkaService)
+	// 注入串口管理器，run_serial_command 会自动使用（仅在非 nil 时注入，避免 typed-nil 接口陷阱）
+	if e.serialManager != nil {
+		ctx = WithSerialManager(ctx, e.serialManager)
+	}
 	return handler(ctx, args)
 }

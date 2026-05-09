@@ -80,7 +80,7 @@ func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
 	config := ai.NewDefaultConfig()
 	config.ContextWindow = contextWindow
 	a.aiAgent = ai.NewAgent(provider, func() ai.ToolExecutor {
-		return ai.NewAuditingExecutor(ai.NewDefaultToolExecutor(), ai.NewDefaultAuditWriter())
+		return ai.NewAuditingExecutor(ai.NewDefaultToolExecutor().WithSerialManager(a.serialManager), ai.NewDefaultAuditWriter())
 	}, checker, config)
 	a.resetRunners()
 	return nil
@@ -342,7 +342,7 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 			wailsRuntime.EventsEmit(a.ctx, eventName, event)
 		},
 		NewExecutor: func() ai.ToolExecutor {
-			return ai.NewAuditingExecutor(ai.NewDefaultToolExecutor(), ai.NewDefaultAuditWriter())
+			return ai.NewAuditingExecutor(ai.NewDefaultToolExecutor().WithSerialManager(a.serialManager), ai.NewDefaultAuditWriter())
 		},
 	})
 

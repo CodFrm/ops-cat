@@ -11,6 +11,7 @@ import {
   TerminalSquare,
   AlertTriangle,
   Fingerprint,
+  Unplug,
 } from "lucide-react";
 import { Button, Input } from "@opskat/ui";
 import { useTerminalStore, type ConnectionState, type ConnectionStep } from "@/stores/terminalStore";
@@ -19,10 +20,11 @@ const STEPS: { key: ConnectionStep; icon: typeof Server }[] = [
   { key: "resolve", icon: KeyRound },
   { key: "connect", icon: Server },
   { key: "auth", icon: Shield },
+  { key: "open", icon: Unplug },
   { key: "shell", icon: TerminalSquare },
 ];
 
-const STEP_ORDER: ConnectionStep[] = ["resolve", "connect", "auth", "shell"];
+const STEP_ORDER: ConnectionStep[] = ["resolve", "open", "connect", "auth", "shell"];
 
 function getStepIndex(step: ConnectionStep): number {
   return STEP_ORDER.indexOf(step);
