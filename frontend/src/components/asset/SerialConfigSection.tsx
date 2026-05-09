@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@opskat/ui";
 import { RefreshCw } from "lucide-react";
-import { ListSerialPorts } from "@/../wailsjs/go/app/App";
+import { ListSerialPorts } from "../../../wailsjs/go/app/App";
 
 interface SerialPortInfo {
   name: string;

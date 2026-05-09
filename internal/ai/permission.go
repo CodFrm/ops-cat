@@ -17,7 +17,8 @@ import (
 
 // CheckPermission 统一权限检查（策略 + DB Grant 匹配）。
 // 不包含用户确认逻辑 — NeedConfirm 时由调用方处理。
-// assetType: "ssh" | "database" | "redis" | "mongodb" | "kafka" | "k8s" | "exec"（exec 等同于 ssh）| "sql"（sql 等同于 database）| "mongo"（mongo 等同于 mongodb）
+// assetType: "ssh" | "serial" | "database" | "redis" | "mongodb" | "kafka" | "k8s" |
+// "exec"（exec 等同于 ssh）| "sql"（sql 等同于 database）| "mongo"（mongo 等同于 mongodb）
 func CheckPermission(ctx context.Context, assetType string, assetID int64, command string) CheckResult {
 	// opsctl 使用的类型名映射到内部类型
 	switch assetType {
@@ -31,6 +32,8 @@ func CheckPermission(ctx context.Context, assetType string, assetID int64, comma
 
 	switch assetType {
 	case asset_entity.AssetTypeSSH:
+		return checkSSHPermission(ctx, assetID, command)
+	case asset_entity.AssetTypeSerial:
 		return checkSSHPermission(ctx, assetID, command)
 	case asset_entity.AssetTypeDatabase:
 		return checkDatabasePermission(ctx, assetID, command)

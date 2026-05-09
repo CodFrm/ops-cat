@@ -5,20 +5,22 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/service/serial_svc"
 )
 
 type serialManagerKeyType struct{}
 
 // WithSerialManager 将串口管理器注入 context
-func WithSerialManager(ctx context.Context, mgr *serial_svc.Manager) context.Context {
+func WithSerialManager(ctx context.Context, mgr serial_svc.CommandManager) context.Context {
 	return context.WithValue(ctx, serialManagerKeyType{}, mgr)
 }
 
-func getSerialManager(ctx context.Context) *serial_svc.Manager {
-	if mgr, ok := ctx.Value(serialManagerKeyType{}).(*serial_svc.Manager); ok {
+func getSerialManager(ctx context.Context) serial_svc.CommandManager {
+	if mgr, ok := ctx.Value(serialManagerKeyType{}).(serial_svc.CommandManager); ok {
 		return mgr
 	}
+
 	return nil
 }
 
@@ -44,7 +46,7 @@ func handleRunSerialCommand(ctx context.Context, args map[string]any) (string, e
 
 	// 权限检查
 	if checker := GetPolicyChecker(ctx); checker != nil {
-		result := checker.Check(ctx, assetID, command)
+		result := checker.CheckForAsset(ctx, assetID, asset_entity.AssetTypeSerial, command)
 		setCheckResult(ctx, result)
 		if result.Decision != Allow {
 			return result.Message, nil
@@ -58,5 +60,6 @@ func handleRunSerialCommand(ctx context.Context, args map[string]any) (string, e
 	if output == "" {
 		return "(no output)", nil
 	}
+
 	return output, nil
 }

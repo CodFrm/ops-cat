@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -52,6 +53,9 @@ func (a *App) ConnectSerialAsync(req SerialConnectRequest) (string, error) {
 	connectionId := fmt.Sprintf("conn-%d", a.connCounter)
 	a.mu.Unlock()
 
+	connCtx, cancel := context.WithCancel(a.ctx)
+	a.pendingConnections.Store(connectionId, cancel)
+
 	eventName := "serial:connect:" + connectionId
 
 	emitEvent := func(event SerialConnectEvent) {
@@ -59,6 +63,11 @@ func (a *App) ConnectSerialAsync(req SerialConnectRequest) (string, error) {
 	}
 
 	go func() {
+		defer a.pendingConnections.Delete(connectionId)
+
+		if connCtx.Err() != nil {
+			return
+		}
 		emitEvent(SerialConnectEvent{Type: "progress", Step: "open", Message: "正在打开串口..."})
 
 		sessionID, err := a.serialManager.Connect(serial_svc.ConnectConfig{
@@ -74,9 +83,14 @@ func (a *App) ConnectSerialAsync(req SerialConnectRequest) (string, error) {
 			emitEvent(SerialConnectEvent{Type: "error", Error: err.Error()})
 			return
 		}
+		if connCtx.Err() != nil {
+			a.serialManager.Disconnect(sessionID)
+			return
+		}
 
 		// 设置回调（sessionID 已知）
-		a.serialManager.SetCallbacks(sessionID,
+		a.serialManager.SetCallbacks(
+			sessionID,
 			func(data []byte) {
 				wailsRuntime.EventsEmit(a.ctx, "serial:data:"+sessionID, base64.StdEncoding.EncodeToString(data))
 			},
@@ -109,8 +123,10 @@ func (a *App) TestSerialConnection(configJSON string) error {
 	if err != nil {
 		return err
 	}
+
 	// 立即断开测试连接
 	a.serialManager.Disconnect(sessionID)
+
 	return nil
 }
 
@@ -120,14 +136,26 @@ func (a *App) WriteSerial(sessionID string, dataB64 string) error {
 	if !ok {
 		return fmt.Errorf("串口会话不存在: %s", sessionID)
 	}
+
 	data, err := base64.StdEncoding.DecodeString(dataB64)
 	if err != nil {
 		return fmt.Errorf("解码数据失败: %w", err)
 	}
+
 	return sess.Write(data)
 }
 
 // DisconnectSerial 断开串口连接
 func (a *App) DisconnectSerial(sessionID string) {
 	a.serialManager.Disconnect(sessionID)
+}
+
+// ResizeSerialTerminal 调整串口终端尺寸（当前为 no-op，仅保持前后端接口一致）。
+func (a *App) ResizeSerialTerminal(sessionID string, cols int, rows int) error {
+	sess, ok := a.serialManager.GetSession(sessionID)
+	if !ok {
+		return fmt.Errorf("串口会话不存在: %s", sessionID)
+	}
+
+	return sess.Resize(cols, rows)
 }

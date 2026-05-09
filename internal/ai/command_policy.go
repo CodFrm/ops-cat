@@ -331,6 +331,8 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 	// 映射资产类型到审批项类型
 	approvalType := "exec"
 	switch assetType {
+	case asset_entity.AssetTypeSerial:
+		approvalType = "serial"
 	case asset_entity.AssetTypeDatabase:
 		approvalType = "sql"
 	case asset_entity.AssetTypeRedis:

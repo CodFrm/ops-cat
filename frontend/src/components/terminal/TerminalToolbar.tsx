@@ -5,7 +5,7 @@ import { Button } from "@opskat/ui";
 import { useSFTPStore } from "@/stores/sftpStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { SnippetPopover } from "@/components/snippet/SnippetPopover";
-import { WriteSSH } from "../../../wailsjs/go/app/App";
+import { WriteSSH, WriteSerial } from "../../../wailsjs/go/app/App";
 import { bytesToBase64 } from "@/lib/terminalEncode";
 
 interface TerminalToolbarProps {
@@ -20,14 +20,16 @@ export function TerminalToolbar({ tabId }: TerminalToolbarProps) {
 
   const activePaneId = tabData?.activePaneId;
   const activePaneConnected = activePaneId ? (tabData?.panes[activePaneId]?.connected ?? false) : false;
+  const isSerialActivePane = !!activePaneId && activePaneId.startsWith("serial-");
 
   const handleSnippetInsert = useCallback(
     (content: string, { withEnter }: { withEnter: boolean }) => {
       if (!activePaneId) return;
       const payload = withEnter ? content + "\r" : content;
-      WriteSSH(activePaneId, bytesToBase64(new TextEncoder().encode(payload))).catch(console.error);
+      const writeFn = isSerialActivePane ? WriteSerial : WriteSSH;
+      writeFn(activePaneId, bytesToBase64(new TextEncoder().encode(payload))).catch(console.error);
     },
-    [activePaneId]
+    [activePaneId, isSerialActivePane]
   );
 
   if (!tabData) return null;
@@ -54,14 +56,16 @@ export function TerminalToolbar({ tabId }: TerminalToolbarProps) {
           </Button>
         }
       />
-      <Button
-        variant={isOpen ? "secondary" : "ghost"}
-        size="icon-xs"
-        title={t("sftp.fileManager")}
-        onClick={() => toggleFileManager(tabId)}
-      >
-        <Icon className="h-3.5 w-3.5" />
-      </Button>
+      {!isSerialActivePane && (
+        <Button
+          variant={isOpen ? "secondary" : "ghost"}
+          size="icon-xs"
+          title={t("sftp.fileManager")}
+          onClick={() => toggleFileManager(tabId)}
+        >
+          <Icon className="h-3.5 w-3.5" />
+        </Button>
+      )}
     </div>
   );
 }

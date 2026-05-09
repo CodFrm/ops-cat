@@ -1,6 +1,7 @@
 package serial_svc
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -11,11 +12,22 @@ import (
 	"go.uber.org/zap"
 )
 
+// CommandSession 是供 AI 串口命令执行使用的最小会话接口。
+type CommandSession interface {
+	ExecCommand(command string, silenceTimeout, maxTimeout time.Duration) (string, error)
+}
+
+// CommandManager 是供 AI 查找活跃串口会话使用的最小管理器接口。
+type CommandManager interface {
+	GetSessionByAssetID(assetID int64) (CommandSession, bool)
+}
+
 // Session 表示一个活跃的串口终端会话
 type Session struct {
 	ID       string
 	AssetID  int64
 	port     serial.Port
+	writeMu  sync.Mutex
 	mu       sync.Mutex
 	closed   bool
 	onData   func(data []byte)      // 终端输出回调
@@ -27,6 +39,12 @@ type Session struct {
 
 // Write 向串口写入数据（用户输入）
 func (s *Session) Write(data []byte) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.writeLocked(data)
+}
+
+func (s *Session) writeLocked(data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -49,7 +67,7 @@ func (s *Session) Close() {
 		return
 	}
 	s.closed = true
-	if err := s.port.Close(); err != nil {
+	if err := s.port.Close(); err != nil && !isPortClosedError(err) {
 		logger.Default().Warn("close serial port", zap.String("sessionID", s.ID), zap.Error(err))
 	}
 	if s.onClosed != nil {
@@ -60,6 +78,9 @@ func (s *Session) Close() {
 // ExecCommand 向串口发送命令并收集输出。
 // 适用于 AI 工具调用场景：写入命令后等待输出静默（silenceTimeout）或达到最大等待时间。
 func (s *Session) ExecCommand(command string, silenceTimeout, maxTimeout time.Duration) (string, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -77,7 +98,7 @@ func (s *Session) ExecCommand(command string, silenceTimeout, maxTimeout time.Du
 	}()
 
 	// 写入命令 + 回车
-	if _, err := s.port.Write([]byte(command + "\r\n")); err != nil {
+	if err := s.writeLocked([]byte(command + "\r\n")); err != nil {
 		return "", fmt.Errorf("write command: %w", err)
 	}
 
@@ -189,7 +210,9 @@ func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
 
 	// 设置读超时（避免阻塞读取 goroutine 永远不退出）
 	if err := port.SetReadTimeout(100 * time.Millisecond); err != nil {
-		port.Close()
+		if closeErr := port.Close(); closeErr != nil && !isPortClosedError(closeErr) {
+			logger.Default().Warn("close serial port after read-timeout setup failure", zap.Error(closeErr))
+		}
 		return "", fmt.Errorf("set read timeout: %w", err)
 	}
 
@@ -241,6 +264,7 @@ func (m *Manager) readOutput(sess *Session) {
 	buf := make([]byte, 4096)
 	for {
 		if sess.IsClosed() {
+			m.sessions.Delete(sess.ID)
 			return
 		}
 		n, err := sess.port.Read(buf)
@@ -263,13 +287,16 @@ func (m *Manager) readOutput(sess *Session) {
 			}
 		}
 		if err != nil {
-			if err == io.EOF || sess.IsClosed() {
+			if err == io.EOF || isPortClosedError(err) || sess.IsClosed() {
+				m.sessions.Delete(sess.ID)
 				return
 			}
-			// 超时不算错误，继续读
-			if sess.IsClosed() {
-				return
-			}
+			logger.Default().Warn("serial read failed", zap.String("sessionID", sess.ID), zap.Error(err))
+			m.closeSession(sess.ID)
+			return
+		}
+		if n == 0 {
+			// SetReadTimeout 超时返回 (0, nil)，继续轮询即可。
 			continue
 		}
 	}
@@ -290,8 +317,8 @@ func (m *Manager) GetSession(sessionID string) (*Session, bool) {
 }
 
 // GetSessionByAssetID 根据资产 ID 查找活跃的串口会话
-func (m *Manager) GetSessionByAssetID(assetID int64) (*Session, bool) {
-	var found *Session
+func (m *Manager) GetSessionByAssetID(assetID int64) (CommandSession, bool) {
+	var found CommandSession
 	m.sessions.Range(func(_, value any) bool {
 		sess := value.(*Session)
 		if sess.AssetID == assetID && !sess.IsClosed() {
@@ -305,13 +332,19 @@ func (m *Manager) GetSessionByAssetID(assetID int64) (*Session, bool) {
 
 // Disconnect 断开串口连接
 func (m *Manager) Disconnect(sessionID string) {
-	v, ok := m.sessions.Load(sessionID)
-	if !ok {
-		return
+	m.closeSession(sessionID)
+}
+
+// CloseAll 关闭所有活跃串口会话。
+func (m *Manager) CloseAll() {
+	var sessionIDs []string
+	m.sessions.Range(func(key, _ any) bool {
+		sessionIDs = append(sessionIDs, key.(string))
+		return true
+	})
+	for _, sessionID := range sessionIDs {
+		m.closeSession(sessionID)
 	}
-	sess := v.(*Session)
-	sess.Close()
-	m.sessions.Delete(sessionID)
 }
 
 // toStopBits 转换停止位字符串到 serial.StopBits
@@ -340,4 +373,20 @@ func toParity(s string) serial.Parity {
 	default:
 		return serial.NoParity
 	}
+}
+
+func (m *Manager) closeSession(sessionID string) {
+	v, ok := m.sessions.LoadAndDelete(sessionID)
+	if !ok {
+		return
+	}
+	v.(*Session).Close()
+}
+
+func isPortClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var portErr *serial.PortError
+	return errors.As(err, &portErr) && portErr.Code() == serial.PortClosed
 }

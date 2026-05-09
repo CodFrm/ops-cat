@@ -24,7 +24,15 @@ describe("AssetType Registry", () => {
   });
 
   it("getBuiltinTypes returns all built-in types", () => {
-    expect(getBuiltinTypes().map((def) => def.type)).toEqual(["ssh", "database", "redis", "mongodb", "kafka", "k8s", "serial"]);
+    expect(getBuiltinTypes().map((def) => def.type)).toEqual([
+      "ssh",
+      "database",
+      "redis",
+      "mongodb",
+      "kafka",
+      "k8s",
+      "serial",
+    ]);
   });
 
   it("each type has required fields", () => {

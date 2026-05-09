@@ -1369,8 +1369,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                   ? t("asset.typeSerial")
                   : (() => {
                       const found = availableTypes.find((at) => at.type === assetType);
-                    return found ? resolveExtDisplayName(found) : assetType;
-                  })();
+                      return found ? resolveExtDisplayName(found) : assetType;
+                    })();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

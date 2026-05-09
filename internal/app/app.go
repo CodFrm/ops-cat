@@ -193,6 +193,10 @@ func (a *App) Cleanup() {
 	// 先发送关闭信号，解除所有阻塞等待（审批、权限确认等），避免 wg.Wait 死锁
 	close(a.shutdownCh)
 
+	if a.serialManager != nil {
+		a.serialManager.CloseAll()
+	}
+
 	if a.kafkaService != nil {
 		a.kafkaService.Close()
 		a.kafkaService = nil
