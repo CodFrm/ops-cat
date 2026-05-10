@@ -2,67 +2,72 @@ package aiagent
 
 import (
 	"context"
-	"encoding/json"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/cago-frame/agents/agent"
-
-	"github.com/opskat/opskat/internal/ai"
+	"github.com/stretchr/testify/assert"
 )
 
-type fakeAuditWriter struct {
-	mu  sync.Mutex
-	got ai.ToolCallInfo
+type captureAudit struct {
+	rows []captureAuditRow
 }
 
-func (f *fakeAuditWriter) WriteToolCall(_ context.Context, info ai.ToolCallInfo) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.got = info
+type captureAuditRow struct {
+	toolName, input, output string
+	isError                 bool
 }
 
-func (f *fakeAuditWriter) waitGot() ai.ToolCallInfo {
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		f.mu.Lock()
-		got := f.got
-		f.mu.Unlock()
-		if got.ToolName != "" {
-			return got
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	return ai.ToolCallInfo{}
+func (c *captureAudit) Write(ctx context.Context, toolName, inputJSON, outputJSON string, isError bool) error {
+	c.rows = append(c.rows, captureAuditRow{toolName, inputJSON, outputJSON, isError})
+	return nil
 }
 
-func TestAuditHook_DrainsSidecarAndWritesAudit(t *testing.T) {
-	sc := newSidecar()
-	sc.put("call_42", &ai.CheckResult{
-		Decision: ai.Allow, MatchedPattern: "ls *", DecisionSource: ai.SourcePolicyAllow,
+func TestAuditHook_WritesPerCall(t *testing.T) {
+	a := &captureAudit{}
+	h := newAuditHook(a)
+	out, err := h(context.Background(), &agent.PostToolUseInput{
+		ToolName: "ssh.exec",
+		Input:    map[string]any{"cmd": "ls"},
+		Output: &agent.ToolResultBlock{
+			Content: []agent.ContentBlock{agent.TextBlock{Text: "ok"}},
+			IsError: false,
+		},
 	})
-	w := &fakeAuditWriter{}
-	hook := makeAuditHook(sc, w)
+	assert.NoError(t, err)
+	assert.NotNil(t, out)
+	assert.Nil(t, out.ModifiedOutput)
+	assert.Len(t, a.rows, 1)
+	assert.Equal(t, "ssh.exec", a.rows[0].toolName)
+	assert.Contains(t, a.rows[0].input, "cmd")
+	assert.Contains(t, a.rows[0].output, "ok")
+	assert.False(t, a.rows[0].isError)
+}
 
-	_, err := hook(context.Background(), agent.HookInput{
-		Stage:        agent.StagePostToolUse,
-		ToolName:     "run_command",
-		ToolInput:    json.RawMessage(`{"asset_id":1,"command":"ls /"}`),
-		ToolResponse: json.RawMessage(`"output here"`),
-		ToolCallID:   "call_42",
+func TestAuditHook_PreservesIsErrorFlag(t *testing.T) {
+	a := &captureAudit{}
+	h := newAuditHook(a)
+	_, err := h(context.Background(), &agent.PostToolUseInput{
+		ToolName: "redis.exec",
+		Input:    map[string]any{"cmd": "BADCMD"},
+		Output: &agent.ToolResultBlock{
+			Content: []agent.ContentBlock{agent.TextBlock{Text: "syntax error"}},
+			IsError: true,
+		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := w.waitGot()
-	if got.ToolName != "run_command" {
-		t.Errorf("ToolName = %q", got.ToolName)
-	}
-	if got.Decision == nil || got.Decision.Decision != ai.Allow {
-		t.Errorf("decision lost: %+v", got.Decision)
-	}
-	if got.Decision != nil && got.Decision.MatchedPattern != "ls *" {
-		t.Errorf("pattern lost: %+v", got.Decision)
-	}
+	assert.NoError(t, err)
+	assert.Len(t, a.rows, 1)
+	assert.True(t, a.rows[0].isError)
+}
+
+func TestAuditHook_NilOutputDoesNotPanic(t *testing.T) {
+	// Defensive: cago should always provide Output, but guard.
+	a := &captureAudit{}
+	h := newAuditHook(a)
+	_, err := h(context.Background(), &agent.PostToolUseInput{
+		ToolName: "noop",
+		Input:    map[string]any{},
+		Output:   nil,
+	})
+	assert.NoError(t, err)
+	assert.Len(t, a.rows, 0, "nil Output should skip write rather than panic")
 }

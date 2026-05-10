@@ -29,7 +29,7 @@ type SystemOptions struct {
 	// CheckPerm 注入静态策略检查；nil 时走 ai.CheckPermission（生产默认）。
 	// 测试可传 fake 避免拉起 DB / asset 仓库。
 	CheckPerm   CheckPermissionFunc
-	AuditWriter ai.AuditWriter // nil → ai.NewDefaultAuditWriter()
+	AuditWriter AuditWriter // nil → noopAuditWriter (Task 21 wires real impl)
 	Resolver    PendingResolver
 	Activate    func()      // window activation; may be nil
 	MaxRounds   int         // 0 → 50
@@ -92,7 +92,7 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 		opts.Deps = &Deps{}
 	}
 	if opts.AuditWriter == nil {
-		opts.AuditWriter = ai.NewDefaultAuditWriter()
+		opts.AuditWriter = noopAuditWriter{}
 	}
 	if opts.MaxRounds == 0 {
 		opts.MaxRounds = 50
@@ -108,7 +108,7 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 	turnState := &PerTurnState{}
 
 	policyHook := makePolicyHook(sc, gw, opts.CheckPerm, opts.LocalGrants)
-	auditHook := makeAuditHook(sc, opts.AuditWriter)
+	auditHook := newAuditHook(opts.AuditWriter)
 	rounds := newRoundsCounter(opts.MaxRounds)
 	promptHook := makePromptHook(turnState)
 	agentEndHook := MakeAgentEndHook(opts.Emitter)
