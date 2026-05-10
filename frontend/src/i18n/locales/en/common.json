@@ -569,6 +569,7 @@
       "retry": "Reconnect",
       "steps": {
         "resolve": "Resolve",
+        "open": "Open",
         "connect": "Connect",
         "auth": "Auth",
         "shell": "Shell"

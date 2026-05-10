@@ -86,7 +86,7 @@ func TestSessionExecCommandSerializesWrites(t *testing.T) {
 	require.Eventually(t, func() bool {
 		sess.mu.Lock()
 		defer sess.mu.Unlock()
-		return sess.cmdOutputCh != nil
+		return sess.cmdCapture != nil
 	}, time.Second, 5*time.Millisecond)
 
 	writeDone := make(chan error, 1)
@@ -115,6 +115,39 @@ func TestSessionExecCommandSerializesWrites(t *testing.T) {
 	}
 
 	assert.Equal(t, []string{"display version\r\n", "user input\r\n"}, port.writeStrings())
+}
+
+func TestSessionExecCommandCollectsAllCapturedOutput(t *testing.T) {
+	port := &fakePort{}
+	sess := &Session{ID: "serial-3", port: port}
+
+	resultCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		out, err := sess.ExecCommand("show data", 30*time.Millisecond, 200*time.Millisecond)
+		resultCh <- out
+		errCh <- err
+	}()
+
+	var capture *commandCapture
+	require.Eventually(t, func() bool {
+		sess.mu.Lock()
+		defer sess.mu.Unlock()
+		capture = sess.cmdCapture
+		return capture != nil
+	}, time.Second, 5*time.Millisecond)
+
+	for i := 0; i < 512; i++ {
+		capture.Append([]byte("x"))
+	}
+
+	select {
+	case out := <-resultCh:
+		require.NoError(t, <-errCh)
+		assert.Len(t, out, 512)
+	case <-time.After(time.Second):
+		t.Fatal("ExecCommand did not finish")
+	}
 }
 
 func TestManagerReadOutputClosesSessionOnUnexpectedError(t *testing.T) {

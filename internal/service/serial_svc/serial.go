@@ -23,6 +23,48 @@ type CommandManager interface {
 	GetSessionByAssetID(assetID int64) (CommandSession, bool)
 }
 
+type commandCapture struct {
+	mu     sync.Mutex
+	chunks [][]byte
+	signal chan struct{}
+}
+
+func newCommandCapture() *commandCapture {
+	return &commandCapture{signal: make(chan struct{}, 1)}
+}
+
+func (c *commandCapture) Append(data []byte) {
+	chunk := make([]byte, len(data))
+	copy(chunk, data)
+
+	c.mu.Lock()
+	c.chunks = append(c.chunks, chunk)
+	c.mu.Unlock()
+
+	select {
+	case c.signal <- struct{}{}:
+	default:
+	}
+}
+
+func (c *commandCapture) Drain() []byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.chunks) == 0 {
+		return nil
+	}
+	total := 0
+	for _, chunk := range c.chunks {
+		total += len(chunk)
+	}
+	out := make([]byte, 0, total)
+	for _, chunk := range c.chunks {
+		out = append(out, chunk...)
+	}
+	c.chunks = nil
+	return out
+}
+
 // Session 表示一个活跃的串口终端会话
 type Session struct {
 	ID       string
@@ -34,8 +76,8 @@ type Session struct {
 	onData   func(data []byte)      // 终端输出回调
 	onClosed func(sessionID string) // 会话关闭回调
 
-	// AI 命令执行辅助：当 cmdOutputCh 非 nil 时，readOutput 会同时向此 channel 发送数据副本
-	cmdOutputCh chan []byte
+	// AI 命令执行辅助：当 cmdCapture 非 nil 时，readOutput 会同时向此收集器追加数据副本。
+	cmdCapture *commandCapture
 }
 
 // Write 向串口写入数据（用户输入）
@@ -87,14 +129,15 @@ func (s *Session) ExecCommand(command string, silenceTimeout, maxTimeout time.Du
 		s.mu.Unlock()
 		return "", fmt.Errorf("session is closed")
 	}
-	// 设置命令输出收集 channel
-	ch := make(chan []byte, 256)
-	s.cmdOutputCh = ch
+	capture := newCommandCapture()
+	s.cmdCapture = capture
 	s.mu.Unlock()
 
 	defer func() {
 		s.mu.Lock()
-		s.cmdOutputCh = nil
+		if s.cmdCapture == capture {
+			s.cmdCapture = nil
+		}
 		s.mu.Unlock()
 	}()
 
@@ -111,7 +154,11 @@ func (s *Session) ExecCommand(command string, silenceTimeout, maxTimeout time.Du
 
 	for {
 		select {
-		case data := <-ch:
+		case <-capture.signal:
+			data := capture.Drain()
+			if len(data) == 0 {
+				continue
+			}
 			output = append(output, data...)
 			// 收到数据后重置静默计时器
 			if !silenceTimer.Stop() {
@@ -314,15 +361,12 @@ func (m *Manager) readOutput(sess *Session) {
 			data := make([]byte, n)
 			copy(data, buf[:n])
 			pending.Write(data)
-			// AI 命令执行：即时转发每个 chunk（ExecCommand 依赖 channel 实时性）
+			// AI 命令执行：即时收集每个 chunk，避免高峰时丢失输出。
 			sess.mu.Lock()
-			cmdCh := sess.cmdOutputCh
+			capture := sess.cmdCapture
 			sess.mu.Unlock()
-			if cmdCh != nil {
-				select {
-				case cmdCh <- data:
-				default: // 避免阻塞
-				}
+			if capture != nil {
+				capture.Append(data)
 			}
 			// 缓冲超过 32KB 时立即刷新，避免延迟过大
 			if pending.Len() >= 32*1024 {

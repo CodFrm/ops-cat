@@ -22,6 +22,7 @@ require (
 	github.com/twmb/franz-go/pkg/kmsg v1.13.1
 	github.com/wailsapp/wails/v2 v2.12.0
 	github.com/zalando/go-keyring v0.2.8
+	go.bug.st/serial v1.6.4
 	go.mongodb.org/mongo-driver/v2 v2.5.1
 	go.uber.org/mock v0.6.0
 	go.uber.org/zap v1.27.0
@@ -133,7 +134,6 @@ require (
 	github.com/xdg-go/scram v1.2.0 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
-	go.bug.st/serial v1.6.4 // indirect
 	go.mongodb.org/mongo-driver v1.17.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.40.0 // indirect

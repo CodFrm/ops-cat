@@ -16,18 +16,20 @@ import {
 import { Button, Input } from "@opskat/ui";
 import { useTerminalStore, type ConnectionState, type ConnectionStep } from "@/stores/terminalStore";
 
-const STEPS: { key: ConnectionStep; icon: typeof Server }[] = [
+const SSH_STEPS: { key: ConnectionStep; icon: typeof Server }[] = [
   { key: "resolve", icon: KeyRound },
   { key: "connect", icon: Server },
   { key: "auth", icon: Shield },
-  { key: "open", icon: Unplug },
   { key: "shell", icon: TerminalSquare },
 ];
 
-const STEP_ORDER: ConnectionStep[] = ["resolve", "open", "connect", "auth", "shell"];
+const SERIAL_STEPS: { key: ConnectionStep; icon: typeof Server }[] = [
+  { key: "resolve", icon: KeyRound },
+  { key: "open", icon: Unplug },
+];
 
-function getStepIndex(step: ConnectionStep): number {
-  return STEP_ORDER.indexOf(step);
+function getStepIndex(step: ConnectionStep, steps: { key: ConnectionStep }[]): number {
+  return steps.findIndex((item) => item.key === step);
 }
 
 interface ConnectionProgressProps {
@@ -53,7 +55,8 @@ export function ConnectionProgress({ connectionId }: ConnectionProgressProps) {
   const isError = connection.status === "error";
   const isChallenge = connection.status === "auth_challenge";
   const isHostKeyVerify = connection.status === "host_key_verify";
-  const currentIdx = getStepIndex(connection.currentStep);
+  const steps = connection.transport === "serial" ? SERIAL_STEPS : SSH_STEPS;
+  const currentIdx = getStepIndex(connection.currentStep, steps);
 
   return (
     <div className="h-full w-full flex flex-col bg-background">
@@ -64,9 +67,9 @@ export function ConnectionProgress({ connectionId }: ConnectionProgressProps) {
 
         {/* Step progress */}
         <div className="flex items-center gap-0 mb-6 w-full max-w-xs">
-          {STEPS.map((step, i) => {
+          {steps.map((step, i) => {
             const Icon = step.icon;
-            const stepIdx = getStepIndex(step.key);
+            const stepIdx = getStepIndex(step.key, steps);
             const isCurrent = stepIdx === currentIdx;
             const isDone = stepIdx < currentIdx;
             const isFailed = isError && isCurrent;
@@ -114,7 +117,7 @@ export function ConnectionProgress({ connectionId }: ConnectionProgressProps) {
                 </div>
 
                 {/* Connector line */}
-                {i < STEPS.length - 1 && (
+                {i < steps.length - 1 && (
                   <div className="flex-1 h-0.5 mx-1">
                     <div
                       className={`h-full rounded-full transition-all duration-500 ${
@@ -130,8 +133,8 @@ export function ConnectionProgress({ connectionId }: ConnectionProgressProps) {
 
         {/* Step labels */}
         <div className="flex items-start gap-0 w-full max-w-xs mb-8">
-          {STEPS.map((step) => {
-            const stepIdx = getStepIndex(step.key);
+          {steps.map((step) => {
+            const stepIdx = getStepIndex(step.key, steps);
             const isCurrent = stepIdx === currentIdx;
             const isDone = stepIdx < currentIdx;
             return (

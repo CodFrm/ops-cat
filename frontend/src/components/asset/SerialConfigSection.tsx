@@ -28,6 +28,7 @@ export interface SerialConfigSectionProps {
 }
 
 const CUSTOM_PORT = "__custom__";
+const NO_PORTS_PLACEHOLDER = "__no_ports__";
 const BAUD_RATES = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
 const DATA_BITS_OPTIONS = [5, 6, 7, 8];
 const STOP_BITS_OPTIONS = ["1", "1.5", "2"];
@@ -118,7 +119,7 @@ export function SerialConfigSection({
               </SelectItem>
             ))}
             {ports.length === 0 && !loadingPorts && (
-              <SelectItem value={CUSTOM_PORT} disabled>
+              <SelectItem value={NO_PORTS_PLACEHOLDER} disabled>
                 {t("asset.serialNoPortsDetected")}
               </SelectItem>
             )}
