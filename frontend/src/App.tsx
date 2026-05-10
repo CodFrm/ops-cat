@@ -26,6 +26,7 @@ import { useTabStore } from "@/stores/tabStore";
 import { useExtensionStore } from "@/extension";
 import { bootstrapExtensions } from "@/extension/init";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useExternalEditStore } from "@/stores/externalEditStore";
 import { asset_entity, group_entity } from "../wailsjs/go/models";
 import { EventsOn, WindowToggleMaximise } from "../wailsjs/runtime/runtime";
 
@@ -43,6 +44,10 @@ function App() {
       .getState()
       .fetchGroups()
       .catch((err) => console.error("Fetch groups failed:", err));
+    useExternalEditStore
+      .getState()
+      .fetchSessions()
+      .catch((err) => console.error("Fetch external edit sessions failed:", err));
   }, []);
 
   // 监听外部数据变更（opsctl 等），自动刷新 UI
@@ -94,6 +99,13 @@ function App() {
     });
     return () => cancel();
   }, [t]);
+
+  useEffect(() => {
+    const cancel = EventsOn("external-edit:event", (event: unknown) => {
+      useExternalEditStore.getState().applyEvent(event as never);
+    });
+    return () => cancel();
+  }, []);
 
   // 双击拖拽区域最大化/还原窗口
   useEffect(() => {

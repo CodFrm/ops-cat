@@ -71,6 +71,7 @@
     "copy": "Copy",
     "close": "Close",
     "submit": "Submit",
+    "browse": "Browse",
     "openInTab": "Open in New Tab",
     "editPermission": "Edit Permission",
     "open": "Open",
@@ -971,6 +972,41 @@
       "brightMagenta": "Bright Magenta",
       "brightCyan": "Bright Cyan",
       "brightWhite": "Bright White"
+    }
+  },
+  "externalEdit": {
+    "panel": {
+      "title": "External Edit"
+    },
+    "actions": {
+      "open": "Edit Externally",
+      "sync": "Save to Remote",
+      "reread": "Open Remote Version",
+      "overwrite": "Overwrite Remote",
+      "saveAgain": "Recreate Remote File"
+    },
+    "state": {
+      "clean": "Synced",
+      "dirty": "Local Changes",
+      "conflict": "Remote Changed",
+      "remote_missing": "Remote Missing",
+      "stale": "Conflict Copy",
+      "expired": "Session Expired"
+    },
+    "conflict": {
+      "remoteChangedTitle": "Remote File Changed",
+      "remoteMissingTitle": "Remote File Missing"
+    },
+    "settings": {
+      "tab": "External Edit",
+      "title": "External Editors",
+      "desc": "Configure the default editor, local workspace, and custom editor entries.",
+      "defaultEditor": "Default Editor",
+      "workspaceRoot": "Workspace Root",
+      "customEditors": "Custom Editors",
+      "editorPath": "Editor Path",
+      "editorArgs": "Launch Args",
+      "saved": "External edit settings saved"
     }
   },
   "integration": {

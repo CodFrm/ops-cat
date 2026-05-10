@@ -18,6 +18,7 @@ import (
 	"github.com/opskat/opskat/internal/repository/extension_state_repo"
 	"github.com/opskat/opskat/internal/service/credential_resolver"
 	"github.com/opskat/opskat/internal/service/extension_svc"
+	"github.com/opskat/opskat/internal/service/external_edit_svc"
 	"github.com/opskat/opskat/internal/service/kafka_svc"
 	"github.com/opskat/opskat/internal/service/redis_svc"
 	"github.com/opskat/opskat/internal/service/sftp_svc"
@@ -86,6 +87,7 @@ type App struct {
 	currentConversationID   int64                      // 当前活跃会话ID
 	runners                 sync.Map                   // map[int64]*ai.ConversationRunner
 	extSvc                  *extension_svc.Service
+	externalEditSvc         *external_edit_svc.Service
 	flushAckCh              chan struct{} // OnBeforeClose 等待前端确认 flush 完成
 	k8sLogStreams           sync.Map      // map[string]context.CancelFunc — pod log stream cancellations
 	k8sLogStreamCounter     int64         // pod log stream ID counter
@@ -126,6 +128,7 @@ func (a *App) Startup(ctx context.Context) {
 	a.InitAIProvider()
 	a.subscribeAIFlushAck()
 	a.emitSystemStatus()
+	a.initExternalEdit()
 
 	// AI 工具变更资产/分组后广播 data:changed，触发前端左侧树刷新
 	ai.SetDataChangeNotifier(&appDataChangeNotifier{app: a})
@@ -205,6 +208,11 @@ func (a *App) Cleanup() {
 	}
 	if a.extSvc != nil {
 		a.extSvc.Close(context.Background())
+	}
+	if a.externalEditSvc != nil {
+		if err := a.externalEditSvc.Close(); err != nil {
+			logger.Default().Warn("close external edit service", zap.Error(err))
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ export interface CtxMenuState {
   x: number;
   y: number;
   entry: sftp_svc.FileEntry | null;
+  canExternalEdit?: boolean;
 }
 
 export interface DeleteTarget {

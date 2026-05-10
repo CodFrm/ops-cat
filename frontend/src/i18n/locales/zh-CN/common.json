@@ -71,6 +71,7 @@
     "copy": "复制",
     "close": "关闭",
     "submit": "提交",
+    "browse": "选择",
     "openInTab": "在新标签打开",
     "editPermission": "编辑权限",
     "open": "打开",
@@ -956,6 +957,41 @@
       "brightMagenta": "亮品红",
       "brightCyan": "亮青",
       "brightWhite": "亮白"
+    }
+  },
+  "externalEdit": {
+    "panel": {
+      "title": "外部编辑"
+    },
+    "actions": {
+      "open": "外部编辑",
+      "sync": "保存到远程",
+      "reread": "打开远程新版本",
+      "overwrite": "覆盖远程",
+      "saveAgain": "重新创建远程文件"
+    },
+    "state": {
+      "clean": "已同步",
+      "dirty": "本地已修改",
+      "conflict": "远程已变更",
+      "remote_missing": "远程文件不存在",
+      "stale": "冲突副本",
+      "expired": "会话已过期"
+    },
+    "conflict": {
+      "remoteChangedTitle": "远程文件已变更",
+      "remoteMissingTitle": "远程文件不存在"
+    },
+    "settings": {
+      "tab": "外部编辑",
+      "title": "外部编辑器",
+      "desc": "配置默认外部编辑器、本地工作区和自定义编辑器。",
+      "defaultEditor": "默认外部编辑器",
+      "workspaceRoot": "临时工作区",
+      "customEditors": "自定义编辑器",
+      "editorPath": "编辑器路径",
+      "editorArgs": "启动参数",
+      "saved": "外部编辑设置已保存"
     }
   },
   "integration": {

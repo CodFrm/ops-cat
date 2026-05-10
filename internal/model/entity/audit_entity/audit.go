@@ -3,7 +3,7 @@ package audit_entity
 // AuditLog 审计日志实体
 type AuditLog struct {
 	ID             int64  `gorm:"column:id;primaryKey;autoIncrement"`
-	Source         string `gorm:"column:source;type:varchar(20);not null;index"` // "ai" | "opsctl"
+	Source         string `gorm:"column:source;type:varchar(20);not null;index"` // "ai" | "opsctl" | "desktop"
 	ToolName       string `gorm:"column:tool_name;type:varchar(100);not null"`
 	AssetID        int64  `gorm:"column:asset_id;default:0;index"`
 	AssetName      string `gorm:"column:asset_name;type:varchar(255)"`

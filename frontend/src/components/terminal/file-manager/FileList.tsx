@@ -6,10 +6,12 @@ import { sftp_svc } from "../../../../wailsjs/go/models";
 import { formatBytes, formatDate, getEntryPath, sortEntries } from "./utils";
 
 interface FileListProps {
+  canExternalEdit?: (entry: sftp_svc.FileEntry) => boolean;
   currentPath: string;
   entries: sftp_svc.FileEntry[];
   error: string | null;
   loading: boolean;
+  onExternalOpen?: (path: string) => void;
   onGoUp: () => void;
   onNavigate: (path: string) => void;
   onOpenContextMenu: (x: number, y: number, entry: sftp_svc.FileEntry | null) => void;
@@ -19,10 +21,12 @@ interface FileListProps {
 }
 
 export function FileList({
+  canExternalEdit,
   currentPath,
   entries,
   error,
   loading,
+  onExternalOpen,
   onGoUp,
   onNavigate,
   onOpenContextMenu,
@@ -85,7 +89,13 @@ export function FileList({
                   style={{ contentVisibility: "auto", containIntrinsicSize: "auto 28px" }}
                   onClick={() => setSelected(fullPath)}
                   onDoubleClick={() => {
-                    if (entry.isDir) onNavigate(fullPath);
+                    if (entry.isDir) {
+                      onNavigate(fullPath);
+                      return;
+                    }
+                    if (canExternalEdit?.(entry)) {
+                      onExternalOpen?.(fullPath);
+                    }
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();

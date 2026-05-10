@@ -1,12 +1,17 @@
 package sftp_svc
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -129,6 +134,60 @@ type FileEntry struct {
 	ModTime int64  `json:"modTime"` // Unix timestamp
 }
 
+// RemoteFileInfo 是远程文件的基础元信息。
+type RemoteFileInfo struct {
+	Path     string `json:"path"`
+	Size     int64  `json:"size"`
+	Mode     uint32 `json:"mode"`
+	ModTime  int64  `json:"modTime"`
+	IsDir    bool   `json:"isDir"`
+	Regular  bool   `json:"regular"`
+	SHA256   string `json:"sha256,omitempty"`
+	RealPath string `json:"realPath,omitempty"`
+}
+
+type remoteAtomicWriter interface {
+	io.Writer
+	Close() error
+}
+
+type remoteAtomicClient interface {
+	OpenFile(path string, f int) (remoteAtomicWriter, error)
+	Stat(path string) (os.FileInfo, error)
+	Chmod(path string, mode os.FileMode) error
+	Remove(path string) error
+	Rename(oldname, newname string) error
+	PosixRename(oldname, newname string) error
+}
+
+type sftpAtomicClient struct {
+	client *sftp.Client
+}
+
+func (c sftpAtomicClient) OpenFile(path string, f int) (remoteAtomicWriter, error) {
+	return c.client.OpenFile(path, f)
+}
+
+func (c sftpAtomicClient) Stat(path string) (os.FileInfo, error) {
+	return c.client.Stat(path)
+}
+
+func (c sftpAtomicClient) Chmod(path string, mode os.FileMode) error {
+	return c.client.Chmod(path, mode)
+}
+
+func (c sftpAtomicClient) Remove(path string) error {
+	return c.client.Remove(path)
+}
+
+func (c sftpAtomicClient) Rename(oldname, newname string) error {
+	return c.client.Rename(oldname, newname)
+}
+
+func (c sftpAtomicClient) PosixRename(oldname, newname string) error {
+	return c.client.PosixRename(oldname, newname)
+}
+
 // ListDir 列出远程目录内容
 func (s *Service) ListDir(sessionID, dirPath string) ([]FileEntry, error) {
 	sftpClient, err := s.getSFTPClient(sessionID)
@@ -161,6 +220,81 @@ func (s *Service) ListDir(sessionID, dirPath string) ([]FileEntry, error) {
 	result = append(result, dirs...)
 	result = append(result, files...)
 	return result, nil
+}
+
+// Stat 返回远程路径元信息。
+func (s *Service) Stat(sessionID, remotePath string) (*RemoteFileInfo, error) {
+	// external edit 需要一份“可比较、可恢复”的远端基线，
+	// 所以这里除了常规 stat，还尽量补齐 realPath，避免符号链接或相对路径把同一文件拆成多份会话。
+	sftpClient, err := s.getSFTPClient(sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	info, err := sftpClient.Stat(remotePath)
+	if err != nil {
+		return nil, fmt.Errorf("获取远程文件信息失败: %w", err)
+	}
+
+	realPath := remotePath
+	if rp, realPathErr := sftpClient.RealPath(remotePath); realPathErr == nil && rp != "" {
+		realPath = rp
+	}
+
+	return &RemoteFileInfo{
+		Path:     remotePath,
+		Size:     info.Size(),
+		Mode:     uint32(info.Mode()),
+		ModTime:  info.ModTime().Unix(),
+		IsDir:    info.IsDir(),
+		Regular:  info.Mode().IsRegular(),
+		RealPath: realPath,
+	}, nil
+}
+
+// ReadFile 读取远程文件全部字节。
+func (s *Service) ReadFile(sessionID, remotePath string) ([]byte, *RemoteFileInfo, error) {
+	// 读取阶段直接附带内容哈希，减少上层再次遍历字节流的机会，
+	// 让 external edit 可以把“读取基线”和“冲突比较基线”绑定到同一次远端快照上。
+	sftpClient, err := s.getSFTPClient(sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	info, err := s.Stat(sessionID, remotePath)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	remoteFile, err := sftpClient.Open(remotePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("打开远程文件失败: %w", err)
+	}
+	defer func() {
+		if err := remoteFile.Close(); err != nil {
+			logger.Default().Warn("close remote file", zap.String("path", remotePath), zap.Error(err))
+		}
+	}()
+
+	data, err := io.ReadAll(remoteFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("读取远程文件失败: %w", err)
+	}
+
+	sum := sha256.Sum256(data)
+	info.SHA256 = fmt.Sprintf("%x", sum[:])
+	return data, info, nil
+}
+
+// WriteFile 原子替换远程文件内容。
+func (s *Service) WriteFile(sessionID, remotePath string, data []byte) error {
+	// 外部编辑回写不能复用普通上传语义。
+	// 这里强制走原子替换，避免编辑器保存中途断开时把远端文本文件截成半份。
+	sftpClient, err := s.getSFTPClient(sessionID)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomically(sftpAtomicClient{client: sftpClient}, remotePath, data)
 }
 
 // Upload 上传单个文件
@@ -635,4 +769,121 @@ func (s *Service) copyWithProgress(ctx context.Context, transferID string, dst i
 			return readErr
 		}
 	}
+}
+
+func writeFileAtomically(client remoteAtomicClient, remotePath string, data []byte) error {
+	// 优先写临时文件再切换目标文件名：
+	// 成功时远端始终只会看到“旧版本”或“完整新版本”，不会暴露半写入状态。
+	targetMode, targetExists, err := statRemoteRegularFile(client, remotePath)
+	if err != nil {
+		return err
+	}
+
+	tempPath := buildRemoteTempPath(remotePath, "tmp")
+	backupPath := ""
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			cleanupRemotePath(client, tempPath)
+		}
+		if backupPath != "" {
+			cleanupRemotePath(client, backupPath)
+		}
+	}()
+
+	tempFile, err := client.OpenFile(tempPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
+	if err != nil {
+		return fmt.Errorf("创建远程临时文件失败: %w", err)
+	}
+	if _, err := io.Copy(tempFile, bytes.NewReader(data)); err != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("写入远程临时文件失败: %w", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("关闭远程临时文件失败: %w", err)
+	}
+
+	if targetExists {
+		if err := client.Chmod(tempPath, targetMode); err != nil {
+			return fmt.Errorf("同步远程文件权限失败: %w", err)
+		}
+		if err := client.PosixRename(tempPath, remotePath); err == nil {
+			cleanupTemp = false
+			return nil
+		} else if !isSFTPOpUnsupported(err) {
+			return fmt.Errorf("原子替换远程文件失败: %w", err)
+		}
+
+		// 某些 SFTP 服务端不支持 PosixRename。
+		// 这里回退到“先备份旧文件，再切换新文件，再尽力恢复”的兼容路径，把副作用控制在单个目标文件范围内。
+		backupPath = buildRemoteTempPath(remotePath, "bak")
+		if err := client.Rename(remotePath, backupPath); err != nil {
+			return fmt.Errorf("创建远程备份文件失败: %w", err)
+		}
+		if err := client.Rename(tempPath, remotePath); err != nil {
+			restoreErr := client.Rename(backupPath, remotePath)
+			if restoreErr != nil {
+				return fmt.Errorf("替换远程文件失败且恢复原文件失败: %w; restore: %v", err, restoreErr)
+			}
+			return fmt.Errorf("替换远程文件失败，已恢复原文件: %w", err)
+		}
+		if err := client.Remove(backupPath); err != nil && !os.IsNotExist(err) {
+			logger.Default().Warn("cleanup remote backup file", zap.String("path", backupPath), zap.Error(err))
+		}
+		cleanupTemp = false
+		backupPath = ""
+		return nil
+	}
+
+	if err := client.Rename(tempPath, remotePath); err != nil {
+		return fmt.Errorf("提交远程临时文件失败: %w", err)
+	}
+	cleanupTemp = false
+	return nil
+}
+
+func statRemoteRegularFile(client remoteAtomicClient, remotePath string) (os.FileMode, bool, error) {
+	// 这里只允许覆盖常规文件。
+	// 目录、管道或其他特殊节点一旦进入原子替换流程，失败恢复和权限继承语义都会变得不可控。
+	info, err := client.Stat(remotePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("获取远程文件信息失败: %w", err)
+	}
+	if info.IsDir() || !info.Mode().IsRegular() {
+		return 0, false, fmt.Errorf("远程路径不是常规文件")
+	}
+	return info.Mode().Perm(), true, nil
+}
+
+func buildRemoteTempPath(remotePath, suffix string) string {
+	dir := path.Dir(remotePath)
+	base := path.Base(remotePath)
+	token := fmt.Sprintf(".%s.opskat-%s-%d", base, suffix, time.Now().UnixNano())
+	return path.Join(dir, token)
+}
+
+func cleanupRemotePath(client remoteAtomicClient, remotePath string) {
+	if strings.TrimSpace(remotePath) == "" {
+		return
+	}
+	if err := client.Remove(remotePath); err != nil && !os.IsNotExist(err) {
+		logger.Default().Warn("cleanup remote temp file", zap.String("path", remotePath), zap.Error(err))
+	}
+}
+
+func isSFTPOpUnsupported(err error) bool {
+	// 不同服务端对“操作不支持”的返回并不统一，
+	// 这里同时兼容结构化状态码和文本兜底，避免因为供应商差异错过安全回退路径。
+	if err == nil {
+		return false
+	}
+	var statusErr *sftp.StatusError
+	if errors.As(err, &statusErr) {
+		return statusErr.FxCode() == sftp.ErrSSHFxOpUnsupported
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "op unsupported") || strings.Contains(text, "unsupported")
 }

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { Download, FolderDown, FolderOpen, RefreshCw, Trash2, Upload } from "lucide-react";
+import { Download, FolderDown, FolderOpen, PencilLine, RefreshCw, Trash2, Upload } from "lucide-react";
 import { cn } from "@opskat/ui";
 import { type CtxMenuState } from "./types";
 
@@ -98,6 +98,12 @@ export function FloatingMenu({ ctx, onAction, onClose }: FloatingMenuProps) {
           </>
         ) : (
           <>
+            {ctx.canExternalEdit && (
+              <>
+                {item("externalEdit", <PencilLine />, t("externalEdit.actions.open"))}
+                <div className="-mx-1 my-1 h-px bg-border" />
+              </>
+            )}
             {item("download", <Download />, t("sftp.download"))}
             <div className="-mx-1 my-1 h-px bg-border" />
             {item("delete", <Trash2 />, t("action.delete"), "destructive")}
