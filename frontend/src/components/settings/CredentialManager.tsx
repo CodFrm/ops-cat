@@ -756,14 +756,24 @@ function EditCredentialDialog({
             />
           </div>
           {isSSHKey ? (
-            <div className="grid gap-2">
-              <Label>{t("sshKey.comment")}</Label>
-              <Input
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                placeholder={t("sshKey.commentPlaceholder")}
-              />
-            </div>
+            <>
+              <div className="grid gap-2">
+                <Label>{t("sshKey.comment")}</Label>
+                <Input
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder={t("sshKey.commentPlaceholder")}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>{t("credential.username")}</Label>
+                <Input
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder={t("credential.usernamePlaceholder")}
+                />
+              </div>
+            </>
           ) : (
             <>
               <div className="grid gap-2">
