@@ -27,26 +27,14 @@ type ConversationSvc interface {
 	// 消息持久化
 	LoadMessages(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error)
 
-	// UpsertMessages 是 cago gormStore 的写入入口（替代旧的 SaveMessages）。
-	// 同 conversation 的并发调用通过 saveLocks 串行化；行级 upsert 委托给
-	// conversation_repo.UpsertMessagesByID。msgs 的 ConversationID 与
-	// SortOrder/Createtime 由本方法填充——调用方无需预设。
-	UpsertMessages(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error
-
 	// UpdateConversationState 把 cago Session 的 ThreadID + State.Values 写入
 	// conversations 表的 thread_id / state_values 列。values 序列化为 JSON；
 	// 空 map / nil 映射到空字符串（GetStateValues 返回 nil）。
 	UpdateConversationState(ctx context.Context, conversationID int64, threadID string, values map[string]string) error
-
-	// UpdateMessageTokenUsage 把已序列化的 token_usage JSON 写到指定 (conversationID, cagoID)
-	// 消息行。由 gormStore.Save drain System.pendingUsage 时调用，纯透传。
-	UpdateMessageTokenUsage(ctx context.Context, conversationID int64, cagoID, tokenUsageJSON string) error
 }
 
 type conversationSvc struct {
-	// saveLocks 为每个 conversationID 维护一把互斥锁。
-	// 同会话的 cago Save 并发到来时串行化，避免 upsert 间的快照交错（cago
-	// 每次 Save 发的是全量快照，后到的应当 last-write-wins）。
+	// saveLocks 为每个 conversationID 维护一把互斥锁，供上层（gormStore）按需使用。
 	saveLocks sync.Map // map[int64]*sync.Mutex
 }
 
@@ -108,27 +96,6 @@ func (s *conversationSvc) LoadMessages(ctx context.Context, conversationID int64
 	return conversation_repo.Conversation().ListMessages(ctx, conversationID)
 }
 
-func (s *conversationSvc) UpsertMessages(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error {
-	// 复用 saveLocks：同会话的 cago Save 并发到来时串行化，避免 upsert 间的快照交错
-	// （cago 每次 Save 发的是全量快照，后到的应当 last-write-wins）。
-	lockI, _ := s.saveLocks.LoadOrStore(conversationID, &sync.Mutex{})
-	lock := lockI.(*sync.Mutex)
-	lock.Lock()
-	defer lock.Unlock()
-
-	now := time.Now().Unix()
-	for i, m := range msgs {
-		m.ConversationID = conversationID
-		if m.SortOrder == 0 {
-			m.SortOrder = i
-		}
-		if m.Createtime == 0 {
-			m.Createtime = now
-		}
-	}
-	return conversation_repo.Conversation().UpsertMessagesByID(ctx, conversationID, msgs)
-}
-
 func (s *conversationSvc) UpdateConversationState(ctx context.Context, conversationID int64, threadID string, values map[string]string) error {
 	var jsonStr string
 	if len(values) > 0 {
@@ -139,8 +106,4 @@ func (s *conversationSvc) UpdateConversationState(ctx context.Context, conversat
 		jsonStr = string(b)
 	}
 	return conversation_repo.Conversation().UpdateState(ctx, conversationID, threadID, jsonStr)
-}
-
-func (s *conversationSvc) UpdateMessageTokenUsage(ctx context.Context, conversationID int64, cagoID, tokenUsageJSON string) error {
-	return conversation_repo.Conversation().UpdateMessageTokenUsage(ctx, conversationID, cagoID, tokenUsageJSON)
 }

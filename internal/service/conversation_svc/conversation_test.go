@@ -4,10 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"sync"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
 	"github.com/opskat/opskat/internal/repository/conversation_repo"
@@ -201,80 +198,6 @@ func TestConversationSvc_Delete(t *testing.T) {
 	})
 }
 
-func TestConversationSvc_UpsertMessages(t *testing.T) {
-	convey.Convey("UpsertMessages 包装 cago gormStore 的快照写入", t, func() {
-		convey.Convey("成功写入：填充 ConversationID/SortOrder/Createtime", func() {
-			ctx, mockRepo := setupTest(t)
-
-			msgs := []*conversation_entity.Message{
-				{Role: "user", Content: "你好"},
-				{Role: "assistant", Content: "你好！"},
-			}
-			mockRepo.EXPECT().UpsertMessagesByID(gomock.Any(), int64(1), msgs).DoAndReturn(
-				func(_ context.Context, _ int64, msgs []*conversation_entity.Message) error {
-					for i, msg := range msgs {
-						assert.Equal(t, int64(1), msg.ConversationID)
-						assert.Equal(t, i, msg.SortOrder)
-						assert.Greater(t, msg.Createtime, int64(0))
-					}
-					return nil
-				},
-			)
-
-			err := Conversation().UpsertMessages(ctx, 1, msgs)
-			assert.NoError(t, err)
-		})
-
-		convey.Convey("repo 错误透传", func() {
-			ctx, mockRepo := setupTest(t)
-
-			msgs := []*conversation_entity.Message{
-				{Role: "user", Content: "test"},
-			}
-			mockRepo.EXPECT().UpsertMessagesByID(gomock.Any(), int64(1), gomock.Any()).
-				Return(errors.New("db"))
-
-			err := Conversation().UpsertMessages(ctx, 1, msgs)
-			assert.Error(t, err)
-		})
-
-		convey.Convey("同一 conversationID 的并发调用串行", func() {
-			ctx, mockRepo := setupTest(t)
-
-			var inFlight atomic.Int32
-			var maxInFlight atomic.Int32
-			mockRepo.EXPECT().UpsertMessagesByID(gomock.Any(), int64(7), gomock.Any()).Times(5).DoAndReturn(
-				func(_ context.Context, _ int64, _ []*conversation_entity.Message) error {
-					n := inFlight.Add(1)
-					for {
-						m := maxInFlight.Load()
-						if n <= m || maxInFlight.CompareAndSwap(m, n) {
-							break
-						}
-					}
-					time.Sleep(20 * time.Millisecond)
-					inFlight.Add(-1)
-					return nil
-				},
-			)
-
-			var wg sync.WaitGroup
-			for i := 0; i < 5; i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					_ = Conversation().UpsertMessages(ctx, 7,
-						[]*conversation_entity.Message{{Role: "user", Content: "x"}})
-				}()
-			}
-			wg.Wait()
-
-			assert.LessOrEqual(t, maxInFlight.Load(), int32(1),
-				"同一 conversationID 的 UpsertMessages 应串行")
-		})
-	})
-}
-
 func TestConversationSvc_UpdateConversationState(t *testing.T) {
 	convey.Convey("UpdateConversationState 写入 thread_id 与 state_values JSON", t, func() {
 		convey.Convey("非空 values 序列化为 JSON", func() {
@@ -325,23 +248,14 @@ func TestConversationSvc_UpdateConversationState(t *testing.T) {
 	})
 }
 
-func TestConversationSvc_UpdateMessageTokenUsage(t *testing.T) {
-	ctx, mockRepo := setupTest(t)
-	convey.Convey("UpdateMessageTokenUsage 透传给 repo", t, func() {
-		mockRepo.EXPECT().UpdateMessageTokenUsage(gomock.Any(), int64(7), "cago-1", `{"inputTokens":12}`).Return(nil)
-		err := Conversation().UpdateMessageTokenUsage(ctx, 7, "cago-1", `{"inputTokens":12}`)
-		assert.NoError(t, err)
-	})
-}
-
 func TestConversationSvc_LoadMessages(t *testing.T) {
 	ctx, mockRepo := setupTest(t)
 
 	convey.Convey("加载消息", t, func() {
 		convey.Convey("返回排序后的消息列表", func() {
 			expected := []*conversation_entity.Message{
-				{ID: 1, ConversationID: 1, Role: "user", Content: "问题", SortOrder: 0},
-				{ID: 2, ConversationID: 1, Role: "assistant", Content: "回答", SortOrder: 1},
+				{ID: 1, ConversationID: 1, Role: "user", SortOrder: 0},
+				{ID: 2, ConversationID: 1, Role: "assistant", SortOrder: 1},
 			}
 			mockRepo.EXPECT().ListMessages(gomock.Any(), int64(1)).Return(expected, nil)
 
@@ -353,3 +267,4 @@ func TestConversationSvc_LoadMessages(t *testing.T) {
 		})
 	})
 }
+

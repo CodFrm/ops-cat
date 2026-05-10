@@ -114,7 +114,7 @@ func Init(ctx context.Context, opts Options) error {
 func registerRepositories() {
 	asset_repo.RegisterAsset(asset_repo.NewAsset())
 	audit_repo.RegisterAudit(audit_repo.NewAudit())
-	conversation_repo.RegisterConversation(conversation_repo.NewConversation())
+	conversation_repo.RegisterConversation(conversation_repo.NewConversation(db.Default()))
 	group_repo.RegisterGroup(group_repo.NewGroup())
 	grant_repo.RegisterGrant(grant_repo.NewGrant())
 	local_tool_grant_repo.Register(local_tool_grant_repo.New())

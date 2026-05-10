@@ -1,14 +1,13 @@
+//go:generate mockgen -source=conversation.go -destination=mock_conversation_repo/conversation.go -package=mock_conversation_repo
 package conversation_repo
 
 import (
 	"context"
-	"errors"
 	"time"
 
-	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
-
-	"github.com/cago-frame/cago/database/db"
 	"gorm.io/gorm"
+
+	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
 )
 
 // ConversationRepo 会话数据访问接口
@@ -25,26 +24,26 @@ type ConversationRepo interface {
 	ListMessages(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error)
 	DeleteMessages(ctx context.Context, conversationID int64) error
 
-	// UpsertMessagesByID 按 (conversation_id, cago_id) 自然键行级 upsert：
-	// - 删除当前快照里没有的旧行（history rewrite/compact 场景的收敛）
-	// - 已存在的 cago_id 行更新 framework 字段 + role/content/sort_order；不动
-	//   mentions/token_usage 这两个由 System pending 缓存写的扩展列
-	// - 新行直接 Create
-	// 整体在事务内完成。
-	//
-	// 注：cago_id 列存的是 agent.Message.ID，cago framework 端保证非空唯一；
-	// 列名沿用 cago_id 是 schema 历史，函数名按一般化的 ByID 暴露。
-	UpsertMessagesByID(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error
+	// AppendAt 在指定 (conversationID, sortOrder) 位置插入新消息行。
+	// 调用方须保证该位置尚不存在记录（否则触发唯一索引冲突）。
+	AppendAt(ctx context.Context, conversationID int64, sortOrder int, msg *conversation_entity.Message) error
+
+	// UpdateAt 按 (conversationID, sortOrder) 自然键更新已有消息行。
+	// 只写 role/blocks/mentions/token_usage/partial_reason/createtime；
+	// id 与 conversation_id 不变。
+	UpdateAt(ctx context.Context, conversationID int64, sortOrder int, msg *conversation_entity.Message) error
+
+	// TruncateFrom 删除同一会话中 sort_order >= fromSortOrder 的所有行。
+	// 用于 history rewrite / compact 场景的收敛。
+	TruncateFrom(ctx context.Context, conversationID int64, fromSortOrder int) error
+
+	// LoadOrdered 按 sort_order ASC 返回指定会话的所有消息行。
+	LoadOrdered(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error)
 
 	// UpdateState 写入 cago Session 的 thread_id / state_values，并刷新 updatetime。
 	// stateValuesJSON 已是序列化好的 JSON 字符串（service 层负责 marshal）；
 	// 空字符串视为清空（GetStateValues 返回 nil）。
 	UpdateState(ctx context.Context, conversationID int64, threadID, stateValuesJSON string) error
-
-	// UpdateMessageTokenUsage 把序列化好的 token_usage JSON 写到指定 (conversationID, cagoID) 行。
-	// 由 gormStore.Save drain System.pendingUsage 时调用；
-	// 写不存在的 cago_id 是 no-op（行未被 upsert 创建则跳过）。
-	UpdateMessageTokenUsage(ctx context.Context, conversationID int64, cagoID, tokenUsageJSON string) error
 }
 
 var defaultConversation ConversationRepo
@@ -60,16 +59,18 @@ func RegisterConversation(i ConversationRepo) {
 }
 
 // conversationRepo 默认实现
-type conversationRepo struct{}
+type conversationRepo struct {
+	db *gorm.DB
+}
 
-// NewConversation 创建默认实现
-func NewConversation() ConversationRepo {
-	return &conversationRepo{}
+// NewConversation 创建默认实现，db 为注入的 *gorm.DB 实例（生产环境传 db.Default()）。
+func NewConversation(db *gorm.DB) ConversationRepo {
+	return &conversationRepo{db: db}
 }
 
 func (r *conversationRepo) Find(ctx context.Context, id int64) (*conversation_entity.Conversation, error) {
 	var conv conversation_entity.Conversation
-	if err := db.Ctx(ctx).Where("id = ? AND status = ?", id, conversation_entity.StatusActive).First(&conv).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("id = ? AND status = ?", id, conversation_entity.StatusActive).First(&conv).Error; err != nil {
 		return nil, err
 	}
 	return &conv, nil
@@ -77,7 +78,7 @@ func (r *conversationRepo) Find(ctx context.Context, id int64) (*conversation_en
 
 func (r *conversationRepo) List(ctx context.Context) ([]*conversation_entity.Conversation, error) {
 	var convs []*conversation_entity.Conversation
-	if err := db.Ctx(ctx).Where("status = ?", conversation_entity.StatusActive).
+	if err := r.db.WithContext(ctx).Where("status = ?", conversation_entity.StatusActive).
 		Order("updatetime DESC").Find(&convs).Error; err != nil {
 		return nil, err
 	}
@@ -85,15 +86,15 @@ func (r *conversationRepo) List(ctx context.Context) ([]*conversation_entity.Con
 }
 
 func (r *conversationRepo) Create(ctx context.Context, conv *conversation_entity.Conversation) error {
-	return db.Ctx(ctx).Create(conv).Error
+	return r.db.WithContext(ctx).Create(conv).Error
 }
 
 func (r *conversationRepo) Update(ctx context.Context, conv *conversation_entity.Conversation) error {
-	return db.Ctx(ctx).Save(conv).Error
+	return r.db.WithContext(ctx).Save(conv).Error
 }
 
 func (r *conversationRepo) UpdateTitle(ctx context.Context, id int64, title string, updatetime int64) error {
-	result := db.Ctx(ctx).
+	result := r.db.WithContext(ctx).
 		Model(&conversation_entity.Conversation{}).
 		Where("id = ? AND status = ?", id, conversation_entity.StatusActive).
 		Updates(map[string]any{
@@ -110,7 +111,7 @@ func (r *conversationRepo) UpdateTitle(ctx context.Context, id int64, title stri
 }
 
 func (r *conversationRepo) UpdateWorkDir(ctx context.Context, id int64, workDir string, updatetime int64) error {
-	result := db.Ctx(ctx).
+	result := r.db.WithContext(ctx).
 		Model(&conversation_entity.Conversation{}).
 		Where("id = ? AND status = ?", id, conversation_entity.StatusActive).
 		Updates(map[string]any{
@@ -127,13 +128,13 @@ func (r *conversationRepo) UpdateWorkDir(ctx context.Context, id int64, workDir 
 }
 
 func (r *conversationRepo) Delete(ctx context.Context, id int64) error {
-	return db.Ctx(ctx).Model(&conversation_entity.Conversation{}).Where("id = ?", id).
+	return r.db.WithContext(ctx).Model(&conversation_entity.Conversation{}).Where("id = ?", id).
 		Update("status", conversation_entity.StatusDeleted).Error
 }
 
 func (r *conversationRepo) ListMessages(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error) {
 	var msgs []*conversation_entity.Message
-	if err := db.Ctx(ctx).Where("conversation_id = ?", conversationID).
+	if err := r.db.WithContext(ctx).Where("conversation_id = ?", conversationID).
 		Order("sort_order ASC").Find(&msgs).Error; err != nil {
 		return nil, err
 	}
@@ -141,26 +142,52 @@ func (r *conversationRepo) ListMessages(ctx context.Context, conversationID int6
 }
 
 func (r *conversationRepo) DeleteMessages(ctx context.Context, conversationID int64) error {
-	return db.Ctx(ctx).Where("conversation_id = ?", conversationID).
+	return r.db.WithContext(ctx).Where("conversation_id = ?", conversationID).
 		Delete(&conversation_entity.Message{}).Error
 }
 
-func (r *conversationRepo) UpsertMessagesByID(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error {
-	// v1 method removed; await Task 8 rewrite
-	return errors.New("v1 method removed; await Task 8")
+func (r *conversationRepo) AppendAt(ctx context.Context, conversationID int64, sortOrder int, msg *conversation_entity.Message) error {
+	msg.ConversationID = conversationID
+	msg.SortOrder = sortOrder
+	return r.db.WithContext(ctx).Create(msg).Error
+}
+
+func (r *conversationRepo) UpdateAt(ctx context.Context, conversationID int64, sortOrder int, msg *conversation_entity.Message) error {
+	return r.db.WithContext(ctx).Model(&conversation_entity.Message{}).
+		Where("conversation_id = ? AND sort_order = ?", conversationID, sortOrder).
+		Updates(map[string]any{
+			"role":           msg.Role,
+			"blocks":         msg.Blocks,
+			"mentions":       msg.Mentions,
+			"token_usage":    msg.TokenUsage,
+			"partial_reason": msg.PartialReason,
+			"createtime":     msg.Createtime,
+		}).Error
+}
+
+func (r *conversationRepo) TruncateFrom(ctx context.Context, conversationID int64, fromSortOrder int) error {
+	return r.db.WithContext(ctx).
+		Where("conversation_id = ? AND sort_order >= ?", conversationID, fromSortOrder).
+		Delete(&conversation_entity.Message{}).Error
+}
+
+func (r *conversationRepo) LoadOrdered(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error) {
+	var msgs []*conversation_entity.Message
+	if err := r.db.WithContext(ctx).
+		Where("conversation_id = ?", conversationID).
+		Order("sort_order ASC").
+		Find(&msgs).Error; err != nil {
+		return nil, err
+	}
+	return msgs, nil
 }
 
 func (r *conversationRepo) UpdateState(ctx context.Context, conversationID int64, threadID, stateValuesJSON string) error {
-	return db.Ctx(ctx).Model(&conversation_entity.Conversation{}).
+	return r.db.WithContext(ctx).Model(&conversation_entity.Conversation{}).
 		Where("id = ?", conversationID).
 		Updates(map[string]any{
 			"thread_id":    threadID,
 			"state_values": stateValuesJSON,
 			"updatetime":   time.Now().Unix(),
 		}).Error
-}
-
-func (r *conversationRepo) UpdateMessageTokenUsage(ctx context.Context, conversationID int64, cagoID, tokenUsageJSON string) error {
-	// v1 method removed; await Task 8 rewrite
-	return errors.New("v1 method removed; await Task 8")
 }
