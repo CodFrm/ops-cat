@@ -169,7 +169,7 @@ func TestSystem_NeedConfirm_EmitsExactlyOneApprovalRequest(t *testing.T) {
 		ch <- ai.ApprovalResponse{Decision: "allow"}
 		return ch, func() {}
 	})
-	gw := NewApprovalGateway(rec, resolver)
+	gw := NewApprovalGateway(1, rec, nil, resolver)
 	policyHook := makePolicyHook(sc, gw, needConfirm, nil)
 	promptHook := makePromptHook(&PerTurnState{})
 

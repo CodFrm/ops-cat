@@ -101,7 +101,7 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 		opts.LocalGrants = NewRepoLocalGrantStore()
 	}
 
-	gw := NewApprovalGateway(opts.Emitter, opts.Resolver)
+	gw := NewApprovalGateway(opts.ConvID, opts.Emitter, opts.LocalGrants, opts.Resolver)
 	gw.SetActivateFunc(opts.Activate)
 
 	sc := newSidecar()

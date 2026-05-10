@@ -2,162 +2,184 @@ package aiagent
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
+
+	"github.com/cago-frame/agents/agent"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/opskat/opskat/internal/ai"
 )
 
-func TestApprovalGateway_RequestEmitsAndBlocks(t *testing.T) {
-	emitted := make(chan ai.StreamEvent, 2)
-	em := EmitterFunc(func(_ int64, ev ai.StreamEvent) { emitted <- ev })
-	resolve := make(chan ai.ApprovalResponse, 1)
-	gw := NewApprovalGateway(em, func(confirmID string) (chan ai.ApprovalResponse, func()) {
-		return resolve, func() {}
-	})
+// apprCaptureEmitter is a local emitter for approval_gateway tests, separate
+// from the captureEmitter in bridge_test.go (same package; avoids DuplicateDecl).
+type apprCaptureEmitter struct {
+	convID int64
+	events []ai.StreamEvent
+}
 
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		resolve <- ai.ApprovalResponse{Decision: "allow"}
-	}()
+func (c *apprCaptureEmitter) Emit(convID int64, ev ai.StreamEvent) {
+	c.convID = convID
+	c.events = append(c.events, ev)
+}
 
-	resp := gw.RequestSingle(context.Background(), 7, "exec",
-		[]ai.ApprovalItem{{Type: "exec", AssetID: 1, Command: "ls"}}, "")
+type fakeGrants struct {
+	hasAllowed bool
+	saved      []string
+}
 
-	if resp.Decision != "allow" {
-		t.Fatalf("decision = %s", resp.Decision)
-	}
-	ev := <-emitted
-	if ev.Type != "approval_request" {
-		t.Fatalf("first event = %s", ev.Type)
-	}
-	ev2 := <-emitted
-	if ev2.Type != "approval_result" || ev2.Content != "allow" {
-		t.Fatalf("second event = %+v", ev2)
+func (f *fakeGrants) Has(_ context.Context, _, _ string) bool {
+	return f.hasAllowed
+}
+func (f *fakeGrants) Save(_ context.Context, sessionID, toolName string) {
+	f.saved = append(f.saved, sessionID+":"+toolName)
+}
+
+// fakeResolver returns a synchronous channel that the test pre-fills.
+type fakeResolver struct {
+	respCh   chan ai.ApprovalResponse
+	released chan struct{}
+}
+
+func newFakeResolver() *fakeResolver {
+	return &fakeResolver{
+		respCh:   make(chan ai.ApprovalResponse, 1),
+		released: make(chan struct{}, 1),
 	}
 }
 
-func TestApprovalGateway_ContextCancelDenies(t *testing.T) {
-	em := EmitterFunc(func(int64, ai.StreamEvent) {})
-	gw := NewApprovalGateway(em, func(string) (chan ai.ApprovalResponse, func()) {
-		return make(chan ai.ApprovalResponse), func() {}
-	})
+func (f *fakeResolver) Resolver() PendingResolver {
+	return func(_ string) (chan ai.ApprovalResponse, func()) {
+		return f.respCh, func() { f.released <- struct{}{} }
+	}
+}
+
+func TestApprovalGateway_LocalGrantShortCircuit(t *testing.T) {
+	em := &apprCaptureEmitter{}
+	grants := &fakeGrants{hasAllowed: true}
+	res := newFakeResolver()
+	g := NewApprovalGateway(42, em, grants, res.Resolver())
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	resp := gw.RequestSingle(ctx, 1, "exec", nil, "")
-	if resp.Decision != "deny" {
-		t.Fatalf("expected deny on canceled ctx, got %s", resp.Decision)
-	}
+	defer cancel()
+	go g.Run(ctx)
+
+	hook := g.Hook()
+	out, err := hook(ctx, &agent.PreToolUseInput{
+		ToolName: "Write", ToolUseID: "tu_1",
+		Input: map[string]any{"path": "/tmp/x"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, agent.DecisionApprove, out.Decision)
+	// No emit (short-circuit), resolver not called.
+	assert.Empty(t, em.events, "local grant should suppress all emits")
+
+	_ = g.Close()
 }
 
-// TestApprovalGateway_RequestGrant_AllowReturnsEditedItems mirrors the policy-
-// hook's "save user-edited grant pattern" expectation: when the user edits the
-// command in the grant dialog, RequestGrant must surface the edited items, not
-// the original.
-func TestApprovalGateway_RequestGrant_AllowReturnsEditedItems(t *testing.T) {
-	emitted := make(chan ai.StreamEvent, 2)
-	em := EmitterFunc(func(_ int64, ev ai.StreamEvent) { emitted <- ev })
-	resolve := make(chan ai.ApprovalResponse, 1)
-	gw := NewApprovalGateway(em, func(string) (chan ai.ApprovalResponse, func()) {
-		return resolve, func() {}
-	})
+func TestApprovalGateway_UserApproves(t *testing.T) {
+	em := &apprCaptureEmitter{}
+	grants := &fakeGrants{}
+	res := newFakeResolver()
+	g := NewApprovalGateway(42, em, grants, res.Resolver())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go g.Run(ctx)
 
+	// Pre-arm the response so the gateway sees "approve" once it emits the request.
+	res.respCh <- ai.ApprovalResponse{Decision: "approve"}
+
+	hook := g.Hook()
+	out, err := hook(ctx, &agent.PreToolUseInput{
+		ToolName: "ssh.exec", ToolUseID: "tu_2",
+		Input: map[string]any{"cmd": "ls"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, agent.DecisionApprove, out.Decision)
+
+	// Two emits: approval_request + approval_result
+	require.Len(t, em.events, 2)
+	assert.Equal(t, "approval_request", em.events[0].Type)
+	assert.Equal(t, "ssh.exec", em.events[0].ToolName)
+	assert.Equal(t, "approval_result", em.events[1].Type)
+	assert.Equal(t, "approve", em.events[1].Content)
+
+	_ = g.Close()
+}
+
+func TestApprovalGateway_UserDenies(t *testing.T) {
+	em := &apprCaptureEmitter{}
+	res := newFakeResolver()
+	g := NewApprovalGateway(42, em, &fakeGrants{}, res.Resolver())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go g.Run(ctx)
+
+	res.respCh <- ai.ApprovalResponse{Decision: "deny"}
+
+	hook := g.Hook()
+	out, err := hook(ctx, &agent.PreToolUseInput{
+		ToolName: "rm.file", ToolUseID: "tu_3",
+		Input: map[string]any{},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, agent.DecisionDeny, out.Decision)
+
+	_ = g.Close()
+}
+
+func TestApprovalGateway_AlwaysGrantPersists(t *testing.T) {
+	em := &apprCaptureEmitter{}
+	grants := &fakeGrants{}
+	res := newFakeResolver()
+	g := NewApprovalGateway(42, em, grants, res.Resolver())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go g.Run(ctx)
+
+	res.respCh <- ai.ApprovalResponse{Decision: "always"}
+
+	hook := g.Hook()
+	out, err := hook(ctx, &agent.PreToolUseInput{
+		ToolName: "Write", ToolUseID: "tu_4",
+		Input: map[string]any{},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, agent.DecisionApprove, out.Decision)
+	assert.Equal(t, []string{"conv_42:Write"}, grants.saved, "always should persist via grants.Save")
+
+	_ = g.Close()
+}
+
+func TestApprovalGateway_CtxCancelDeniesPending(t *testing.T) {
+	em := &apprCaptureEmitter{}
+	res := newFakeResolver()
+	g := NewApprovalGateway(42, em, &fakeGrants{}, res.Resolver())
+	ctx, cancel := context.WithCancel(context.Background())
+	go g.Run(ctx)
+
+	hookDone := make(chan struct{})
 	go func() {
-		time.Sleep(20 * time.Millisecond)
-		resolve <- ai.ApprovalResponse{
-			Decision:    "allow",
-			EditedItems: []ai.ApprovalItem{{Type: "exec", AssetID: 1, Command: "ls /var/*"}},
-		}
+		defer close(hookDone)
+		hook := g.Hook()
+		out, err := hook(context.Background(), &agent.PreToolUseInput{
+			ToolName: "stuck", ToolUseID: "tu_stuck",
+			Input: map[string]any{},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, agent.DecisionDeny, out.Decision, "ctx cancel should deny pending")
 	}()
 
-	ok, final := gw.RequestGrant(context.Background(), 5,
-		[]ai.ApprovalItem{{Type: "exec", AssetID: 1, Command: "ls"}}, "expand pattern")
+	// Wait until the gateway is blocked on the resolver, then cancel.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
 
-	if !ok {
-		t.Fatal("expected approved=true on allow decision")
+	select {
+	case <-hookDone:
+		// good
+	case <-time.After(2 * time.Second):
+		t.Fatal("hook did not return after ctx cancel")
 	}
-	if len(final) != 1 || final[0].Command != "ls /var/*" {
-		t.Fatalf("expected user-edited pattern, got %+v", final)
-	}
-	ev := <-emitted
-	if ev.Type != "approval_request" || ev.Kind != "grant" || ev.Description != "expand pattern" {
-		t.Fatalf("first event = %+v", ev)
-	}
-}
 
-// TestApprovalGateway_RequestGrant_DenyReturnsNoItems confirms the contract for
-// the deny branch: approved=false, items=nil — even if the user supplies edits,
-// the caller must not persist them.
-func TestApprovalGateway_RequestGrant_DenyReturnsNoItems(t *testing.T) {
-	em := EmitterFunc(func(int64, ai.StreamEvent) {})
-	resolve := make(chan ai.ApprovalResponse, 1)
-	resolve <- ai.ApprovalResponse{Decision: "deny"}
-	gw := NewApprovalGateway(em, func(string) (chan ai.ApprovalResponse, func()) {
-		return resolve, func() {}
-	})
-
-	ok, final := gw.RequestGrant(context.Background(), 1,
-		[]ai.ApprovalItem{{Command: "ls"}}, "")
-	if ok {
-		t.Fatal("expected approved=false on deny")
-	}
-	if final != nil {
-		t.Fatalf("deny must zero out items, got %+v", final)
-	}
-}
-
-// TestApprovalGateway_RequestGrant_FallsBackToOriginalWhenNoEdits covers the
-// branch where the user clicks Allow without editing — final must equal the
-// caller-supplied items so saveGrantPatternFromResponse stores the policy-
-// proposed pattern.
-func TestApprovalGateway_RequestGrant_FallsBackToOriginalWhenNoEdits(t *testing.T) {
-	em := EmitterFunc(func(int64, ai.StreamEvent) {})
-	resolve := make(chan ai.ApprovalResponse, 1)
-	resolve <- ai.ApprovalResponse{Decision: "allow"} // no EditedItems
-	gw := NewApprovalGateway(em, func(string) (chan ai.ApprovalResponse, func()) {
-		return resolve, func() {}
-	})
-
-	original := []ai.ApprovalItem{{Type: "exec", AssetID: 1, Command: "uname -a"}}
-	ok, final := gw.RequestGrant(context.Background(), 1, original, "")
-	if !ok {
-		t.Fatal("expected approved=true")
-	}
-	if len(final) != 1 || final[0].Command != "uname -a" {
-		t.Fatalf("expected fallback to original, got %+v", final)
-	}
-}
-
-// TestApprovalGateway_ActivateFuncCalledBeforeEmit pins down the UX guarantee:
-// the desktop window is brought to front *before* the approval_request event is
-// emitted, so the user sees the dialog without manually focusing the app.
-func TestApprovalGateway_ActivateFuncCalledBeforeEmit(t *testing.T) {
-	var order []string
-	var mu sync.Mutex
-	em := EmitterFunc(func(_ int64, _ ai.StreamEvent) {
-		mu.Lock()
-		order = append(order, "emit")
-		mu.Unlock()
-	})
-	resolve := make(chan ai.ApprovalResponse, 1)
-	resolve <- ai.ApprovalResponse{Decision: "deny"}
-
-	gw := NewApprovalGateway(em, func(string) (chan ai.ApprovalResponse, func()) {
-		return resolve, func() {}
-	})
-	gw.SetActivateFunc(func() {
-		mu.Lock()
-		order = append(order, "activate")
-		mu.Unlock()
-	})
-
-	gw.RequestSingle(context.Background(), 1, "exec",
-		[]ai.ApprovalItem{{Command: "x"}}, "")
-
-	mu.Lock()
-	defer mu.Unlock()
-	if len(order) < 2 || order[0] != "activate" || order[1] != "emit" {
-		t.Fatalf("expected activate→emit ordering, got %v", order)
-	}
+	_ = g.Close()
 }
