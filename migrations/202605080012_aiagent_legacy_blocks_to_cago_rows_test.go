@@ -4,12 +4,61 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/glebarez/sqlite"
 	"github.com/go-gormigrate/gormigrate/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
 )
+
+// runMigrationsUpTo applies all registered migrations up to (and including) targetID.
+// 复用 production 用的 gormigrate 包，所以测的就是发出去的版本。
+func runMigrationsUpTo(t *testing.T, targetID string) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	all := allMigrationsForTest()
+	upto := []*gormigrate.Migration{}
+	for _, m := range all {
+		upto = append(upto, m)
+		if m.ID == targetID {
+			break
+		}
+	}
+	m := gormigrate.New(db, gormigrate.DefaultOptions, upto)
+	require.NoError(t, m.Migrate())
+	return db
+}
+
+// allMigrationsForTest 返回与 migrations.go 同序的全量迁移列表。test-only。
+// 维护性：如果新增迁移记得追加。
+func allMigrationsForTest() []*gormigrate.Migration {
+	return []*gormigrate.Migration{
+		migration202603220001(),
+		migration202603260001(),
+		migration202603270001(),
+		migration202603290001(),
+		migration202603300001(),
+		migration202603300002(),
+		migration202603310001(),
+		migration202604050001(),
+		migration202604140001(),
+		migration202604160001(),
+		migration202604170001(),
+		migration202604220001(),
+		migration202604230001(),
+		migration202604270001(),
+		migration202605010001(),
+		migration202605060001(),
+		migration202605070001(),
+		migration202605080001(),
+		migration202605080010(),
+		migration202605080012(),
+	}
+}
 
 // 测试数据迁移 202605080012：把前 cago 时代由前端 SaveConversationMessages 写入的
 // 单行多 Block 消息（kind=”/cago_id=”），按 Block 边界展开为 cago 形态的多行
@@ -19,7 +68,7 @@ import (
 // 兼容前提：202605080011 已经把 conversations 上有 cago session_data 的会话覆盖过
 // 了；本迁移只动剩下的 legacy 行（kind=” 且 cago_id=”）。
 func TestMigrate202605080012_LegacyAssistantTurnWithToolExpands(t *testing.T) {
-	db := runMigrationsUpTo(t, "202605080011")
+	db := runMigrationsUpTo(t, "202605080010")
 
 	conv := &conversation_entity.Conversation{
 		Title: "legacy", ProviderType: "anthropic", Status: conversation_entity.StatusActive,
@@ -128,7 +177,7 @@ func TestMigrate202605080012_LegacyAssistantTurnWithToolExpands(t *testing.T) {
 // Pure text legacy 行（Blocks 为空，只有 Content）也要展开成一条 text-kind cago 行。
 // 这是更常见的 case：legacy 写入路径下大部分用户/助手消息都没 tool。
 func TestMigrate202605080012_LegacyTextOnlyExpands(t *testing.T) {
-	db := runMigrationsUpTo(t, "202605080011")
+	db := runMigrationsUpTo(t, "202605080010")
 	conv := &conversation_entity.Conversation{
 		Title: "x", ProviderType: "anthropic", Status: conversation_entity.StatusActive,
 	}
@@ -157,7 +206,7 @@ func TestMigrate202605080012_LegacyTextOnlyExpands(t *testing.T) {
 
 // 已经是 cago 形态的会话（kind/cago_id 都填了）必须原样不动 —— 防止 idempotency 退化。
 func TestMigrate202605080012_AlreadyCagoShape_NoOp(t *testing.T) {
-	db := runMigrationsUpTo(t, "202605080011")
+	db := runMigrationsUpTo(t, "202605080010")
 	conv := &conversation_entity.Conversation{
 		Title: "cago", ProviderType: "anthropic", Status: conversation_entity.StatusActive, ThreadID: "tid-1",
 	}
@@ -181,7 +230,7 @@ func TestMigrate202605080012_AlreadyCagoShape_NoOp(t *testing.T) {
 
 // Tool block 的 Status="error" → tool_result 的 err 字段而不是 result。
 func TestMigrate202605080012_LegacyErrorToolResult(t *testing.T) {
-	db := runMigrationsUpTo(t, "202605080011")
+	db := runMigrationsUpTo(t, "202605080010")
 	conv := &conversation_entity.Conversation{
 		Title: "err", ProviderType: "anthropic", Status: conversation_entity.StatusActive,
 	}
@@ -216,7 +265,7 @@ func TestMigrate202605080012_LegacyErrorToolResult(t *testing.T) {
 // Tool block 没有 result（Status=running，被中断的 tool）→ 不写 tool_result 行，
 // 渲染端把这种孤儿 tool_call 显示为 "running" 占位。
 func TestMigrate202605080012_LegacyRunningToolNoResult(t *testing.T) {
-	db := runMigrationsUpTo(t, "202605080011")
+	db := runMigrationsUpTo(t, "202605080010")
 	conv := &conversation_entity.Conversation{
 		Title: "runn", ProviderType: "anthropic", Status: conversation_entity.StatusActive,
 	}
