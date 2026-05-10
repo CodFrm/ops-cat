@@ -390,12 +390,12 @@ export function ImportSSHConfigSelected(arg1, arg2) {
   return window['go']['app']['App']['ImportSSHConfigSelected'](arg1, arg2);
 }
 
-export function ImportSSHKeyFile(arg1, arg2, arg3) {
-  return window['go']['app']['App']['ImportSSHKeyFile'](arg1, arg2, arg3);
+export function ImportSSHKeyFile(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ImportSSHKeyFile'](arg1, arg2, arg3, arg4);
 }
 
-export function ImportSSHKeyPEM(arg1, arg2, arg3, arg4) {
-  return window['go']['app']['App']['ImportSSHKeyPEM'](arg1, arg2, arg3, arg4);
+export function ImportSSHKeyPEM(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['ImportSSHKeyPEM'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function ImportTabbySelected(arg1, arg2, arg3) {

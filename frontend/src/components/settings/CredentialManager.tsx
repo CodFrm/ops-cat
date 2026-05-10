@@ -452,6 +452,7 @@ function ImportKeyDialog({
   const { t } = useTranslation();
   const [name, setName] = useState("");
   const [comment, setComment] = useState("");
+  const [username, setUsername] = useState("");
   const [pemContent, setPemContent] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [mode, setMode] = useState<"file" | "pem">("file");
@@ -461,6 +462,7 @@ function ImportKeyDialog({
     if (open) {
       setName("");
       setComment("");
+      setUsername("");
       setPemContent("");
       setPassphrase("");
       setMode("file");
@@ -470,7 +472,7 @@ function ImportKeyDialog({
   const handleImportFile = async () => {
     setSaving(true);
     try {
-      const result = await ImportSSHKeyFile(name, comment, passphrase);
+      const result = await ImportSSHKeyFile(name, comment, passphrase, username);
       if (result) {
         toast.success(t("sshKey.importSuccess"));
         onOpenChange(false);
@@ -486,7 +488,7 @@ function ImportKeyDialog({
   const handleImportPEM = async () => {
     setSaving(true);
     try {
-      await ImportSSHKeyPEM(name, comment, pemContent, passphrase);
+      await ImportSSHKeyPEM(name, comment, pemContent, passphrase, username);
       toast.success(t("sshKey.importSuccess"));
       onOpenChange(false);
       onSuccess();
@@ -514,6 +516,14 @@ function ImportKeyDialog({
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               placeholder={t("sshKey.commentPlaceholder")}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label>{t("credential.username")}</Label>
+            <Input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder={t("credential.usernamePlaceholder")}
             />
           </div>
           <div className="grid gap-2">

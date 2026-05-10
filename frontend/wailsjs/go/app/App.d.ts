@@ -219,9 +219,9 @@ export function ImportFromWebDAV(arg1:string,arg2:string,arg3:backup_svc.ImportO
 
 export function ImportSSHConfigSelected(arg1:Array<number>,arg2:boolean):Promise<import_svc.ImportResult>;
 
-export function ImportSSHKeyFile(arg1:string,arg2:string,arg3:string):Promise<credential_entity.Credential>;
+export function ImportSSHKeyFile(arg1:string,arg2:string,arg3:string,arg4:string):Promise<credential_entity.Credential>;
 
-export function ImportSSHKeyPEM(arg1:string,arg2:string,arg3:string,arg4:string):Promise<credential_entity.Credential>;
+export function ImportSSHKeyPEM(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<credential_entity.Credential>;
 
 export function ImportTabbySelected(arg1:Array<number>,arg2:string,arg3:boolean):Promise<import_svc.ImportResult>;
 
