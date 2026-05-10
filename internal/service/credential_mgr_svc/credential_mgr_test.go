@@ -255,6 +255,76 @@ func TestImportSSHKeyFromPEM_PersistsUsername(t *testing.T) {
 	})
 }
 
+func TestUpdate_PersistsUsername(t *testing.T) {
+	Convey("Update 写入 username 字段（SSH 密钥与密码凭证均生效）", t, func() {
+		repo := setupCredentialTestEnv(t)
+		ctx := context.Background()
+
+		Convey("SSH 密钥：username 可被更新", func() {
+			cred, err := GenerateSSHKey(ctx, GenerateKeyRequest{
+				Name:     "k",
+				KeyType:  credential_entity.KeyTypeED25519,
+				Username: "alice",
+			})
+			assert.NoError(t, err)
+
+			updated, err := Update(ctx, UpdateRequest{
+				ID:       cred.ID,
+				Name:     "k",
+				Comment:  "c",
+				Username: "bob",
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, "bob", updated.Username)
+			// 持久层断言：避免依赖 repo 的指针复用语义
+			persisted, err := repo.Find(ctx, cred.ID)
+			assert.NoError(t, err)
+			assert.Equal(t, "bob", persisted.Username)
+		})
+
+		Convey("SSH 密钥：username 可被清空", func() {
+			cred, err := GenerateSSHKey(ctx, GenerateKeyRequest{
+				Name:     "k2",
+				KeyType:  credential_entity.KeyTypeED25519,
+				Username: "alice",
+			})
+			assert.NoError(t, err)
+
+			_, err = Update(ctx, UpdateRequest{
+				ID:       cred.ID,
+				Name:     "k2",
+				Comment:  "c",
+				Username: "",
+			})
+			assert.NoError(t, err)
+			persisted, err := repo.Find(ctx, cred.ID)
+			assert.NoError(t, err)
+			assert.Equal(t, "", persisted.Username)
+		})
+
+		Convey("密码凭证：username 仍可被更新（回归）", func() {
+			cred, err := CreatePassword(ctx, CreatePasswordRequest{
+				Name:     "p",
+				Username: "u1",
+				Password: "secret",
+			})
+			assert.NoError(t, err)
+
+			_, err = Update(ctx, UpdateRequest{
+				ID:          cred.ID,
+				Name:        "p",
+				Description: "desc",
+				Username:    "u2",
+			})
+			assert.NoError(t, err)
+			persisted, err := repo.Find(ctx, cred.ID)
+			assert.NoError(t, err)
+			assert.Equal(t, "u2", persisted.Username)
+			assert.Equal(t, "desc", persisted.Description)
+		})
+	})
+}
+
 // TestCredentialTypeCheck 测试凭证类型检查
 func TestCredentialTypeCheck(t *testing.T) {
 	Convey("凭证类型检查", t, func() {

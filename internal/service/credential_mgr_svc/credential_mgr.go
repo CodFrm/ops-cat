@@ -45,7 +45,7 @@ type UpdateRequest struct {
 	Name        string `json:"name"`
 	Comment     string `json:"comment"`     // SSH 密钥专用
 	Description string `json:"description"` // 密码凭证专用
-	Username    string `json:"username"`    // 密码凭证专用
+	Username    string `json:"username"`    // 关联用户名，SSH 密钥与密码凭证均可使用
 }
 
 // List 列出所有凭证
@@ -372,6 +372,7 @@ func Update(ctx context.Context, req UpdateRequest) (*credential_entity.Credenti
 	}
 
 	cred.Name = req.Name
+	cred.Username = req.Username
 	cred.Updatetime = time.Now().Unix()
 
 	if cred.IsSSHKey() {
@@ -389,7 +390,6 @@ func Update(ctx context.Context, req UpdateRequest) (*credential_entity.Credenti
 		cred.Comment = comment
 	} else {
 		cred.Description = req.Description
-		cred.Username = req.Username
 	}
 
 	if err := credential_repo.Credential().Update(ctx, cred); err != nil {
