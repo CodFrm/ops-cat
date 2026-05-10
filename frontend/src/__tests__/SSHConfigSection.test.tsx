@@ -65,11 +65,12 @@ function renderSSH(overrides: Partial<React.ComponentProps<typeof SSHConfigSecti
 
 describe("SSHConfigSection 自动填用户名", () => {
   it("选中带 username 的密钥时调 setUsername", async () => {
-    const { setUsername, user } = renderSSH();
+    const { setUsername, setPasswordCredentialId, user } = renderSSH();
 
     await user.click(screen.getByText("asset.selectPasswordPlaceholder"));
     await user.click(screen.getByRole("option", { name: "cred-1 (alice)" }));
 
+    expect(setPasswordCredentialId).toHaveBeenCalledWith(1);
     expect(setUsername).toHaveBeenCalledWith("alice");
   });
 
