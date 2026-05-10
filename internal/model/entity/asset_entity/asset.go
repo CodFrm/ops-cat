@@ -244,7 +244,7 @@ type SerialConfig struct {
 	DataBits    int    `json:"data_bits"`              // 数据位: 5, 6, 7, 8
 	StopBits    string `json:"stop_bits"`              // 停止位: "1", "1.5", "2"
 	Parity      string `json:"parity"`                 // 校验位: "none", "odd", "even", "mark", "space"
-	FlowControl string `json:"flow_control,omitempty"` // 流控制: "none", "hardware", "software"
+	FlowControl string `json:"flow_control,omitempty"` // 流控制: "none", "hardware"（当前不支持 "software" / XON-XOFF）
 }
 
 // DatabaseConfig PasswordSource implementation
@@ -737,17 +737,17 @@ func (a *Asset) validateSerial() error {
 	switch cfg.StopBits {
 	case "1", "1.5", "2":
 	default:
-		return fmt.Errorf("不支持的串口停止位: %s", cfg.StopBits)
+		return fmt.Errorf("不支持的串口停止位: %q", cfg.StopBits)
 	}
 	switch cfg.Parity {
 	case "none", "odd", "even", "mark", "space":
 	default:
-		return fmt.Errorf("不支持的串口校验位: %s", cfg.Parity)
+		return fmt.Errorf("不支持的串口校验位: %q", cfg.Parity)
 	}
 	switch cfg.FlowControl {
 	case "", "none", "hardware":
 	default:
-		return fmt.Errorf("不支持的串口流控模式: %s", cfg.FlowControl)
+		return fmt.Errorf("不支持的串口流控模式: %q", cfg.FlowControl)
 	}
 	return nil
 }
