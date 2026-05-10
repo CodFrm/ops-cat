@@ -123,6 +123,7 @@ export function RedisConfigSection({
         managedPasswords={managedPasswords}
         hasExistingPassword={!!encryptedPassword}
         editAssetId={editAssetId}
+        onUsernameChange={setUsername}
       />
 
       {/* TLS */}

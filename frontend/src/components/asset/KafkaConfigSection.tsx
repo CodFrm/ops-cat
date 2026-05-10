@@ -192,6 +192,7 @@ export function KafkaConfigSection({
             managedPasswords={managedPasswords}
             hasExistingPassword={!!encryptedPassword}
             editAssetId={editAssetId}
+            onUsernameChange={setUsername}
           />
         </>
       )}
@@ -402,6 +403,7 @@ function KafkaCompanionAuthFields({
             hasExistingPassword={!!value.encryptedPassword}
             secretLabel={value.authType === "bearer" ? t("asset.kafkaBearerToken") : undefined}
             selectSecretLabel={value.authType === "bearer" ? t("asset.kafkaBearerToken") : undefined}
+            onUsernameChange={(username) => onChange({ username })}
           />
         </>
       )}

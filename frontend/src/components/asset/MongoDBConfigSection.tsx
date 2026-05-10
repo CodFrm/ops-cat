@@ -152,6 +152,7 @@ export function MongoDBConfigSection({
         managedPasswords={managedPasswords}
         hasExistingPassword={!!encryptedPassword}
         editAssetId={editAssetId}
+        onUsernameChange={setUsername}
       />
 
       {/* Default Database */}
