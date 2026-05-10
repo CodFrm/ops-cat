@@ -273,7 +273,7 @@ func GenerateSSHKey(ctx context.Context, req GenerateKeyRequest) (*credential_en
 }
 
 // ImportSSHKeyFromFile 从文件导入私钥
-func ImportSSHKeyFromFile(ctx context.Context, name, comment, filePath, passphrase string) (*credential_entity.Credential, error) {
+func ImportSSHKeyFromFile(ctx context.Context, name, comment, filePath, passphrase, username string) (*credential_entity.Credential, error) {
 	if name == "" {
 		return nil, fmt.Errorf("密钥名称不能为空")
 	}
@@ -283,11 +283,11 @@ func ImportSSHKeyFromFile(ctx context.Context, name, comment, filePath, passphra
 		return nil, fmt.Errorf("读取密钥文件失败: %w", err)
 	}
 
-	return ImportSSHKeyFromPEM(ctx, name, comment, string(data), passphrase)
+	return ImportSSHKeyFromPEM(ctx, name, comment, string(data), passphrase, username)
 }
 
 // ImportSSHKeyFromPEM 从 PEM 字符串导入私钥
-func ImportSSHKeyFromPEM(ctx context.Context, name, comment, pemData, passphrase string) (*credential_entity.Credential, error) {
+func ImportSSHKeyFromPEM(ctx context.Context, name, comment, pemData, passphrase, username string) (*credential_entity.Credential, error) {
 	if name == "" {
 		return nil, fmt.Errorf("密钥名称不能为空")
 	}
@@ -343,6 +343,7 @@ func ImportSSHKeyFromPEM(ctx context.Context, name, comment, pemData, passphrase
 		Name:        name,
 		Type:        credential_entity.TypeSSHKey,
 		Comment:     comment,
+		Username:    username,
 		KeyType:     keyType,
 		KeySize:     keySize,
 		PrivateKey:  encryptedPrivateKey,
