@@ -311,6 +311,7 @@ function GenerateKeyDialog({
   const { t } = useTranslation();
   const [name, setName] = useState("");
   const [comment, setComment] = useState("");
+  const [username, setUsername] = useState("");
   const [keyType, setKeyType] = useState("ed25519");
   const [keySize, setKeySize] = useState(4096);
   const [passphrase, setPassphrase] = useState("");
@@ -320,6 +321,7 @@ function GenerateKeyDialog({
     if (open) {
       setName("");
       setComment("");
+      setUsername("");
       setKeyType("ed25519");
       setKeySize(4096);
       setPassphrase("");
@@ -329,7 +331,7 @@ function GenerateKeyDialog({
   const handleGenerate = async () => {
     setSaving(true);
     try {
-      await GenerateSSHKey(name, comment, keyType, keySize, passphrase);
+      await GenerateSSHKey(name, comment, keyType, keySize, passphrase, username);
       toast.success(t("sshKey.generateSuccess"));
       onOpenChange(false);
       onSuccess();
@@ -375,6 +377,14 @@ function GenerateKeyDialog({
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               placeholder={t("sshKey.commentPlaceholder")}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label>{t("credential.username")}</Label>
+            <Input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder={t("credential.usernamePlaceholder")}
             />
           </div>
           <div className="grid gap-2">
