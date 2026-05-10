@@ -71,7 +71,7 @@ func (h *sshHandler) ApplyCreateArgs(ctx context.Context, a *asset_entity.Asset,
 		if credName == "" {
 			credName = "ai-imported-key"
 		}
-		cred, err := credential_mgr_svc.ImportSSHKeyFromPEM(ctx, credName, "", privateKey, ArgString(args, "passphrase"))
+		cred, err := credential_mgr_svc.ImportSSHKeyFromPEM(ctx, credName, "", privateKey, ArgString(args, "passphrase"), ArgString(args, "username"))
 		if err != nil {
 			return fmt.Errorf("import SSH key: %w", err)
 		}
@@ -115,7 +115,7 @@ func (h *sshHandler) ApplyUpdateArgs(ctx context.Context, a *asset_entity.Asset,
 		if credName == "" {
 			credName = "ai-imported-key"
 		}
-		cred, err := credential_mgr_svc.ImportSSHKeyFromPEM(ctx, credName, "", privateKey, ArgString(args, "passphrase"))
+		cred, err := credential_mgr_svc.ImportSSHKeyFromPEM(ctx, credName, "", privateKey, ArgString(args, "passphrase"), ArgString(args, "username"))
 		if err != nil {
 			return fmt.Errorf("import SSH key: %w", err)
 		}
