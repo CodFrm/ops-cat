@@ -8,7 +8,10 @@ function makeCred(id: number, username: string): credential_entity.Credential {
   return { id, name: `cred-${id}`, username, type: "password" } as credential_entity.Credential;
 }
 
+// Radix Select renders SelectValue as a <span pointer-events:none> inside its trigger,
+// so userEvent has to skip its pointer-events check before it can click the trigger.
 function renderField(overrides: Partial<React.ComponentProps<typeof PasswordSourceField>> = {}) {
+  const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
   const props: React.ComponentProps<typeof PasswordSourceField> = {
     source: "managed",
     onSourceChange: vi.fn(),
@@ -20,31 +23,25 @@ function renderField(overrides: Partial<React.ComponentProps<typeof PasswordSour
     onUsernameChange: vi.fn(),
     ...overrides,
   };
-  return { ...render(<PasswordSourceField {...props} />), props };
+  return { ...render(<PasswordSourceField {...props} />), props, user };
 }
-
-// Radix Select renders SelectValue as a <span pointer-events:none> inside a <button>.
-// We disable pointer-events check so userEvent can click the trigger normally.
-const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
 
 describe("PasswordSourceField username 联动", () => {
   it("选中带 username 的密钥 → 触发 onUsernameChange", async () => {
-    const { props } = renderField();
+    const { props, user } = renderField();
 
-    // 打开 Select 列表（点击 SelectTrigger 的文本）
     await user.click(screen.getByText("asset.selectPasswordPlaceholder"));
-    // 点击 "cred-1 (alice)"
-    await user.click(screen.getByText("cred-1 (alice)"));
+    await user.click(screen.getByRole("option", { name: "cred-1 (alice)" }));
 
     expect(props.onCredentialIdChange).toHaveBeenCalledWith(1);
     expect(props.onUsernameChange).toHaveBeenCalledWith("alice");
   });
 
   it("选中 username 为空的密钥 → 不触发 onUsernameChange", async () => {
-    const { props } = renderField();
+    const { props, user } = renderField();
 
     await user.click(screen.getByText("asset.selectPasswordPlaceholder"));
-    await user.click(screen.getByText("cred-2"));
+    await user.click(screen.getByRole("option", { name: "cred-2" }));
 
     expect(props.onCredentialIdChange).toHaveBeenCalledWith(2);
     expect(props.onUsernameChange).not.toHaveBeenCalled();
