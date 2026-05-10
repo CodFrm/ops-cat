@@ -34,6 +34,7 @@ func (a *App) initExternalEdit() {
 		ConfigProvider: bootstrap.GetConfig,
 		ConfigSaver:    bootstrap.SaveConfig,
 		Remote:         a.sftpService,
+		FindSessions:   a.sshManager.ListActiveSessionIDsByAsset,
 		Assets:         asset_repo.Asset(),
 		Audit:          audit_repo.Audit(),
 		Emit: func(event external_edit_svc.Event) {
@@ -139,6 +140,14 @@ func (a *App) SaveExternalEditSession(sessionID string) (*ExternalEditSaveResult
 		return nil, err
 	}
 	return svc.Save(a.langCtx(), sessionID)
+}
+
+func (a *App) RefreshExternalEditSession(sessionID string) (*ExternalEditSession, error) {
+	svc, err := a.externalEditService()
+	if err != nil {
+		return nil, err
+	}
+	return svc.Refresh(sessionID)
 }
 
 func (a *App) ResolveExternalEditConflict(sessionID, resolution string) (*ExternalEditSaveResult, error) {

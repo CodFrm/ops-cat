@@ -41,6 +41,7 @@ export interface ExternalEditSession {
   id: string;
   assetId: number;
   assetName: string;
+  documentKey: string;
   sessionId: string;
   remotePath: string;
   remoteRealPath: string;
@@ -110,6 +111,7 @@ declare global {
           OpenExternalEdit?: (req: ExternalEditOpenRequest) => MaybePromise<ExternalEditSession>;
           ListExternalEditSessions?: () => MaybePromise<ExternalEditSession[]>;
           SaveExternalEditSession?: (sessionId: string) => MaybePromise<ExternalEditSaveResult>;
+          RefreshExternalEditSession?: (sessionId: string) => MaybePromise<ExternalEditSession>;
           ResolveExternalEditConflict?: (sessionId: string, resolution: string) => MaybePromise<ExternalEditSaveResult>;
           CompareExternalEditSession?: (sessionId: string) => MaybePromise<ExternalEditCompareResult>;
         };
@@ -154,6 +156,10 @@ export function listExternalEditSessions() {
 
 export function saveExternalEditSession(sessionId: string) {
   return appBindings().SaveExternalEditSession!(sessionId);
+}
+
+export function refreshExternalEditSession(sessionId: string) {
+  return appBindings().RefreshExternalEditSession!(sessionId);
 }
 
 export function resolveExternalEditConflict(sessionId: string, resolution: string) {
