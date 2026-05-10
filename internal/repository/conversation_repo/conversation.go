@@ -5,6 +5,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/cago-frame/cago/database/db"
 	"gorm.io/gorm"
 
 	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
@@ -59,18 +60,16 @@ func RegisterConversation(i ConversationRepo) {
 }
 
 // conversationRepo 默认实现
-type conversationRepo struct {
-	db *gorm.DB
-}
+type conversationRepo struct{}
 
-// NewConversation 创建默认实现，db 为注入的 *gorm.DB 实例（生产环境传 db.Default()）。
-func NewConversation(db *gorm.DB) ConversationRepo {
-	return &conversationRepo{db: db}
+// NewConversation 创建默认实现。所有方法走 db.Ctx(ctx) 以复用 cago 的事务传播。
+func NewConversation() ConversationRepo {
+	return &conversationRepo{}
 }
 
 func (r *conversationRepo) Find(ctx context.Context, id int64) (*conversation_entity.Conversation, error) {
 	var conv conversation_entity.Conversation
-	if err := r.db.WithContext(ctx).Where("id = ? AND status = ?", id, conversation_entity.StatusActive).First(&conv).Error; err != nil {
+	if err := db.Ctx(ctx).Where("id = ? AND status = ?", id, conversation_entity.StatusActive).First(&conv).Error; err != nil {
 		return nil, err
 	}
 	return &conv, nil
@@ -78,7 +77,7 @@ func (r *conversationRepo) Find(ctx context.Context, id int64) (*conversation_en
 
 func (r *conversationRepo) List(ctx context.Context) ([]*conversation_entity.Conversation, error) {
 	var convs []*conversation_entity.Conversation
-	if err := r.db.WithContext(ctx).Where("status = ?", conversation_entity.StatusActive).
+	if err := db.Ctx(ctx).Where("status = ?", conversation_entity.StatusActive).
 		Order("updatetime DESC").Find(&convs).Error; err != nil {
 		return nil, err
 	}
@@ -86,15 +85,15 @@ func (r *conversationRepo) List(ctx context.Context) ([]*conversation_entity.Con
 }
 
 func (r *conversationRepo) Create(ctx context.Context, conv *conversation_entity.Conversation) error {
-	return r.db.WithContext(ctx).Create(conv).Error
+	return db.Ctx(ctx).Create(conv).Error
 }
 
 func (r *conversationRepo) Update(ctx context.Context, conv *conversation_entity.Conversation) error {
-	return r.db.WithContext(ctx).Save(conv).Error
+	return db.Ctx(ctx).Save(conv).Error
 }
 
 func (r *conversationRepo) UpdateTitle(ctx context.Context, id int64, title string, updatetime int64) error {
-	result := r.db.WithContext(ctx).
+	result := db.Ctx(ctx).
 		Model(&conversation_entity.Conversation{}).
 		Where("id = ? AND status = ?", id, conversation_entity.StatusActive).
 		Updates(map[string]any{
@@ -111,7 +110,7 @@ func (r *conversationRepo) UpdateTitle(ctx context.Context, id int64, title stri
 }
 
 func (r *conversationRepo) UpdateWorkDir(ctx context.Context, id int64, workDir string, updatetime int64) error {
-	result := r.db.WithContext(ctx).
+	result := db.Ctx(ctx).
 		Model(&conversation_entity.Conversation{}).
 		Where("id = ? AND status = ?", id, conversation_entity.StatusActive).
 		Updates(map[string]any{
@@ -128,13 +127,13 @@ func (r *conversationRepo) UpdateWorkDir(ctx context.Context, id int64, workDir 
 }
 
 func (r *conversationRepo) Delete(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Model(&conversation_entity.Conversation{}).Where("id = ?", id).
+	return db.Ctx(ctx).Model(&conversation_entity.Conversation{}).Where("id = ?", id).
 		Update("status", conversation_entity.StatusDeleted).Error
 }
 
 func (r *conversationRepo) ListMessages(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error) {
 	var msgs []*conversation_entity.Message
-	if err := r.db.WithContext(ctx).Where("conversation_id = ?", conversationID).
+	if err := db.Ctx(ctx).Where("conversation_id = ?", conversationID).
 		Order("sort_order ASC").Find(&msgs).Error; err != nil {
 		return nil, err
 	}
@@ -142,18 +141,18 @@ func (r *conversationRepo) ListMessages(ctx context.Context, conversationID int6
 }
 
 func (r *conversationRepo) DeleteMessages(ctx context.Context, conversationID int64) error {
-	return r.db.WithContext(ctx).Where("conversation_id = ?", conversationID).
+	return db.Ctx(ctx).Where("conversation_id = ?", conversationID).
 		Delete(&conversation_entity.Message{}).Error
 }
 
 func (r *conversationRepo) AppendAt(ctx context.Context, conversationID int64, sortOrder int, msg *conversation_entity.Message) error {
 	msg.ConversationID = conversationID
 	msg.SortOrder = sortOrder
-	return r.db.WithContext(ctx).Create(msg).Error
+	return db.Ctx(ctx).Create(msg).Error
 }
 
 func (r *conversationRepo) UpdateAt(ctx context.Context, conversationID int64, sortOrder int, msg *conversation_entity.Message) error {
-	return r.db.WithContext(ctx).Model(&conversation_entity.Message{}).
+	return db.Ctx(ctx).Model(&conversation_entity.Message{}).
 		Where("conversation_id = ? AND sort_order = ?", conversationID, sortOrder).
 		Updates(map[string]any{
 			"role":           msg.Role,
@@ -166,14 +165,14 @@ func (r *conversationRepo) UpdateAt(ctx context.Context, conversationID int64, s
 }
 
 func (r *conversationRepo) TruncateFrom(ctx context.Context, conversationID int64, fromSortOrder int) error {
-	return r.db.WithContext(ctx).
+	return db.Ctx(ctx).
 		Where("conversation_id = ? AND sort_order >= ?", conversationID, fromSortOrder).
 		Delete(&conversation_entity.Message{}).Error
 }
 
 func (r *conversationRepo) LoadOrdered(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error) {
 	var msgs []*conversation_entity.Message
-	if err := r.db.WithContext(ctx).
+	if err := db.Ctx(ctx).
 		Where("conversation_id = ?", conversationID).
 		Order("sort_order ASC").
 		Find(&msgs).Error; err != nil {
@@ -183,7 +182,7 @@ func (r *conversationRepo) LoadOrdered(ctx context.Context, conversationID int64
 }
 
 func (r *conversationRepo) UpdateState(ctx context.Context, conversationID int64, threadID, stateValuesJSON string) error {
-	return r.db.WithContext(ctx).Model(&conversation_entity.Conversation{}).
+	return db.Ctx(ctx).Model(&conversation_entity.Conversation{}).
 		Where("id = ?", conversationID).
 		Updates(map[string]any{
 			"thread_id":    threadID,
