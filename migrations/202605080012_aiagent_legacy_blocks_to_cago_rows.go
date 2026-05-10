@@ -156,7 +156,12 @@ func expandLegacyConversation(tx *gorm.DB, convID int64) error {
 	for _, r := range dbRows {
 		isLegacy := r.Kind == "" && r.CagoID == ""
 		if !isLegacy {
-			// 已是 cago 形态 — 原样保留
+			// 已是 cago 形态 — 原样保留。
+			// 注意：legacyOutRow 故意省略 thinking / raw / parent_id 三列。
+			// 这三列只在 cago v1 SessionData 时代由 080011 写入，而 080011 在 cago
+			// v2 升级时已被删除，所以全新装机本身就不会有这三列数据；已经应用过
+			// 旧 080012 的生产 DB 由 gormigrate 按 ID 跳过本迁移，不受影响；
+			// 紧随其后运行的 202605100001 又会把这三列从 schema 上彻底拿掉。
 			out = append(out, legacyOutRow{
 				convID:     r.ConversationID,
 				cagoID:     r.CagoID,
