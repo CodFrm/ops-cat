@@ -6,6 +6,7 @@ import { DatabaseDetailInfoCard } from "../DatabaseDetailInfoCard";
 import { RedisDetailInfoCard } from "../RedisDetailInfoCard";
 import { MongoDBDetailInfoCard } from "../MongoDBDetailInfoCard";
 import { K8sDetailInfoCard } from "../K8sDetailInfoCard";
+import { SerialDetailInfoCard } from "../SerialDetailInfoCard";
 
 afterEach(() => {
   cleanup();
@@ -213,6 +214,50 @@ describe("MongoDBDetailInfoCard", () => {
     const asset = makeAsset("mongodb", {});
     const { container } = render(<MongoDBDetailInfoCard asset={asset} sshTunnelName={noopTunnel} />);
     expect(container).toBeDefined();
+  });
+});
+
+describe("SerialDetailInfoCard", () => {
+  it("renders serial configuration fields", () => {
+    const asset = makeAsset("serial", {
+      port_path: "COM3",
+      baud_rate: 115200,
+      data_bits: 8,
+      stop_bits: "1",
+      parity: "none",
+      flow_control: "hardware",
+    });
+    const { getByText } = render(<SerialDetailInfoCard asset={asset} />);
+    expect(getByText("COM3")).toBeInTheDocument();
+    expect(getByText("115200")).toBeInTheDocument();
+    expect(getByText("8")).toBeInTheDocument();
+    expect(getByText("1")).toBeInTheDocument();
+    expect(getByText("none")).toBeInTheDocument();
+    expect(getByText("hardware")).toBeInTheDocument();
+  });
+
+  it("hides flow control when set to none", () => {
+    const asset = makeAsset("serial", {
+      port_path: "COM4",
+      baud_rate: 9600,
+      flow_control: "none",
+    });
+    const { queryByText } = render(<SerialDetailInfoCard asset={asset} />);
+    expect(queryByText("none")).not.toBeInTheDocument();
+  });
+
+  it("handles empty config without crashing", () => {
+    const asset = makeAsset("serial", {});
+    const { container } = render(<SerialDetailInfoCard asset={asset} />);
+    expect(container).toBeDefined();
+  });
+
+  it("handles invalid JSON safely", () => {
+    const asset = makeAsset("serial", {});
+    asset.Config = "{";
+    const { container, queryByText } = render(<SerialDetailInfoCard asset={asset} />);
+    expect(container).toBeDefined();
+    expect(queryByText("串口")).not.toBeInTheDocument();
   });
 });
 
