@@ -961,11 +961,16 @@
   },
   "externalEdit": {
     "panel": {
-      "title": "外部编辑"
+      "title": "外部编辑",
+      "conflicts": "冲突文件",
+      "remoteSnapshotReady": "已获取远端新副本",
+      "reviewInList": "到下方列表处理"
     },
     "actions": {
       "open": "外部编辑",
       "sync": "保存到远程",
+      "refresh": "刷新远程状态",
+      "compare": "比对差异",
       "reread": "打开远程新版本",
       "overwrite": "覆盖远程",
       "saveAgain": "重新创建远程文件"
@@ -981,6 +986,11 @@
     "conflict": {
       "remoteChangedTitle": "远程文件已变更",
       "remoteMissingTitle": "远程文件不存在"
+    },
+    "compare": {
+      "title": "只读差异比对",
+      "localDraft": "本地草稿",
+      "remoteSnapshot": "远端快照"
     },
     "settings": {
       "tab": "外部编辑",

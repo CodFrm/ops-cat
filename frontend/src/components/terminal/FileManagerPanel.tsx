@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
-import { Upload } from "lucide-react";
+import { ArrowRightLeft, RefreshCw, Upload } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -11,11 +11,21 @@ import {
   Button,
   cn,
   ConfirmDialog,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
 } from "@opskat/ui";
 import { SFTPDelete, SFTPGetwd } from "../../../wailsjs/go/app/App";
 import { sftp_svc } from "../../../wailsjs/go/models";
+import { CodeDiffViewer } from "@/components/CodeDiffViewer";
 import { openExternalEdit, type ExternalEditSession } from "@/lib/externalEditApi";
-import { useExternalEditStore } from "@/stores/externalEditStore";
+import {
+  buildExternalEditConflicts,
+  buildExternalEditDocuments,
+  useExternalEditStore,
+} from "@/stores/externalEditStore";
 import { useSFTPStore } from "@/stores/sftpStore";
 import { FileList } from "./file-manager/FileList";
 import { FloatingMenu } from "./file-manager/FloatingMenu";
@@ -84,6 +94,10 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
   const allExternalSessions = useExternalEditStore((s) => s.sessions);
   const pendingConflict = useExternalEditStore((s) => s.pendingConflict);
   const dismissConflict = useExternalEditStore((s) => s.dismissConflict);
+  const dismissCompare = useExternalEditStore((s) => s.dismissCompare);
+  const compareResult = useExternalEditStore((s) => s.compareResult);
+  const compareSession = useExternalEditStore((s) => s.compareSession);
+  const refreshSession = useExternalEditStore((s) => s.refreshSession);
   const resolveConflict = useExternalEditStore((s) => s.resolveConflict);
   const savingSessionId = useExternalEditStore((s) => s.savingSessionId);
   const remoteChangedConflict = pendingConflict?.status === "conflict_remote_changed" ? pendingConflict : null;
@@ -95,9 +109,13 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
   );
   const externalSessions = useMemo(
     () =>
-      Object.values(allExternalSessions)
-        .filter((session) => session.assetId === assetId)
-        .sort((left, right) => right.updatedAt - left.updatedAt),
+      buildExternalEditDocuments(allExternalSessions)
+        .map((entry) => entry.session)
+        .filter((session) => session.assetId === assetId),
+    [allExternalSessions, assetId]
+  );
+  const conflictDocuments = useMemo(
+    () => buildExternalEditConflicts(allExternalSessions).filter((entry) => entry.primaryDraft.assetId === assetId),
     [allExternalSessions, assetId]
   );
 
@@ -181,7 +199,7 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
 
   const handleOpenExternalEdit = useCallback(
     async (remotePath: string) => {
-      // 只有终端页真正绑定资产后才允许进入外部编辑链路，
+      // 兼容旧调用方：只有终端页真正绑定资产后才允许进入外部编辑链路，
       // 这样可以让历史测试和非终端场景继续复用组件，而不需要把 assetId 适配带回测试侧。
       if (!assetId) {
         return;
@@ -208,6 +226,28 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
       }
     },
     [setError]
+  );
+
+  const handleRefreshExternalEdit = useCallback(
+    async (session: ExternalEditSession) => {
+      try {
+        await refreshSession(session.id);
+      } catch (error) {
+        setError(String(error));
+      }
+    },
+    [refreshSession, setError]
+  );
+
+  const handleCompareExternalEdit = useCallback(
+    async (session: ExternalEditSession) => {
+      try {
+        await compareSession(session.id);
+      } catch (error) {
+        setError(String(error));
+      }
+    },
+    [compareSession, setError]
   );
 
   const handleCtxAction = useCallback(
@@ -339,9 +379,100 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
               setSelected={setSelected}
             />
 
-            {externalSessions.length > 0 && (
+            {(externalSessions.length > 0 || conflictDocuments.length > 0) && (
               <div className="border-t px-2 py-2 space-y-2">
                 <div className="text-[11px] font-medium text-muted-foreground">{t("externalEdit.panel.title")}</div>
+                {conflictDocuments.length > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground/80">
+                      {t("externalEdit.panel.conflicts")}
+                    </div>
+                    {conflictDocuments.map(({ documentKey, primaryDraft, latestSnapshot }) => {
+                      const fileName = primaryDraft.remotePath.split("/").filter(Boolean).pop() || primaryDraft.remotePath;
+                      const sameNameCount = externalSessions.filter((session) => {
+                        const candidate = session.remotePath.split("/").filter(Boolean).pop() || session.remotePath;
+                        return candidate === fileName;
+                      }).length;
+                      const showPath = sameNameCount > 1;
+                      const compareDisabled =
+                        savingSessionId === primaryDraft.id ||
+                        (primaryDraft.state !== "conflict" && primaryDraft.state !== "stale");
+                      const rereadDisabled = savingSessionId === primaryDraft.id || primaryDraft.state !== "conflict";
+                      const overwriteDisabled = savingSessionId === primaryDraft.id || primaryDraft.state !== "conflict";
+                      const recreateDisabled = savingSessionId === primaryDraft.id || primaryDraft.state !== "remote_missing";
+                      return (
+                        <div key={documentKey} className="rounded border border-amber-400/30 bg-amber-500/5 px-2 py-2 text-[11px]">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="truncate font-medium">{fileName}</div>
+                              {showPath && <div className="truncate text-muted-foreground">{primaryDraft.remotePath}</div>}
+                              <div className="truncate text-muted-foreground">
+                                {t(`externalEdit.state.${primaryDraft.state}`)}
+                                {latestSnapshot ? ` · ${t("externalEdit.panel.remoteSnapshotReady")}` : ""}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              disabled={compareDisabled}
+                              onClick={() => void handleCompareExternalEdit(primaryDraft)}
+                            >
+                              <ArrowRightLeft className="mr-1 h-3 w-3" />
+                              {t("externalEdit.actions.compare")}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              disabled={rereadDisabled}
+                              onClick={async () => {
+                                try {
+                                  await resolveConflict(primaryDraft.id, "reread");
+                                  dismissConflict();
+                                } catch (error) {
+                                  setError(String(error));
+                                }
+                              }}
+                            >
+                              {t("externalEdit.actions.reread")}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="destructive"
+                              disabled={overwriteDisabled}
+                              onClick={async () => {
+                                try {
+                                  await resolveConflict(primaryDraft.id, "overwrite");
+                                  dismissConflict();
+                                } catch (error) {
+                                  setError(String(error));
+                                }
+                              }}
+                            >
+                              {t("externalEdit.actions.overwrite")}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              disabled={recreateDisabled}
+                              onClick={async () => {
+                                try {
+                                  await resolveConflict(primaryDraft.id, "recreate");
+                                  dismissConflict();
+                                } catch (error) {
+                                  setError(String(error));
+                                }
+                              }}
+                            >
+                              {t("externalEdit.actions.saveAgain")}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <div className="space-y-1">
                   {externalSessions.map((session) => {
                     const fileName = session.remotePath.split("/").filter(Boolean).pop() || session.remotePath;
@@ -361,14 +492,25 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                             {t(`externalEdit.state.${session.state}`)}
                           </div>
                         </div>
-                        <Button
-                          size="xs"
-                          variant="outline"
-                          disabled={!actionable || savingSessionId === session.id}
-                          onClick={() => void handleSaveExternalEdit(session)}
-                        >
-                          {savingSessionId === session.id ? t("action.saving") : t("externalEdit.actions.sync")}
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            disabled={savingSessionId === session.id}
+                            onClick={() => void handleRefreshExternalEdit(session)}
+                          >
+                            <RefreshCw className="mr-1 h-3 w-3" />
+                            {t("externalEdit.actions.refresh")}
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            disabled={!actionable || savingSessionId === session.id}
+                            onClick={() => void handleSaveExternalEdit(session)}
+                          >
+                            {savingSessionId === session.id ? t("action.saving") : t("externalEdit.actions.sync")}
+                          </Button>
+                        </div>
                       </div>
                     );
                   })}
@@ -398,38 +540,8 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
             <Button variant="outline" onClick={dismissConflict}>
               {t("action.cancel")}
             </Button>
-            <Button
-              variant="outline"
-              disabled={!remoteChangedConflict?.session || savingSessionId === remoteChangedConflict?.session?.id}
-              onClick={async () => {
-                if (!remoteChangedConflict?.session) return;
-                try {
-                  // reread 会创建一个新的 clean 会话，并把当前副本降级为 stale 副本；
-                  // 弹窗在成功后立即关闭，避免用户对旧会话继续操作。
-                  await resolveConflict(remoteChangedConflict.session.id, "reread");
-                  dismissConflict();
-                } catch (error) {
-                  setError(String(error));
-                }
-              }}
-            >
-              {t("externalEdit.actions.reread")}
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={!remoteChangedConflict?.session || savingSessionId === remoteChangedConflict?.session?.id}
-              onClick={async () => {
-                if (!remoteChangedConflict?.session) return;
-                try {
-                  // overwrite 直接把本地副本视为最终来源，因此要等后端返回成功后再清掉冲突态。
-                  await resolveConflict(remoteChangedConflict.session.id, "overwrite");
-                  dismissConflict();
-                } catch (error) {
-                  setError(String(error));
-                }
-              }}
-            >
-              {t("externalEdit.actions.overwrite")}
+            <Button variant="outline" onClick={dismissConflict}>
+              {t("externalEdit.panel.reviewInList")}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -443,18 +555,33 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
         title={t("externalEdit.conflict.remoteMissingTitle")}
         description={remoteMissingConflict?.message || ""}
         cancelText={t("action.cancel")}
-        confirmText={t("externalEdit.actions.saveAgain")}
-        onConfirm={async () => {
-          if (!remoteMissingConflict?.session) return;
-          try {
-            // recreate 只在远端缺失时开放，成功后会把当前会话重置为 clean，故该处清空前端挂起的冲突提示。
-            await resolveConflict(remoteMissingConflict.session.id, "recreate");
-            dismissConflict();
-          } catch (error) {
-            setError(String(error));
-          }
-        }}
+        confirmText={t("externalEdit.panel.reviewInList")}
+        onConfirm={dismissConflict}
       />
+
+      <Dialog open={!!compareResult} onOpenChange={(open) => !open && dismissCompare()}>
+        <DialogContent className="max-w-6xl">
+          <DialogHeader>
+            <DialogTitle>{t("externalEdit.compare.title")}</DialogTitle>
+            <DialogDescription>
+              {compareResult ? `${compareResult.fileName} · ${compareResult.remotePath}` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded border bg-muted/10 p-2">
+            <div className="mb-2 grid gap-2 text-xs font-medium text-muted-foreground md:grid-cols-2">
+              <div>{t("externalEdit.compare.remoteSnapshot")}</div>
+              <div>{t("externalEdit.compare.localDraft")}</div>
+            </div>
+            <div className="h-[420px]">
+              <CodeDiffViewer
+                original={compareResult?.remoteContent || ""}
+                modified={compareResult?.localContent || ""}
+                language="plaintext"
+              />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={!!deleteTarget}

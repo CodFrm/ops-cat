@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { FileManagerPanel } from "../components/terminal/FileManagerPanel";
 import { useTerminalStore, type TerminalDirectorySyncState } from "../stores/terminalStore";
 import { useSFTPStore } from "../stores/sftpStore";
+import { useExternalEditStore } from "../stores/externalEditStore";
 import { ChangeSSHDirectory, SFTPListDir } from "../../wailsjs/go/app/App";
 
 const { toastError } = vi.hoisted(() => ({
@@ -56,6 +57,21 @@ describe("FileManagerPanel", () => {
       fileManagerOpenTabs: { tab1: true },
       fileManagerPaths: { tab1: "/srv/app" },
       fileManagerWidth: 280,
+    });
+    useExternalEditStore.setState({
+      sessions: {},
+      loading: false,
+      savingSessionId: null,
+      pendingConflict: null,
+      compareResult: null,
+      fetchSessions: vi.fn(),
+      saveSession: vi.fn(),
+      refreshSession: vi.fn(),
+      compareSession: vi.fn(),
+      resolveConflict: vi.fn(),
+      dismissConflict: vi.fn(),
+      dismissCompare: vi.fn(),
+      applyEvent: vi.fn(),
     });
     vi.mocked(SFTPListDir).mockResolvedValue([]);
   });
@@ -125,5 +141,77 @@ describe("FileManagerPanel", () => {
 
     expect(toastError).toHaveBeenCalledWith("sftp.sync.busy");
     expect(useTerminalStore.getState().tabData.tab1.directoryFollowMode).toBe("off");
+  });
+
+  it("renders a document-level conflict row with visible disabled actions", async () => {
+    useExternalEditStore.setState({
+      sessions: {
+        draft: {
+          id: "draft",
+          assetId: 101,
+          assetName: "asset-101",
+          documentKey: "101:/srv/app/demo.txt",
+          sessionId: "ssh-b",
+          remotePath: "/srv/app/demo.txt",
+          remoteRealPath: "/srv/app/demo.txt",
+          localPath: "/tmp/demo.txt",
+          workspaceRoot: "/tmp",
+          workspaceDir: "/tmp/demo",
+          editorId: "system-text",
+          editorName: "System Text Editor",
+          editorPath: "/bin/editor",
+          originalSha256: "a",
+          originalSize: 1,
+          originalModTime: 1,
+          originalEncoding: "utf-8",
+          lastLocalSha256: "b",
+          dirty: true,
+          state: "conflict",
+          expired: false,
+          createdAt: 1,
+          updatedAt: 10,
+          lastLaunchedAt: 10,
+          lastSyncedAt: 1,
+        },
+        snapshot: {
+          id: "snapshot",
+          assetId: 101,
+          assetName: "asset-101",
+          documentKey: "101:/srv/app/demo.txt",
+          sessionId: "ssh-c",
+          remotePath: "/srv/app/demo.txt",
+          remoteRealPath: "/srv/app/demo.txt",
+          localPath: "/tmp/demo-new.txt",
+          workspaceRoot: "/tmp",
+          workspaceDir: "/tmp/demo-new",
+          editorId: "system-text",
+          editorName: "System Text Editor",
+          editorPath: "/bin/editor",
+          originalSha256: "c",
+          originalSize: 1,
+          originalModTime: 2,
+          originalEncoding: "utf-8",
+          lastLocalSha256: "c",
+          dirty: false,
+          state: "clean",
+          expired: false,
+          sourceSessionId: "draft",
+          createdAt: 2,
+          updatedAt: 20,
+          lastLaunchedAt: 20,
+          lastSyncedAt: 20,
+        },
+      },
+      savingSessionId: "draft",
+    });
+
+    render(
+      <FileManagerPanel assetId={101} tabId="tab1" sessionId="s1" isOpen width={280} onWidthChange={vi.fn()} />
+    );
+
+    expect(await screen.findByText("externalEdit.panel.conflicts")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "externalEdit.actions.compare" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "externalEdit.actions.reread" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "externalEdit.actions.overwrite" })).toBeDisabled();
   });
 });

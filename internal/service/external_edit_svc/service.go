@@ -73,6 +73,10 @@ const (
 	textEncodingGB18030 = "gb18030"
 )
 
+const autoSaveDebounce = 1200 * time.Millisecond
+
+const externalEditReconnectHint = "请在同一资产中重新打开该远程文件后再继续同步"
+
 var textExtensions = map[string]struct{}{
 	".txt":        {},
 	".md":         {},
@@ -185,6 +189,7 @@ type Session struct {
 	ID                    string   `json:"id"`
 	AssetID               int64    `json:"assetId"`
 	AssetName             string   `json:"assetName"`
+	DocumentKey           string   `json:"documentKey"`
 	SessionID             string   `json:"sessionId"`
 	RemotePath            string   `json:"remotePath"`
 	RemoteRealPath        string   `json:"remoteRealPath"`
@@ -213,17 +218,39 @@ type Session struct {
 	LastSyncedAt          int64    `json:"lastSyncedAt"`
 }
 
+// Conflict 描述 document 级冲突关系：
+// primaryDraftSessionId 永远指向用户正在保留的原始草稿；
+// latestSnapshotSessionId 只在执行 reread 后出现，用来标记最新远端快照副本。
+type Conflict struct {
+	DocumentKey             string `json:"documentKey"`
+	PrimaryDraftSessionID   string `json:"primaryDraftSessionId"`
+	LatestSnapshotSessionID string `json:"latestSnapshotSessionId,omitempty"`
+}
+
 type SaveResult struct {
-	Status  string   `json:"status"`
-	Message string   `json:"message,omitempty"`
-	Session *Session `json:"session,omitempty"`
+	Status    string    `json:"status"`
+	Message   string    `json:"message,omitempty"`
+	Session   *Session  `json:"session,omitempty"`
+	Conflict  *Conflict `json:"conflict,omitempty"`
+	Automatic bool      `json:"automatic,omitempty"`
+}
+
+type CompareResult struct {
+	DocumentKey             string `json:"documentKey"`
+	PrimaryDraftSessionID   string `json:"primaryDraftSessionId"`
+	LatestSnapshotSessionID string `json:"latestSnapshotSessionId,omitempty"`
+	FileName                string `json:"fileName"`
+	RemotePath              string `json:"remotePath"`
+	LocalContent            string `json:"localContent"`
+	RemoteContent           string `json:"remoteContent"`
+	ReadOnly                bool   `json:"readOnly"`
 }
 
 type auditSessionPayload struct {
 	ID                    string `json:"id,omitempty"`
 	AssetID               int64  `json:"assetId,omitempty"`
 	AssetName             string `json:"assetName,omitempty"`
-	SessionID             string `json:"sessionId,omitempty"`
+	DocumentKey           string `json:"documentKey,omitempty"`
 	RemotePath            string `json:"remotePath,omitempty"`
 	RemoteRealPath        string `json:"remoteRealPath,omitempty"`
 	EditorID              string `json:"editorId,omitempty"`
@@ -255,6 +282,14 @@ type Event struct {
 	SaveResult *SaveResult `json:"saveResult,omitempty"`
 }
 
+type documentTransport struct {
+	SessionID     string
+	RemotePath    string
+	CanonicalPath string
+	Info          *sftp_svc.RemoteFileInfo
+	Missing       bool
+}
+
 type manifestFile struct {
 	Version  int        `json:"version"`
 	Sessions []*Session `json:"sessions"`
@@ -265,6 +300,7 @@ type Options struct {
 	ConfigProvider func() *bootstrap.AppConfig
 	ConfigSaver    func(cfg *bootstrap.AppConfig) error
 	Remote         RemoteFileService
+	FindSessions   func(assetID int64) []string
 	Assets         AssetFinder
 	Audit          audit_repo.AuditRepo
 	Emit           func(Event)
@@ -280,6 +316,7 @@ type Service struct {
 	configProvider func() *bootstrap.AppConfig
 	configSaver    func(cfg *bootstrap.AppConfig) error
 	remote         RemoteFileService
+	findSessions   func(assetID int64) []string
 	assets         AssetFinder
 	auditRepo      audit_repo.AuditRepo
 	emit           func(Event)
@@ -291,6 +328,9 @@ type Service struct {
 	watcher         *fsnotify.Watcher
 	watchedDirs     map[string]int
 	reconcileTimers map[string]*time.Timer
+	autoSaveTimers  map[string]*time.Timer
+	autoSavePaused  map[string]bool
+	autoSaveTried   map[string]string
 	closeCh         chan struct{}
 	closeOnce       sync.Once
 }
@@ -328,6 +368,7 @@ func NewService(opts Options) (*Service, error) {
 		configProvider:  opts.ConfigProvider,
 		configSaver:     opts.ConfigSaver,
 		remote:          opts.Remote,
+		findSessions:    opts.FindSessions,
 		assets:          opts.Assets,
 		auditRepo:       opts.Audit,
 		emit:            opts.Emit,
@@ -336,6 +377,9 @@ func NewService(opts Options) (*Service, error) {
 		sessions:        make(map[string]*Session),
 		watchedDirs:     make(map[string]int),
 		reconcileTimers: make(map[string]*time.Timer),
+		autoSaveTimers:  make(map[string]*time.Timer),
+		autoSavePaused:  make(map[string]bool),
+		autoSaveTried:   make(map[string]string),
 		closeCh:         make(chan struct{}),
 	}
 
@@ -371,6 +415,10 @@ func (s *Service) Close() error {
 			timer.Stop()
 		}
 		s.reconcileTimers = map[string]*time.Timer{}
+		for _, timer := range s.autoSaveTimers {
+			timer.Stop()
+		}
+		s.autoSaveTimers = map[string]*time.Timer{}
 		s.mu.Unlock()
 
 		if s.watcher != nil {
@@ -483,6 +531,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (*Session, error) {
 		return nil, fmt.Errorf("仅支持打开常规文本文件")
 	}
 	remoteRealPath := canonicalRemotePath(info, req.RemotePath)
+	documentKey := buildDocumentKey(req.AssetID, remoteRealPath)
 	assetName := s.lookupAssetName(ctx, req.AssetID)
 	nowUnix := s.now().Unix()
 
@@ -491,7 +540,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (*Session, error) {
 	// 这里优先复用已有主会话，而不是每次都重新拉一份本地副本：
 	// 这样可以保留未保存的本地修改、watch 状态和审计上下文，避免双击同一文件时产生多份互相竞争的工作副本。
 	for _, existing := range s.sessions {
-		if existing.AssetID != req.AssetID || existing.RemoteRealPath != remoteRealPath || existing.State == sessionStateStale {
+		if existing.DocumentKey != documentKey || existing.State == sessionStateStale {
 			continue
 		}
 		if _, statErr := os.Stat(existing.LocalPath); statErr != nil {
@@ -505,7 +554,9 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (*Session, error) {
 	if reusable != nil {
 		reusable.SessionID = req.SessionID
 		reusable.AssetName = assetName
+		reusable.DocumentKey = documentKey
 		reusable.RemotePath = req.RemotePath
+		reusable.RemoteRealPath = remoteRealPath
 		reusable.EditorID = editor.ID
 		reusable.EditorName = editor.Name
 		reusable.EditorPath = editor.Path
@@ -569,6 +620,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (*Session, error) {
 		ID:              sessionToken,
 		AssetID:         req.AssetID,
 		AssetName:       assetName,
+		DocumentKey:     documentKey,
 		SessionID:       req.SessionID,
 		RemotePath:      req.RemotePath,
 		RemoteRealPath:  canonicalRemotePath(fileInfo, req.RemotePath),
@@ -621,7 +673,69 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (*Session, error) {
 }
 
 func (s *Service) Save(ctx context.Context, sessionID string) (*SaveResult, error) {
-	return s.saveInternal(ctx, sessionID, "")
+	return s.saveInternal(ctx, sessionID, "", false)
+}
+
+func (s *Service) Refresh(sessionID string) (*Session, error) {
+	current := s.getSession(sessionID)
+	if current == nil {
+		return nil, fmt.Errorf("外部编辑会话不存在")
+	}
+	if err := s.guardMutableSession(current); err != nil {
+		return nil, err
+	}
+
+	transport, transportErr := s.resolveDocumentTransport(current)
+	if transportErr != nil {
+		s.writeAudit(current, "external_edit_refresh", false, nil, nil, transportErr)
+		return nil, transportErr
+	}
+	current, err := s.bindSessionTransport(sessionID, transport)
+	if err != nil {
+		return nil, err
+	}
+
+	localData, err := os.ReadFile(current.LocalPath) //nolint:gosec // local path is controlled by the service workspace
+	if err != nil {
+		return nil, fmt.Errorf("读取本地副本失败: %w", err)
+	}
+	localHash := hashBytes(localData)
+	dirty := current.Dirty || localHash != current.OriginalSHA256
+
+	if transport.Missing {
+		refreshed := s.markSessionState(sessionID, sessionStateRemoteMissing, dirty, localHash)
+		s.writeAudit(refreshed, "external_edit_refresh", true, map[string]any{"status": sessionStateRemoteMissing}, refreshed, nil)
+		s.emit(Event{Type: eventSessionChanged, Session: refreshed})
+		return refreshed, nil
+	}
+
+	remoteData, remoteInfo, err := s.remote.ReadFile(current.SessionID, current.RemotePath)
+	if err != nil {
+		if isRemoteMissingError(err) {
+			refreshed := s.markSessionState(sessionID, sessionStateRemoteMissing, dirty, localHash)
+			s.writeAudit(refreshed, "external_edit_refresh", true, map[string]any{"status": sessionStateRemoteMissing}, refreshed, nil)
+			s.emit(Event{Type: eventSessionChanged, Session: refreshed})
+			return refreshed, nil
+		}
+		refreshErr := fmt.Errorf("暂时无法确认当前远程文件状态，请稍后重试或重新打开该远程文件")
+		s.writeAudit(current, "external_edit_refresh", false, nil, nil, refreshErr)
+		return nil, refreshErr
+	}
+	if remoteInfo.IsDir || !remoteInfo.Regular {
+		return nil, fmt.Errorf("远程路径已不是常规文件")
+	}
+
+	nextState := sessionStateClean
+	switch {
+	case remoteInfo.SHA256 != current.OriginalSHA256:
+		nextState = sessionStateConflict
+	case dirty:
+		nextState = sessionStateDirty
+	}
+	refreshed := s.markSessionState(sessionID, nextState, dirty, localHash)
+	s.writeAudit(refreshed, "external_edit_refresh", true, map[string]any{"status": nextState, "remoteBytes": len(remoteData)}, refreshed, nil)
+	s.emit(Event{Type: eventSessionChanged, Session: refreshed})
+	return refreshed, nil
 }
 
 func (s *Service) Resolve(ctx context.Context, sessionID, resolution string) (*SaveResult, error) {
@@ -632,13 +746,25 @@ func (s *Service) Resolve(ctx context.Context, sessionID, resolution string) (*S
 	default:
 		return nil, fmt.Errorf("未知冲突处理动作: %s", resolution)
 	}
-	return s.saveInternal(ctx, sessionID, resolution)
+	return s.saveInternal(ctx, sessionID, resolution, false)
 }
 
-func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string) (*SaveResult, error) {
+func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string, automatic bool) (*SaveResult, error) {
 	session := s.getSession(sessionID)
 	if session == nil {
 		return nil, fmt.Errorf("外部编辑会话不存在")
+	}
+	if err := s.guardMutableSession(session); err != nil {
+		return nil, err
+	}
+	transport, transportErr := s.resolveDocumentTransport(session)
+	if transportErr != nil {
+		s.writeAudit(session, "external_edit_document_transport_blocked", false, map[string]any{"resolution": resolution}, nil, transportErr)
+		return nil, transportErr
+	}
+	session, err := s.bindSessionTransport(sessionID, transport)
+	if err != nil {
+		return nil, err
 	}
 
 	localData, err := os.ReadFile(session.LocalPath) //nolint:gosec // local path is controlled by the service workspace
@@ -654,9 +780,10 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 	// 两者同时成立才说明确实需要回写，避免“watch 尚未来得及落地”或“内容没变只是触发了写入时间”造成误保存。
 	if localHash == session.OriginalSHA256 && !session.Dirty {
 		result := &SaveResult{
-			Status:  saveStatusNoop,
-			Message: "本地副本没有新的变更",
-			Session: cloneSession(session),
+			Status:    saveStatusNoop,
+			Message:   "本地副本没有新的变更",
+			Session:   cloneSession(session),
+			Automatic: automatic,
 		}
 		return result, nil
 	}
@@ -675,10 +802,13 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 		if resolution != resolutionRecreate {
 			result := s.markSessionState(sessionID, sessionStateRemoteMissing, true, localHash)
 			saveResult := &SaveResult{
-				Status:  saveStatusRemoteMissing,
-				Message: "远程文件不存在，可选择重新保存",
-				Session: result,
+				Status:    saveStatusRemoteMissing,
+				Message:   "远程文件不存在，请先确认是否需要重新创建远程文件",
+				Session:   result,
+				Conflict:  s.describeConflict(result, ""),
+				Automatic: automatic,
 			}
+			s.pauseAutoSaveForDocument(result.DocumentKey)
 			s.writeAudit(result, "external_edit_conflict_remote_missing", true, map[string]any{"resolution": resolution}, saveResult, nil)
 			s.emit(Event{Type: eventSessionConflict, Session: result, SaveResult: saveResult})
 			return saveResult, nil
@@ -694,10 +824,13 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 				if isRemoteMissingError(readErr) {
 					result := s.markSessionState(sessionID, sessionStateRemoteMissing, true, localHash)
 					saveResult := &SaveResult{
-						Status:  saveStatusRemoteMissing,
-						Message: "远程文件不存在，可选择重新保存",
-						Session: result,
+						Status:    saveStatusRemoteMissing,
+						Message:   "远程文件不存在，请先确认是否需要重新创建远程文件",
+						Session:   result,
+						Conflict:  s.describeConflict(result, ""),
+						Automatic: automatic,
 					}
+					s.pauseAutoSaveForDocument(result.DocumentKey)
 					s.writeAudit(result, "external_edit_conflict_remote_missing", true, map[string]any{"resolution": resolution}, saveResult, nil)
 					s.emit(Event{Type: eventSessionConflict, Session: result, SaveResult: saveResult})
 					return saveResult, nil
@@ -707,14 +840,24 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 			if remoteInfo.SHA256 != session.OriginalSHA256 {
 				result := s.markSessionState(sessionID, sessionStateConflict, true, localHash)
 				saveResult := &SaveResult{
-					Status:  saveStatusConflict,
-					Message: "远程文件已变更，可选择覆盖保存",
-					Session: result,
+					Status:    saveStatusConflict,
+					Message:   "远程文件已有新版本，请先比对差异，再决定重新读取或强制覆盖",
+					Session:   result,
+					Conflict:  s.describeConflict(result, ""),
+					Automatic: automatic,
 				}
+				s.pauseAutoSaveForDocument(result.DocumentKey)
 				s.writeAudit(result, "external_edit_conflict_remote_changed", true, map[string]any{"resolution": resolution, "remoteSha256": remoteInfo.SHA256, "remoteBytes": len(remoteData)}, saveResult, nil)
 				s.emit(Event{Type: eventSessionConflict, Session: result, SaveResult: saveResult})
 				return saveResult, nil
 			}
+		}
+	}
+
+	if resolution == resolutionOverwrite {
+		if err := s.validateOverwriteTransport(session, currentInfo); err != nil {
+			s.writeAudit(session, "external_edit_overwrite_validation_failed", false, map[string]any{"resolution": resolution}, nil, err)
+			return nil, err
 		}
 	}
 
@@ -735,9 +878,10 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 	}
 
 	saveResult := &SaveResult{
-		Status:  saveStatusSaved,
-		Message: "远程文件已保存",
-		Session: savedSession,
+		Status:    saveStatusSaved,
+		Message:   "远程文件已保存",
+		Session:   savedSession,
+		Automatic: automatic,
 	}
 	toolName := "external_edit_save"
 	if resolution == resolutionOverwrite {
@@ -748,6 +892,7 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 	}
 	s.writeAudit(savedSession, toolName, true, map[string]any{"resolution": resolution, "bytes": len(localData)}, saveResult, nil)
 	s.emit(Event{Type: eventSessionSaved, Session: savedSession, SaveResult: saveResult})
+	s.resumeAutoSaveForDocument(savedSession.DocumentKey)
 	return saveResult, nil
 }
 
@@ -922,6 +1067,64 @@ func (s *Service) reconcileLocalCopy(sessionID string) {
 		return
 	}
 	s.emit(Event{Type: eventSessionChanged, Session: cloned})
+	if cloned.State == sessionStateDirty {
+		s.scheduleAutoSave(cloned)
+		return
+	}
+	s.cancelAutoSaveForDocument(cloned.DocumentKey)
+}
+
+func (s *Service) scheduleAutoSave(session *Session) {
+	if session == nil || strings.TrimSpace(session.DocumentKey) == "" {
+		return
+	}
+	attemptKey := session.DocumentKey + ":" + session.LastLocalSHA256
+
+	s.mu.Lock()
+	if s.autoSavePaused[session.DocumentKey] || s.autoSaveTried[session.DocumentKey] == attemptKey {
+		s.mu.Unlock()
+		return
+	}
+	if timer, ok := s.autoSaveTimers[session.DocumentKey]; ok {
+		timer.Stop()
+	}
+	documentKey := session.DocumentKey
+	primarySessionID := session.ID
+	s.autoSaveTimers[documentKey] = time.AfterFunc(autoSaveDebounce, func() {
+		s.runAutoSave(documentKey, primarySessionID, attemptKey)
+	})
+	s.mu.Unlock()
+}
+
+func (s *Service) runAutoSave(documentKey, sessionID, attemptKey string) {
+	session := s.getSession(sessionID)
+	if session == nil || session.DocumentKey != documentKey {
+		return
+	}
+
+	s.mu.Lock()
+	if current, ok := s.autoSaveTimers[documentKey]; ok && current != nil {
+		delete(s.autoSaveTimers, documentKey)
+	}
+	if s.autoSavePaused[documentKey] || s.autoSaveTried[documentKey] == attemptKey {
+		s.mu.Unlock()
+		return
+	}
+	s.autoSaveTried[documentKey] = attemptKey
+	s.mu.Unlock()
+
+	result, err := s.saveInternal(context.Background(), sessionID, "", true)
+	if err != nil {
+		logger.Default().Warn("auto save external edit document failed", zap.String("documentKey", documentKey), zap.Error(err))
+		s.pauseAutoSaveForDocument(documentKey)
+		return
+	}
+	if result == nil {
+		return
+	}
+	if result.Status == saveStatusConflict || result.Status == saveStatusRemoteMissing {
+		s.pauseAutoSaveForDocument(documentKey)
+	}
 }
 
 func (s *Service) getSession(sessionID string) *Session {
@@ -942,6 +1145,7 @@ func (s *Service) markSaved(sessionID, localHash string, localData []byte, remot
 		session.OriginalSize = remoteInfo.Size
 		session.OriginalModTime = remoteInfo.ModTime
 		session.RemoteRealPath = canonicalRemotePath(remoteInfo, session.RemotePath)
+		session.DocumentKey = buildDocumentKey(session.AssetID, session.RemoteRealPath)
 	} else {
 		session.OriginalSize = int64(len(localData))
 	}
@@ -978,6 +1182,47 @@ func (s *Service) markSessionState(sessionID, state string, dirty bool, localHas
 		logger.Default().Warn("persist external edit manifest after state change", zap.Error(err))
 	}
 	return cloneSession(session)
+}
+
+func (s *Service) pauseAutoSaveForDocument(documentKey string) {
+	documentKey = strings.TrimSpace(documentKey)
+	if documentKey == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.autoSavePaused[documentKey] = true
+	if timer, ok := s.autoSaveTimers[documentKey]; ok {
+		timer.Stop()
+		delete(s.autoSaveTimers, documentKey)
+	}
+}
+
+func (s *Service) resumeAutoSaveForDocument(documentKey string) {
+	documentKey = strings.TrimSpace(documentKey)
+	if documentKey == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.autoSavePaused, documentKey)
+	delete(s.autoSaveTried, documentKey)
+}
+
+func (s *Service) cancelAutoSaveForDocument(documentKey string) {
+	documentKey = strings.TrimSpace(documentKey)
+	if documentKey == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if timer, ok := s.autoSaveTimers[documentKey]; ok {
+		timer.Stop()
+		delete(s.autoSaveTimers, documentKey)
+	}
+	if !s.autoSavePaused[documentKey] {
+		delete(s.autoSaveTried, documentKey)
+	}
 }
 
 func (s *Service) addWatchLocked(dir string) error {
@@ -1227,7 +1472,7 @@ func (s *Service) writeAudit(session *Session, toolName string, success bool, re
 		Result:     marshalAuditPayload(result, 8192),
 		Error:      truncateText(errText, 2048),
 		Success:    boolToSuccess(success),
-		SessionID:  session.SessionID,
+		SessionID:  session.ID,
 		Createtime: s.now().Unix(),
 	}
 	// desktop 审计既要给 QA/SEC 还原状态机，又不能把本地工作区路径、编辑器安装路径等敏感环境信息带进数据库。
@@ -1241,16 +1486,30 @@ func (s *Service) rereadRemoteSession(sessionID string) (*SaveResult, error) {
 	if current == nil {
 		return nil, fmt.Errorf("外部编辑会话不存在")
 	}
+	if err := s.guardMutableSession(current); err != nil {
+		return nil, err
+	}
+	transport, transportErr := s.resolveDocumentTransport(current)
+	if transportErr != nil {
+		s.writeAudit(current, "external_edit_document_transport_blocked", false, map[string]any{"resolution": resolutionReread}, nil, transportErr)
+		return nil, transportErr
+	}
+	current, err := s.bindSessionTransport(sessionID, transport)
+	if err != nil {
+		return nil, err
+	}
 
 	remoteData, remoteInfo, err := s.remote.ReadFile(current.SessionID, current.RemotePath)
 	if err != nil {
 		if isRemoteMissingError(err) {
 			result := s.markSessionState(sessionID, sessionStateRemoteMissing, true, current.LastLocalSHA256)
 			saveResult := &SaveResult{
-				Status:  saveStatusRemoteMissing,
-				Message: "远程文件不存在，可选择重新保存",
-				Session: result,
+				Status:   saveStatusRemoteMissing,
+				Message:  "远程文件不存在，请先确认是否需要重新创建远程文件",
+				Session:  result,
+				Conflict: s.describeConflict(result, ""),
 			}
+			s.pauseAutoSaveForDocument(result.DocumentKey)
 			s.writeAudit(result, "external_edit_conflict_remote_missing", true, map[string]any{"resolution": resolutionReread}, saveResult, nil)
 			s.emit(Event{Type: eventSessionConflict, Session: result, SaveResult: saveResult})
 			return saveResult, nil
@@ -1285,6 +1544,7 @@ func (s *Service) rereadRemoteSession(sessionID string) (*SaveResult, error) {
 		ID:              sessionToken,
 		AssetID:         current.AssetID,
 		AssetName:       current.AssetName,
+		DocumentKey:     current.DocumentKey,
 		SessionID:       current.SessionID,
 		RemotePath:      current.RemotePath,
 		RemoteRealPath:  canonicalRemotePath(remoteInfo, current.RemotePath),
@@ -1351,14 +1611,370 @@ func (s *Service) rereadRemoteSession(sessionID string) (*SaveResult, error) {
 	}
 
 	saveResult := &SaveResult{
-		Status:  saveStatusReread,
-		Message: "已重新读取远程新版本，旧副本已保留为冲突副本",
-		Session: openedCopy,
+		Status:   saveStatusReread,
+		Message:  "已打开远程新版本，原冲突稿已保留",
+		Session:  openedCopy,
+		Conflict: s.describeConflict(staleCopy, openedCopy.ID),
 	}
+	s.pauseAutoSaveForDocument(openedCopy.DocumentKey)
 	s.writeAudit(openedCopy, "external_edit_reread", true, map[string]any{"sourceSessionId": sessionID}, saveResult, nil)
 	s.emit(Event{Type: eventSessionChanged, Session: staleCopy})
 	s.emit(Event{Type: eventSessionOpened, Session: openedCopy})
 	return saveResult, nil
+}
+
+func (s *Service) Compare(sessionID string) (*CompareResult, error) {
+	current := s.getSession(sessionID)
+	if current == nil {
+		return nil, fmt.Errorf("外部编辑会话不存在")
+	}
+	conflict := s.describeConflict(current, "")
+	if conflict == nil {
+		return nil, fmt.Errorf("当前文件没有待比对的冲突版本")
+	}
+
+	primary := s.getSession(conflict.PrimaryDraftSessionID)
+	if primary == nil {
+		return nil, fmt.Errorf("冲突草稿不存在")
+	}
+	if primary.State != sessionStateConflict && primary.State != sessionStateStale {
+		return nil, fmt.Errorf("当前文件没有待比对的冲突版本")
+	}
+
+	var snapshot *Session
+	if conflict.LatestSnapshotSessionID != "" {
+		snapshot = s.getSession(conflict.LatestSnapshotSessionID)
+	}
+	if snapshot == nil {
+		snapshot = primary
+	}
+
+	transport, err := s.resolveDocumentTransport(primary)
+	if err != nil {
+		s.writeAudit(primary, "external_edit_compare", false, nil, nil, err)
+		return nil, err
+	}
+	primary, err = s.bindSessionTransport(primary.ID, transport)
+	if err != nil {
+		return nil, err
+	}
+
+	remoteData, remoteInfo, err := s.remote.ReadFile(primary.SessionID, primary.RemotePath)
+	if err != nil {
+		if isRemoteMissingError(err) {
+			return nil, fmt.Errorf("远程文件不存在，当前无法比对")
+		}
+		return nil, fmt.Errorf("读取远程文件失败: %w", err)
+	}
+	if remoteInfo.IsDir || !remoteInfo.Regular {
+		return nil, fmt.Errorf("远程路径已不是常规文件")
+	}
+	if !sameRemoteIdentity(primary, remoteInfo, primary.RemotePath) {
+		return nil, fmt.Errorf("当前文件位置已变化，无法确认仍是同一份远程文件；%s", externalEditReconnectHint)
+	}
+	if !isLikelyText(primary.RemotePath, remoteData) {
+		return nil, fmt.Errorf("当前远程文件不是可编辑文本文件")
+	}
+	if _, err := detectTextEncoding(remoteData); err != nil {
+		return nil, fmt.Errorf("当前远程文件编码暂不支持比对: %w", err)
+	}
+	if err := validateRoundTrip(primary, remoteData); err != nil {
+		return nil, err
+	}
+
+	localData, err := os.ReadFile(primary.LocalPath) //nolint:gosec // local path is controlled by the service workspace
+	if err != nil {
+		return nil, fmt.Errorf("读取本地副本失败: %w", err)
+	}
+	if !isLikelyText(primary.RemotePath, localData) {
+		return nil, fmt.Errorf("本地副本已不是可编辑文本文件")
+	}
+	if err := validateRoundTrip(primary, localData); err != nil {
+		return nil, err
+	}
+
+	result := &CompareResult{
+		DocumentKey:             primary.DocumentKey,
+		PrimaryDraftSessionID:   primary.ID,
+		LatestSnapshotSessionID: snapshot.ID,
+		FileName:                filepath.Base(primary.RemotePath),
+		RemotePath:              primary.RemotePath,
+		LocalContent:            string(localData),
+		RemoteContent:           string(remoteData),
+		ReadOnly:                true,
+	}
+	s.writeAudit(primary, "external_edit_compare", true, nil, map[string]any{"documentKey": primary.DocumentKey, "readOnly": true}, nil)
+	return result, nil
+}
+
+func (s *Service) guardMutableSession(session *Session) error {
+	if session == nil {
+		return fmt.Errorf("外部编辑会话不存在")
+	}
+	switch session.State {
+	case sessionStateStale:
+		return fmt.Errorf("当前副本已被新的远程版本替代，不能继续同步；%s", externalEditReconnectHint)
+	case sessionStateExpired:
+		return fmt.Errorf("当前副本已过期，不能继续同步；%s", externalEditReconnectHint)
+	default:
+		return nil
+	}
+}
+
+func (s *Service) describeConflict(session *Session, snapshotSessionID string) *Conflict {
+	if session == nil || strings.TrimSpace(session.DocumentKey) == "" {
+		return nil
+	}
+	if session.State != sessionStateConflict && session.State != sessionStateStale && session.State != sessionStateRemoteMissing {
+		return nil
+	}
+
+	primaryDraftID := session.ID
+	latestSnapshotID := strings.TrimSpace(snapshotSessionID)
+
+	if session.State == sessionStateStale && session.SourceSessionID != "" {
+		primaryDraftID = session.ID
+		if latestSnapshotID == "" {
+			latestSnapshotID = strings.TrimSpace(session.SupersededBySessionID)
+		}
+	}
+
+	if session.State == sessionStateConflict || session.State == sessionStateRemoteMissing {
+		for _, candidate := range s.ListSessions() {
+			if candidate == nil || candidate.DocumentKey != session.DocumentKey || candidate.ID == session.ID {
+				continue
+			}
+			if candidate.SourceSessionID == session.ID && candidate.State == sessionStateClean {
+				latestSnapshotID = candidate.ID
+				break
+			}
+		}
+	}
+
+	return &Conflict{
+		DocumentKey:             session.DocumentKey,
+		PrimaryDraftSessionID:   primaryDraftID,
+		LatestSnapshotSessionID: latestSnapshotID,
+	}
+}
+
+func (s *Service) findSessionsByAsset(assetID int64) []string {
+	if s.findSessions == nil {
+		return nil
+	}
+	candidates := s.findSessions(assetID)
+	if len(candidates) == 0 {
+		return nil
+	}
+	filtered := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		filtered = append(filtered, candidate)
+	}
+	return filtered
+}
+
+func (s *Service) resolveDocumentTransport(session *Session) (*documentTransport, error) {
+	if session == nil {
+		return nil, fmt.Errorf("外部编辑会话不存在")
+	}
+
+	candidates := s.documentCandidateSessionIDs(session)
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("当前远程文件已不可访问；%s", externalEditReconnectHint)
+	}
+
+	var firstMatch *documentTransport
+	var missingMatch *documentTransport
+	reachableDifferentDocument := false
+	for _, candidateID := range candidates {
+		transport, sameDocument, err := s.inspectDocumentTransport(session, candidateID)
+		if err != nil {
+			return nil, err
+		}
+		if transport == nil {
+			if !sameDocument {
+				reachableDifferentDocument = true
+			}
+			continue
+		}
+		if transport.Missing {
+			if missingMatch == nil {
+				missingMatch = transport
+			}
+			continue
+		}
+		if firstMatch == nil {
+			firstMatch = transport
+		}
+	}
+
+	if firstMatch != nil {
+		return firstMatch, nil
+	}
+	if missingMatch != nil {
+		return missingMatch, nil
+	}
+	if reachableDifferentDocument {
+		return nil, fmt.Errorf("当前文件位置已变化，无法确认仍是同一份远程文件；%s", externalEditReconnectHint)
+	}
+	return nil, fmt.Errorf("当前远程文件已不可访问；%s", externalEditReconnectHint)
+}
+
+func (s *Service) validateOverwriteTransport(session *Session, info *sftp_svc.RemoteFileInfo) error {
+	if session == nil {
+		return fmt.Errorf("外部编辑会话不存在")
+	}
+	if info == nil {
+		return fmt.Errorf("暂时无法确认当前远程文件状态，请稍后重试或重新打开该远程文件")
+	}
+	if info.IsDir || !info.Regular {
+		return fmt.Errorf("远程路径已不是常规文件")
+	}
+	if !sameRemoteIdentity(session, info, session.RemotePath) {
+		return fmt.Errorf("当前文件位置已变化，无法确认仍是同一份远程文件；%s", externalEditReconnectHint)
+	}
+	if os.FileMode(info.Mode).Perm()&0o200 == 0 {
+		return fmt.Errorf("当前远程文件不可写，请先调整权限后再强制覆盖")
+	}
+	return nil
+}
+
+func (s *Service) documentCandidateSessionIDs(session *Session) []string {
+	if session == nil {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, 4)
+	candidates := make([]string, 0, 4)
+	push := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		candidates = append(candidates, id)
+	}
+
+	push(session.SessionID)
+	for _, id := range s.findSessionsByAsset(session.AssetID) {
+		push(id)
+	}
+	return candidates
+}
+
+func (s *Service) inspectDocumentTransport(session *Session, candidateID string) (*documentTransport, bool, error) {
+	if session == nil || candidateID == "" {
+		return nil, false, nil
+	}
+
+	info, err := s.remote.Stat(candidateID, session.RemotePath)
+	if err != nil {
+		if isRemoteMissingError(err) {
+			if !canConfirmRemotePathWithoutStat(session) {
+				return nil, false, fmt.Errorf("当前远程文件位置已变化，无法确认是否仍是同一份文件；%s", externalEditReconnectHint)
+			}
+			return &documentTransport{
+				SessionID:     candidateID,
+				RemotePath:    session.RemotePath,
+				CanonicalPath: session.RemoteRealPath,
+				Missing:       true,
+			}, true, nil
+		}
+		if isSSHSessionMissingError(err) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("验证当前远程文件失败: %w", err)
+	}
+	if info.IsDir || !info.Regular {
+		return nil, false, fmt.Errorf("当前远程路径已不是常规文件")
+	}
+
+	canonicalPath := canonicalRemotePath(info, session.RemotePath)
+	if buildDocumentKey(session.AssetID, canonicalPath) != session.DocumentKey {
+		return nil, false, nil
+	}
+	return &documentTransport{
+		SessionID:     candidateID,
+		RemotePath:    session.RemotePath,
+		CanonicalPath: canonicalPath,
+		Info:          info,
+	}, true, nil
+}
+
+func (s *Service) bindSessionTransport(sessionID string, transport *documentTransport) (*Session, error) {
+	if transport == nil {
+		return nil, fmt.Errorf("缺少可用的远程文件连接")
+	}
+	return s.updateSessionBinding(sessionID, transport.SessionID, transport.RemotePath, transport.CanonicalPath)
+}
+
+func (s *Service) updateSessionBinding(sessionID, nextSessionID, remotePath, remoteRealPath string) (*Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session := s.sessions[sessionID]
+	if session == nil {
+		return nil, fmt.Errorf("外部编辑会话不存在")
+	}
+	session.SessionID = nextSessionID
+	session.RemotePath = remotePath
+	session.RemoteRealPath = remoteRealPath
+	session.DocumentKey = buildDocumentKey(session.AssetID, remoteRealPath)
+	session.UpdatedAt = s.now().Unix()
+	if err := s.saveManifestLocked(); err != nil {
+		return nil, err
+	}
+	return cloneSession(session), nil
+}
+
+func sameRemoteIdentity(session *Session, info *sftp_svc.RemoteFileInfo, fallbackPath string) bool {
+	if session == nil || info == nil {
+		return false
+	}
+	currentRealPath := strings.TrimSpace(session.RemoteRealPath)
+	nextRealPath := strings.TrimSpace(canonicalRemotePath(info, fallbackPath))
+	currentPath := strings.TrimSpace(session.RemotePath)
+	fallbackPath = strings.TrimSpace(fallbackPath)
+
+	if currentRealPath != "" && nextRealPath != "" {
+		return currentRealPath == nextRealPath
+	}
+	if currentPath != "" && nextRealPath != "" {
+		return currentPath == nextRealPath
+	}
+	if currentRealPath != "" && fallbackPath != "" {
+		return currentRealPath == fallbackPath
+	}
+	return currentPath != "" && currentPath == fallbackPath
+}
+
+func canConfirmRemotePathWithoutStat(session *Session) bool {
+	if session == nil {
+		return false
+	}
+	currentPath := strings.TrimSpace(session.RemotePath)
+	currentRealPath := strings.TrimSpace(session.RemoteRealPath)
+	if currentPath == "" {
+		return false
+	}
+	return currentRealPath == "" || currentRealPath == currentPath
+}
+
+func isSSHSessionMissingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "ssh会话不存在") ||
+		strings.Contains(text, "ssh 会话不存在") ||
+		strings.Contains(text, "ssh session does not exist")
 }
 
 func (s *Service) rollbackRereadSession(original *Session, newSessionID string) {
@@ -1810,6 +2426,10 @@ func canonicalRemotePath(info *sftp_svc.RemoteFileInfo, fallback string) string 
 	return fallback
 }
 
+func buildDocumentKey(assetID int64, canonicalRemoteFile string) string {
+	return fmt.Sprintf("%d:%s", assetID, strings.TrimSpace(canonicalRemoteFile))
+}
+
 func isRemoteMissingError(err error) bool {
 	if err == nil {
 		return false
@@ -1918,7 +2538,6 @@ func sanitizeAuditPayload(payload any) any {
 func sanitizeAuditOpenRequest(req OpenRequest) map[string]any {
 	return map[string]any{
 		"assetId":    req.AssetID,
-		"sessionId":  req.SessionID,
 		"remotePath": req.RemotePath,
 		"editorId":   req.EditorID,
 	}
@@ -1943,7 +2562,7 @@ func sanitizeAuditSession(session *Session) *auditSessionPayload {
 		ID:                    session.ID,
 		AssetID:               session.AssetID,
 		AssetName:             session.AssetName,
-		SessionID:             session.SessionID,
+		DocumentKey:           session.DocumentKey,
 		RemotePath:            session.RemotePath,
 		RemoteRealPath:        session.RemoteRealPath,
 		EditorID:              session.EditorID,

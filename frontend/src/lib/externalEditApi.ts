@@ -73,12 +73,29 @@ export interface ExternalEditSaveResult {
   status: string;
   message?: string;
   session?: ExternalEditSession;
+  conflict?: {
+    documentKey: string;
+    primaryDraftSessionId: string;
+    latestSnapshotSessionId?: string;
+  };
+  automatic?: boolean;
 }
 
 export interface ExternalEditEvent {
   type: string;
   session?: ExternalEditSession;
   saveResult?: ExternalEditSaveResult;
+}
+
+export interface ExternalEditCompareResult {
+  documentKey: string;
+  primaryDraftSessionId: string;
+  latestSnapshotSessionId?: string;
+  fileName: string;
+  remotePath: string;
+  localContent: string;
+  remoteContent: string;
+  readOnly: boolean;
 }
 
 declare global {
@@ -94,6 +111,7 @@ declare global {
           ListExternalEditSessions?: () => MaybePromise<ExternalEditSession[]>;
           SaveExternalEditSession?: (sessionId: string) => MaybePromise<ExternalEditSaveResult>;
           ResolveExternalEditConflict?: (sessionId: string, resolution: string) => MaybePromise<ExternalEditSaveResult>;
+          CompareExternalEditSession?: (sessionId: string) => MaybePromise<ExternalEditCompareResult>;
         };
       };
     };
@@ -140,4 +158,8 @@ export function saveExternalEditSession(sessionId: string) {
 
 export function resolveExternalEditConflict(sessionId: string, resolution: string) {
   return appBindings().ResolveExternalEditConflict!(sessionId, resolution);
+}
+
+export function compareExternalEditSession(sessionId: string) {
+  return appBindings().CompareExternalEditSession!(sessionId);
 }

@@ -976,11 +976,16 @@
   },
   "externalEdit": {
     "panel": {
-      "title": "External Edit"
+      "title": "External Edit",
+      "conflicts": "Conflicting Files",
+      "remoteSnapshotReady": "remote snapshot ready",
+      "reviewInList": "Review in list"
     },
     "actions": {
       "open": "Edit Externally",
       "sync": "Save to Remote",
+      "refresh": "Refresh Remote State",
+      "compare": "Compare",
       "reread": "Open Remote Version",
       "overwrite": "Overwrite Remote",
       "saveAgain": "Recreate Remote File"
@@ -996,6 +1001,11 @@
     "conflict": {
       "remoteChangedTitle": "Remote File Changed",
       "remoteMissingTitle": "Remote File Missing"
+    },
+    "compare": {
+      "title": "Read-only Diff",
+      "localDraft": "Local Draft",
+      "remoteSnapshot": "Remote Snapshot"
     },
     "settings": {
       "tab": "External Edit",

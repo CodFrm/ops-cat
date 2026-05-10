@@ -23,6 +23,7 @@ type ExternalEditEditor = external_edit_svc.Editor
 type ExternalEditOpenRequest = external_edit_svc.OpenRequest
 type ExternalEditSession = external_edit_svc.Session
 type ExternalEditSaveResult = external_edit_svc.SaveResult
+type ExternalEditCompareResult = external_edit_svc.CompareResult
 
 func (a *App) initExternalEdit() {
 	// Wails 绑定层只负责把运行时依赖接到 service：
@@ -148,6 +149,16 @@ func (a *App) ResolveExternalEditConflict(sessionID, resolution string) (*Extern
 		return nil, err
 	}
 	return svc.Resolve(a.langCtx(), sessionID, resolution)
+}
+
+func (a *App) CompareExternalEditSession(sessionID string) (*ExternalEditCompareResult, error) {
+	// compare 只暴露“生成一个只读差异快照”的能力；
+	// 具体的编码/BOM/round-trip 校验与远端身份确认仍由 service 串行裁决，避免前端擅自猜测文件状态。
+	svc, err := a.externalEditService()
+	if err != nil {
+		return nil, err
+	}
+	return svc.Compare(sessionID)
 }
 
 func (a *App) externalEditDialogTitle(kind string) string {
