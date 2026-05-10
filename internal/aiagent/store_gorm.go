@@ -2,6 +2,7 @@ package aiagent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -78,6 +79,9 @@ func (g *gormStore) LoadConversation(ctx context.Context, sessionID string) ([]a
 	rows, err := g.repo.LoadOrdered(ctx, convID)
 	if err != nil {
 		return nil, agentstore.BranchInfo{}, err
+	}
+	if len(rows) == 0 {
+		return nil, agentstore.BranchInfo{}, nil
 	}
 	out := make([]agent.Message, 0, len(rows))
 	for _, r := range rows {
@@ -191,6 +195,9 @@ func serializeBlocks(blocks []agent.ContentBlock) []map[string]any {
 		case agent.ImageBlock:
 			entry["media_type"] = v.MediaType
 			entry["url"] = v.Source.URL
+			if len(v.Source.Inline) > 0 {
+				entry["inline"] = v.Source.Inline // json.Marshal encodes []byte as base64 automatically
+			}
 		}
 		out = append(out, entry)
 	}
@@ -234,11 +241,18 @@ func deserializeBlocks(raw []map[string]any) ([]agent.ContentBlock, error) {
 		case "metadata":
 			out = append(out, agent.MetadataBlock{Key: asString(r["key"]), Value: r["value"]})
 		case "image":
+			src := agent.BlobSource{URL: asString(r["url"])}
+			if inlineStr, ok := r["inline"].(string); ok && inlineStr != "" {
+				// json.Unmarshal decoded []byte → base64 string in the map[string]any.
+				// Decode it back to []byte.
+				if dec, err := base64.StdEncoding.DecodeString(inlineStr); err == nil {
+					src.Inline = dec
+				}
+				// If decode fails (malformed), leave Inline nil — tolerant parse.
+			}
 			out = append(out, agent.ImageBlock{
 				MediaType: asString(r["media_type"]),
-				Source: agent.BlobSource{
-					URL: asString(r["url"]),
-				},
+				Source:    src,
 			})
 		}
 	}

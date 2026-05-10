@@ -117,3 +117,80 @@ func TestGormStore_PreservesMetadataBlock(t *testing.T) {
 	assert.Equal(t, "display", mb.Key)
 	assert.Equal(t, "@srv1 status", mb.Value)
 }
+
+func TestGormStore_ToolUseAndToolResultRoundTrip(t *testing.T) {
+	ctx, s := setupGormStore(t)
+
+	toolUse := agent.ToolUseBlock{
+		ID:      "toolu_01abc",
+		Name:    "list_servers",
+		Input:   map[string]any{"region": "us-west", "limit": float64(5)},
+		RawArgs: `{"region":"us-west","limit":5}`,
+	}
+	require.NoError(t, s.AppendMessage(ctx, "1", 0, agent.Message{
+		Role:    agent.RoleAssistant,
+		Content: []agent.ContentBlock{toolUse},
+	}))
+
+	toolResult := agent.ToolResultBlock{
+		ToolUseID: "toolu_01abc",
+		IsError:   false,
+		Content:   []agent.ContentBlock{agent.TextBlock{Text: "found 3 servers"}},
+	}
+	require.NoError(t, s.AppendMessage(ctx, "1", 1, agent.Message{
+		Role:    agent.RoleUser,
+		Content: []agent.ContentBlock{toolResult},
+	}))
+
+	msgs, _, err := s.LoadConversation(ctx, "1")
+	require.NoError(t, err)
+	require.Len(t, msgs, 2)
+
+	gotUse, ok := msgs[0].Content[0].(agent.ToolUseBlock)
+	require.True(t, ok)
+	assert.Equal(t, "toolu_01abc", gotUse.ID)
+	assert.Equal(t, "list_servers", gotUse.Name)
+	assert.Equal(t, "us-west", gotUse.Input["region"])
+	assert.Equal(t, float64(5), gotUse.Input["limit"])
+	assert.Equal(t, `{"region":"us-west","limit":5}`, gotUse.RawArgs)
+
+	gotResult, ok := msgs[1].Content[0].(agent.ToolResultBlock)
+	require.True(t, ok)
+	assert.Equal(t, "toolu_01abc", gotResult.ToolUseID)
+	assert.False(t, gotResult.IsError)
+	require.Len(t, gotResult.Content, 1)
+	innerText, ok := gotResult.Content[0].(agent.TextBlock)
+	require.True(t, ok)
+	assert.Equal(t, "found 3 servers", innerText.Text)
+}
+
+func TestGormStore_LoadEmpty_ReturnsNil(t *testing.T) {
+	ctx, s := setupGormStore(t)
+	// No AppendMessage calls; conversation row exists (seeded by setup) but no messages.
+	msgs, branch, err := s.LoadConversation(ctx, "1")
+	require.NoError(t, err)
+	assert.Nil(t, msgs, "empty conv should return nil messages per cago Store contract")
+	assert.Equal(t, agentstore.BranchInfo{}, branch)
+}
+
+func TestGormStore_ImageBlockInlineRoundTrip(t *testing.T) {
+	ctx, s := setupGormStore(t)
+	inline := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A} // PNG magic bytes
+	require.NoError(t, s.AppendMessage(ctx, "1", 0, agent.Message{
+		Role: agent.RoleUser,
+		Content: []agent.ContentBlock{
+			agent.ImageBlock{
+				MediaType: "image/png",
+				Source:    agent.BlobSource{Inline: inline},
+			},
+		},
+	}))
+	msgs, _, err := s.LoadConversation(ctx, "1")
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	img, ok := msgs[0].Content[0].(agent.ImageBlock)
+	require.True(t, ok)
+	assert.Equal(t, "image/png", img.MediaType)
+	assert.Equal(t, "", img.Source.URL)
+	assert.Equal(t, inline, img.Source.Inline, "inline bytes must round-trip cleanly")
+}
