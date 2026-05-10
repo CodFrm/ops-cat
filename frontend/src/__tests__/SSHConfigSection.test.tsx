@@ -4,8 +4,8 @@ import userEvent, { PointerEventsCheckLevel } from "@testing-library/user-event"
 import { SSHConfigSection } from "../components/asset/SSHConfigSection";
 import { credential_entity } from "../../wailsjs/go/models";
 
-function makeCred(id: number, username: string): credential_entity.Credential {
-  return { id, name: `cred-${id}`, username, type: "password" } as credential_entity.Credential;
+function makeCred(id: number, username: string, type = "password"): credential_entity.Credential {
+  return { id, name: `cred-${id}`, username, type, keyType: "ed25519" } as credential_entity.Credential;
 }
 
 // Radix Select renders SelectValue as a <span pointer-events:none> inside its trigger,
@@ -82,6 +82,34 @@ describe("SSHConfigSection 自动填用户名", () => {
 
     await user.click(screen.getByText("asset.selectPasswordPlaceholder"));
     await user.click(screen.getByRole("option", { name: "cred-2" }));
+
+    expect(setUsername).not.toHaveBeenCalled();
+  });
+
+  it("authType=key 时选中带 username 的 SSH key 也调 setUsername", async () => {
+    const setCredentialId = vi.fn();
+    const { setUsername, user } = renderSSH({
+      authType: "key",
+      managedKeys: [makeCred(10, "alice", "ssh_key"), makeCred(11, "", "ssh_key")],
+      setCredentialId,
+    });
+
+    await user.click(screen.getByText("asset.selectKeyPlaceholder"));
+    await user.click(screen.getByRole("option", { name: /cred-10 \(alice\) \(ED25519\)/ }));
+
+    expect(setCredentialId).toHaveBeenCalledWith(10);
+    expect(setUsername).toHaveBeenCalledWith("alice");
+  });
+
+  it("authType=key 时选中 username 为空的 SSH key 不调 setUsername", async () => {
+    const { setUsername, user } = renderSSH({
+      authType: "key",
+      username: "preexisting",
+      managedKeys: [makeCred(11, "", "ssh_key")],
+    });
+
+    await user.click(screen.getByText("asset.selectKeyPlaceholder"));
+    await user.click(screen.getByRole("option", { name: /cred-11 \(ED25519\)/ }));
 
     expect(setUsername).not.toHaveBeenCalled();
   });
