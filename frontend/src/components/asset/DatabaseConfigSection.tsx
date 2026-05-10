@@ -101,6 +101,7 @@ export function DatabaseConfigSection({
         managedPasswords={managedPasswords}
         hasExistingPassword={!!encryptedPassword}
         editAssetId={editAssetId}
+        onUsernameChange={setUsername}
       />
 
       {/* Database name */}

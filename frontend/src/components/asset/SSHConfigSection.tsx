@@ -247,6 +247,7 @@ export function SSHConfigSection({
           placeholder={t("asset.passwordPlaceholder")}
           hasExistingPassword={!!encryptedPassword}
           editAssetId={editAssetId}
+          onUsernameChange={setUsername}
         />
       )}
 
