@@ -5,56 +5,40 @@ import (
 	"testing"
 
 	"github.com/cago-frame/agents/agent"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestRoundsCounter_StopsAtCap(t *testing.T) {
-	c := newRoundsCounter(2)
-	hook := c.Hook()
-
-	for i := range 2 {
-		out, err := hook(context.Background(), agent.HookInput{Stage: agent.StagePreToolUse})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if out != nil && out.Continue != nil && !*out.Continue {
-			t.Fatalf("turn %d should not stop", i)
-		}
+func TestRoundsCounter_Cap(t *testing.T) {
+	rc := newRoundsCounter(2)
+	h := rc.Hook()
+	for i := 0; i < 2; i++ {
+		out, err := h(context.Background(), &agent.PreToolUseInput{})
+		assert.NoError(t, err)
+		assert.Equal(t, agent.DecisionPass, out.Decision)
 	}
-
-	out, err := hook(context.Background(), agent.HookInput{Stage: agent.StagePreToolUse})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out == nil || out.Continue == nil || *out.Continue {
-		t.Fatalf("expected StopRun on 3rd call, got %+v", out)
-	}
+	out, err := h(context.Background(), &agent.PreToolUseInput{})
+	assert.NoError(t, err)
+	assert.Equal(t, agent.DecisionDeny, out.Decision)
+	assert.Contains(t, out.DenyReason, "回合上限")
 }
 
-func TestRoundsCounter_ResetClearsCount(t *testing.T) {
-	c := newRoundsCounter(1)
-	hook := c.Hook()
+func TestRoundsCounter_ResetClearsBudget(t *testing.T) {
+	rc := newRoundsCounter(1)
+	h := rc.Hook()
+	_, _ = h(context.Background(), &agent.PreToolUseInput{})
+	out1, _ := h(context.Background(), &agent.PreToolUseInput{})
+	assert.Equal(t, agent.DecisionDeny, out1.Decision)
+	rc.Reset()
+	out2, _ := h(context.Background(), &agent.PreToolUseInput{})
+	assert.Equal(t, agent.DecisionPass, out2.Decision)
+}
 
-	// Use the only allowed round.
-	if _, err := hook(context.Background(), agent.HookInput{Stage: agent.StagePreToolUse}); err != nil {
-		t.Fatal(err)
-	}
-	// Cap exceeded — must StopRun.
-	out, err := hook(context.Background(), agent.HookInput{Stage: agent.StagePreToolUse})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out == nil || out.Continue == nil || *out.Continue {
-		t.Fatalf("expected StopRun before reset, got %+v", out)
-	}
-
-	c.Reset()
-
-	// After reset the next call must pass.
-	out, err = hook(context.Background(), agent.HookInput{Stage: agent.StagePreToolUse})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out != nil && out.Continue != nil && !*out.Continue {
-		t.Fatalf("after Reset the next call should not stop, got %+v", out)
+func TestRoundsCounter_ZeroMaxAllowsAll(t *testing.T) {
+	// max=0 means unlimited (defensive default; explicit semantics)
+	rc := newRoundsCounter(0)
+	h := rc.Hook()
+	for i := 0; i < 10; i++ {
+		out, _ := h(context.Background(), &agent.PreToolUseInput{})
+		assert.Equal(t, agent.DecisionPass, out.Decision, "max=0 should allow unlimited rounds")
 	}
 }

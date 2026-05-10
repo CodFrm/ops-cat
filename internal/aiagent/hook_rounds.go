@@ -2,53 +2,55 @@ package aiagent
 
 import (
 	"context"
-	"fmt"
 	"sync/atomic"
 
 	"github.com/cago-frame/agents/agent"
 )
 
-// roundsCounter is a per-turn PreToolUse cap. NewSystem installs the hook once
-// on the parent agent (cago wires hooks at construction time and they cannot
-// be swapped per Stream); a paired SessionStart hook calls Reset so the budget
-// is per-turn, not per-Conversation. Without auto-reset the closure counter
-// would carry across turns and eventually StopRun every PreToolUse, surfacing
-// to the user as "tool block stuck running" because the frontend sees a
-// tool_start with no matching tool_result.
+// roundsCounter caps the number of PreToolUse invocations per turn. Manager
+// constructs one per ConvHandle and registers two hooks:
+//   - rc.Hook() as a PreToolUse hook (cap enforcement)
+//   - an OnRunnerStart hook calling rc.Reset() (clear budget at turn start)
+//
+// max==0 disables the cap (every call passes); negative values are treated as
+// 0 for safety.
 type roundsCounter struct {
-	n         atomic.Int64
-	maxRounds int
+	used int32
+	max  int32
 }
 
-// newRoundsCounter constructs a counter with the given per-turn cap.
-// maxRounds <= 0 falls back to 50 (matches the legacy default).
-func newRoundsCounter(maxRounds int) *roundsCounter {
-	if maxRounds <= 0 {
-		maxRounds = 50
+func newRoundsCounter(max int) *roundsCounter {
+	if max < 0 {
+		max = 0
 	}
-	return &roundsCounter{maxRounds: maxRounds}
+	return &roundsCounter{max: int32(max)}
 }
 
-// Reset zeroes the counter. Called by the auto-reset SessionStart hook (and
-// available to tests).
-func (c *roundsCounter) Reset() { c.n.Store(0) }
+// Reset zeroes the budget. Safe to call concurrently with Hook invocations.
+func (rc *roundsCounter) Reset() {
+	atomic.StoreInt32(&rc.used, 0)
+}
 
-// Hook returns the PreToolUse HookFunc.
-func (c *roundsCounter) Hook() agent.HookFunc {
-	return func(_ context.Context, _ agent.HookInput) (*agent.HookOutput, error) {
-		current := c.n.Add(1)
-		if current > int64(c.maxRounds) {
-			return agent.StopRun(fmt.Sprintf("max rounds (%d) reached", c.maxRounds)), nil
+// ResetHook returns an OnRunnerStart-compatible function that calls Reset.
+// Retained for v1 consumers (system.go) until Task 19 replaces them.
+func (rc *roundsCounter) ResetHook() func(ctx context.Context, r *agent.Runner) error {
+	return func(_ context.Context, _ *agent.Runner) error {
+		rc.Reset()
+		return nil
+	}
+}
+
+// Hook returns the cago PreToolUseHook. Each invocation atomically increments
+// the used counter; when used > max (and max > 0), returns DecisionDeny.
+func (rc *roundsCounter) Hook() agent.PreToolUseHook {
+	return func(_ context.Context, _ *agent.PreToolUseInput) (*agent.PreToolUseOutput, error) {
+		used := atomic.AddInt32(&rc.used, 1)
+		if rc.max > 0 && used > rc.max {
+			return &agent.PreToolUseOutput{
+				Decision:   agent.DecisionDeny,
+				DenyReason: "已达回合上限",
+			}, nil
 		}
-		return nil, nil
-	}
-}
-
-// ResetHook returns a SessionStart HookFunc that calls Reset. Register
-// alongside Hook so the cap is enforced per Stream, not per Conversation.
-func (c *roundsCounter) ResetHook() agent.HookFunc {
-	return func(_ context.Context, _ agent.HookInput) (*agent.HookOutput, error) {
-		c.Reset()
-		return nil, nil
+		return &agent.PreToolUseOutput{Decision: agent.DecisionPass}, nil
 	}
 }
