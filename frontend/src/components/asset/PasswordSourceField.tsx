@@ -23,7 +23,7 @@ interface PasswordSourceFieldProps {
   secretLabel?: string;
   /** Override label for managed secret selector. */
   selectSecretLabel?: string;
-  /** 选/换密钥时若所选 credential.username 非空则触发，把 username 回传给父组件 */
+  /** Fires when the selected credential has a non-empty username; passes it to the parent. */
   onUsernameChange?: (username: string) => void;
 }
 
