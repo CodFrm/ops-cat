@@ -19,7 +19,7 @@ func makeSubagentObserver(em EventEmitter, convID int64, role, task string) agen
 	// 子 agent 的 EventUsage 不需要 stash 进父 System 的 pendingUsage —— 它没有对应
 	// 的 conversation_messages 行（子 agent assistant message ID 不会出现在父 Save
 	// 快照里）；usage 传 nil 即可。前端仍照常收到 "usage" 流事件。
-	br := newBridge(taggingEmitter{inner: em, role: role, task: task}, nil, nil)
+	br := newBridgeLegacy(taggingEmitter{inner: em, role: role, task: task}, nil, nil)
 	return func(_ context.Context, ev agent.Event) {
 		br.translate(convID, ev)
 	}

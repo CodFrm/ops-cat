@@ -73,7 +73,7 @@ func TestSystem_StreamCompletesAfterToolCall(t *testing.T) {
 	sess := a.Session()
 
 	rec := &recordEmitter{}
-	br := newBridge(rec, nil, nil)
+	br := newBridgeLegacy(rec, nil, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -185,7 +185,7 @@ func TestSystem_NeedConfirm_EmitsExactlyOneApprovalRequest(t *testing.T) {
 	)
 	sess := a.Session()
 
-	br := newBridge(rec, nil, nil)
+	br := newBridgeLegacy(rec, nil, nil)
 
 	ctx, cancel := context.WithTimeout(WithConvID(context.Background(), 1), 5*time.Second)
 	defer cancel()

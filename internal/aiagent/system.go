@@ -201,7 +201,7 @@ func NewSystem(ctx context.Context, opts SystemOptions) (*System, error) {
 	// 全部 API），且测试时可注入 fake popDisplay/usageStasher 单独覆盖 bridge
 	// 行为。usage 这一项让 bridge 能在 EventUsage 时把 token usage stash 进
 	// System pending 缓存。
-	sys.bridge = newBridge(opts.Emitter, sys.popPendingDisplay, sys)
+	sys.bridge = newBridgeLegacy(opts.Emitter, sys.popPendingDisplay, sys)
 	return sys, nil
 }
 

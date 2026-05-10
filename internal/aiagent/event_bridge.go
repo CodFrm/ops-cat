@@ -41,7 +41,7 @@ type bridge struct {
 	lastAssistantMsgID string
 }
 
-func newBridge(em EventEmitter, popDisplay func() string, usage usageStasher) *bridge {
+func newBridgeLegacy(em EventEmitter, popDisplay func() string, usage usageStasher) *bridge {
 	if popDisplay == nil {
 		popDisplay = func() string { return "" }
 	}

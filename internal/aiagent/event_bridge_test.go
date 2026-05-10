@@ -36,7 +36,7 @@ func (r *recordEmitter) Emit(_ int64, ev ai.StreamEvent) {
 
 func TestBridge_TextDeltaToContent(t *testing.T) {
 	rec := &recordEmitter{}
-	br := newBridge(rec, nil, nil)
+	br := newBridgeLegacy(rec, nil, nil)
 	br.translate(99, agent.Event{Kind: agent.EventTextDelta, Text: "hello"})
 	if len(rec.events) != 1 || rec.events[0].Type != "content" || rec.events[0].Content != "hello" {
 		t.Fatalf("got %+v", rec.events)
@@ -45,7 +45,7 @@ func TestBridge_TextDeltaToContent(t *testing.T) {
 
 func TestBridge_ThinkingThenTextSynthesizesThinkingDone(t *testing.T) {
 	rec := &recordEmitter{}
-	br := newBridge(rec, nil, nil)
+	br := newBridgeLegacy(rec, nil, nil)
 	br.translate(1, agent.Event{Kind: agent.EventThinkingDelta, Text: "reflecting"})
 	br.translate(1, agent.Event{Kind: agent.EventTextDelta, Text: "answer"})
 
@@ -59,7 +59,7 @@ func TestBridge_ThinkingThenTextSynthesizesThinkingDone(t *testing.T) {
 
 func TestBridge_UsageMappingExposesCacheCreation(t *testing.T) {
 	rec := &recordEmitter{}
-	br := newBridge(rec, nil, nil)
+	br := newBridgeLegacy(rec, nil, nil)
 	br.translate(1, agent.Event{Kind: agent.EventUsage, Usage: provider.Usage{
 		PromptTokens: 100, CompletionTokens: 20, CachedTokens: 50, CacheCreationTokens: 30,
 	}})
@@ -74,7 +74,7 @@ func TestBridge_UsageMappingExposesCacheCreation(t *testing.T) {
 
 func TestBridge_ToolEventsCarryToolCallID(t *testing.T) {
 	rec := &recordEmitter{}
-	br := newBridge(rec, nil, nil)
+	br := newBridgeLegacy(rec, nil, nil)
 	br.translate(1, agent.Event{Kind: agent.EventPreToolUse, Tool: &agent.ToolEvent{ID: "abc", Name: "run_command", Input: []byte(`{"x":1}`)}})
 	br.translate(1, agent.Event{Kind: agent.EventPostToolUse, Tool: &agent.ToolEvent{ID: "abc", Name: "run_command", Response: []byte(`"ok"`)}})
 	if rec.events[0].ToolCallID != "abc" || rec.events[1].ToolCallID != "abc" {
@@ -90,7 +90,7 @@ func TestBridge_FollowUpsMergedIntoBatchOnNextEvent(t *testing.T) {
 	rec := &recordEmitter{}
 	displays := []string{"u1", "u2", "u3"}
 	idx := 0
-	br := newBridge(rec, func() string {
+	br := newBridgeLegacy(rec, func() string {
 		if idx >= len(displays) {
 			return ""
 		}
@@ -149,7 +149,7 @@ func TestBridge_FollowUpsMergedIntoBatchOnNextEvent(t *testing.T) {
 func TestBridge_HistoricalFollowUpReplayDoesNotEmitGhostBatch(t *testing.T) {
 	rec := &recordEmitter{}
 	popCount := 0
-	br := newBridge(rec, func() string {
+	br := newBridgeLegacy(rec, func() string {
 		popCount++
 		return "" // 模拟历史回放：FIFO 没有对应推送
 	}, nil)
@@ -179,7 +179,7 @@ func TestBridge_MixedHistoricalAndLiveFollowUpsOnlyEmitLive(t *testing.T) {
 	rec := &recordEmitter{}
 	// FIFO 模拟：head=空(历史) → "live1" → 空(历史) → "live2"
 	queue := []string{"", "live1", "", "live2"}
-	br := newBridge(rec, func() string {
+	br := newBridgeLegacy(rec, func() string {
 		if len(queue) == 0 {
 			return ""
 		}
@@ -222,7 +222,7 @@ func TestBridge_MixedHistoricalAndLiveFollowUpsOnlyEmitLive(t *testing.T) {
 func TestBridge_NonFollowUpUserPromptSubmitNotBuffered(t *testing.T) {
 	rec := &recordEmitter{}
 	popCount := 0
-	br := newBridge(rec, func() string { popCount++; return "should-not-be-popped" }, nil)
+	br := newBridgeLegacy(rec, func() string { popCount++; return "should-not-be-popped" }, nil)
 	br.translate(1, agent.Event{
 		Kind:    agent.EventUserPromptSubmit,
 		Message: &agent.Message{Kind: agent.MessageKindText, Text: "initial"},
@@ -246,7 +246,7 @@ func TestBridge_NonFollowUpUserPromptSubmitNotBuffered(t *testing.T) {
 func TestBridge_StashesUsageKeyedByLastAssistantMessageEnd(t *testing.T) {
 	rec := &recordEmitter{}
 	stash := &fakeUsageStasher{}
-	br := newBridge(rec, nil, stash)
+	br := newBridgeLegacy(rec, nil, stash)
 	br.translate(7, agent.Event{Kind: agent.EventMessageEnd, Message: &agent.Message{
 		ID: "asst-1", Role: agent.RoleAssistant, Origin: agent.MessageOriginModel,
 	}})
@@ -277,7 +277,7 @@ func TestBridge_StashesUsageKeyedByLastAssistantMessageEnd(t *testing.T) {
 // 是给 bridge 提供 lastAssistantMsgID 锚点）。
 func TestBridge_MessageEndDoesNotEmit(t *testing.T) {
 	rec := &recordEmitter{}
-	br := newBridge(rec, nil, nil)
+	br := newBridgeLegacy(rec, nil, nil)
 	br.translate(1, agent.Event{Kind: agent.EventMessageEnd, Message: &agent.Message{
 		ID: "asst-1", Role: agent.RoleAssistant, Origin: agent.MessageOriginModel, Text: "hi",
 	}})
@@ -290,7 +290,7 @@ func TestBridge_MessageEndDoesNotEmit(t *testing.T) {
 // lastAssistantMsgID。否则 EventUsage 可能错误地把 usage 绑到 user/tool 行。
 func TestBridge_MessageEndIgnoresNonAssistantModel(t *testing.T) {
 	stash := &fakeUsageStasher{}
-	br := newBridge(&recordEmitter{}, nil, stash)
+	br := newBridgeLegacy(&recordEmitter{}, nil, stash)
 	// user origin → 不更新 lastAssistantMsgID
 	br.translate(1, agent.Event{Kind: agent.EventMessageEnd, Message: &agent.Message{
 		ID: "user-1", Role: agent.RoleUser, Origin: agent.MessageOriginUser,
