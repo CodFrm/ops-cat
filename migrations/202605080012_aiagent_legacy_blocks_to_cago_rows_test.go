@@ -61,13 +61,73 @@ func allMigrationsForTest() []*gormigrate.Migration {
 	}
 }
 
+// insertLegacyMsg inserts a row directly into conversation_messages using raw SQL so
+// we can populate v1 columns (cago_id, kind, origin, content, persist, msg_time,
+// tool_call_json, tool_result_json) that no longer exist on the Go struct but are still
+// present in the DB schema at the time this migration runs (before 202605100001 drops them).
+func insertLegacyMsg(t *testing.T, db *gorm.DB, convID int64, role, content, blocks, mentions, tokenUsage string, sortOrder int, cagoID, kind, origin string) {
+	t.Helper()
+	require.NoError(t, db.Exec(`
+		INSERT INTO conversation_messages
+		(conversation_id, role, content, blocks, mentions, token_usage, sort_order, cago_id, kind, origin, persist, createtime, msg_time)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1100, 1100)
+	`, convID, role, content, blocks, mentions, tokenUsage, sortOrder, cagoID, kind, origin).Error)
+}
+
+// scanRawMsgRows reads back conversation_messages rows including v1 columns via raw SQL.
+// Fields are returned as a slice of maps for flexible assertion.
+type rawMsgRow struct {
+	ID             int64
+	ConversationID int64
+	Role           string
+	Content        string
+	Blocks         string
+	Mentions       string
+	TokenUsage     string
+	SortOrder      int
+	CagoID         string
+	Kind           string
+	Origin         string
+	ToolCallJSON   string
+	ToolResultJSON string
+}
+
+func scanRawMsgRows(t *testing.T, db *gorm.DB, convID int64) []rawMsgRow {
+	t.Helper()
+	rows, err := db.Raw(`
+		SELECT id, conversation_id, role,
+		       COALESCE(content,''), COALESCE(blocks,''),
+		       COALESCE(mentions,''), COALESCE(token_usage,''),
+		       COALESCE(sort_order,0), COALESCE(cago_id,''),
+		       COALESCE(kind,''), COALESCE(origin,''),
+		       COALESCE(tool_call_json,''), COALESCE(tool_result_json,'')
+		FROM conversation_messages
+		WHERE conversation_id = ?
+		ORDER BY sort_order ASC
+	`, convID).Rows()
+	require.NoError(t, err)
+	defer rows.Close()
+	var out []rawMsgRow
+	for rows.Next() {
+		var r rawMsgRow
+		require.NoError(t, rows.Scan(
+			&r.ID, &r.ConversationID, &r.Role, &r.Content, &r.Blocks,
+			&r.Mentions, &r.TokenUsage, &r.SortOrder, &r.CagoID,
+			&r.Kind, &r.Origin, &r.ToolCallJSON, &r.ToolResultJSON,
+		))
+		out = append(out, r)
+	}
+	require.NoError(t, rows.Err())
+	return out
+}
+
 // 测试数据迁移 202605080012：把前 cago 时代由前端 SaveConversationMessages 写入的
-// 单行多 Block 消息（kind=”/cago_id=”），按 Block 边界展开为 cago 形态的多行
+// 单行多 Block 消息（kind=" 且 cago_id="），按 Block 边界展开为 cago 形态的多行
 // （text / tool_call / tool_result）。一个 assistant 回合"原本一气泡多 Block"在
 // 渲染端会被聚合还原。
 //
 // 兼容前提：080011 在 cago v2 升级时被删（v1 SessionData 类型不复存在），本测试
-// 直接构造 legacy 行（kind=” 且 cago_id=”），无需依赖 080011 的数据迁移结果。
+// 直接构造 legacy 行（kind=" 且 cago_id="），无需依赖 080011 的数据迁移结果。
 func TestMigrate202605080012_LegacyAssistantTurnWithToolExpands(t *testing.T) {
 	db := runMigrationsUpTo(t, "202605080010")
 
@@ -79,14 +139,7 @@ func TestMigrate202605080012_LegacyAssistantTurnWithToolExpands(t *testing.T) {
 
 	// 用户行：legacy 形态（kind/cago_id 全空），带 mentions
 	userMentions, _ := json.Marshal([]conversation_entity.MentionRef{{AssetID: 7, Name: "srv"}})
-	require.NoError(t, db.Create(&conversation_entity.Message{
-		ConversationID: conv.ID,
-		Role:           "user",
-		Content:        "hi @srv",
-		Mentions:       string(userMentions),
-		SortOrder:      0,
-		Createtime:     1100,
-	}).Error)
+	insertLegacyMsg(t, db, conv.ID, "user", "hi @srv", "", string(userMentions), "", 0, "", "", "")
 
 	// Assistant 行：legacy 单行多 Block + token_usage
 	asstBlocks, _ := json.Marshal([]conversation_entity.ContentBlock{
@@ -95,21 +148,12 @@ func TestMigrate202605080012_LegacyAssistantTurnWithToolExpands(t *testing.T) {
 		{Type: "text", Content: "done"},
 	})
 	usage, _ := json.Marshal(conversation_entity.TokenUsage{InputTokens: 10, OutputTokens: 20})
-	require.NoError(t, db.Create(&conversation_entity.Message{
-		ConversationID: conv.ID,
-		Role:           "assistant",
-		Content:        "",
-		Blocks:         string(asstBlocks),
-		TokenUsage:     string(usage),
-		SortOrder:      1,
-		Createtime:     1200,
-	}).Error)
+	insertLegacyMsg(t, db, conv.ID, "assistant", "", string(asstBlocks), "", string(usage), 1, "", "", "")
 
 	next := gormigrate.New(db, gormigrate.DefaultOptions, []*gormigrate.Migration{migration202605080012()})
 	require.NoError(t, next.Migrate())
 
-	var got []conversation_entity.Message
-	require.NoError(t, db.Where("conversation_id = ?", conv.ID).Order("sort_order ASC").Find(&got).Error)
+	got := scanRawMsgRows(t, db, conv.ID)
 
 	// 5 行：user_text + asst_text + tool_call + tool_result + asst_text
 	require.Len(t, got, 5, "1 user legacy + 1 asst legacy(3 blocks) → 1 + 4 = 5 cago 行")
@@ -120,7 +164,6 @@ func TestMigrate202605080012_LegacyAssistantTurnWithToolExpands(t *testing.T) {
 	assert.Equal(t, "user", got[0].Origin)
 	assert.Equal(t, "hi @srv", got[0].Content)
 	assert.NotEmpty(t, got[0].CagoID, "legacy 迁移必须给每行铸新的 cago_id；前端 in-memory 渲染靠它做 key")
-	assert.True(t, got[0].Persist)
 	assert.NotEmpty(t, got[0].Mentions, "user 行的 mentions 应保留在迁出后的 user text 行上")
 
 	// [1] assistant 第一段文本
@@ -184,18 +227,13 @@ func TestMigrate202605080012_LegacyTextOnlyExpands(t *testing.T) {
 	}
 	require.NoError(t, db.Create(conv).Error)
 
-	require.NoError(t, db.Create(&conversation_entity.Message{
-		ConversationID: conv.ID, Role: "user", Content: "hi", SortOrder: 0,
-	}).Error)
-	require.NoError(t, db.Create(&conversation_entity.Message{
-		ConversationID: conv.ID, Role: "assistant", Content: "hello back", SortOrder: 1,
-	}).Error)
+	insertLegacyMsg(t, db, conv.ID, "user", "hi", "", "", "", 0, "", "", "")
+	insertLegacyMsg(t, db, conv.ID, "assistant", "hello back", "", "", "", 1, "", "", "")
 
 	next := gormigrate.New(db, gormigrate.DefaultOptions, []*gormigrate.Migration{migration202605080012()})
 	require.NoError(t, next.Migrate())
 
-	var got []conversation_entity.Message
-	require.NoError(t, db.Where("conversation_id = ?", conv.ID).Order("sort_order ASC").Find(&got).Error)
+	got := scanRawMsgRows(t, db, conv.ID)
 	require.Len(t, got, 2)
 	assert.Equal(t, "text", got[0].Kind)
 	assert.Equal(t, "user", got[0].Origin)
@@ -213,17 +251,12 @@ func TestMigrate202605080012_AlreadyCagoShape_NoOp(t *testing.T) {
 	}
 	require.NoError(t, db.Create(conv).Error)
 
-	require.NoError(t, db.Create(&conversation_entity.Message{
-		ConversationID: conv.ID, Role: "user", Content: "hi",
-		Kind: "text", Origin: "user", CagoID: "m1", Persist: true,
-		SortOrder: 0, Createtime: 1100,
-	}).Error)
+	insertLegacyMsg(t, db, conv.ID, "user", "hi", "", "", "", 0, "m1", "text", "user")
 
 	next := gormigrate.New(db, gormigrate.DefaultOptions, []*gormigrate.Migration{migration202605080012()})
 	require.NoError(t, next.Migrate())
 
-	var got []conversation_entity.Message
-	require.NoError(t, db.Where("conversation_id = ?", conv.ID).Find(&got).Error)
+	got := scanRawMsgRows(t, db, conv.ID)
 	require.Len(t, got, 1)
 	assert.Equal(t, "m1", got[0].CagoID)
 	assert.Equal(t, "hi", got[0].Content)
@@ -237,21 +270,16 @@ func TestMigrate202605080012_LegacyErrorToolResult(t *testing.T) {
 	}
 	require.NoError(t, db.Create(conv).Error)
 
-	require.NoError(t, db.Create(&conversation_entity.Message{
-		ConversationID: conv.ID, Role: "user", Content: "do it", SortOrder: 0,
-	}).Error)
+	insertLegacyMsg(t, db, conv.ID, "user", "do it", "", "", "", 0, "", "", "")
 	asstBlocks, _ := json.Marshal([]conversation_entity.ContentBlock{
 		{Type: "tool", ToolName: "exec", ToolInput: `{}`, ToolCallID: "c-1", Status: "error", Content: "boom"},
 	})
-	require.NoError(t, db.Create(&conversation_entity.Message{
-		ConversationID: conv.ID, Role: "assistant", Blocks: string(asstBlocks), SortOrder: 1,
-	}).Error)
+	insertLegacyMsg(t, db, conv.ID, "assistant", "", string(asstBlocks), "", "", 1, "", "", "")
 
 	next := gormigrate.New(db, gormigrate.DefaultOptions, []*gormigrate.Migration{migration202605080012()})
 	require.NoError(t, next.Migrate())
 
-	var got []conversation_entity.Message
-	require.NoError(t, db.Where("conversation_id = ?", conv.ID).Order("sort_order ASC").Find(&got).Error)
+	got := scanRawMsgRows(t, db, conv.ID)
 	require.Len(t, got, 3) // user + tool_call + tool_result
 	assert.Equal(t, "tool_result", got[2].Kind)
 	var tr struct {
@@ -272,21 +300,16 @@ func TestMigrate202605080012_LegacyRunningToolNoResult(t *testing.T) {
 	}
 	require.NoError(t, db.Create(conv).Error)
 
-	require.NoError(t, db.Create(&conversation_entity.Message{
-		ConversationID: conv.ID, Role: "user", Content: "go", SortOrder: 0,
-	}).Error)
+	insertLegacyMsg(t, db, conv.ID, "user", "go", "", "", "", 0, "", "", "")
 	asstBlocks, _ := json.Marshal([]conversation_entity.ContentBlock{
 		{Type: "tool", ToolName: "exec", ToolInput: `{}`, ToolCallID: "c-1", Status: "running"},
 	})
-	require.NoError(t, db.Create(&conversation_entity.Message{
-		ConversationID: conv.ID, Role: "assistant", Blocks: string(asstBlocks), SortOrder: 1,
-	}).Error)
+	insertLegacyMsg(t, db, conv.ID, "assistant", "", string(asstBlocks), "", "", 1, "", "", "")
 
 	next := gormigrate.New(db, gormigrate.DefaultOptions, []*gormigrate.Migration{migration202605080012()})
 	require.NoError(t, next.Migrate())
 
-	var got []conversation_entity.Message
-	require.NoError(t, db.Where("conversation_id = ?", conv.ID).Order("sort_order ASC").Find(&got).Error)
+	got := scanRawMsgRows(t, db, conv.ID)
 	require.Len(t, got, 2) // user + tool_call only（无 result）
 	assert.Equal(t, "tool_call", got[1].Kind)
 	assert.Empty(t, got[1].ToolResultJSON)

@@ -146,55 +146,8 @@ func (r *conversationRepo) DeleteMessages(ctx context.Context, conversationID in
 }
 
 func (r *conversationRepo) UpsertMessagesByID(ctx context.Context, conversationID int64, msgs []*conversation_entity.Message) error {
-	return db.Ctx(ctx).Transaction(func(tx *gorm.DB) error {
-		keep := make([]string, 0, len(msgs))
-		for _, m := range msgs {
-			keep = append(keep, m.CagoID)
-		}
-		// 删除本次快照不再包含的旧行。当 keep 为空时（Delete 路径），删除所有该会话的 message 行。
-		del := tx.Where("conversation_id = ?", conversationID)
-		if len(keep) > 0 {
-			del = del.Where("cago_id NOT IN ?", keep)
-		}
-		if err := del.Delete(&conversation_entity.Message{}).Error; err != nil {
-			return err
-		}
-		// 逐行 upsert
-		for _, m := range msgs {
-			var existing conversation_entity.Message
-			err := tx.Where("conversation_id = ? AND cago_id = ?", conversationID, m.CagoID).
-				First(&existing).Error
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				if err := tx.Create(m).Error; err != nil {
-					return err
-				}
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			updates := map[string]any{
-				"role":             m.Role,
-				"content":          m.Content,
-				"parent_id":        m.ParentID,
-				"kind":             m.Kind,
-				"origin":           m.Origin,
-				"thinking":         m.Thinking,
-				"tool_call_json":   m.ToolCallJSON,
-				"tool_result_json": m.ToolResultJSON,
-				"persist":          m.Persist,
-				"raw":              m.Raw,
-				"msg_time":         m.MsgTime,
-				"sort_order":       m.SortOrder,
-			}
-			if err := tx.Model(&conversation_entity.Message{}).
-				Where("conversation_id = ? AND cago_id = ?", conversationID, m.CagoID).
-				Updates(updates).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	// v1 method removed; await Task 8 rewrite
+	return errors.New("v1 method removed; await Task 8")
 }
 
 func (r *conversationRepo) UpdateState(ctx context.Context, conversationID int64, threadID, stateValuesJSON string) error {
@@ -208,7 +161,6 @@ func (r *conversationRepo) UpdateState(ctx context.Context, conversationID int64
 }
 
 func (r *conversationRepo) UpdateMessageTokenUsage(ctx context.Context, conversationID int64, cagoID, tokenUsageJSON string) error {
-	return db.Ctx(ctx).Model(&conversation_entity.Message{}).
-		Where("conversation_id = ? AND cago_id = ?", conversationID, cagoID).
-		Update("token_usage", tokenUsageJSON).Error
+	// v1 method removed; await Task 8 rewrite
+	return errors.New("v1 method removed; await Task 8")
 }

@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -231,146 +230,11 @@ func (a *App) LoadConversationMessages(id int64) ([]ConversationDisplayMessage, 
 // buildDisplayMessages 把按 sort_order 排好的 cago-shape conversation_messages 行
 // 聚合成前端展示用的 ConversationDisplayMessage 列表。
 //
-// 关键不变量：
-//   - 一条 user/text 行 → 一条 user 显示消息；同一 user 行同时承载 mentions
-//   - origin=model/tool 的 text/tool_call/tool_result 行属于"当前 assistant 回合"，
-//     连续聚合为一条 assistant 显示消息；下一条 user 行或末尾关闭该回合
-//   - tool_call 行按其 ToolCallJSON.id 在整轮 rows 范围内查 tool_result 行配对
-//     （tool_result.ToolCallJSON.id 同值），不再依赖 i+1 邻接，多 tool 回合下
-//     结果归位严格正确
-//   - tool_result 行被 tool_call 消费，自身不产出独立气泡
-//   - assistant 回合内 token_usage 取最后一条带 token_usage 的行（与 cago
-//     event_bridge.lastAssistantMsgID 语义一致：usage 跟到回合最后一条 cago 消息）
-//   - 跳过非展示 kind（system / compaction_summary / steering / follow_up /
-//     hook_context / transcript_only）与非展示 origin（hook / framework）
-func buildDisplayMessages(rows []*conversation_entity.Message) []ConversationDisplayMessage {
-	// 索引所有 tool_result 行：call_id → row。tool_call 行据此查结果。
-	resultByCallID := make(map[string]*conversation_entity.Message, len(rows))
-	for _, r := range rows {
-		if r.Kind != "tool_result" {
-			continue
-		}
-		if id := callIDFromToolJSON(r.ToolCallJSON); id != "" {
-			resultByCallID[id] = r
-		}
-	}
-
-	var out []ConversationDisplayMessage
-	var pending *ConversationDisplayMessage // 正在累积的 assistant 回合（如果有）
-
-	flushPending := func() {
-		if pending != nil {
-			out = append(out, *pending)
-			pending = nil
-		}
-	}
-
-	for _, row := range rows {
-		// kind 过滤：只看展示用 kind
-		switch row.Kind {
-		case "text", "tool_call":
-			// 通过
-		case "tool_result":
-			continue // 由其 tool_call 行消费
-		default:
-			continue
-		}
-		// origin 过滤：hook / framework 等纯协议消息不进 UI
-		if row.Origin != "" && row.Origin != "model" && row.Origin != "user" && row.Origin != "tool" {
-			continue
-		}
-
-		// user 行：关闭当前 assistant 回合（如果有），开一条 user 显示消息
-		if row.Origin == "user" || (row.Origin == "" && row.Role == "user") {
-			flushPending()
-			mentions, err := row.GetMentions()
-			if err != nil {
-				logger.Default().Warn("get message mentions", zap.Error(err))
-			}
-			out = append(out, ConversationDisplayMessage{
-				Role:     row.Role,
-				Content:  row.Content,
-				Blocks:   []conversation_entity.ContentBlock{{Type: "text", Content: row.Content}},
-				Mentions: mentions,
-			})
-			continue
-		}
-
-		// model/tool origin → 当前 assistant 回合
-		if pending == nil {
-			pending = &ConversationDisplayMessage{Role: row.Role}
-			if pending.Role == "" {
-				pending.Role = "assistant"
-			}
-		}
-		switch row.Kind {
-		case "text":
-			pending.Blocks = append(pending.Blocks, conversation_entity.ContentBlock{
-				Type: "text", Content: row.Content,
-			})
-		case "tool_call":
-			pending.Blocks = append(pending.Blocks, toolBlockFromCall(row, resultByCallID))
-		}
-		// token_usage：cago 把它写到回合最后一条 cago 消息上，但为容错允许任何
-		// 一行带 token_usage 都覆盖到当前回合（last wins）
-		if usage, err := row.GetTokenUsage(); err != nil {
-			logger.Default().Warn("get message token usage", zap.Error(err))
-		} else if usage != nil {
-			pending.TokenUsage = usage
-		}
-	}
-	flushPending()
-	return out
-}
-
-// callIDFromToolJSON 从 row.ToolCallJSON 抽 id 字段；解析失败返回空串。
-func callIDFromToolJSON(s string) string {
-	if s == "" {
-		return ""
-	}
-	var tc struct {
-		ID string `json:"id"`
-	}
-	_ = json.Unmarshal([]byte(s), &tc)
-	return tc.ID
-}
-
-// toolBlockFromCall 把一条 tool_call 行 + 配对到的 tool_result 行（如有）合成一个
-// 前端 tool ContentBlock。未配对到 result 的 tool_call → status="running"。
-func toolBlockFromCall(callRow *conversation_entity.Message, results map[string]*conversation_entity.Message) conversation_entity.ContentBlock {
-	var tc struct {
-		ID   string          `json:"id"`
-		Name string          `json:"name"`
-		Args json.RawMessage `json:"args"`
-	}
-	_ = json.Unmarshal([]byte(callRow.ToolCallJSON), &tc)
-	block := conversation_entity.ContentBlock{
-		Type:       "tool",
-		ToolName:   tc.Name,
-		ToolInput:  string(tc.Args),
-		ToolCallID: tc.ID,
-		Status:     "running",
-	}
-	resRow, ok := results[tc.ID]
-	if !ok {
-		return block
-	}
-	block.Status = "completed"
-	var tr struct {
-		Result any    `json:"result,omitempty"`
-		Err    string `json:"err,omitempty"`
-	}
-	_ = json.Unmarshal([]byte(resRow.ToolResultJSON), &tr)
-	if tr.Err != "" {
-		block.Status = "error"
-		block.Content = tr.Err
-	} else if s, ok := tr.Result.(string); ok {
-		block.Content = s
-	} else if tr.Result != nil {
-		b, _ := json.Marshal(tr.Result)
-		block.Content = string(b)
-	}
-	return block
+// TODO(Task 20): v1 path removed; await Phase 3 rewrite with v2 Message struct.
+// This stub returns an empty slice to keep the build green.
+func buildDisplayMessages(_ []*conversation_entity.Message) []ConversationDisplayMessage {
+	// v1 path removed; await Task 20 rewrite
+	return nil
 }
 
 func (a *App) loadConversationDisplayMessages(ctx context.Context, id int64) ([]ConversationDisplayMessage, error) {

@@ -6,32 +6,20 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
-func TestMessage_CagoFieldsRoundTrip(t *testing.T) {
-	Convey("Message cago 平铺字段读写", t, func() {
-		m := &Message{}
-		m.CagoID = "c-1"
-		m.ParentID = "p-1"
-		m.Kind = "assistant"
-		m.Origin = "model"
-		m.Thinking = "thinking content"
-		m.ToolCallJSON = `{"name":"foo"}`
-		m.ToolResultJSON = `{"ok":true}`
-		m.Persist = true
-		m.Raw = `{"raw":"value"}`
-		m.MsgTime = 1715155200
-
-		Convey("所有 cago 字段能读回", func() {
-			So(m.CagoID, ShouldEqual, "c-1")
-			So(m.ParentID, ShouldEqual, "p-1")
-			So(m.Kind, ShouldEqual, "assistant")
-			So(m.Origin, ShouldEqual, "model")
-			So(m.Thinking, ShouldEqual, "thinking content")
-			So(m.ToolCallJSON, ShouldEqual, `{"name":"foo"}`)
-			So(m.ToolResultJSON, ShouldEqual, `{"ok":true}`)
-			So(m.Persist, ShouldBeTrue)
-			So(m.Raw, ShouldEqual, `{"raw":"value"}`)
-			So(m.MsgTime, ShouldEqual, int64(1715155200))
-		})
+func TestMessage_V2Fields(t *testing.T) {
+	Convey("Message v2 字段", t, func() {
+		m := Message{
+			ID:             0,
+			ConversationID: 42,
+			Role:           "assistant",
+			Blocks:         `[{"type":"text","text":"hi"}]`,
+			Mentions:       `[]`,
+			TokenUsage:     `{"prompt":10,"completion":5}`,
+			PartialReason:  "errored",
+			SortOrder:      3,
+		}
+		So(m.PartialReason, ShouldEqual, "errored")
+		So(m.SortOrder, ShouldEqual, 3)
 	})
 }
 
