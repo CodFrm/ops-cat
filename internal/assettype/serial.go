@@ -5,14 +5,12 @@ import (
 	"fmt"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
-	"github.com/opskat/opskat/internal/model/entity/policy"
 )
 
 type serialHandler struct{}
 
 func init() {
 	Register(&serialHandler{})
-	policy.RegisterDefaultPolicy("serial", func() any { return asset_entity.DefaultCommandPolicy() })
 }
 
 func (h *serialHandler) Type() string     { return asset_entity.AssetTypeSerial }

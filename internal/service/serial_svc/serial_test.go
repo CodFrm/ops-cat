@@ -2,6 +2,7 @@ package serial_svc
 
 import (
 	"errors"
+	"io"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +16,8 @@ type fakePort struct {
 	mu         sync.Mutex
 	writes     [][]byte
 	readFn     func([]byte) (int, error)
+	writeFn    func([]byte) (int, error)
+	closeFn    func() error
 	closeCount int
 }
 
@@ -28,6 +31,9 @@ func (p *fakePort) Read(buf []byte) (int, error) {
 }
 
 func (p *fakePort) Write(buf []byte) (int, error) {
+	if p.writeFn != nil {
+		return p.writeFn(buf)
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	data := make([]byte, len(buf))
@@ -53,6 +59,9 @@ func (p *fakePort) GetModemStatusBits() (*serial.ModemStatusBits, error) {
 func (p *fakePort) SetReadTimeout(_ time.Duration) error { return nil }
 
 func (p *fakePort) Close() error {
+	if p.closeFn != nil {
+		return p.closeFn()
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.closeCount++
@@ -148,6 +157,164 @@ func TestSessionExecCommandCollectsAllCapturedOutput(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("ExecCommand did not finish")
 	}
+}
+
+func TestSessionWriteDoesNotHoldStateLockDuringPortWrite(t *testing.T) {
+	writeEntered := make(chan struct{}, 1)
+	releaseWrite := make(chan struct{})
+	port := &fakePort{
+		writeFn: func(buf []byte) (int, error) {
+			select {
+			case writeEntered <- struct{}{}:
+			default:
+			}
+			<-releaseWrite
+			return len(buf), nil
+		},
+	}
+	sess := &Session{ID: "serial-write-lock", port: port}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- sess.Write([]byte("abc"))
+	}()
+
+	select {
+	case <-writeEntered:
+	case <-time.After(time.Second):
+		t.Fatal("port.Write was not reached")
+	}
+
+	isClosedDone := make(chan struct{})
+	go func() {
+		sess.IsClosed()
+		close(isClosedDone)
+	}()
+
+	select {
+	case <-isClosedDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("IsClosed blocked while Write was waiting on port.Write")
+	}
+
+	close(releaseWrite)
+	require.NoError(t, <-errCh)
+}
+
+func TestSessionCloseDoesNotHoldStateLockDuringPortClose(t *testing.T) {
+	closeEntered := make(chan struct{}, 1)
+	releaseClose := make(chan struct{})
+	port := &fakePort{
+		closeFn: func() error {
+			select {
+			case closeEntered <- struct{}{}:
+			default:
+			}
+			<-releaseClose
+			return nil
+		},
+	}
+	sess := &Session{ID: "serial-close-lock", port: port}
+
+	closeDone := make(chan struct{})
+	go func() {
+		sess.Close()
+		close(closeDone)
+	}()
+
+	select {
+	case <-closeEntered:
+	case <-time.After(time.Second):
+		t.Fatal("port.Close was not reached")
+	}
+
+	isClosedDone := make(chan struct{})
+	go func() {
+		assert.True(t, sess.IsClosed())
+		close(isClosedDone)
+	}()
+
+	select {
+	case <-isClosedDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("IsClosed blocked while Close was waiting on port.Close")
+	}
+
+	close(releaseClose)
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not finish")
+	}
+}
+
+func TestManagerSetCallbacksStartsReaderOnlyOnce(t *testing.T) {
+	var mu sync.Mutex
+	activeReads := 0
+	maxActiveReads := 0
+	releaseRead := make(chan struct{})
+	port := &fakePort{
+		readFn: func([]byte) (int, error) {
+			mu.Lock()
+			activeReads++
+			if activeReads > maxActiveReads {
+				maxActiveReads = activeReads
+			}
+			mu.Unlock()
+
+			<-releaseRead
+
+			mu.Lock()
+			activeReads--
+			mu.Unlock()
+			return 0, io.EOF
+		},
+	}
+	sess := &Session{ID: "serial-reader-once", port: port}
+	mgr := NewManager()
+	mgr.sessions.Store(sess.ID, sess)
+
+	mgr.SetCallbacks(sess.ID, nil, nil)
+	mgr.SetCallbacks(sess.ID, nil, nil)
+
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return maxActiveReads > 0
+	}, time.Second, 5*time.Millisecond)
+
+	time.Sleep(20 * time.Millisecond)
+	mu.Lock()
+	gotMaxActiveReads := maxActiveReads
+	mu.Unlock()
+
+	close(releaseRead)
+	require.Eventually(t, func() bool {
+		_, ok := mgr.GetSession(sess.ID)
+		return !ok
+	}, time.Second, 5*time.Millisecond)
+	assert.Equal(t, 1, gotMaxActiveReads)
+}
+
+func TestBuildSerialModeRejectsInvalidStopBits(t *testing.T) {
+	_, err := buildSerialMode(ConnectConfig{StopBits: "3"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported stop bits")
+}
+
+func TestBuildSerialModeRejectsInvalidParity(t *testing.T) {
+	_, err := buildSerialMode(ConnectConfig{Parity: "invalid"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported parity")
+}
+
+func TestBuildSerialModeAppliesDefaults(t *testing.T) {
+	mode, err := buildSerialMode(ConnectConfig{})
+	require.NoError(t, err)
+	assert.Equal(t, 115200, mode.BaudRate)
+	assert.Equal(t, 8, mode.DataBits)
+	assert.Equal(t, serial.OneStopBit, mode.StopBits)
+	assert.Equal(t, serial.NoParity, mode.Parity)
 }
 
 func TestManagerReadOutputClosesSessionOnUnexpectedError(t *testing.T) {

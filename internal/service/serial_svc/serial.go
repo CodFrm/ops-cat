@@ -73,6 +73,7 @@ type Session struct {
 	writeMu  sync.Mutex
 	mu       sync.Mutex
 	closed   bool
+	readerStarted bool
 	onData   func(data []byte)      // 终端输出回调
 	onClosed func(sessionID string) // 会话关闭回调
 
@@ -89,11 +90,13 @@ func (s *Session) Write(data []byte) error {
 
 func (s *Session) writeLocked(data []byte) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.closed {
+		s.mu.Unlock()
 		return fmt.Errorf("session is closed")
 	}
-	_, err := s.port.Write(data)
+	port := s.port
+	s.mu.Unlock()
+	_, err := port.Write(data)
 	return err
 }
 
@@ -105,16 +108,20 @@ func (s *Session) Resize(cols, rows int) error {
 // Close 关闭串口会话
 func (s *Session) Close() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.closed {
+		s.mu.Unlock()
 		return
 	}
 	s.closed = true
-	if err := s.port.Close(); err != nil && !isPortClosedError(err) {
+	port := s.port
+	onClosed := s.onClosed
+	sessionID := s.ID
+	s.mu.Unlock()
+	if err := port.Close(); err != nil && !isPortClosedError(err) {
 		logger.Default().Warn("close serial port", zap.String("sessionID", s.ID), zap.Error(err))
 	}
-	if s.onClosed != nil {
-		go s.onClosed(s.ID)
+	if onClosed != nil {
+		go onClosed(sessionID)
 	}
 }
 
@@ -235,20 +242,9 @@ func (m *Manager) ListPorts() ([]SerialPortInfo, error) {
 
 // Connect 打开串口连接，返回 sessionId。调用方通过 SetCallbacks 设置回调。
 func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
-	// 构建 serial 模式
-	mode := &serial.Mode{
-		BaudRate: cfg.BaudRate,
-		DataBits: cfg.DataBits,
-		StopBits: toStopBits(cfg.StopBits),
-		Parity:   toParity(cfg.Parity),
-	}
-
-	// 默认值
-	if mode.BaudRate == 0 {
-		mode.BaudRate = 115200
-	}
-	if mode.DataBits == 0 {
-		mode.DataBits = 8
+	mode, err := buildSerialMode(cfg)
+	if err != nil {
+		return "", err
 	}
 
 	port, err := serial.Open(cfg.PortPath, mode)
@@ -311,13 +307,20 @@ func (m *Manager) SetCallbacks(sessionID string, onData func(data []byte), onClo
 	if !ok {
 		return
 	}
+	startReader := false
 	sess.mu.Lock()
 	sess.onData = onData
 	sess.onClosed = onClosed
+	if !sess.readerStarted && !sess.closed {
+		sess.readerStarted = true
+		startReader = true
+	}
 	sess.mu.Unlock()
 
 	// 回调就绪后才启动读取，确保首屏输出不会因回调未挂载而丢失
-	go m.readOutput(sess)
+	if startReader {
+		go m.readOutput(sess)
+	}
 }
 
 // readOutput 持续从串口读取数据并回调。
@@ -436,31 +439,59 @@ func (m *Manager) CloseAll() {
 	}
 }
 
-// toStopBits 转换停止位字符串到 serial.StopBits
-func toStopBits(s string) serial.StopBits {
+func buildSerialMode(cfg ConnectConfig) (*serial.Mode, error) {
+	stopBits, err := parseStopBits(cfg.StopBits)
+	if err != nil {
+		return nil, err
+	}
+	parity, err := parseParity(cfg.Parity)
+	if err != nil {
+		return nil, err
+	}
+	mode := &serial.Mode{
+		BaudRate: cfg.BaudRate,
+		DataBits: cfg.DataBits,
+		StopBits: stopBits,
+		Parity:   parity,
+	}
+	if mode.BaudRate == 0 {
+		mode.BaudRate = 115200
+	}
+	if mode.DataBits == 0 {
+		mode.DataBits = 8
+	}
+	return mode, nil
+}
+
+// parseStopBits 转换停止位字符串到 serial.StopBits
+func parseStopBits(s string) (serial.StopBits, error) {
 	switch s {
+	case "", "1":
+		return serial.OneStopBit, nil
 	case "1.5":
-		return serial.OnePointFiveStopBits
+		return serial.OnePointFiveStopBits, nil
 	case "2":
-		return serial.TwoStopBits
+		return serial.TwoStopBits, nil
 	default:
-		return serial.OneStopBit
+		return 0, fmt.Errorf("unsupported stop bits %q (supported: \"1\", \"1.5\", \"2\")", s)
 	}
 }
 
-// toParity 转换校验位字符串到 serial.Parity
-func toParity(s string) serial.Parity {
+// parseParity 转换校验位字符串到 serial.Parity
+func parseParity(s string) (serial.Parity, error) {
 	switch s {
+	case "", "none":
+		return serial.NoParity, nil
 	case "odd":
-		return serial.OddParity
+		return serial.OddParity, nil
 	case "even":
-		return serial.EvenParity
+		return serial.EvenParity, nil
 	case "mark":
-		return serial.MarkParity
+		return serial.MarkParity, nil
 	case "space":
-		return serial.SpaceParity
+		return serial.SpaceParity, nil
 	default:
-		return serial.NoParity
+		return 0, fmt.Errorf("unsupported parity %q (supported: \"none\", \"odd\", \"even\", \"mark\", \"space\")", s)
 	}
 }
 
