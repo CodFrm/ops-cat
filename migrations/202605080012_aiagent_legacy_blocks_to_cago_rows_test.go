@@ -66,8 +66,8 @@ func allMigrationsForTest() []*gormigrate.Migration {
 // （text / tool_call / tool_result）。一个 assistant 回合"原本一气泡多 Block"在
 // 渲染端会被聚合还原。
 //
-// 兼容前提：202605080011 已经把 conversations 上有 cago session_data 的会话覆盖过
-// 了；本迁移只动剩下的 legacy 行（kind=” 且 cago_id=”）。
+// 兼容前提：080011 在 cago v2 升级时被删（v1 SessionData 类型不复存在），本测试
+// 直接构造 legacy 行（kind=” 且 cago_id=”），无需依赖 080011 的数据迁移结果。
 func TestMigrate202605080012_LegacyAssistantTurnWithToolExpands(t *testing.T) {
 	db := runMigrationsUpTo(t, "202605080010")
 

@@ -20,7 +20,9 @@ func migration202605100001() *gormigrate.Migration {
 	return &gormigrate.Migration{
 		ID: "202605100001_aiagent_v2_schema",
 		Migrate: func(tx *gorm.DB) error {
-			// 1. backfill：blocks 为空时把 content 折叠进去
+			// 1. backfill：blocks 为空时把 content 折叠进去。
+			// JSON key 必须是 "text"（与 Task 9 deserializeBlocks 的 TextBlock 协议
+			// 一致）；早先用 "content" 会导致每行回放成空 TextBlock。
 			rows, err := tx.Raw(`
 				SELECT id, content
 				FROM conversation_messages
@@ -29,6 +31,7 @@ func migration202605100001() *gormigrate.Migration {
 			if err != nil {
 				return fmt.Errorf("backfill scan: %w", err)
 			}
+			defer rows.Close()
 			type pair struct {
 				id      int64
 				content string
@@ -37,15 +40,16 @@ func migration202605100001() *gormigrate.Migration {
 			for rows.Next() {
 				var p pair
 				if err := rows.Scan(&p.id, &p.content); err != nil {
-					rows.Close()
 					return fmt.Errorf("backfill row: %w", err)
 				}
 				todo = append(todo, p)
 			}
-			rows.Close()
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("backfill iter: %w", err)
+			}
 			for _, p := range todo {
 				blob, err := json.Marshal([]map[string]string{
-					{"type": "text", "content": p.content},
+					{"type": "text", "text": p.content},
 				})
 				if err != nil {
 					return fmt.Errorf("backfill marshal id=%d: %w", p.id, err)
