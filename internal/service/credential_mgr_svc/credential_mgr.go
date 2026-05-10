@@ -25,6 +25,7 @@ import (
 type GenerateKeyRequest struct {
 	Name       string `json:"name"`
 	Comment    string `json:"comment"`
+	Username   string `json:"username"`   // 关联用户名（可选），用于资产表单自动填充
 	KeyType    string `json:"keyType"`    // rsa, ed25519, ecdsa
 	KeySize    int    `json:"keySize"`    // RSA: 2048/4096; ECDSA: 256/384/521; ED25519 忽略
 	Passphrase string `json:"passphrase"` // 私钥密码（可选）
@@ -246,6 +247,7 @@ func GenerateSSHKey(ctx context.Context, req GenerateKeyRequest) (*credential_en
 		Name:        req.Name,
 		Type:        credential_entity.TypeSSHKey,
 		Comment:     comment,
+		Username:    req.Username,
 		KeyType:     req.KeyType,
 		KeySize:     req.KeySize,
 		PrivateKey:  encryptedPrivateKey,
