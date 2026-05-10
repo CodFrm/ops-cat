@@ -322,7 +322,7 @@ func (m *Manager) SetCallbacks(sessionID string, onData func(data []byte), onClo
 
 // readOutput 持续从串口读取数据并回调。
 // 使用 10ms ticker 合并输出，减少高频 EventsEmit 调用导致前端事件队列阻塞。
-// cmdOutputCh（AI 命令执行）仍按每个 chunk 即时转发，确保 ExecCommand 能及时收到数据。
+// AI 命令执行期间通过 cmdCapture 即时收集每个 chunk，确保 ExecCommand 能及时收到数据。
 func (m *Manager) readOutput(sess *Session) {
 	defer func() {
 		m.sessions.Delete(sess.ID)
