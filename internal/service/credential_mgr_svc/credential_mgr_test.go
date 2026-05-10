@@ -133,7 +133,7 @@ func TestPassphraseReEncrypt(t *testing.T) {
 	})
 }
 
-// fakeCredentialRepo: 内存实现，仅用于测试。捕获最近一次 Create 的 cred 用于断言。
+// fakeCredentialRepo: 内存实现，仅用于测试。Create 累积保存到 creds slice 用于断言。
 type fakeCredentialRepo struct {
 	mu     sync.Mutex
 	creds  []*credential_entity.Credential
@@ -229,13 +229,15 @@ func TestGenerateSSHKey_PersistsUsername(t *testing.T) {
 			})
 			assert.NoError(t, err)
 			assert.Equal(t, "", cred.Username)
+			assert.Len(t, repo.creds, 1)
+			assert.Equal(t, "", repo.creds[0].Username)
 		})
 	})
 }
 
 func TestImportSSHKeyFromPEM_PersistsUsername(t *testing.T) {
 	Convey("ImportSSHKeyFromPEM 写入 username 字段", t, func() {
-		setupCredentialTestEnv(t)
+		repo := setupCredentialTestEnv(t)
 		ctx := context.Background()
 
 		// 用 gossh 现场生成一个无 passphrase 的 ed25519 PEM，避免 fixture
@@ -248,6 +250,8 @@ func TestImportSSHKeyFromPEM_PersistsUsername(t *testing.T) {
 		cred, err := ImportSSHKeyFromPEM(ctx, "imported", "comment", pemData, "", "bob")
 		assert.NoError(t, err)
 		assert.Equal(t, "bob", cred.Username)
+		assert.Len(t, repo.creds, 1)
+		assert.Equal(t, "bob", repo.creds[0].Username)
 	})
 }
 
