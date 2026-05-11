@@ -144,14 +144,6 @@ func checkQueryPolicyRules(ctx context.Context, policy *asset_entity.QueryPolicy
 	return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
 }
 
-// CheckQueryPolicyOnly 只检查策略，不触发确认回调
-func CheckQueryPolicyOnly(ctx context.Context, policy *asset_entity.QueryPolicy, sqlText string) CheckResult {
-	stmts, err := ClassifyStatements(sqlText)
-	if err != nil {
-		return CheckResult{Decision: Deny, Message: policyFmt(ctx, "SQL parse failed, execution denied: %v", "SQL 解析失败，拒绝执行: %v", err)}
-	}
-	return CheckQueryPolicy(ctx, policy, stmts)
-}
 
 func mergeQueryPolicy(custom, defaults *asset_entity.QueryPolicy) *asset_entity.QueryPolicy {
 	result := &asset_entity.QueryPolicy{}

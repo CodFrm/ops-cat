@@ -25,15 +25,6 @@ type dbCacheKeyType struct{}
 // DatabaseClientCache 在同一次 AI Chat 中复用数据库连接
 type DatabaseClientCache = ConnCache[*sql.DB]
 
-// NewDatabaseClientCache 创建数据库连接缓存
-func NewDatabaseClientCache() *DatabaseClientCache {
-	return NewConnCache[*sql.DB]("database")
-}
-
-// WithDatabaseCache 将数据库缓存注入 context
-func WithDatabaseCache(ctx context.Context, cache *DatabaseClientCache) context.Context {
-	return context.WithValue(ctx, dbCacheKeyType{}, cache)
-}
 
 func getDatabaseCache(ctx context.Context) *DatabaseClientCache {
 	if cache, ok := ctx.Value(dbCacheKeyType{}).(*DatabaseClientCache); ok {

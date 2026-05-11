@@ -431,41 +431,7 @@ func AllToolDefs() []ToolDef {
 	}
 }
 
-// --- 格式转换 ---
 
-// ToOpenAITools 将工具定义转换为 OpenAI function calling 格式
-func ToOpenAITools(defs []ToolDef) []Tool {
-	tools := make([]Tool, len(defs))
-	for i, def := range defs {
-		properties := make(map[string]any)
-		var required []string
-		for _, p := range def.Params {
-			properties[p.Name] = map[string]any{
-				"type":        string(p.Type),
-				"description": p.Description,
-			}
-			if p.Required {
-				required = append(required, p.Name)
-			}
-		}
-		params := map[string]any{
-			"type":       "object",
-			"properties": properties,
-		}
-		if len(required) > 0 {
-			params["required"] = required
-		}
-		tools[i] = Tool{
-			Type: "function",
-			Function: ToolFunction{
-				Name:        def.Name,
-				Description: def.Description,
-				Parameters:  params,
-			},
-		}
-	}
-	return tools
-}
 
 // --- SSH 客户端缓存（内置 Agent 同一次 Chat 中复用连接）---
 

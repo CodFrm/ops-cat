@@ -25,15 +25,6 @@ type redisCacheKeyType struct{}
 // RedisClientCache 在同一次 AI Chat 中复用 Redis 连接
 type RedisClientCache = ConnCache[*redis.Client]
 
-// NewRedisClientCache 创建 Redis 连接缓存
-func NewRedisClientCache() *RedisClientCache {
-	return NewConnCache[*redis.Client]("Redis")
-}
-
-// WithRedisCache 将 Redis 缓存注入 context
-func WithRedisCache(ctx context.Context, cache *RedisClientCache) context.Context {
-	return context.WithValue(ctx, redisCacheKeyType{}, cache)
-}
 
 func getRedisCache(ctx context.Context) *RedisClientCache {
 	if cache, ok := ctx.Value(redisCacheKeyType{}).(*RedisClientCache); ok {

@@ -33,19 +33,6 @@ type ToolCall struct {
 	} `json:"function"`
 }
 
-// Tool 工具定义（OpenAI function calling 格式）
-type Tool struct {
-	Type     string       `json:"type"` // "function"
-	Function ToolFunction `json:"function"`
-}
-
-// ToolFunction 工具函数定义
-type ToolFunction struct {
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	Parameters  interface{} `json:"parameters"` // JSON Schema
-}
-
 // Usage 本轮 LLM 调用的 token 使用情况
 // 语义统一：InputTokens 仅包含本次真正新增的输入；CacheReadTokens / CacheCreationTokens
 // 分开统计缓存命中与缓存写入，便于前端展示和成本核算。
