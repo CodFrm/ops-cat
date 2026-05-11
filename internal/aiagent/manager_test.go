@@ -43,8 +43,15 @@ func (discardAudit) Write(_ context.Context, _, _, _ string, _ bool, _ *ai.Check
 }
 
 func setupManager(t *testing.T, prov provider.Provider) *Manager {
+	// SQLite :memory: 是 per-connection 的——每个新连接看到独立的库。Recorder 在
+	// 单独 goroutine 写库，跟测试 goroutine 大概率分到不同连接，AutoMigrate 建的表
+	// Recorder 那边看不到，写入直接挂 "no such table"。这里强制连接池大小 1，让所有
+	// goroutine 都用同一条连接，共享同一个 :memory: 库。
 	gdb, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := gdb.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, gdb.AutoMigrate(&conversation_entity.Message{}, &conversation_entity.Conversation{}))
 	require.NoError(t, gdb.Exec(`INSERT INTO conversations (id, title, provider_type) VALUES (1, 'test', 'mock'), (2, 'other', 'mock')`).Error)
 	db.SetDefault(gdb)

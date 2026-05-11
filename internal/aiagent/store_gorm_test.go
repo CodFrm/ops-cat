@@ -31,16 +31,36 @@ func setupGormStore(t *testing.T) (context.Context, agentstore.Store) {
 	return context.Background(), NewGormStore(nil)
 }
 
+// mustEncode encodes a typed agent.Message to the on-wire StoredMessage form
+// the Store contract consumes. Tests write agent.Message because it's the
+// ergonomic typed shape; the store sees the JSON-discriminator form.
+func mustEncode(t *testing.T, m agent.Message) agentstore.StoredMessage {
+	t.Helper()
+	sm, err := agentstore.EncodeMessage(m)
+	require.NoError(t, err)
+	return sm
+}
+
+// loadDecoded is the inverse: read the store, then decode StoredMessage back
+// to typed agent.Message so tests can type-assert blocks directly.
+func loadDecoded(t *testing.T, ctx context.Context, s agentstore.Store, sessionID string) []agent.Message {
+	t.Helper()
+	sms, _, err := s.LoadConversation(ctx, sessionID)
+	require.NoError(t, err)
+	msgs, err := agentstore.DecodeMessages(sms)
+	require.NoError(t, err)
+	return msgs
+}
+
 func TestGormStore_AppendAndLoad(t *testing.T) {
 	ctx, s := setupGormStore(t)
-	err := s.AppendMessage(ctx, "1", 0, agent.Message{
+	err := s.AppendMessage(ctx, "1", 0, mustEncode(t, agent.Message{
 		Role:    agent.RoleUser,
 		Content: []agent.ContentBlock{agent.TextBlock{Text: "hello"}},
-	})
+	}))
 	require.NoError(t, err)
 
-	msgs, _, err := s.LoadConversation(ctx, "1")
-	require.NoError(t, err)
+	msgs := loadDecoded(t, ctx, s, "1")
 	require.Len(t, msgs, 1)
 	assert.Equal(t, agent.RoleUser, msgs[0].Role)
 	tb, ok := msgs[0].Content[0].(agent.TextBlock)
@@ -50,18 +70,19 @@ func TestGormStore_AppendAndLoad(t *testing.T) {
 
 func TestGormStore_UpdateMessage_FillsPartialAndUsage(t *testing.T) {
 	ctx, s := setupGormStore(t)
-	require.NoError(t, s.AppendMessage(ctx, "1", 0, agent.Message{Role: agent.RoleAssistant, PartialReason: agent.PartialStreaming}))
+	require.NoError(t, s.AppendMessage(ctx, "1", 0, mustEncode(t, agent.Message{
+		Role: agent.RoleAssistant, PartialReason: agent.PartialStreaming,
+	})))
 	usage := agent.Usage{PromptTokens: 5, CompletionTokens: 10, TotalTokens: 15}
-	err := s.UpdateMessage(ctx, "1", 0, agent.Message{
+	err := s.UpdateMessage(ctx, "1", 0, mustEncode(t, agent.Message{
 		Role:          agent.RoleAssistant,
 		Content:       []agent.ContentBlock{agent.TextBlock{Text: "done"}},
 		PartialReason: agent.PartialErrored,
 		Usage:         &usage,
-	})
+	}))
 	require.NoError(t, err)
 
-	msgs, _, err := s.LoadConversation(ctx, "1")
-	require.NoError(t, err)
+	msgs := loadDecoded(t, ctx, s, "1")
 	assert.Equal(t, agent.PartialErrored, msgs[0].PartialReason)
 	require.NotNil(t, msgs[0].Usage)
 	assert.Equal(t, 15, msgs[0].Usage.TotalTokens)
@@ -70,28 +91,26 @@ func TestGormStore_UpdateMessage_FillsPartialAndUsage(t *testing.T) {
 func TestGormStore_TruncateAfter(t *testing.T) {
 	ctx, s := setupGormStore(t)
 	for i := 0; i < 4; i++ {
-		require.NoError(t, s.AppendMessage(ctx, "1", i, agent.Message{
+		require.NoError(t, s.AppendMessage(ctx, "1", i, mustEncode(t, agent.Message{
 			Role: agent.RoleUser, Content: []agent.ContentBlock{agent.TextBlock{Text: strconv.Itoa(i)}},
-		}))
+		})))
 	}
 	require.NoError(t, s.TruncateAfter(ctx, "1", 2))
-	msgs, _, err := s.LoadConversation(ctx, "1")
-	require.NoError(t, err)
+	msgs := loadDecoded(t, ctx, s, "1")
 	assert.Len(t, msgs, 2)
 }
 
 func TestGormStore_LoadFixesStreamingTail(t *testing.T) {
 	ctx, s := setupGormStore(t)
-	require.NoError(t, s.AppendMessage(ctx, "1", 0, agent.Message{
+	require.NoError(t, s.AppendMessage(ctx, "1", 0, mustEncode(t, agent.Message{
 		Role: agent.RoleUser, Content: []agent.ContentBlock{agent.TextBlock{Text: "hi"}},
-	}))
-	require.NoError(t, s.AppendMessage(ctx, "1", 1, agent.Message{
+	})))
+	require.NoError(t, s.AppendMessage(ctx, "1", 1, mustEncode(t, agent.Message{
 		Role: agent.RoleAssistant, PartialReason: agent.PartialStreaming,
 		Content: []agent.ContentBlock{agent.TextBlock{Text: "half "}},
-	}))
+	})))
 
-	msgs, _, err := s.LoadConversation(ctx, "1")
-	require.NoError(t, err)
+	msgs := loadDecoded(t, ctx, s, "1")
 	require.Len(t, msgs, 2)
 	assert.Equal(t, agent.PartialErrored, msgs[1].PartialReason, "streaming tail should be rewritten to errored on load")
 	tb, ok := msgs[1].Content[0].(agent.TextBlock)
@@ -99,23 +118,27 @@ func TestGormStore_LoadFixesStreamingTail(t *testing.T) {
 	assert.Equal(t, "half ", tb.Text, "partial content preserved")
 }
 
-func TestGormStore_PreservesMetadataBlock(t *testing.T) {
+// TestGormStore_PreservesDisplayTextBlock 验证 cago Audience 体系下 user 消息
+// 的 raw 显示文本（@srv1 status 这种）以 DisplayTextBlock 形态持久化 + 完整 round-trip。
+// 这是历史回放 + 重启后前端 UserMessage chip 渲染的依据。
+func TestGormStore_PreservesDisplayTextBlock(t *testing.T) {
 	ctx, s := setupGormStore(t)
-	require.NoError(t, s.AppendMessage(ctx, "1", 0, agent.Message{
+	require.NoError(t, s.AppendMessage(ctx, "1", 0, mustEncode(t, agent.Message{
 		Role: agent.RoleUser,
 		Content: []agent.ContentBlock{
 			agent.TextBlock{Text: "expanded body"},
-			agent.MetadataBlock{Key: "display", Value: "@srv1 status"},
+			agent.DisplayTextBlock{Text: "@srv1 status"},
 		},
-	}))
-	msgs, _, err := s.LoadConversation(ctx, "1")
-	require.NoError(t, err)
+	})))
+	msgs := loadDecoded(t, ctx, s, "1")
 	require.Len(t, msgs, 1)
-	require.Len(t, msgs[0].Content, 2)
-	mb, ok := msgs[0].Content[1].(agent.MetadataBlock)
-	require.True(t, ok)
-	assert.Equal(t, "display", mb.Key)
-	assert.Equal(t, "@srv1 status", mb.Value)
+	require.Len(t, msgs[0].Content, 2, "TextBlock + DisplayTextBlock both kept")
+	tb, ok := msgs[0].Content[0].(agent.TextBlock)
+	require.True(t, ok, "block 0 should be TextBlock (LLM body)")
+	assert.Equal(t, "expanded body", tb.Text)
+	dt, ok := msgs[0].Content[1].(agent.DisplayTextBlock)
+	require.True(t, ok, "block 1 should be DisplayTextBlock (UI raw)")
+	assert.Equal(t, "@srv1 status", dt.Text)
 }
 
 func TestGormStore_ToolUseAndToolResultRoundTrip(t *testing.T) {
@@ -127,23 +150,22 @@ func TestGormStore_ToolUseAndToolResultRoundTrip(t *testing.T) {
 		Input:   map[string]any{"region": "us-west", "limit": float64(5)},
 		RawArgs: `{"region":"us-west","limit":5}`,
 	}
-	require.NoError(t, s.AppendMessage(ctx, "1", 0, agent.Message{
+	require.NoError(t, s.AppendMessage(ctx, "1", 0, mustEncode(t, agent.Message{
 		Role:    agent.RoleAssistant,
 		Content: []agent.ContentBlock{toolUse},
-	}))
+	})))
 
 	toolResult := agent.ToolResultBlock{
 		ToolUseID: "toolu_01abc",
 		IsError:   false,
 		Content:   []agent.ContentBlock{agent.TextBlock{Text: "found 3 servers"}},
 	}
-	require.NoError(t, s.AppendMessage(ctx, "1", 1, agent.Message{
+	require.NoError(t, s.AppendMessage(ctx, "1", 1, mustEncode(t, agent.Message{
 		Role:    agent.RoleUser,
 		Content: []agent.ContentBlock{toolResult},
-	}))
+	})))
 
-	msgs, _, err := s.LoadConversation(ctx, "1")
-	require.NoError(t, err)
+	msgs := loadDecoded(t, ctx, s, "1")
 	require.Len(t, msgs, 2)
 
 	gotUse, ok := msgs[0].Content[0].(agent.ToolUseBlock)
@@ -167,16 +189,16 @@ func TestGormStore_ToolUseAndToolResultRoundTrip(t *testing.T) {
 func TestGormStore_LoadEmpty_ReturnsNil(t *testing.T) {
 	ctx, s := setupGormStore(t)
 	// No AppendMessage calls; conversation row exists (seeded by setup) but no messages.
-	msgs, branch, err := s.LoadConversation(ctx, "1")
+	sms, branch, err := s.LoadConversation(ctx, "1")
 	require.NoError(t, err)
-	assert.Nil(t, msgs, "empty conv should return nil messages per cago Store contract")
+	assert.Nil(t, sms, "empty conv should return nil messages per cago Store contract")
 	assert.Equal(t, agentstore.BranchInfo{}, branch)
 }
 
 func TestGormStore_ImageBlockInlineRoundTrip(t *testing.T) {
 	ctx, s := setupGormStore(t)
 	inline := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A} // PNG magic bytes
-	require.NoError(t, s.AppendMessage(ctx, "1", 0, agent.Message{
+	require.NoError(t, s.AppendMessage(ctx, "1", 0, mustEncode(t, agent.Message{
 		Role: agent.RoleUser,
 		Content: []agent.ContentBlock{
 			agent.ImageBlock{
@@ -184,9 +206,8 @@ func TestGormStore_ImageBlockInlineRoundTrip(t *testing.T) {
 				Source:    agent.BlobSource{Inline: inline},
 			},
 		},
-	}))
-	msgs, _, err := s.LoadConversation(ctx, "1")
-	require.NoError(t, err)
+	})))
+	msgs := loadDecoded(t, ctx, s, "1")
 	require.Len(t, msgs, 1)
 	img, ok := msgs[0].Content[0].(agent.ImageBlock)
 	require.True(t, ok)

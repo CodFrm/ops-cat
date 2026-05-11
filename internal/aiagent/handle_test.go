@@ -59,6 +59,7 @@ func setupHandle(t *testing.T, prov provider.Provider) (*ConvHandle, *handleCapt
 	}()
 
 	h := NewConvHandle(1, conv, r)
+	h.AttachBridge(bridge)
 	return h, em, cancel
 }
 
@@ -77,6 +78,81 @@ func TestConvHandle_SendNewTurnWhenNoActive(t *testing.T) {
 	types := streamTypes(em.snapshot())
 	assert.Contains(t, types, "content")
 	assert.Contains(t, types, "done")
+}
+
+// TestConvHandle_SendNewTurnWithMention_NoQueueConsumedBatch 复现 bug：
+// 带 @-mention 时 raw != llmBody，display=raw 被挂到 user message 上做历史回放，
+// 但 bridge 不应该把这次 fresh Send 当 steer-drain emit queue_consumed_batch——
+// 否则前端会重复 push user 气泡 + 把当前 streaming asst 钉成空气泡。
+func TestConvHandle_SendNewTurnWithMention_NoQueueConsumedBatch(t *testing.T) {
+	prov := providertest.New().QueueStream(
+		provider.StreamChunk{ContentDelta: "ack"},
+		provider.StreamChunk{FinishReason: provider.FinishStop},
+	)
+	h, em, cancel := setupHandle(t, prov)
+	defer cancel()
+	defer func() { _ = h.Close() }()
+
+	raw := "@local-docker 检查容器"
+	llmBody := "## Mention context: local-docker (192.168.x.x)\n\n" + raw
+	require.NoError(t, h.Send(context.Background(), raw, llmBody))
+
+	// 等 done 出来再断言事件序列，避免读到流式 half-state。
+	waitFor(t, func() bool {
+		for _, e := range em.snapshot() {
+			if e.Type == "done" {
+				return true
+			}
+		}
+		return false
+	})
+
+	for _, e := range em.snapshot() {
+		assert.NotEqual(t, "queue_consumed_batch", e.Type,
+			"Send-new-turn 带 mention 时绝不应该 emit queue_consumed_batch")
+	}
+}
+
+// TestConvHandle_Edit_NoQueueConsumedBatch Edit 同样是前端已经本地 push 的
+// fresh user-append，bridge 必须跳过——否则编辑后会多出一条重复 user 气泡。
+func TestConvHandle_Edit_NoQueueConsumedBatch(t *testing.T) {
+	prov := providertest.New().
+		QueueStream(provider.StreamChunk{ContentDelta: "v1"}, provider.StreamChunk{FinishReason: provider.FinishStop}).
+		QueueStream(provider.StreamChunk{ContentDelta: "v2"}, provider.StreamChunk{FinishReason: provider.FinishStop})
+	h, em, cancel := setupHandle(t, prov)
+	defer cancel()
+	defer func() { _ = h.Close() }()
+
+	require.NoError(t, h.Send(context.Background(), "u1", "u1"))
+
+	// 等第一个 turn 走完再 edit，否则两个 turn 的事件混在一起断言不稳。
+	waitFor(t, func() bool {
+		count := 0
+		for _, e := range em.snapshot() {
+			if e.Type == "done" {
+				count++
+			}
+		}
+		return count >= 1
+	})
+
+	// Edit 带 mention 风格的 raw != llmBody。
+	require.NoError(t, h.Edit(context.Background(), 0, "@asset edited", "## ctx\n\n@asset edited"))
+
+	waitFor(t, func() bool {
+		count := 0
+		for _, e := range em.snapshot() {
+			if e.Type == "done" {
+				count++
+			}
+		}
+		return count >= 2
+	})
+
+	for _, e := range em.snapshot() {
+		assert.NotEqual(t, "queue_consumed_batch", e.Type,
+			"Edit 是 fresh user-append，bridge 不该 emit queue_consumed_batch")
+	}
 }
 
 func TestConvHandle_Cancel(t *testing.T) {

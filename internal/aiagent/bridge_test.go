@@ -79,11 +79,11 @@ func TestBridge_QueueConsumedBatch_AggregatesUserAppends(t *testing.T) {
 	// Two user-message appends in a row (e.g., from Steer'd queue draining)
 	userMsgA := agent.Message{Role: agent.RoleUser, Content: []agent.ContentBlock{
 		agent.TextBlock{Text: "expanded A"},
-		agent.MetadataBlock{Key: "display", Value: "raw A"},
+		agent.DisplayTextBlock{Text: "raw A"},
 	}}
 	userMsgB := agent.Message{Role: agent.RoleUser, Content: []agent.ContentBlock{
 		agent.TextBlock{Text: "expanded B"},
-		agent.MetadataBlock{Key: "display", Value: "raw B"},
+		agent.DisplayTextBlock{Text: "raw B"},
 	}}
 	b.OnConvChange(context.Background(), agent.Change{Kind: agent.ChangeAppended, Index: 0, Message: &userMsgA})
 	b.OnConvChange(context.Background(), agent.Change{Kind: agent.ChangeAppended, Index: 1, Message: &userMsgB})
@@ -318,16 +318,63 @@ func TestBridge_MessageEnd_NilUsageDoesNotEmit(t *testing.T) {
 	assert.Len(t, em.events, 0)
 }
 
-func TestBridge_TurnEnd_AndCancelledAreObservational(t *testing.T) {
-	// TurnEnd 自身不直接对应前端事件（usage 由 MessageEnd 承担，stopped 由 app_ai 在 stopGeneration 时发）。
-	// Cancelled 也是观察事件 —— 取消由 app_ai 的 stopGeneration 直接发 "stopped"，bridge 不重复发。
+func TestBridge_TurnEnd_AndOthersObservational(t *testing.T) {
+	// TurnEnd 自身不直接对应前端事件（usage 由 MessageEnd 承担，cancel/done 都在 EventDone 路径上）。
+	// ToolDelta / Compacted 同样是观察事件。
 	em := &captureEmitter{}
 	b := newBridge(42, em)
 	b.OnRunnerEvent(context.Background(), agent.Event{Kind: agent.EventTurnEnd})
-	b.OnRunnerEvent(context.Background(), agent.Event{Kind: agent.EventCancelled})
 	b.OnRunnerEvent(context.Background(), agent.Event{Kind: agent.EventToolDelta})
 	b.OnRunnerEvent(context.Background(), agent.Event{Kind: agent.EventCompacted})
 	assert.Len(t, em.events, 0)
+}
+
+func TestBridge_Cancelled_EmitsStopped(t *testing.T) {
+	// cago 任何取消路径都会先 EventCancelled 再 emitDone。
+	// 前端 "done" handler 把 running tool block 标 "completed"，"stopped" 才标 "cancelled" —
+	// 不发 stopped 的话，cancel 出来的工具气泡看起来像成功完成的。
+	em := &captureEmitter{}
+	b := newBridge(42, em)
+	b.OnRunnerEvent(context.Background(), agent.Event{
+		Kind:          agent.EventCancelled,
+		StopReason:    agent.StopCancelled,
+		PartialReason: "user",
+	})
+	assert.Len(t, em.events, 1)
+	assert.Equal(t, "stopped", em.events[0].Type)
+}
+
+func TestBridge_Cancelled_TimeoutEmitsStopped(t *testing.T) {
+	// ctx 超时路径 (StopTimeout) 同样必须发 stopped — 这是历史上完全没覆盖的路径，
+	// 之前 cancel 在 bridge 全被吞，前端只会看到 done，cancel 状态彻底丢失。
+	em := &captureEmitter{}
+	b := newBridge(42, em)
+	b.OnRunnerEvent(context.Background(), agent.Event{
+		Kind:       agent.EventCancelled,
+		StopReason: agent.StopTimeout,
+	})
+	assert.Len(t, em.events, 1)
+	assert.Equal(t, "stopped", em.events[0].Type)
+}
+
+func TestBridge_Cancelled_ThenDone_BothEmitted(t *testing.T) {
+	// 真实序列：EventCancelled → EventTurnEnd → EventDone
+	// bridge 应发 stopped + done；TurnEnd 仍是 observational。
+	em := &captureEmitter{}
+	b := newBridge(42, em)
+	b.OnRunnerEvent(context.Background(), agent.Event{Kind: agent.EventCancelled, PartialReason: "user"})
+	b.OnRunnerEvent(context.Background(), agent.Event{Kind: agent.EventTurnEnd})
+	b.OnRunnerEvent(context.Background(), agent.Event{Kind: agent.EventDone})
+	assert.Equal(t, []string{"stopped", "done"}, eventTypes(em.events))
+}
+
+func TestBridge_ThinkingDone_BeforeStopped(t *testing.T) {
+	// 思考中被 cancel：thinking → cancel 之间也要有 thinking_done，前端才能把 thinking 块切到 completed。
+	em := &captureEmitter{}
+	b := newBridge(42, em)
+	b.OnRunnerEvent(context.Background(), agent.Event{Kind: agent.EventThinkingDelta, Delta: "x"})
+	b.OnRunnerEvent(context.Background(), agent.Event{Kind: agent.EventCancelled, PartialReason: "user"})
+	assert.Equal(t, []string{"thinking", "thinking_done", "stopped"}, eventTypes(em.events))
 }
 
 func TestBridge_QueueConsumedBatch_FlushedBeforeToolStart(t *testing.T) {
@@ -336,7 +383,7 @@ func TestBridge_QueueConsumedBatch_FlushedBeforeToolStart(t *testing.T) {
 	em := &captureEmitter{}
 	b := newBridge(42, em)
 	userMsg := agent.Message{Role: agent.RoleUser, Content: []agent.ContentBlock{
-		agent.MetadataBlock{Key: "display", Value: "queued"},
+		agent.DisplayTextBlock{Text: "queued"},
 	}}
 	b.OnConvChange(context.Background(), agent.Change{Kind: agent.ChangeAppended, Message: &userMsg})
 
@@ -353,7 +400,7 @@ func TestBridge_QueueConsumedBatch_OnlyFlushedOnce(t *testing.T) {
 	em := &captureEmitter{}
 	b := newBridge(42, em)
 	userMsg := agent.Message{Role: agent.RoleUser, Content: []agent.ContentBlock{
-		agent.MetadataBlock{Key: "display", Value: "queued"},
+		agent.DisplayTextBlock{Text: "queued"},
 	}}
 	b.OnConvChange(context.Background(), agent.Change{Kind: agent.ChangeAppended, Message: &userMsg})
 
@@ -361,4 +408,72 @@ func TestBridge_QueueConsumedBatch_OnlyFlushedOnce(t *testing.T) {
 	b.OnRunnerEvent(context.Background(), agent.Event{Kind: agent.EventTextDelta, Delta: "b"})
 
 	assert.Equal(t, []string{"queue_consumed_batch", "content", "content"}, eventTypes(em.events))
+}
+
+func TestBridge_SkipNextUserAppend_SuppressesQueueConsumed(t *testing.T) {
+	// handle.Send 走 Send-new-turn 路径时（前端已自己 push 过 user 气泡），
+	// 应该 prime bridge 跳过下一条 user-append——否则带 @-mention 时 display
+	// 非空，会被误当作 steer-drain 重发 queue_consumed_batch，前端再 push 一条
+	// 重复 user 气泡 + 把当前 streaming assistant 钉成空气泡。
+	em := &captureEmitter{}
+	b := newBridge(42, em)
+
+	b.SkipNextUserAppend()
+
+	// 模拟 cago.runner.Send 内部 conv.Append 触发的 user-append（带 display）。
+	userMsg := agent.Message{Role: agent.RoleUser, Content: []agent.ContentBlock{
+		agent.TextBlock{Text: "expanded with mention ctx"},
+		agent.DisplayTextBlock{Text: "@asset 检查"},
+	}}
+	b.OnConvChange(context.Background(), agent.Change{Kind: agent.ChangeAppended, Message: &userMsg})
+
+	b.OnRunnerEvent(context.Background(), agent.Event{Kind: agent.EventTextDelta, Delta: "hi"})
+
+	// 没有 queue_consumed_batch — 跳过生效。
+	assert.Equal(t, []string{"content"}, eventTypes(em.events))
+}
+
+func TestBridge_SkipNextUserAppend_OnlyConsumesOneUserAppend(t *testing.T) {
+	// 第二条 user-append（典型场景：mid-turn steer drain）必须正常 buffer。
+	em := &captureEmitter{}
+	b := newBridge(42, em)
+
+	b.SkipNextUserAppend()
+	first := agent.Message{Role: agent.RoleUser, Content: []agent.ContentBlock{
+		agent.DisplayTextBlock{Text: "new-turn raw"},
+	}}
+	b.OnConvChange(context.Background(), agent.Change{Kind: agent.ChangeAppended, Message: &first})
+
+	second := agent.Message{Role: agent.RoleUser, Content: []agent.ContentBlock{
+		agent.DisplayTextBlock{Text: "drained"},
+	}}
+	b.OnConvChange(context.Background(), agent.Change{Kind: agent.ChangeAppended, Message: &second})
+
+	b.OnRunnerEvent(context.Background(), agent.Event{Kind: agent.EventTextDelta, Delta: "x"})
+
+	assert.Equal(t, []string{"queue_consumed_batch", "content"}, eventTypes(em.events))
+	assert.Equal(t, []string{"drained"}, em.events[0].QueueContents)
+}
+
+func TestBridge_SkipNextUserAppend_DoesNotConsumeAssistantAppend(t *testing.T) {
+	// flag 只能被 user-role append 消费——assistant 等其他 append 不应该把 flag 啃掉。
+	em := &captureEmitter{}
+	b := newBridge(42, em)
+
+	b.SkipNextUserAppend()
+
+	asst := agent.Message{Role: agent.RoleAssistant, Content: []agent.ContentBlock{
+		agent.TextBlock{Text: "..."},
+	}}
+	b.OnConvChange(context.Background(), agent.Change{Kind: agent.ChangeAppended, Message: &asst})
+
+	// 现在才轮到真正的 user-append——flag 还要在。
+	userMsg := agent.Message{Role: agent.RoleUser, Content: []agent.ContentBlock{
+		agent.DisplayTextBlock{Text: "new-turn raw"},
+	}}
+	b.OnConvChange(context.Background(), agent.Change{Kind: agent.ChangeAppended, Message: &userMsg})
+
+	b.OnRunnerEvent(context.Background(), agent.Event{Kind: agent.EventTextDelta, Delta: "x"})
+
+	assert.Equal(t, []string{"content"}, eventTypes(em.events))
 }

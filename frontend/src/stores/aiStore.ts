@@ -1313,6 +1313,10 @@ function resolveMentionedAssets(mentions: MentionRef[] | undefined): ai.Mentione
         type: asset.Type,
         host,
         groupPath: asset.GroupID ? groupPathMap.get(asset.GroupID) || "" : "",
+        // start/end 必须传给后端落库，否则刷新后 UserMessage.buildSegments
+        // 拿到的 mention.start=end=0，chip 切出空字符串渲染成空 button。
+        start: mr.start,
+        end: mr.end,
       })
     );
   }

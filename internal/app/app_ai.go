@@ -252,9 +252,17 @@ func (a *App) LoadConversationMessages(id int64) ([]ConversationDisplayMessage, 
 //   - user 行 → 若 blocks 全是 tool_result，则把 result content 按 toolCallId
 //     回填到上一条 assistant 的 tool block，不单独产出消息（前端 tool 块本来
 //     就把 call+result 合并展示）。否则当成普通 user 消息。
-//   - metadata.display 用作 user 消息的 raw 显示文本（mention 扩展后保 raw）。
+//   - display_text 块（cago Audience 体系）用作 user 消息的 raw 显示文本（mention
+//     扩展后保 raw）；老数据兼容 metadata{key:"display"}。
+//   - 紧跟在 tool_result-only user 行之后的 assistant 行，会折叠合并到上一条
+//     assistant 上：cago 每次 LLM 调用记一条 assistant，多轮 tool 后的最终
+//     格式化回复在 DB 是第 N+2 条；前端流式 reducer 把整轮都贴到同一气泡，
+//     历史回放要对齐这个体验，否则刷新后会变成两个 assistant 气泡。
 func buildDisplayMessages(msgs []*conversation_entity.Message) []ConversationDisplayMessage {
 	out := make([]ConversationDisplayMessage, 0, len(msgs))
+	// mergePending：刚处理了一条 tool_result-only user 行——下一条 assistant
+	// 应该 fold 进 out 末尾的 assistant，而不是独立成一条新消息。
+	mergePending := false
 	for _, m := range msgs {
 		var raw []map[string]any
 		if m.Blocks != "" {
@@ -283,6 +291,7 @@ func buildDisplayMessages(msgs []*conversation_entity.Message) []ConversationDis
 					Mentions:   mentions,
 					TokenUsage: tokenUsage,
 				})
+				mergePending = false
 				continue
 			}
 		}
@@ -292,10 +301,13 @@ func buildDisplayMessages(msgs []*conversation_entity.Message) []ConversationDis
 			// 若 user 行只有 tool_result 块 → 回填到上一条 assistant 的 tool block，跳过此行。
 			if onlyToolResults(raw) {
 				mergeToolResultsIntoLastAssistant(out, raw)
+				mergePending = true
 				continue
 			}
 			displayText := extractV2UserDisplay(raw)
 			if displayText == "" {
+				// 空 user 行（连 display 都没有）跳过；不动 mergePending——
+				// 它代表的是 "上一条 assistant 已结束 tool result 等待"，被空消息打断不合理。
 				continue
 			}
 			mentions, _ := m.GetMentions()
@@ -305,6 +317,7 @@ func buildDisplayMessages(msgs []*conversation_entity.Message) []ConversationDis
 				Blocks:  []conversation_entity.ContentBlock{{Type: "text", Content: displayText}},
 				Mentions: mentions,
 			})
+			mergePending = false
 			continue
 		}
 
@@ -314,23 +327,58 @@ func buildDisplayMessages(msgs []*conversation_entity.Message) []ConversationDis
 			continue
 		}
 		tokenUsage, _ := m.GetTokenUsage()
+		if mergePending && m.Role == "assistant" && len(out) > 0 && out[len(out)-1].Role == "assistant" {
+			prev := &out[len(out)-1]
+			prev.Blocks = append(prev.Blocks, blocks...)
+			if content != "" {
+				if prev.Content != "" {
+					prev.Content += "\n"
+				}
+				prev.Content += content
+			}
+			prev.TokenUsage = sumTokenUsage(prev.TokenUsage, tokenUsage)
+			mergePending = false
+			continue
+		}
 		out = append(out, ConversationDisplayMessage{
 			Role:       m.Role,
 			Content:    content,
 			Blocks:     blocks,
 			TokenUsage: tokenUsage,
 		})
+		mergePending = false
 	}
 	return out
 }
 
-// looksLikeV2Blocks 判断 raw 是否是 cago v2 形状（type ∈ {text,tool_use,tool_result,thinking,metadata,image}）。
+// sumTokenUsage 把两个 round 的 token 用量相加。任一为 nil 时返回另一个（不深拷贝，
+// 调用者持有所有权）；都为 nil 返回 nil。对齐 aiStore live "usage" handler 的累加语义。
+func sumTokenUsage(a, b *conversation_entity.TokenUsage) *conversation_entity.TokenUsage {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	return &conversation_entity.TokenUsage{
+		InputTokens:         a.InputTokens + b.InputTokens,
+		OutputTokens:        a.OutputTokens + b.OutputTokens,
+		CacheCreationTokens: a.CacheCreationTokens + b.CacheCreationTokens,
+		CacheReadTokens:     a.CacheReadTokens + b.CacheReadTokens,
+	}
+}
+
+// looksLikeV2Blocks 判断 raw 是否是 cago v2 形状（type ∈ {text,display_text,
+// tool_use,tool_result,thinking,metadata,image}）。
+//
 // v1 ContentBlock 有 toolName/toolInput/content/status 等字段；v2 用 name/input/text 等。
+// metadata 留作老 DB 行兼容（pre-DisplayTextBlock 写入的 {"type":"metadata",
+// "key":"display"} 行）。
 func looksLikeV2Blocks(raw []map[string]any) bool {
 	for _, b := range raw {
 		t, _ := b["type"].(string)
 		switch t {
-		case "tool_use", "tool_result", "thinking", "metadata", "image":
+		case "tool_use", "tool_result", "thinking", "metadata", "image", "display_text":
 			return true
 		case "text":
 			if _, ok := b["text"]; ok {
@@ -354,9 +402,18 @@ func onlyToolResults(raw []map[string]any) bool {
 	return true
 }
 
-// extractV2UserDisplay 优先返回 metadata.display 的 raw 文本（mention 扩展前的
-// 用户原文）；否则拼接所有 text 块。
+// extractV2UserDisplay 优先返回 display_text 块的 text（mention 扩展前的用户原文，
+// cago Audience 体系下 LLM 不可见 + UI/储存可见的官方载体）；否则降级到老格式
+// metadata{key:"display"}（pre-cago-rename DB 行兼容）；都没有时拼接所有 text 块。
 func extractV2UserDisplay(raw []map[string]any) string {
+	for _, b := range raw {
+		if t, _ := b["type"].(string); t == "display_text" {
+			if s, _ := b["text"].(string); s != "" {
+				return s
+			}
+		}
+	}
+	// 兼容：老行写的是 metadata{key:"display"}。
 	for _, b := range raw {
 		if t, _ := b["type"].(string); t == "metadata" {
 			if k, _ := b["key"].(string); k == "display" {
@@ -536,7 +593,8 @@ func (a *App) buildCagoProvider(p *ai_provider_entity.AIProvider) (provider.Prov
 
 // mentionsToStash 把 ai.MentionedAsset 切片转成 gormStore 旁路接收的形态。空切片
 // 返回 nil，避免 store 误把空 stash 当成「显式清空」(影响 PopPendingMentions
-// 的 nil 判断)。Asset 字段映射保持与 v1 持久化兼容：assetId/name/type/host/groupPath。
+// 的 nil 判断)。Asset 字段映射保持与 v1 持久化兼容：assetId/name/type/host/groupPath；
+// start/end 是前端 buildSegments 渲染 chip 必需的偏移——不传刷新后整个 chip 变成空 button。
 func mentionsToStash(ms []ai.MentionedAsset) []map[string]any {
 	if len(ms) == 0 {
 		return nil
@@ -549,6 +607,8 @@ func mentionsToStash(ms []ai.MentionedAsset) []map[string]any {
 			"type":      m.Type,
 			"host":      m.Host,
 			"groupPath": m.GroupPath,
+			"start":     m.Start,
+			"end":       m.End,
 		})
 	}
 	return out
@@ -686,11 +746,15 @@ func (a *App) RunAISlash(_ int64, line string) (*RunAISlashResult, error) {
 }
 
 // StopAIGeneration 停止指定会话的 AI 生成。
-// 即使 handle 不存在也会 emit stopped，让前端清掉进行中的 tool block。
+//
+// handle 存在 → h.Cancel 触发 cago EventCancelled，bridge 那边统一发 "stopped"
+// （见 bridge.go EventCancelled case，单源原则避免双发）。
+// handle 缺失 → 没有 cago 事件源，直接 emit 让前端清 UI。
 func (a *App) StopAIGeneration(convID int64) error {
 	if a.mgr != nil {
 		if h, err := a.mgr.Handle(a.langCtx(), convID); err == nil {
 			_ = h.Cancel("user")
+			return nil
 		}
 	}
 	eventName := fmt.Sprintf("ai:event:%d", convID)

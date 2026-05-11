@@ -110,9 +110,17 @@ func (m *Manager) Handle(ctx context.Context, convID int64) (*ConvHandle, error)
 	m.mu.Unlock()
 
 	sid := strconv.FormatInt(convID, 10)
-	msgs, branch, err := m.store.LoadConversation(ctx, sid)
+	stored, branch, err := m.store.LoadConversation(ctx, sid)
 	if err != nil {
 		return nil, fmt.Errorf("aiagent: load conv %d: %w", convID, err)
+	}
+	// cago Store 用 on-wire StoredMessage 形态（type discriminator 嵌 data），
+	// agent.LoadConversation 需要 in-memory typed Message —— 走 store.DecodeMessages
+	// 还原典型形态。失败说明 DB 行里有不认识的 block 类型（version skew），直接 bail
+	// 比塞个空 conv 让用户看到一片空白要好。
+	msgs, err := agentstore.DecodeMessages(stored)
+	if err != nil {
+		return nil, fmt.Errorf("aiagent: decode conv %d messages: %w", convID, err)
 	}
 
 	convOpts := []agent.ConvOption{agent.WithConvID(sid)}
@@ -147,6 +155,9 @@ func (m *Manager) Handle(ctx context.Context, convID int64) (*ConvHandle, error)
 	unbind := m.recorder.Bind(conv)
 
 	h := NewConvHandle(convID, conv, r)
+	// 让 Send/Edit 能在写 fresh user-append 前 prime bridge 跳过它，避免
+	// 重复 user 气泡 + 空 asst 占位（详见 bridge.skipNextUser 注释）。
+	h.AttachBridge(bridge)
 	// LIFO order: teardown runs in reverse — bridgeCancel first (stop emit
 	// translation), then unbind (release the recorder watch).
 	// gateway 没有后台 goroutine 了：RequestSingle 是同步调用，ctx 由 hook 的

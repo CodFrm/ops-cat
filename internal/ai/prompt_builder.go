@@ -17,12 +17,18 @@ type TabInfo struct {
 }
 
 // MentionedAsset 用户本次消息引用的资产（对应前端 @ 提及）
+//
+// Start/End 是 @-mention 在原 prompt 字符串中的字符偏移（JS 字符串索引）。前端
+// AIChatInput 提交时算出，gormStore 旁路落库到 conversation_messages.mentions JSON，
+// 刷新后 UserMessage.buildSegments 据此切片渲染 chip——丢了就会渲染成空 button。
 type MentionedAsset struct {
 	AssetID   int64  `json:"assetId"`
 	Name      string `json:"name"`
 	Type      string `json:"type"` // ssh/mysql/redis/mongo/...
 	Host      string `json:"host"`
 	GroupPath string `json:"groupPath"` // 完整路径 "生产/数据库"，无分组时为空
+	Start     int    `json:"start"`     // content 中字符起始索引（含 @ 符号）
+	End       int    `json:"end"`       // 结束索引（不含）
 }
 
 // AIContext 前端传入的上下文信息

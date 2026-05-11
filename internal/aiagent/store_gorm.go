@@ -23,6 +23,14 @@ type pendingMentionsProvider interface {
 
 // gormStore 把 cago agent.Conversation 的增量变更落到 conversation_messages 的
 // (conversation_id, sort_order) 行上。配合 agent/store.Recorder 监听 Conv.Watch 使用。
+//
+// 三路投影分工（重要）：
+//   - LLM：BuildRequest 按 Audience ToLLM 过滤；DisplayTextBlock 不带 ToLLM 自动剥离。
+//     这里不参与。
+//   - 储存（本文件）：Recorder 按 Audience ToStore 过滤后调进来，落到 DB 行的
+//     blocks/mentions/token_usage/partial_reason 几列。
+//   - UI：前端走 ai:event 流；历史回放走 app_ai.buildDisplayMessages 解析这里写出的
+//     flat JSON（{"type":"text","text":...} / {"type":"display_text","text":...}/...）。
 type gormStore struct {
 	repo     conversation_repo.ConversationRepo
 	mentions pendingMentionsProvider // may be nil (e.g., in unit tests)
@@ -45,18 +53,22 @@ func parseSessionID(s string) (int64, error) {
 	return id, nil
 }
 
-func (g *gormStore) AppendMessage(ctx context.Context, sessionID string, index int, msg agent.Message) error {
+func (g *gormStore) AppendMessage(ctx context.Context, sessionID string, index int, sm agentstore.StoredMessage) error {
 	convID, err := parseSessionID(sessionID)
 	if err != nil {
 		return err
+	}
+	msg, err := agentstore.DecodeMessage(sm)
+	if err != nil {
+		return fmt.Errorf("aiagent: decode stored message: %w", err)
 	}
 	row, err := messageToRow(convID, index, msg)
 	if err != nil {
 		return err
 	}
-	// Sidechannel: if a pendingMentions provider is wired and this is a user
-	// message, replace the row's Mentions column with the stashed mentions
-	// (richer than what extractMentions can pull from MetadataBlocks alone).
+	// Sidechannel: stashed mentions（由 app_ai 在 Send/Edit 前 Manager.StashMentions
+	// 写入）覆盖 row.Mentions —— 它带 start/end/groupPath 等前端 UI 必需字段，
+	// 比从 blocks 反推完整得多。
 	if g.mentions != nil && msg.Role == agent.RoleUser {
 		if stashed := g.mentions.PopPendingMentions(convID); stashed != nil {
 			mb, err := json.Marshal(stashed)
@@ -68,10 +80,14 @@ func (g *gormStore) AppendMessage(ctx context.Context, sessionID string, index i
 	return g.repo.AppendAt(ctx, convID, index, row)
 }
 
-func (g *gormStore) UpdateMessage(ctx context.Context, sessionID string, index int, msg agent.Message) error {
+func (g *gormStore) UpdateMessage(ctx context.Context, sessionID string, index int, sm agentstore.StoredMessage) error {
 	convID, err := parseSessionID(sessionID)
 	if err != nil {
 		return err
+	}
+	msg, err := agentstore.DecodeMessage(sm)
+	if err != nil {
+		return fmt.Errorf("aiagent: decode stored message: %w", err)
 	}
 	row, err := messageToRow(convID, index, msg)
 	if err != nil {
@@ -88,7 +104,7 @@ func (g *gormStore) TruncateAfter(ctx context.Context, sessionID string, index i
 	return g.repo.TruncateFrom(ctx, convID, index)
 }
 
-func (g *gormStore) LoadConversation(ctx context.Context, sessionID string) ([]agent.Message, agentstore.BranchInfo, error) {
+func (g *gormStore) LoadConversation(ctx context.Context, sessionID string) ([]agentstore.StoredMessage, agentstore.BranchInfo, error) {
 	convID, err := parseSessionID(sessionID)
 	if err != nil {
 		return nil, agentstore.BranchInfo{}, err
@@ -100,36 +116,49 @@ func (g *gormStore) LoadConversation(ctx context.Context, sessionID string) ([]a
 	if len(rows) == 0 {
 		return nil, agentstore.BranchInfo{}, nil
 	}
-	out := make([]agent.Message, 0, len(rows))
+	out := make([]agentstore.StoredMessage, 0, len(rows))
 	for _, r := range rows {
 		m, err := rowToMessage(r)
 		if err != nil {
 			return nil, agentstore.BranchInfo{}, err
 		}
-		out = append(out, m)
+		// crash-recovery invariant：尾部 PartialStreaming 残留改写为 errored，
+		// 让接下来的 turn 把它当作历史而不是当前正在输出的消息。
+		// 只对最后一条做改写，前面的保留原样（历史的 streaming 可能已经被后续
+		// turn 覆盖过，无需再动）。
+		sm, err := agentstore.EncodeMessage(m)
+		if err != nil {
+			return nil, agentstore.BranchInfo{}, fmt.Errorf("aiagent: encode message: %w", err)
+		}
+		out = append(out, sm)
 	}
-	// crash-recovery invariant：尾部 PartialStreaming 残留改写为 errored，让接下
-	// 来的 turn 把它当作历史而不是当前正在输出的消息。
-	if n := len(out); n > 0 && out[n-1].PartialReason == agent.PartialStreaming {
-		out[n-1].PartialReason = agent.PartialErrored
+	if n := len(out); n > 0 && agent.PartialState(out[n-1].PartialReason) == agent.PartialStreaming {
+		out[n-1].PartialReason = string(agent.PartialErrored)
 	}
 	return out, agentstore.BranchInfo{}, nil
 }
 
 // messageToRow 把 cago Message 序列化为 DB 行。
-//   - blocks: 全部 ContentBlock JSON（含 MetadataBlock）
-//   - mentions: 从 MetadataBlock{Key:"mentions"} 提取并序列化
+//
+// 序列化形态有意保 flat（{"type":...,"text":...}），不用 cago StoredBlock 的
+// {type,data} 嵌套形态——
+//   - migration 202605100001 backfill 写的是 flat
+//   - 前端 aiStore / app_ai.buildDisplayMessages 消费 flat
+//
+// 切换嵌套形态需要再写一次迁移 + 改前端解析，目前不值得。
+//
+// 字段映射：
+//   - blocks: 所有 ContentBlock 的 flat JSON
+//   - mentions: 由 AppendMessage 的旁路 (PopPendingMentions) 覆盖；这里默认空数组
 //   - token_usage: msg.Usage JSON（仅 assistant 非 nil 时填）
+//   - partial_reason: agent.PartialState 字符串值
 func messageToRow(convID int64, index int, m agent.Message) (*conversation_entity.Message, error) {
 	blocksJSON, err := json.Marshal(serializeBlocks(m.Content))
 	if err != nil {
 		return nil, fmt.Errorf("marshal blocks: %w", err)
 	}
-	mentions := extractMentions(m.Content)
-	mentionsJSON, err := json.Marshal(mentions)
-	if err != nil {
-		return nil, fmt.Errorf("marshal mentions: %w", err)
-	}
+	// 默认空 mentions（旁路写入会覆盖；非 user 行就此为空，与 v1 行为一致）。
+	mentionsJSON := []byte("[]")
 	var usageJSON string
 	if m.Usage != nil {
 		b, err := json.Marshal(m.Usage)
@@ -148,7 +177,7 @@ func messageToRow(convID int64, index int, m agent.Message) (*conversation_entit
 		Blocks:         string(blocksJSON),
 		Mentions:       string(mentionsJSON),
 		TokenUsage:     usageJSON,
-		PartialReason:  m.PartialReason,
+		PartialReason:  string(m.PartialReason),
 		SortOrder:      index,
 		Createtime:     created.Unix(),
 	}, nil
@@ -178,21 +207,30 @@ func rowToMessage(r *conversation_entity.Message) (agent.Message, error) {
 		Role:          agent.Role(r.Role),
 		Content:       content,
 		CreatedAt:     created,
-		PartialReason: r.PartialReason,
+		PartialReason: agent.PartialState(r.PartialReason),
 		Usage:         usage,
 	}, nil
 }
 
 // serializeBlocks 把 ContentBlock slice 序列化成 [{"type":..., ...}, ...]。
-// tag 用 ContentBlockType()，便于 deserializeBlocks 反向构造。
+// tag 用 Block.Type()（cago Audience 体系下的 on-wire 名）。
 //
-// 重要：text 块 key 用 "text"（与 migration 202605100001 backfill 对齐）。
+// flat 形态：每个块的字段直接平铺到 JSON 对象里，不嵌套 data 子对象。
+// 与 migration 202605100001 backfill + 前端 buildDisplayMessages 对齐。
+//
+// 已知不会被 ToStore 投影写入的块（如 NoticeBlock 仅 ToUI|ToStore，目前
+// 我们不发送）走 default 分支按 {type} 写出来 —— 不丢类型信息，但也不展开
+// 字段，反序列化时会被忽略。
 func serializeBlocks(blocks []agent.ContentBlock) []map[string]any {
 	out := make([]map[string]any, 0, len(blocks))
 	for _, b := range blocks {
-		entry := map[string]any{"type": b.ContentBlockType()}
+		entry := map[string]any{"type": b.Type()}
 		switch v := b.(type) {
 		case agent.TextBlock:
+			entry["text"] = v.Text
+		case agent.DisplayTextBlock:
+			// UI-only：BuildRequest 自动剥离（Audience 不含 ToLLM）。
+			// 储存这里需要 round-trip 回来，前端 UserMessage 才能渲染 raw 文本。
 			entry["text"] = v.Text
 		case agent.ToolUseBlock:
 			entry["id"] = v.ID
@@ -206,9 +244,6 @@ func serializeBlocks(blocks []agent.ContentBlock) []map[string]any {
 		case agent.ThinkingBlock:
 			entry["text"] = v.Text
 			entry["signature"] = v.Signature
-		case agent.MetadataBlock:
-			entry["key"] = v.Key
-			entry["value"] = v.Value
 		case agent.ImageBlock:
 			entry["media_type"] = v.MediaType
 			entry["url"] = v.Source.URL
@@ -227,6 +262,17 @@ func deserializeBlocks(raw []map[string]any) ([]agent.ContentBlock, error) {
 		switch r["type"] {
 		case "text":
 			out = append(out, agent.TextBlock{Text: asString(r["text"])})
+		case "display_text":
+			out = append(out, agent.DisplayTextBlock{Text: asString(r["text"])})
+		case "metadata":
+			// 兼容老 DB 行（cago 新 API 前写入的）：metadata{key:"display"} 等价于
+			// DisplayTextBlock。其他 key（mentions 等）历史上靠 extractMentions
+			// 再写到 mentions 列，typed message 这里就直接丢弃 —— 反正旁路覆盖了。
+			if asString(r["key"]) == "display" {
+				if s, ok := r["value"].(string); ok {
+					out = append(out, agent.DisplayTextBlock{Text: s})
+				}
+			}
 		case "tool_use":
 			input, _ := r["input"].(map[string]any)
 			out = append(out, agent.ToolUseBlock{
@@ -255,8 +301,6 @@ func deserializeBlocks(raw []map[string]any) ([]agent.ContentBlock, error) {
 			})
 		case "thinking":
 			out = append(out, agent.ThinkingBlock{Text: asString(r["text"]), Signature: asString(r["signature"])})
-		case "metadata":
-			out = append(out, agent.MetadataBlock{Key: asString(r["key"]), Value: r["value"]})
 		case "image":
 			src := agent.BlobSource{URL: asString(r["url"])}
 			if inlineStr, ok := r["inline"].(string); ok && inlineStr != "" {
@@ -281,16 +325,4 @@ func asString(v any) string {
 		return s
 	}
 	return ""
-}
-
-// extractMentions 从 Content 里查找 MetadataBlock{Key:"mentions"}，返回 Value 原值
-// （让后续 JSON marshal 决定形态）。提供给 messageToRow 把 mentions 列单独写库
-// （保 v1 行为）。
-func extractMentions(blocks []agent.ContentBlock) any {
-	for _, b := range blocks {
-		if mb, ok := b.(agent.MetadataBlock); ok && mb.Key == "mentions" {
-			return mb.Value
-		}
-	}
-	return []any{}
 }

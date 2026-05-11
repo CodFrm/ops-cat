@@ -29,6 +29,15 @@ type eventBridge struct {
 	mu      sync.Mutex
 	pending []string
 
+	// skipNextUser 标记下一条 user-role ChangeAppended 不应该缓存到 pending。
+	// 由 ConvHandle.Send 在走 Send-new-turn 路径前 prime——前端那时已经本地 push
+	// 了 user 气泡，bridge 再发 queue_consumed_batch 会导致：(1) 重复 user 气泡
+	// (2) 当前 streaming asst placeholder 被钉成空气泡。
+	//
+	// 不用 counter 是因为单 conv 同时只有一次 Send 在飞——bool 足够，避免泄漏。
+	// 只被 user-role append 消费；其他 role 不动它。
+	skipNextUser bool
+
 	// inThinking marks that the most recently emitted runner delta was a
 	// thinking delta. When the next non-thinking event arrives (text, tool,
 	// turn end, done, cancel, error), the bridge emits a synthetic
@@ -36,6 +45,15 @@ type eventBridge struct {
 	// running thinking block to completed. cago has no explicit thinking-end
 	// event; we infer the boundary from the next observable event.
 	inThinking bool
+}
+
+// SkipNextUserAppend 让 bridge 跳过下一条 user-role ChangeAppended 的 pending 缓存。
+// 只对最近的一次 user-append 生效，被消费即清零。
+// 由 ConvHandle.Send（Send-new-turn 分支）和 ConvHandle.Edit 调用。
+func (b *eventBridge) SkipNextUserAppend() {
+	b.mu.Lock()
+	b.skipNextUser = true
+	b.mu.Unlock()
 }
 
 // newBridge constructs a bridge for the given conversation. The bridge does
@@ -58,6 +76,15 @@ func (b *eventBridge) OnConvChange(_ context.Context, ch agent.Change) {
 	}
 	display := extractDisplayText(ch.Message.Content)
 	b.mu.Lock()
+	if b.skipNextUser {
+		// Send-new-turn / Edit 路径：前端已经本地 push 了 user 气泡，bridge 不
+		// 该再 echo。DisplayTextBlock 同时承担「历史回放渲染」职责，所以它必须
+		// 经由 Recorder 落库（Audience 含 ToStore），但这里不能再走
+		// queue_consumed_batch 链路。
+		b.skipNextUser = false
+		b.mu.Unlock()
+		return
+	}
 	b.pending = append(b.pending, display)
 	b.mu.Unlock()
 }
@@ -162,8 +189,15 @@ func (b *eventBridge) OnRunnerEvent(_ context.Context, ev agent.Event) {
 	case agent.EventDone:
 		b.emit.Emit(b.convID, ai.StreamEvent{Type: "done"})
 
-	case agent.EventCancelled, agent.EventTurnEnd,
-		agent.EventToolDelta, agent.EventCompacted:
+	case agent.EventCancelled:
+		// cago 的任何 cancel 路径（user-stop / ctx 超时 / framework 内部 cancel）都会
+		// 先发 EventCancelled 再 emitDone。前端 "done" handler 把 running tool block
+		// 标 "completed"，"stopped" 才标 "cancelled" —— 不发 stopped，被 cancel 的工具
+		// 气泡看起来像成功完成。bridge 在这里发 stopped 是单源；app_ai.StopAIGeneration
+		// 走 h.Cancel(...) 时不再重复直发，仅在 handle 缺失时兜底（见 app_ai.go）。
+		b.emit.Emit(b.convID, ai.StreamEvent{Type: "stopped"})
+
+	case agent.EventTurnEnd, agent.EventToolDelta, agent.EventCompacted:
 		// Observational or handled elsewhere — nothing to emit.
 		// (EventMessageEnd is handled above for the usage emit.)
 	}
@@ -184,15 +218,17 @@ func (b *eventBridge) maybeEmitThinkingDone(nextKind agent.EventKind) {
 	b.emit.Emit(b.convID, ai.StreamEvent{Type: "thinking_done"})
 }
 
-// extractDisplayText finds the first MetadataBlock{Key:"display"} in the
-// message content and returns its Value as a string. Returns empty string
-// when not found or when the value is not a string.
+// extractDisplayText finds the first DisplayTextBlock in the message content
+// and returns its Text. Returns empty string when not found.
+//
+// DisplayTextBlock 的 Audience 是 ToUI|ToStore（不含 LLM），是 cago 新 API 里替
+// 代老 MetadataBlock{Key:"display"} 的「raw 用户输入」承载体。bridge 把它解出来
+// 是为了在 steer-drain 时通过 queue_consumed_batch 让前端补 user 气泡 ——
+// 前端要的是 raw（"@srv1 状态"），不是 expanded body。
 func extractDisplayText(blocks []agent.ContentBlock) string {
 	for _, b := range blocks {
-		if mb, ok := b.(agent.MetadataBlock); ok && mb.Key == "display" {
-			if s, ok := mb.Value.(string); ok {
-				return s
-			}
+		if d, ok := b.(agent.DisplayTextBlock); ok {
+			return d.Text
 		}
 	}
 	return ""

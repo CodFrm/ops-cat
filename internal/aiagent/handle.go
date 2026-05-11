@@ -16,6 +16,7 @@ type ConvHandle struct {
 	convID int64
 	conv   *agent.Conversation
 	runner *agent.Runner
+	bridge *eventBridge // optional; nil-safe (unit tests may omit).
 	closed bool
 
 	// Wired by Manager.Handle. Close() unwinds them in reverse order.
@@ -36,6 +37,14 @@ func NewConvHandle(convID int64, conv *agent.Conversation, runner *agent.Runner)
 	return &ConvHandle{convID: convID, conv: conv, runner: runner}
 }
 
+// AttachBridge wires the per-conv event bridge so Send/Edit can prime
+// SkipNextUserAppend before fresh user-message appends. Manager calls this
+// inside Handle(); unit tests that don't need queue-consumed semantics may
+// leave it unset (handle is nil-safe).
+func (h *ConvHandle) AttachBridge(b *eventBridge) {
+	h.bridge = b
+}
+
 // ConvID returns the conversation ID this handle manages.
 func (h *ConvHandle) ConvID() int64 { return h.convID }
 
@@ -52,9 +61,11 @@ func (h *ConvHandle) Conv() *agent.Conversation { return h.conv }
 //     The runner's auto-continue picks it up after the next safe point.
 //  2. If no active turn (ErrSteerNoActiveTurn), start a new turn via Send.
 //
-// The display text is attached as a MetadataBlock{Key:"display", Value:raw}
-// so the UI can render the user's raw input unchanged while the LLM sees the
-// expanded form. (See Task 3 / Task 4 for the cago-side support.)
+// The display text rides on a DisplayTextBlock (Audience=ToUI|ToStore) when
+// raw != llmBody, so the UI keeps the user's raw input ("@srv1 status") while
+// BuildRequest strips it before the LLM call. On the Steer path the equivalent
+// is WithSteerDisplay(raw); on the Send-new-turn path WithSendDisplay(raw); on
+// the Edit / mid-turn append path buildUserMessage attaches it directly.
 func (h *ConvHandle) Send(ctx context.Context, raw, llmBody string) error {
 	// Steer 路径必须始终挂 WithSteerDisplay(raw)：bridge.OnConvChange 用 display
 	// 字段区分「队列 drain 的 user msg」(需要 emit queue_consumed_batch 让前端 pop
@@ -75,8 +86,13 @@ func (h *ConvHandle) Send(ctx context.Context, raw, llmBody string) error {
 	}
 
 	// Send 路径（新 turn）：前端已经 push 了 user 气泡，所以 display 仅在 mention
-	// 扩展导致 raw != llmBody 时挂上（让历史回放渲染 raw 而不是 expanded body），
-	// 否则 bridge 会把同一条 user msg echo 回去造成重复气泡。
+	// 扩展导致 raw != llmBody 时挂上（让历史回放渲染 raw 而不是 expanded body）。
+	// 因为这条 user-append 不该走 bridge 的 queue_consumed_batch 链路，必须先 prime
+	// bridge 跳过——否则带 @ 提及时 display 非空，前端会重复 push user 气泡，并把
+	// 当前 streaming asst placeholder 钉成空气泡。
+	if h.bridge != nil {
+		h.bridge.SkipNextUserAppend()
+	}
 	sendOpts := []agent.SendOption{}
 	if raw != "" && raw != llmBody {
 		sendOpts = append(sendOpts, agent.WithSendDisplay(raw))
@@ -111,6 +127,11 @@ func (h *ConvHandle) Cancel(reason string) error {
 func (h *ConvHandle) Edit(ctx context.Context, idx int, raw, llmBody string) error {
 	if err := h.conv.Truncate(idx); err != nil {
 		return err
+	}
+	// 与 Send 新 turn 同理：前端 edit 框已经把新文本本地 push 上去了，下面这条
+	// conv.Append 不该再 echo 回前端，否则会重复一条 user 气泡。
+	if h.bridge != nil {
+		h.bridge.SkipNextUserAppend()
 	}
 	h.conv.Append(buildUserMessage(raw, llmBody))
 	return h.resend(ctx)
@@ -151,11 +172,18 @@ func (h *ConvHandle) resend(ctx context.Context) error {
 }
 
 // buildUserMessage constructs a user Message with the LLM body as the primary
-// TextBlock and an optional display MetadataBlock when raw differs from llmBody.
+// TextBlock and an optional DisplayTextBlock when raw differs from llmBody.
+//
+// 三路投影：
+//   - LLM：TextBlock(llmBody) 走 BuildRequest（Audience=ToAll）。
+//   - UI：raw != llmBody 时挂 DisplayTextBlock(raw) —— 前端历史回放渲染 raw。
+//   - 储存：两块都被 Recorder 写入（Audience 都含 ToStore）。
+//
+// raw == llmBody 时只挂一个 TextBlock，UI 走 text fallback 渲染。
 func buildUserMessage(raw, llmBody string) agent.Message {
 	content := []agent.ContentBlock{agent.TextBlock{Text: llmBody}}
 	if raw != "" && raw != llmBody {
-		content = append(content, agent.MetadataBlock{Key: "display", Value: raw})
+		content = append(content, agent.DisplayTextBlock{Text: raw})
 	}
 	return agent.Message{Role: agent.RoleUser, Content: content}
 }
