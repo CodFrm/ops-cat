@@ -2,11 +2,10 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/cago-frame/agents/provider"
 	"github.com/cago-frame/agents/provider/anthropics"
@@ -46,8 +45,8 @@ func normalizeConversationTitle(title string) string {
 	return title
 }
 
-// activateProvider 根据激活的 AI Provider 配置构建 cago provider 并清空旧 Systems。
-// 切换 provider 时若不重置 aiAgentSystems，旧 *aiagent.System 会继续持有旧 provider
+// activateProvider 根据激活的 AI Provider 配置构建 cago provider 并重建 Manager。
+// 切换 provider 时若不重置 Manager，旧 *aiagent.ConvHandle 会继续持有旧 provider
 // 引用，必须重启软件才能生效。
 func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
 	prov, err := a.buildCagoProvider(p)
@@ -56,39 +55,66 @@ func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
 	}
 	a.aiProvider = prov
 	a.aiModel = p.Model
-	a.resetAIAgentSystems()
+	a.resetManager(prov)
 	return nil
 }
 
-// resetAIAgentSystems 关闭并清空所有缓存的 *aiagent.System。
-// 并发 Close 配 3s 超时上限：cago Close 是幂等的且通常很快，但若某个 Close 因
-// goroutine 调度问题卡住，超时后放行避免阻塞 UI；泄漏的 System 只持有旧 provider
-// 引用，不影响正确性。
-func (a *App) resetAIAgentSystems() {
-	var wg sync.WaitGroup
-	a.aiAgentSystems.Range(func(key, value any) bool {
-		if sys, ok := value.(*aiagent.System); ok {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				_ = sys.Close(a.ctx)
-			}()
-		}
-		a.aiAgentSystems.Delete(key)
-		return true
-	})
-
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		logger.Default().Warn("resetAIAgentSystems: 部分 System Close 未在 3s 内完成，放行关闭")
+// resetManager closes any existing Manager and constructs a new one bound
+// to the given cago provider. Called when the active AI Provider changes.
+//
+// TODO(Task 22+): 真实 system prompt（语言 + 扩展 skill MD）、tools registry、
+// audit / policy / mention adapter 仍是 stub；当前用 passthrough 让骨架先跑通。
+func (a *App) resetManager(prov provider.Provider) {
+	if a.mgr != nil {
+		_ = a.mgr.Close()
 	}
+	emitter := aiagent.EmitterFunc(func(convID int64, event ai.StreamEvent) {
+		eventName := fmt.Sprintf("ai:event:%d", convID)
+		wailsRuntime.EventsEmit(a.ctx, eventName, event)
+	})
+	resolver := aiagent.PendingResolver(func(confirmID string) (chan ai.ApprovalResponse, func()) {
+		ch := make(chan ai.ApprovalResponse, 1)
+		a.pendingAIApprovals.Store(confirmID, ch)
+		return ch, func() { a.pendingAIApprovals.Delete(confirmID) }
+	})
+	a.mgr = aiagent.NewManager(aiagent.ManagerOptions{
+		Provider:      prov,
+		System:        "", // TODO Task 22: assemble from a.lang + extension skill MD
+		Tools:         nil,
+		MaxRounds:     50,
+		Emitter:       emitter,
+		Resolver:      resolver,
+		LocalGrants:   aiagent.NewRepoLocalGrantStore(),
+		AuditWriter:   noopAuditWriter{},
+		PolicyChecker: passthroughPolicyChecker{},
+		Mention:       passthroughMentionResolver{},
+		TabOpener:     noopTabOpener{},
+	})
 }
+
+// Stub adapters — replaced by real impls in a future task. They preserve
+// behavior compatibility (no policy denials, no mentions expansion, no audit).
+type noopAuditWriter struct{}
+
+func (noopAuditWriter) Write(_ context.Context, _, _, _ string, _ bool) error {
+	return nil
+}
+
+type passthroughPolicyChecker struct{}
+
+func (passthroughPolicyChecker) Check(_ context.Context, _ string, _ map[string]any) (bool, string, error) {
+	return true, "", nil
+}
+
+type passthroughMentionResolver struct{}
+
+func (passthroughMentionResolver) Expand(_ context.Context, raw string) (string, []map[string]any, []string, error) {
+	return raw, nil, nil, nil
+}
+
+type noopTabOpener struct{}
+
+func (noopTabOpener) Open(_ context.Context, _ string) error { return nil }
 
 // InitAIProvider 启动时加载激活的 Provider
 func (a *App) InitAIProvider() {
@@ -227,14 +253,60 @@ func (a *App) LoadConversationMessages(id int64) ([]ConversationDisplayMessage, 
 	return a.loadConversationDisplayMessages(ctx, id)
 }
 
-// buildDisplayMessages 把按 sort_order 排好的 cago-shape conversation_messages 行
-// 聚合成前端展示用的 ConversationDisplayMessage 列表。
-//
-// TODO(Task 20): v1 path removed; await Phase 3 rewrite with v2 Message struct.
-// This stub returns an empty slice to keep the build green.
-func buildDisplayMessages(_ []*conversation_entity.Message) []ConversationDisplayMessage {
-	// v1 path removed; await Task 20 rewrite
-	return nil
+// buildDisplayMessages 把 cago v2 schema 的 conversation_messages 行聚合成前端
+// 展示用的 ConversationDisplayMessage 列表。当前实现仅处理 text 块；rich
+// rendering（tool calls、thinking、metadata）留待后续 Task。
+func buildDisplayMessages(msgs []*conversation_entity.Message) []ConversationDisplayMessage {
+	out := make([]ConversationDisplayMessage, 0, len(msgs))
+	for _, m := range msgs {
+		// First try the legacy ContentBlock decode path (v1 shape).
+		text := ""
+		if blocks, err := m.GetBlocks(); err == nil {
+			for _, b := range blocks {
+				if b.Type == "text" {
+					text += b.Content
+				}
+			}
+		}
+		// Fall back to v2 raw shape: [{"type":"text","text":"..."}, ...]
+		if text == "" {
+			text = extractV2Text(m.Blocks)
+		}
+		if text == "" {
+			continue
+		}
+		mentions, _ := m.GetMentions()
+		tokenUsage, _ := m.GetTokenUsage()
+		out = append(out, ConversationDisplayMessage{
+			Role:       m.Role,
+			Content:    text,
+			Blocks:     nil, // rich blocks deferred; frontend may degrade to plain text
+			Mentions:   mentions,
+			TokenUsage: tokenUsage,
+		})
+	}
+	return out
+}
+
+// extractV2Text walks the raw cago-v2 blocks JSON and concatenates all text
+// blocks. Returns "" on parse failure or when no text is present.
+func extractV2Text(blocksJSON string) string {
+	if blocksJSON == "" {
+		return ""
+	}
+	var raw []map[string]any
+	if err := json.Unmarshal([]byte(blocksJSON), &raw); err != nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, b := range raw {
+		if t, _ := b["type"].(string); t == "text" {
+			if s, _ := b["text"].(string); s != "" {
+				sb.WriteString(s)
+			}
+		}
+	}
+	return sb.String()
 }
 
 func (a *App) loadConversationDisplayMessages(ctx context.Context, id int64) ([]ConversationDisplayMessage, error) {
@@ -252,8 +324,8 @@ func (a *App) switchToConversation(conv *conversation_entity.Conversation) {
 
 // DeleteConversation 删除会话
 func (a *App) DeleteConversation(id int64) error {
-	if v, ok := a.aiAgentSystems.LoadAndDelete(id); ok {
-		_ = v.(*aiagent.System).Close(a.ctx)
+	if a.mgr != nil {
+		_ = a.mgr.CloseHandle(id)
 	}
 
 	err := conversation_svc.Conversation().Delete(a.langCtx(), id)
@@ -287,9 +359,9 @@ func (a *App) buildCagoProvider(p *ai_provider_entity.AIProvider) (provider.Prov
 	}
 }
 
-// SendAIMessage 发送一轮对话到 cago 后端。首条消息时自动创建会话 + 设置标题；
-// cago Session 持久化历史，因此只把最后一条 user 消息当作 prompt 传入。
-func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AIContext) error {
+// SendAIMessage 发送一轮对话到 cago Manager。首条消息时自动创建会话 + 设置标题。
+// cago 自身持久化历史，因此只把最后一条 user 消息当作 prompt 传入。
+func (a *App) SendAIMessage(convID int64, messages []ai.Message, _ ai.AIContext) error {
 	ctx := a.langCtx()
 
 	if convID == 0 {
@@ -312,7 +384,7 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 		}
 	}
 
-	// Extract the last user turn — cago Session has its own persisted history.
+	// Extract the last user turn — Manager-backed Conv has its own persisted history.
 	var prompt string
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == ai.RoleUser {
@@ -324,105 +396,16 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 		return fmt.Errorf("no user message in send")
 	}
 
-	sys, err := a.getOrCreateAIAgentSystem(convID)
+	if a.mgr == nil {
+		return fmt.Errorf("请先配置 AI Provider")
+	}
+	h, err := a.mgr.Handle(ctx, convID)
 	if err != nil {
 		return err
 	}
-
-	// Per-turn extension skill MD: same logic as legacy path.
-	ext := make(map[string]string)
-	if a.extSvc != nil {
-		bridge := a.extSvc.Bridge()
-		seen := make(map[string]bool)
-		for _, tab := range aiCtx.OpenTabs {
-			if seen[tab.Type] {
-				continue
-			}
-			seen[tab.Type] = true
-			if skillMD := bridge.GetSkillMDWithExtension(tab.Type); skillMD.Content != "" {
-				ext[skillMD.ExtensionName] = skillMD.Content
-			}
-		}
-	}
-
-	return sys.Stream(ctx, prompt, aiCtx, ext)
-}
-
-// getOrCreateAIAgentSystem returns a cached *aiagent.System for convID or
-// builds a new one. activateProvider eagerly builds aiProvider, so we just
-// guard against the no-active-provider case here.
-func (a *App) getOrCreateAIAgentSystem(convID int64) (*aiagent.System, error) {
-	if v, ok := a.aiAgentSystems.Load(convID); ok {
-		return v.(*aiagent.System), nil
-	}
-
-	if a.aiProvider == nil {
-		return nil, fmt.Errorf("请先配置 AI Provider")
-	}
-
-	conv, err := conversation_svc.Conversation().Get(a.langCtx(), convID)
-	if err != nil {
-		return nil, fmt.Errorf("conversation %d not found: %w", convID, err)
-	}
-	cwd := conv.WorkDir
-	if cwd == "" {
-		var derr error
-		cwd, derr = defaultConversationWorkDir()
-		if derr != nil {
-			return nil, derr
-		}
-	}
-
-	lang := "en"
-	if a.lang == "zh-cn" {
-		lang = "zh-cn"
-	}
-
-	checker := ai.NewCommandPolicyChecker(a.makeCommandConfirmFunc())
-	checker.SetGrantRequestFunc(a.makeGrantRequestFunc())
-
-	deps := &aiagent.Deps{
-		SSHPool:       a.sshPool,
-		KafkaService:  a.kafkaService,
-		PolicyChecker: checker,
-	}
-
-	eventName := fmt.Sprintf("ai:event:%d", convID)
-	emitter := aiagent.EmitterFunc(func(_ int64, event ai.StreamEvent) {
-		wailsRuntime.EventsEmit(a.ctx, eventName, event)
-	})
-
-	resolver := aiagent.PendingResolver(func(confirmID string) (chan ai.ApprovalResponse, func()) {
-		ch := make(chan ai.ApprovalResponse, 1)
-		a.pendingAIApprovals.Store(confirmID, ch)
-		return ch, func() { a.pendingAIApprovals.Delete(confirmID) }
-	})
-
-	sys, err := aiagent.NewSystem(a.ctx, aiagent.SystemOptions{
-		Provider: a.aiProvider,
-		Model:    a.aiModel,
-		Cwd:      cwd,
-		ConvID:   convID,
-		Lang:     lang,
-		Deps:     deps,
-		Emitter:  emitter,
-		// CheckPerm 默认走 ai.CheckPermission（静态策略，不触发审批回调），审批弹卡走
-		// gw.RequestSingle 通过 emitter 闭包发出，对得上当前会话的 ai:event:<convID>。
-		// 老路径上 deps.PolicyChecker / makeCommandConfirmFunc 仍保留，给 batch_command
-		// 和 tool handler 内部冗余 check 用。
-		Resolver: resolver,
-		Activate: func() { a.activateWindow() },
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create aiagent.System: %w", err)
-	}
-
-	if existing, loaded := a.aiAgentSystems.LoadOrStore(convID, sys); loaded {
-		// Race: another goroutine created one first. Discard ours, return the winner.
-		_ = sys.Close(a.ctx)
-		return existing.(*aiagent.System), nil
-	}
-	return sys, nil
+	// raw == llmBody for now (mention expansion deferred). When the real
+	// MentionResolver is wired in a follow-up, llmBody differs from raw.
+	return h.Send(ctx, prompt, prompt)
 }
 
 // QueueAIMessage 在生成过程中通过 cago Steer 注入用户消息。
@@ -432,48 +415,67 @@ func (a *App) QueueAIMessage(convID int64, content string, mentions []ai.Mention
 	if mentionCtx := ai.RenderMentionContext(mentions); mentionCtx != "" {
 		body = mentionCtx + "\n\n" + content
 	}
-	v, ok := a.aiAgentSystems.Load(convID)
-	if !ok {
+	if a.mgr == nil {
 		return fmt.Errorf("会话 %d 没有正在运行的生成", convID)
 	}
-	return v.(*aiagent.System).Steer(a.ctx, body, content)
+	h, err := a.mgr.Handle(a.langCtx(), convID)
+	if err != nil {
+		return err
+	}
+	return h.Send(a.langCtx(), content, body)
 }
 
-// RunAISlashResult mirrors aiagent.SlashResult shape for Wails type generation.
+// EditAIMessage 截断 conv 在 idx 处，重新追加 user 消息并重生成。
+func (a *App) EditAIMessage(convID int64, idx int, content string) error {
+	if a.mgr == nil {
+		return fmt.Errorf("请先配置 AI Provider")
+	}
+	h, err := a.mgr.Handle(a.langCtx(), convID)
+	if err != nil {
+		return err
+	}
+	return h.Edit(a.langCtx(), idx, content, content)
+}
+
+// RegenerateAIMessage 截断指定 assistant 消息及其后所有消息，从前一条 user
+// 消息重新生成。
+func (a *App) RegenerateAIMessage(convID int64, assistIdx int) error {
+	if a.mgr == nil {
+		return fmt.Errorf("请先配置 AI Provider")
+	}
+	h, err := a.mgr.Handle(a.langCtx(), convID)
+	if err != nil {
+		return err
+	}
+	return h.Regenerate(a.langCtx(), assistIdx)
+}
+
+// RunAISlashResult mirrors the pre-v2 slash result shape for Wails type generation.
 type RunAISlashResult struct {
 	IsSlash bool   `json:"isSlash"`
 	Prompt  string `json:"prompt"`
 	Notice  string `json:"notice"`
 }
 
-// RunAISlash 解析 /slash 命令。
-//   - IsSlash=false → 前端把 line 当普通消息走 SendAIMessage。
-//   - Prompt 非空 → 前端用 Prompt 调 SendAIMessage（模板展开）。
-//   - Notice 非空 → 前端把它作为合成的 system 消息渲染（/help、/compact 摘要）。
-//
-// 未识别的 /command 返回 aiagent.ErrUnknownSlashCommand。
-func (a *App) RunAISlash(convID int64, line string) (*RunAISlashResult, error) {
-	v, ok := a.aiAgentSystems.Load(convID)
-	if !ok {
-		return nil, fmt.Errorf("会话 %d 没有活跃的 AI System", convID)
-	}
-	sys := v.(*aiagent.System)
-	res, err := sys.RunSlash(a.langCtx(), line)
-	if err != nil {
-		return nil, err
+// RunAISlash 解析 /slash 命令。cago v2 还没有 slash 解析器，这里返回 stub —
+// 非 / 开头视为普通消息，/ 开头返回带说明的 Notice。完整 slash 支持留待后续 Task。
+func (a *App) RunAISlash(_ int64, line string) (*RunAISlashResult, error) {
+	if !strings.HasPrefix(line, "/") {
+		return &RunAISlashResult{IsSlash: false}, nil
 	}
 	return &RunAISlashResult{
-		IsSlash: res.IsSlash,
-		Prompt:  res.Prompt,
-		Notice:  res.Notice,
+		IsSlash: true,
+		Notice:  fmt.Sprintf("slash 命令暂时不可用（cago v2 迁移中）：%s", line),
 	}, nil
 }
 
 // StopAIGeneration 停止指定会话的 AI 生成。
-// 即使 sys 不存在也会 emit stopped，让前端清掉进行中的 tool block。
+// 即使 handle 不存在也会 emit stopped，让前端清掉进行中的 tool block。
 func (a *App) StopAIGeneration(convID int64) error {
-	if v, ok := a.aiAgentSystems.Load(convID); ok {
-		v.(*aiagent.System).StopStream()
+	if a.mgr != nil {
+		if h, err := a.mgr.Handle(a.langCtx(), convID); err == nil {
+			_ = h.Cancel("user")
+		}
 	}
 	eventName := fmt.Sprintf("ai:event:%d", convID)
 	wailsRuntime.EventsEmit(a.ctx, eventName, ai.StreamEvent{Type: "stopped"})

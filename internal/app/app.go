@@ -11,6 +11,7 @@ import (
 	"github.com/cago-frame/agents/provider"
 
 	"github.com/opskat/opskat/internal/ai"
+	"github.com/opskat/opskat/internal/aiagent"
 	"github.com/opskat/opskat/internal/approval"
 	_ "github.com/opskat/opskat/internal/assettype"
 	"github.com/opskat/opskat/internal/bootstrap"
@@ -70,8 +71,8 @@ type App struct {
 	sftpService             *sftp_svc.Service
 	forwardManager          *ForwardManager
 	aiProvider              provider.Provider // 每次激活 AI Provider 时由 activateProvider 重建
-	aiModel                 string            // 当前激活 AIProvider.Model；NewSystem 时透传给底层 WithModel
-	aiAgentSystems          sync.Map          // map[int64]*aiagent.System (one per active conversation)
+	aiModel                 string            // 当前激活 AIProvider.Model；Manager 构造时透传
+	mgr                     *aiagent.Manager  // cago v2 多会话 Manager（per-convID *ConvHandle）
 	githubAuthCancel        context.CancelFunc
 	permissionChan          chan ai.PermissionResponse // 前端权限响应 channel（CLI 工具用）
 	pendingAIApprovals      sync.Map                   // map[string]chan ai.ApprovalResponse（AI 审批用）
@@ -193,6 +194,10 @@ func (a *App) Cleanup() {
 	// 先发送关闭信号，解除所有阻塞等待（审批、权限确认等），避免 wg.Wait 死锁
 	close(a.shutdownCh)
 
+	if a.mgr != nil {
+		_ = a.mgr.Close()
+		a.mgr = nil
+	}
 	if a.kafkaService != nil {
 		a.kafkaService.Close()
 		a.kafkaService = nil
