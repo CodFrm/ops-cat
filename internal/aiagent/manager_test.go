@@ -22,8 +22,8 @@ import (
 // noopMention always returns the input unchanged.
 type noopMention struct{}
 
-func (noopMention) Expand(_ context.Context, raw string) (string, []map[string]any, []string, error) {
-	return raw, nil, nil, nil
+func (noopMention) Expand(_ context.Context, raw string) (string, []string, error) {
+	return raw, nil, nil
 }
 
 type noopTabOpener struct{}
@@ -107,7 +107,9 @@ func TestManager_DifferentConvsIndependent(t *testing.T) {
 	require.NoError(t, h2.Send(context.Background(), "y", "y"))
 }
 
-func TestManager_StashAndPopMentions(t *testing.T) {
+// 验证：user 消息 LLM body 里的 inline <mention> 标签被 gormStore 反向解析
+// 落到 row.Mentions 列。取代旧的 StashMentions 旁路。
+func TestManager_InlineMentionPersistsToRow(t *testing.T) {
 	prov := providertest.New().QueueStream(
 		provider.StreamChunk{ContentDelta: "ack"},
 		provider.StreamChunk{FinishReason: provider.FinishStop},
@@ -115,12 +117,10 @@ func TestManager_StashAndPopMentions(t *testing.T) {
 	m := setupManager(t, prov)
 	defer func() { _ = m.Close() }()
 
-	mentions := []map[string]any{{"asset_id": float64(42), "asset_name": "srv1"}}
-	m.StashMentions(1, mentions)
-
 	h, err := m.Handle(context.Background(), 1)
 	require.NoError(t, err)
-	require.NoError(t, h.Send(context.Background(), "hi @srv1", "hi [server srv1]"))
+	llmBody := `hi <mention asset-id="42" name="srv1" type="ssh" host="" group="" start="3" end="8">@srv1</mention>`
+	require.NoError(t, h.Send(context.Background(), "hi @srv1", llmBody))
 
 	// Recorder writes happen asynchronously via Conv.Watch; poll briefly.
 	var msgs []*conversation_entity.Message
@@ -133,9 +133,9 @@ func TestManager_StashAndPopMentions(t *testing.T) {
 		return msgs[0].Mentions != "" && msgs[0].Mentions != "[]"
 	}, 2*time.Second, 10*time.Millisecond, "user message with mentions should land in DB")
 
-	assert.Contains(t, msgs[0].Mentions, "srv1")
-	// After Pop, the stash should be empty for next call
-	assert.Empty(t, m.PopPendingMentions(1))
+	assert.Contains(t, msgs[0].Mentions, `"name":"srv1"`)
+	assert.Contains(t, msgs[0].Mentions, `"start":3`)
+	assert.Contains(t, msgs[0].Mentions, `"end":8`)
 }
 
 func TestManager_Handle_LoadsExistingConv(t *testing.T) {

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { create } from "zustand";
 import {
   SendAIMessage,
+  EditAIMessage,
   StopAIGeneration,
   QueueAIMessage,
   GetActiveAIProvider,
@@ -72,6 +73,17 @@ export interface ChatMessage {
   streaming?: boolean;
   mentions?: MentionRef[];
   tokenUsage?: TokenUsage;
+  // 后端 conversation_messages.sort_order；编辑/重生成必须传它给后端 Truncate
+  // （前端 messages 索引与后端 sort_order 不再 1:1，因 buildDisplayMessages 合并
+  // 多轮 assistant + 吸收 tool-result 行）。流式 push 的占位消息无该字段。
+  sortOrder?: number;
+  // cago agent.PartialState（"errored"/"canceled"/"tokens_limit"/"timeout"）。
+  // 空表示消息正常完成。运行时 "error"/"stopped" 事件和历史回放都写这两个字段，
+  // 保证 live 渲染和刷新后渲染走同一路径。
+  partialReason?: string;
+  // PartialReason 对应的人类可读详情（errored 时是 err.Error()，cancelled 时是
+  // 取消原因，等等）。空时按 partialReason 显示通用文案。
+  partialDetail?: string;
 }
 
 export interface PendingQueueItem {
@@ -482,6 +494,9 @@ function convertDisplayMessages(displayMsgs: app.ConversationDisplayMessage[]): 
         }
       : undefined,
     streaming: false,
+    sortOrder: dm.sortOrder,
+    partialReason: dm.partialReason || undefined,
+    partialDetail: dm.partialDetail || undefined,
   }));
 }
 
@@ -837,11 +852,14 @@ function resetConversationForReplay(convId: number, messages: ChatMessage[]) {
 }
 
 // 把“编辑并重发”和“重新生成”统一到一条 replay 流程里，避免两套截断逻辑继续分叉。
+// editSortOrder >= 0 时走后端 EditAIMessage（先 Truncate(sortOrder) 再 Append 新 user
+// 再 Resend），保证 DB 也截断；否则走普通 SendAIMessage（追加新 user）。
 async function replayConversation(
   convId: number,
   nextMessages: ChatMessage[],
   content: string,
-  mentions?: MentionRef[]
+  mentions?: MentionRef[],
+  editSortOrder?: number
 ) {
   const streaming = useAIStore.getState().conversationStreaming[convId] || { sending: false, pendingQueue: [] };
   prepareConversationForReplay(convId);
@@ -852,7 +870,7 @@ async function replayConversation(
   resetConversationForReplay(convId, nextMessages);
 
   if (content.trim()) {
-    await _sendForConversation(convId, content, mentions);
+    await _sendForConversation(convId, content, mentions, editSortOrder);
     return;
   }
 
@@ -1270,9 +1288,13 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
 
     case "error": {
       cleanupStreamBuffer(convId);
+      // 把错误信息写到 message 的 partialReason/partialDetail 上（而不是拼到 blocks
+      // 末尾）。这样 live 渲染路径与历史回放（convertDisplayMessages）走同一套字段，
+      // 刷新会话后渲染结果完全一致——不再出现"刷新前看得到错误气泡，刷新后丢了"的现象。
       const updated = updateLastAssistant(msgs, (msg) => ({
         ...msg,
-        blocks: appendText(msg.blocks, `\n\n**Error:** ${event.error}`),
+        partialReason: "errored",
+        partialDetail: event.error || msg.partialDetail || "",
         streaming: false,
       }));
       if (updated) {
@@ -1408,8 +1430,10 @@ function expandToAPIMessages(messages: ChatMessage[]): ai.Message[] {
   return out;
 }
 
-// 核心发送：完全基于 convId，共享给 sendToTab / sendFromSidebar / regenerate
-async function _sendForConversation(convId: number, content: string, mentions?: MentionRef[]) {
+// 核心发送：完全基于 convId，共享给 sendToTab / sendFromSidebar / regenerate / editAndResend。
+// editSortOrder >= 0 时切到 EditAIMessage 路径：后端会 Truncate(sortOrder) → Append(new user) → Resend，
+// 真正把 DB 里旧消息删干净。否则走普通 SendAIMessage（h.Send 仅 append）。
+async function _sendForConversation(convId: number, content: string, mentions?: MentionRef[], editSortOrder?: number) {
   conversationStopRequests.delete(convId);
   const state = useAIStore.getState();
   const streaming = state.conversationStreaming[convId] || { sending: false, pendingQueue: [] };
@@ -1494,18 +1518,22 @@ async function _sendForConversation(convId: number, content: string, mentions?: 
         })
     );
 
-  // 收集所有 user 消息的 mentions（按 assetId 去重、资产已删除跳过）
-  const allMentions: MentionRef[] = [];
-  for (const m of newMessages) {
-    if (m.role !== "user" || !m.mentions) continue;
-    allMentions.push(...m.mentions);
-  }
-  const mentionedAssets = resolveMentionedAssets(allMentions);
+  // 只用本次发送消息自带的 mentions —— 后端 ai.WrapMentions 会把它们包成 inline
+  // <mention> XML 在 LLM body 里，gormStore 反向解析落 row.Mentions。聚合历史
+  // mentions 会让旧 start/end 偏移误污染下一行（"继续" 被渲染为 chip 那个 bug）。
+  const mentionedAssets = resolveMentionedAssets(mentions);
 
   const aiContext = new ai.AIContext({ openTabs, mentionedAssets });
 
   try {
-    await SendAIMessage(convId, apiMessages, aiContext);
+    if (editSortOrder != null && editSortOrder >= 0) {
+      // 后端 h.Edit 会 Truncate(sortOrder) + Append(user) + Resend。
+      // bridge.SkipNextUserAppend 保证不会 echo 一条重复的 user 气泡——
+      // 前端这边 L1437-1454 已经本地 push 了新 user + assistant 占位。
+      await EditAIMessage(convId, editSortOrder, content, mentionedAssets);
+    } else {
+      await SendAIMessage(convId, apiMessages, aiContext);
+    }
   } catch {
     updateConversation(convId, { sending: false });
     cleanupConvListener(convId);
@@ -2150,8 +2178,13 @@ export const useAIStore = create<AIState>((set, get) => {
       }
 
       const truncated = messages.slice(0, messageIndex);
+      // 前端 messages 索引 ≠ 后端 sort_order（buildDisplayMessages 合并多轮 assistant
+      // + 吸收 tool-result 行），必须把 target 自身的 sortOrder 传给后端 Truncate。
+      // 流式占位的 user 消息没有 sortOrder——这类消息后端还没存，直接走 fallback
+      // 普通 send，避免 EditAIMessage 拿到无效 idx。
+      const editSortOrder = target.sortOrder;
       // 从被编辑消息之前的稳定历史重新发送，确保后续分支完全替换。
-      await replayConversation(convId, truncated, content, mentions);
+      await replayConversation(convId, truncated, content, mentions, editSortOrder);
     },
 
     stopConversation: async (convId: number) => {

@@ -152,6 +152,86 @@ func TestApprovalGateway_AllowAllSkipsAssetKind(t *testing.T) {
 }
 
 // ctx 取消时 RequestSingle 立即返回 deny。
+func grantItem(assetID int64, name, cmd string) ai.ApprovalItem {
+	return ai.ApprovalItem{Type: "grant", AssetID: assetID, AssetName: name, Command: cmd}
+}
+
+// RequestGrant 拒绝路径：发出 kind="grant" 弹卡 + 一次 approval_result(deny)，
+// 返回 approved=false。看住 request_permission handler ↔ gateway 的契约。reason
+// 必须挂到 StreamEvent.Description —— 前端 ApprovalBlock 在 grant 卡上单独渲染
+// 这条描述，掉了它用户就看不到 AI 为什么申请这些权限。
+func TestApprovalGateway_RequestGrant_Deny(t *testing.T) {
+	em := &apprCaptureEmitter{}
+	res := newFakeResolver()
+	g := NewApprovalGateway(42, em, &fakeGrants{}, res.Resolver())
+	res.respCh <- ai.ApprovalResponse{Decision: "deny"}
+
+	approved, patterns := g.RequestGrant(context.Background(),
+		[]ai.ApprovalItem{grantItem(7, "srv", "docker *")},
+		"check containers")
+
+	assert.False(t, approved)
+	assert.Empty(t, patterns)
+	assert.Len(t, em.events, 2)
+	assert.Equal(t, "approval_request", em.events[0].Type)
+	assert.Equal(t, "grant", em.events[0].Kind)
+	assert.Equal(t, "check containers", em.events[0].Description)
+	assert.Equal(t, "approval_result", em.events[1].Type)
+	assert.Equal(t, "deny", em.events[1].Content)
+}
+
+// RequestGrant 允许路径：用户允许（无编辑）→ 用原始 patterns 落库，返回
+// approved=true + 全量 patterns。持久化层在测试中无 grant_repo，SaveGrantPattern
+// 走 nil-guard 早退；这里只验证 gateway 自身的路由 + 返回值。
+func TestApprovalGateway_RequestGrant_AllowEchoesPatterns(t *testing.T) {
+	em := &apprCaptureEmitter{}
+	res := newFakeResolver()
+	g := NewApprovalGateway(42, em, &fakeGrants{}, res.Resolver())
+	res.respCh <- ai.ApprovalResponse{Decision: "allow"}
+
+	approved, patterns := g.RequestGrant(context.Background(),
+		[]ai.ApprovalItem{
+			grantItem(7, "srv", "docker *"),
+			grantItem(7, "srv", "systemctl status *"),
+		}, "check fleet")
+
+	assert.True(t, approved)
+	assert.Equal(t, []string{"docker *", "systemctl status *"}, patterns)
+}
+
+// 用户编辑过 items（去掉一条 / 改写一条）→ 落库以编辑后为准。
+func TestApprovalGateway_RequestGrant_HonorsEditedItems(t *testing.T) {
+	em := &apprCaptureEmitter{}
+	res := newFakeResolver()
+	g := NewApprovalGateway(42, em, &fakeGrants{}, res.Resolver())
+	res.respCh <- ai.ApprovalResponse{
+		Decision: "allow",
+		EditedItems: []ai.ApprovalItem{
+			grantItem(7, "srv", "docker ps"),
+			grantItem(7, "srv", ""), // 空串应被丢弃
+		},
+	}
+
+	approved, patterns := g.RequestGrant(context.Background(),
+		[]ai.ApprovalItem{grantItem(7, "srv", "docker *")},
+		"narrow it down")
+
+	assert.True(t, approved)
+	assert.Equal(t, []string{"docker ps"}, patterns)
+}
+
+// 空 items 直接返回 (false, nil)，不发任何事件。
+func TestApprovalGateway_RequestGrant_NoItems(t *testing.T) {
+	em := &apprCaptureEmitter{}
+	res := newFakeResolver()
+	g := NewApprovalGateway(42, em, &fakeGrants{}, res.Resolver())
+
+	approved, patterns := g.RequestGrant(context.Background(), nil, "")
+	assert.False(t, approved)
+	assert.Empty(t, patterns)
+	assert.Empty(t, em.events)
+}
+
 func TestApprovalGateway_CtxCancelDenies(t *testing.T) {
 	em := &apprCaptureEmitter{}
 	res := newFakeResolver()

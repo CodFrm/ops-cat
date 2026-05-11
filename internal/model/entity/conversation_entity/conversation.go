@@ -68,6 +68,7 @@ type Message struct {
 	Mentions       string `gorm:"column:mentions;type:text"`    // []ai.MentionedAsset JSON
 	TokenUsage     string `gorm:"column:token_usage;type:text"` // *agent.Usage JSON，仅 assistant 可能有
 	PartialReason  string `gorm:"column:partial_reason;type:varchar(16);not null;default:''"`
+	PartialDetail  string `gorm:"column:partial_detail;type:text;not null;default:''"` // 配合 PartialReason 的人类可读详情（错误信息 / 取消原因 / …）
 	SortOrder      int    `gorm:"column:sort_order;not null;default:0;uniqueIndex:idx_conv_msg_unique,priority:2"`
 	Createtime     int64  `gorm:"column:createtime"`
 }

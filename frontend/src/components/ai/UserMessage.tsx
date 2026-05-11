@@ -24,6 +24,9 @@ function buildSegments(content: string, mentions: MentionRef[] | undefined): Seg
   const segs: Segment[] = [];
   let cursor = 0;
   for (const m of sorted) {
+    // 越界 / 反向 / 重叠的 mention 整体丢弃（兜底脏数据：例如旧旁路 bug 把
+    // 上条消息的 start/end 打到了短文本行上，会让 slice 吞掉整条文本渲染成 chip）。
+    if (m.start < cursor || m.end > content.length || m.end <= m.start) continue;
     if (m.start > cursor) segs.push({ type: "text", text: content.slice(cursor, m.start) });
     segs.push({ type: "mention", text: content.slice(m.start, m.end), mention: m });
     cursor = m.end;

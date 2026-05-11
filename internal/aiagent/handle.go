@@ -3,8 +3,11 @@ package aiagent
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/cago-frame/agents/agent"
+
+	"github.com/opskat/opskat/internal/ai"
 )
 
 // ConvHandle wraps a single conversation's cago *Conversation + *Runner. It is
@@ -16,7 +19,8 @@ type ConvHandle struct {
 	convID int64
 	conv   *agent.Conversation
 	runner *agent.Runner
-	bridge *eventBridge // optional; nil-safe (unit tests may omit).
+	bridge *eventBridge     // optional; nil-safe (unit tests may omit).
+	gw     *ApprovalGateway // optional; nil-safe (only request_permission needs it).
 	closed bool
 
 	// Wired by Manager.Handle. Close() unwinds them in reverse order.
@@ -45,6 +49,32 @@ func (h *ConvHandle) AttachBridge(b *eventBridge) {
 	h.bridge = b
 }
 
+// AttachGateway wires the per-conv ApprovalGateway so Send/Edit/Regenerate
+// can inject it (as ai.GrantApprover) into the turn ctx. request_permission
+// looks it up via ai.GetGrantApprover to route grant approvals to the same
+// per-conv emitter/resolver channel used by single-call approvals.
+//
+// nil-safe: tests that don't exercise request_permission may skip Attach.
+func (h *ConvHandle) AttachGateway(gw *ApprovalGateway) {
+	h.gw = gw
+}
+
+// injectConvCtx wraps ctx with conv-scoped values needed by ops tool handlers:
+//   - ai.WithSessionID: lets ai.matchGrantPatterns / SaveGrantPattern read &
+//     write the conv's grant items under the same sessionID the gateway uses.
+//   - ai.WithGrantApprover: handler for request_permission to route grant
+//     approval through the per-conv ApprovalGateway.
+//
+// Called by Send / Edit / Regenerate (any path that starts a new turn). The
+// Steer path inherits the prior turn's ctx and so picks these up automatically.
+func (h *ConvHandle) injectConvCtx(ctx context.Context) context.Context {
+	ctx = ai.WithSessionID(ctx, fmt.Sprintf("conv_%d", h.convID))
+	if h.gw != nil {
+		ctx = ai.WithGrantApprover(ctx, h.gw)
+	}
+	return ctx
+}
+
 // ConvID returns the conversation ID this handle manages.
 func (h *ConvHandle) ConvID() int64 { return h.convID }
 
@@ -67,6 +97,7 @@ func (h *ConvHandle) Conv() *agent.Conversation { return h.conv }
 // is WithSteerDisplay(raw); on the Send-new-turn path WithSendDisplay(raw); on
 // the Edit / mid-turn append path buildUserMessage attaches it directly.
 func (h *ConvHandle) Send(ctx context.Context, raw, llmBody string) error {
+	ctx = h.injectConvCtx(ctx)
 	// Steer 路径必须始终挂 WithSteerDisplay(raw)：bridge.OnConvChange 用 display
 	// 字段区分「队列 drain 的 user msg」(需要 emit queue_consumed_batch 让前端 pop
 	// 本地 pendingQueue) 和「新 turn 的首条 user msg」(前端已自己 push，bridge 不
@@ -162,6 +193,7 @@ func (h *ConvHandle) Close() error {
 
 // resend triggers a fresh turn from the current conversation tail.
 func (h *ConvHandle) resend(ctx context.Context) error {
+	ctx = h.injectConvCtx(ctx)
 	events, err := h.runner.Resend(ctx)
 	if err != nil {
 		return err

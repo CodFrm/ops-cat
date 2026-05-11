@@ -43,11 +43,12 @@ func TestBuildDisplayMessages_MultiRoundMergesIntoSingleAssistant(t *testing.T) 
 			SortOrder:  1,
 			Createtime: 2,
 		},
-		// 2: user-role 只含 tool_result（cago 的 tool-result turn）
+		// 2: tool-role 只含 tool_result（cago v2 把 tool turn 的 role 定义成 "tool"，
+		// 不是 "user"——provider/types.go:12 RoleTool = "tool"）。
 		{
 			ID:             3,
 			ConversationID: 1,
-			Role:           "user",
+			Role:           "tool",
 			Blocks: mustJSON(t, []map[string]any{
 				{"type": "tool_result", "tool_use_id": "call_1", "is_error": false,
 					"content": []map[string]any{{"type": "text", "text": "CONTAINER ID  NAME\nabc123  astrbot"}}},
@@ -122,6 +123,82 @@ func TestBuildDisplayMessages_AssistantSeparatedByRealUserMsgNotMerged(t *testin
 	}
 	out := buildDisplayMessages(rows)
 	require.Len(t, out, 4, "user/assistant/user/assistant 必须保留 4 条")
+}
+
+// TestBuildDisplayMessages_PartialReasonAndDetailPropagate 验证流中途出错后，
+// 重新进入会话时，已输出的内容 + PartialReason/PartialDetail 都能透传给前端，
+// 不会再像旧实现那样把"出错"状态在加载路径上丢掉。
+func TestBuildDisplayMessages_PartialReasonAndDetailPropagate(t *testing.T) {
+	rows := []*conversation_entity.Message{
+		{
+			ID:         1,
+			Role:       "user",
+			Blocks:     mustJSON(t, []map[string]any{{"type": "text", "text": "explain X"}}),
+			SortOrder:  0,
+			Createtime: 1,
+		},
+		{
+			ID:   2,
+			Role: "assistant",
+			Blocks: mustJSON(t, []map[string]any{
+				{"type": "text", "text": "Let me start by"},
+			}),
+			PartialReason: "errored",
+			PartialDetail: "context deadline exceeded",
+			SortOrder:     1,
+			Createtime:    2,
+		},
+	}
+
+	out := buildDisplayMessages(rows)
+	require.Len(t, out, 2)
+	asst := out[1]
+	assert.Equal(t, "assistant", asst.Role)
+	assert.Equal(t, "errored", asst.PartialReason, "PartialReason must reach the frontend so the bubble can render the error state")
+	assert.Equal(t, "context deadline exceeded", asst.PartialDetail, "PartialDetail must round-trip so the error message survives reload")
+	require.Len(t, asst.Blocks, 1, "已输出的内容必须保留")
+	assert.Contains(t, asst.Blocks[0].Content, "Let me start by")
+}
+
+// TestBuildDisplayMessages_MultiRoundMergedTakesLastPartialState 验证多轮 assistant
+// 折叠时，partial 状态取**最后一条**——前面几条必然是已 finalized（cago 不会在
+// errored/canceled 之后继续下一轮），合并后整组的状态应反映最末那条的命运。
+func TestBuildDisplayMessages_MultiRoundMergedTakesLastPartialState(t *testing.T) {
+	rows := []*conversation_entity.Message{
+		{ID: 1, Role: "user", Blocks: mustJSON(t, []map[string]any{{"type": "text", "text": "q"}}), SortOrder: 0},
+		// 第一轮 assistant：正常 finalized。
+		{
+			ID:   2,
+			Role: "assistant",
+			Blocks: mustJSON(t, []map[string]any{
+				{"type": "tool_use", "id": "c1", "name": "echo", "input": map[string]any{}},
+			}),
+			SortOrder: 1,
+		},
+		// tool_result-only。
+		{
+			ID:   3,
+			Role: "tool",
+			Blocks: mustJSON(t, []map[string]any{
+				{"type": "tool_result", "tool_use_id": "c1", "content": []map[string]any{{"type": "text", "text": "ok"}}},
+			}),
+			SortOrder: 2,
+		},
+		// 第二轮 assistant：流中途出错。
+		{
+			ID:            4,
+			Role:          "assistant",
+			Blocks:        mustJSON(t, []map[string]any{{"type": "text", "text": "partial reply"}}),
+			PartialReason: "errored",
+			PartialDetail: "upstream 503",
+			SortOrder:     3,
+		},
+	}
+	out := buildDisplayMessages(rows)
+	require.Len(t, out, 2, "两轮 assistant 中间只夹 tool_result，应折叠为 1 条")
+	asst := out[1]
+	assert.Equal(t, "errored", asst.PartialReason, "合并后必须反映最后一条的 partial 状态")
+	assert.Equal(t, "upstream 503", asst.PartialDetail)
 }
 
 func mustJSON(t *testing.T, v any) string {

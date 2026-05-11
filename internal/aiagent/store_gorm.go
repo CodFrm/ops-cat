@@ -6,20 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cago-frame/agents/agent"
 	agentstore "github.com/cago-frame/agents/agent/store"
 
+	"github.com/opskat/opskat/internal/ai"
 	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
 	"github.com/opskat/opskat/internal/repository/conversation_repo"
 )
-
-// pendingMentionsProvider lets the store pull stashed mentions for a user
-// message at AppendMessage time. Manager implements this.
-type pendingMentionsProvider interface {
-	PopPendingMentions(convID int64) []map[string]any
-}
 
 // gormStore 把 cago agent.Conversation 的增量变更落到 conversation_messages 的
 // (conversation_id, sort_order) 行上。配合 agent/store.Recorder 监听 Conv.Watch 使用。
@@ -31,17 +27,19 @@ type pendingMentionsProvider interface {
 //     blocks/mentions/token_usage/partial_reason 几列。
 //   - UI：前端走 ai:event 流；历史回放走 app_ai.buildDisplayMessages 解析这里写出的
 //     flat JSON（{"type":"text","text":...} / {"type":"display_text","text":...}/...）。
+//
+// Mentions：user 消息的 LLM body（TextBlock 内容）携带 inline `<mention>` 标签，
+// 本 store 在 AppendMessage user-role 路径里调 ai.ParseMentions 反向解析，写入
+// row.Mentions JSON。这是为了取代旧的 Manager.StashMentions 旁路——元数据与消息
+// 正文原子绑定，避免历史 mention offset 被误打到下条 row 上。
 type gormStore struct {
-	repo     conversation_repo.ConversationRepo
-	mentions pendingMentionsProvider // may be nil (e.g., in unit tests)
+	repo conversation_repo.ConversationRepo
 }
 
 // NewGormStore returns an agent/store.Store backed by OpsKat's conversation_repo.
-// provider may be nil (used in unit tests where no Manager is involved).
-func NewGormStore(provider pendingMentionsProvider) agentstore.Store {
+func NewGormStore() agentstore.Store {
 	return &gormStore{
-		repo:     conversation_repo.Conversation(),
-		mentions: provider,
+		repo: conversation_repo.Conversation(),
 	}
 }
 
@@ -66,18 +64,35 @@ func (g *gormStore) AppendMessage(ctx context.Context, sessionID string, index i
 	if err != nil {
 		return err
 	}
-	// Sidechannel: stashed mentions（由 app_ai 在 Send/Edit 前 Manager.StashMentions
-	// 写入）覆盖 row.Mentions —— 它带 start/end/groupPath 等前端 UI 必需字段，
-	// 比从 blocks 反推完整得多。
-	if g.mentions != nil && msg.Role == agent.RoleUser {
-		if stashed := g.mentions.PopPendingMentions(convID); stashed != nil {
-			mb, err := json.Marshal(stashed)
-			if err == nil {
-				row.Mentions = string(mb)
-			}
+	// user 消息从 TextBlock 反向解析 inline `<mention>` 标签 → row.Mentions。
+	// 这条路径取代了旧的 Manager.StashMentions 旁路：mention 元数据与消息正文
+	// 原子绑定，不会被前端历史 mention 聚合错位污染下一行。
+	if msg.Role == agent.RoleUser {
+		if mentionsJSON := extractMentionsJSON(msg.Content); mentionsJSON != "" {
+			row.Mentions = mentionsJSON
 		}
 	}
 	return g.repo.AppendAt(ctx, convID, index, row)
+}
+
+// extractMentionsJSON 从 user 消息的 TextBlock 里扫 <mention> 标签反序列化成
+// row.Mentions JSON。无 mention 时返回 ""（保留 messageToRow 给出的默认 "[]"）。
+func extractMentionsJSON(blocks []agent.ContentBlock) string {
+	var body strings.Builder
+	for _, b := range blocks {
+		if tb, ok := b.(agent.TextBlock); ok {
+			body.WriteString(tb.Text)
+		}
+	}
+	mentions := ai.ParseMentions(body.String())
+	if len(mentions) == 0 {
+		return ""
+	}
+	mb, err := json.Marshal(mentions)
+	if err != nil {
+		return ""
+	}
+	return string(mb)
 }
 
 func (g *gormStore) UpdateMessage(ctx context.Context, sessionID string, index int, sm agentstore.StoredMessage) error {
@@ -134,6 +149,11 @@ func (g *gormStore) LoadConversation(ctx context.Context, sessionID string) ([]a
 	}
 	if n := len(out); n > 0 && agent.PartialState(out[n-1].PartialReason) == agent.PartialStreaming {
 		out[n-1].PartialReason = string(agent.PartialErrored)
+		// 进程崩溃 / 异常退出导致没机会写错误详情 —— 给一段固定文案，让 UI
+		// 仍能渲染出"已中断"的提示，不至于看起来像一条正常截断的消息。
+		if out[n-1].PartialDetail == "" {
+			out[n-1].PartialDetail = "stream interrupted (recovered)"
+		}
 	}
 	return out, agentstore.BranchInfo{}, nil
 }
@@ -178,6 +198,7 @@ func messageToRow(convID int64, index int, m agent.Message) (*conversation_entit
 		Mentions:       string(mentionsJSON),
 		TokenUsage:     usageJSON,
 		PartialReason:  string(m.PartialReason),
+		PartialDetail:  m.PartialDetail,
 		SortOrder:      index,
 		Createtime:     created.Unix(),
 	}, nil
@@ -208,6 +229,7 @@ func rowToMessage(r *conversation_entity.Message) (agent.Message, error) {
 		Content:       content,
 		CreatedAt:     created,
 		PartialReason: agent.PartialState(r.PartialReason),
+		PartialDetail: r.PartialDetail,
 		Usage:         usage,
 	}, nil
 }

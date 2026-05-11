@@ -74,20 +74,20 @@ type App struct {
 	aiModel                 string            // 当前激活 AIProvider.Model；Manager 构造时透传
 	mgr                     *aiagent.Manager  // cago v2 多会话 Manager（per-convID *ConvHandle）
 	githubAuthCancel        context.CancelFunc
-	pendingAIApprovals      sync.Map                   // map[string]chan ai.ApprovalResponse（AI 审批用）
-	pendingOpsctlApprovals  sync.Map                   // map[string]chan ai.ApprovalResponse（opsctl 审批用）
-	approvalServer          *approval.Server           // opsctl 审批 Unix socket 服务
-	sshPool                 *sshpool.Pool              // opsctl SSH 连接池
-	sshProxyServer          *sshpool.Server            // SSH 连接池 Unix socket 服务
-	redisService            *redis_svc.Service         // Redis 浏览/编辑服务
-	kafkaService            *kafka_svc.Service         // Kafka 管理服务
-	shutdownCh              chan struct{}              // 关闭信号，cleanup 时 close 以解除所有阻塞等待
-	pendingAuthResponses    sync.Map                   // map[string]chan []string（keyboard-interactive 认证响应用）
-	pendingHostKeyResponses sync.Map                   // map[string]chan ssh_svc.HostKeyAction（主机密钥校验响应用）
-	pendingConnections      sync.Map                   // map[string]context.CancelFunc（异步连接取消用）
-	mu                      sync.Mutex                 // 保护 connCounter
-	connCounter             int64                      // 连接ID计数器
-	currentConversationID   int64                      // 当前活跃会话ID
+	pendingAIApprovals      sync.Map           // map[string]chan ai.ApprovalResponse（AI 审批用）
+	pendingOpsctlApprovals  sync.Map           // map[string]chan ai.ApprovalResponse（opsctl 审批用）
+	approvalServer          *approval.Server   // opsctl 审批 Unix socket 服务
+	sshPool                 *sshpool.Pool      // opsctl SSH 连接池
+	sshProxyServer          *sshpool.Server    // SSH 连接池 Unix socket 服务
+	redisService            *redis_svc.Service // Redis 浏览/编辑服务
+	kafkaService            *kafka_svc.Service // Kafka 管理服务
+	shutdownCh              chan struct{}      // 关闭信号，cleanup 时 close 以解除所有阻塞等待
+	pendingAuthResponses    sync.Map           // map[string]chan []string（keyboard-interactive 认证响应用）
+	pendingHostKeyResponses sync.Map           // map[string]chan ssh_svc.HostKeyAction（主机密钥校验响应用）
+	pendingConnections      sync.Map           // map[string]context.CancelFunc（异步连接取消用）
+	mu                      sync.Mutex         // 保护 connCounter
+	connCounter             int64              // 连接ID计数器
+	currentConversationID   int64              // 当前活跃会话ID
 	extSvc                  *extension_svc.Service
 	flushAckCh              chan struct{} // OnBeforeClose 等待前端确认 flush 完成
 	k8sLogStreams           sync.Map      // map[string]context.CancelFunc — pod log stream cancellations
@@ -98,12 +98,12 @@ type App struct {
 func NewApp(skill SkillContent) *App {
 	mgr := ssh_svc.NewManager()
 	a := &App{
-		lang:           "zh-cn",
-		skillContent:   skill,
-		sshManager:     mgr,
-		sftpService:    sftp_svc.NewService(mgr),
-		shutdownCh:     make(chan struct{}),
-		flushAckCh:     make(chan struct{}, 1),
+		lang:         "zh-cn",
+		skillContent: skill,
+		sshManager:   mgr,
+		sftpService:  sftp_svc.NewService(mgr),
+		shutdownCh:   make(chan struct{}),
+		flushAckCh:   make(chan struct{}, 1),
 	}
 	a.forwardManager = NewForwardManager(&appPoolDialer{})
 	return a

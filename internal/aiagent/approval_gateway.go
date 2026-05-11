@@ -104,6 +104,76 @@ func (g *ApprovalGateway) RequestSingle(ctx context.Context, kind string, items 
 	}
 }
 
+// RequestGrant 实现 ai.GrantApprover：发 grant 审批卡，阻塞等用户决策，approved
+// 后把模式（用户可能编辑过）持久化到 grant_repo 的 conv-scoped session 下。
+//
+// 与 RequestSingle 共用同一条 emitter/resolver 通道（同一个 confirmID 协议），
+// 前端审批卡按 kind="grant" 渲染为多资产多模式的编辑视图，把可能编辑过的模式
+// 列表带回 ApprovalResponse.EditedItems。
+//
+// items 由 ai 层 handler 预先构建（含 AssetName 解析）；gateway 不再独立调用
+// asset_svc，保持 aiagent 包对资产 metadata 解耦。reason 走 StreamEvent.Description
+// 字段（前端 ApprovalBlock 单独渲染 grant 描述）。
+//
+// 持久化：每条最终模式落 grant_repo（sessionID = "conv_<convID>"），后续 ops
+// 工具的 PreToolUse policy hook 会通过 ai.matchGrantPatterns 命中这些模式，
+// 直接 PolicyAllow 跳过弹卡。审计写一份 grant_submit 行。
+func (g *ApprovalGateway) RequestGrant(ctx context.Context, items []ai.ApprovalItem, reason string) (bool, []string) {
+	if len(items) == 0 {
+		return false, nil
+	}
+
+	confirmID := newConfirmID()
+	if g.activate != nil {
+		g.activate()
+	}
+	g.emit.Emit(g.convID, ai.StreamEvent{
+		Type:        "approval_request",
+		Kind:        "grant",
+		ConfirmID:   confirmID,
+		Items:       items,
+		Description: reason,
+	})
+	ch, release := g.resolver(confirmID)
+	defer release()
+
+	var resp ai.ApprovalResponse
+	select {
+	case resp = <-ch:
+	case <-ctx.Done():
+		g.emitResult(confirmID, "deny")
+		return false, nil
+	}
+	g.emitResult(confirmID, resp.Decision)
+	if resp.Decision == "deny" {
+		return false, nil
+	}
+
+	// approved：用户编辑过的 items 优先，否则用原始 items 落库。
+	final := resp.EditedItems
+	if len(final) == 0 {
+		final = items
+	}
+	sessionID := fmt.Sprintf("conv_%d", g.convID)
+	patterns := make([]string, 0, len(final))
+	byAsset := map[int64][]string{}
+	names := map[int64]string{}
+	for _, it := range final {
+		cmd := strings.TrimSpace(it.Command)
+		if cmd == "" {
+			continue
+		}
+		patterns = append(patterns, cmd)
+		ai.SaveGrantPattern(ctx, sessionID, it.AssetID, it.AssetName, cmd)
+		byAsset[it.AssetID] = append(byAsset[it.AssetID], cmd)
+		names[it.AssetID] = it.AssetName
+	}
+	for aid, ps := range byAsset {
+		ai.WriteGrantSubmitAudit(ctx, aid, names[aid], ps, sessionID)
+	}
+	return true, patterns
+}
+
 func (g *ApprovalGateway) emitResult(confirmID, decision string) {
 	g.emit.Emit(g.convID, ai.StreamEvent{
 		Type:      "approval_result",

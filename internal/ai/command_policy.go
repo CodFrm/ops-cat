@@ -17,6 +17,9 @@ import (
 	"github.com/opskat/opskat/internal/service/asset_svc"
 )
 
+// 该文件仅保留命令策略求值 + 单命令 NeedConfirm 路径。Grant 申请（request_permission）
+// 已迁到 GrantApprover（grant_approver.go），不再走 CommandPolicyChecker 全局回调。
+
 // Decision 权限判定结果
 type Decision int
 
@@ -59,17 +62,11 @@ func (r CheckResult) DecisionString() string {
 
 // CommandConfirmFunc 命令确认回调，发送审批请求并阻塞等待前端响应
 // ctx 携带会话 ID 等上下文（通过 GetConversationID 获取）
-// kind: "single", "batch", "grant"
+// kind: "single", "batch"（grant 路径已迁移到 GrantApprover）
 // items: 审批项列表
 // agentRole: 子 agent 角色（可为空）
 // 返回 ApprovalResponse
 type CommandConfirmFunc func(ctx context.Context, kind string, items []ApprovalItem, agentRole string) ApprovalResponse
-
-// GrantRequestFunc Grant 审批回调，创建 grant 并等待用户审批
-// ctx 携带会话 ID 等上下文（通过 GetConversationID 获取）
-// items 为多资产的审批条目列表，用户可能在审批弹窗中编辑
-// 返回 (approved, 用户编辑后的 patterns)
-type GrantRequestFunc func(ctx context.Context, items []ApprovalItem, reason string) (approved bool, finalPatterns []string)
 
 // ApprovedPattern 会话级已批准的命令模式
 type ApprovedPattern struct {
@@ -87,8 +84,7 @@ func (p *ApprovedPattern) Match(assetID int64, command string) bool {
 
 // CommandPolicyChecker 命令权限检查器，通过 context 注入到两条执行路径
 type CommandPolicyChecker struct {
-	confirmFunc      CommandConfirmFunc
-	grantRequestFunc GrantRequestFunc
+	confirmFunc CommandConfirmFunc
 }
 
 // NewCommandPolicyChecker 创建权限检查器
@@ -101,92 +97,6 @@ func NewCommandPolicyChecker(confirmFunc CommandConfirmFunc) *CommandPolicyCheck
 // ConfirmFunc 返回确认回调（供 batch_command 等直接调用）
 func (c *CommandPolicyChecker) ConfirmFunc() CommandConfirmFunc {
 	return c.confirmFunc
-}
-
-// SetGrantRequestFunc 设置 Grant 审批回调
-func (c *CommandPolicyChecker) SetGrantRequestFunc(fn GrantRequestFunc) {
-	c.grantRequestFunc = fn
-}
-
-// SubmitGrant 提交 grant 审批请求（request_permission 工具调用）
-func (c *CommandPolicyChecker) SubmitGrant(ctx context.Context, assetID int64, patterns []string, reason string) CheckResult {
-	if c.grantRequestFunc == nil {
-		return CheckResult{Decision: Deny, Message: policyMsg(ctx, "no grant approval mechanism", "无 Grant 审批机制")}
-	}
-
-	assetName := ""
-	if assetID > 0 {
-		asset, err := asset_svc.Asset().Get(ctx, assetID)
-		if err != nil {
-			logger.Default().Warn("get asset for grant submission", zap.Int64("assetID", assetID), zap.Error(err))
-		}
-		if asset != nil {
-			assetName = asset.Name
-		}
-	}
-
-	items := make([]ApprovalItem, 0, len(patterns))
-	for _, p := range patterns {
-		items = append(items, ApprovalItem{
-			Type:      "grant",
-			AssetID:   assetID,
-			AssetName: assetName,
-			Command:   p,
-			Detail:    reason,
-		})
-	}
-
-	approved, finalPatterns := c.grantRequestFunc(ctx, items, reason)
-	if !approved {
-		return CheckResult{Decision: Deny, Message: policyMsg(ctx, "USER DENIED: The user has denied the grant approval request. Stop the current task immediately.", "用户拒绝：用户已拒绝 Grant 审批请求。请立即停止当前任务。"), DecisionSource: SourceGrantDeny, MatchedPattern: strings.Join(patterns, "; ")}
-	}
-
-	return CheckResult{Decision: Allow, Message: policyFmt(ctx, "grant approved, %d patterns", "Grant 已批准，共 %d 条模式", len(finalPatterns)), DecisionSource: SourceGrantAllow, MatchedPattern: strings.Join(finalPatterns, "; ")}
-}
-
-// GrantItem represents a single asset's patterns in a multi-asset grant request.
-type GrantItem struct {
-	AssetID  int64
-	Patterns []string
-}
-
-// SubmitGrantMulti 提交多资产 grant 审批请求
-func (c *CommandPolicyChecker) SubmitGrantMulti(ctx context.Context, items []GrantItem, reason string) CheckResult {
-	if c.grantRequestFunc == nil {
-		return CheckResult{Decision: Deny, Message: policyMsg(ctx, "no grant approval mechanism", "无 Grant 审批机制")}
-	}
-
-	approvalItems := make([]ApprovalItem, 0)
-	var allPatterns []string
-	for _, item := range items {
-		assetName := ""
-		if item.AssetID > 0 {
-			asset, err := asset_svc.Asset().Get(ctx, item.AssetID)
-			if err != nil {
-				logger.Default().Warn("get asset for grant submission", zap.Int64("assetID", item.AssetID), zap.Error(err))
-			}
-			if asset != nil {
-				assetName = asset.Name
-			}
-		}
-		for _, p := range item.Patterns {
-			approvalItems = append(approvalItems, ApprovalItem{
-				Type:      "grant",
-				AssetID:   item.AssetID,
-				AssetName: assetName,
-				Command:   p,
-				Detail:    reason,
-			})
-			allPatterns = append(allPatterns, p)
-		}
-	}
-
-	approved, finalPatterns := c.grantRequestFunc(ctx, approvalItems, reason)
-	if !approved {
-		return CheckResult{Decision: Deny, Message: policyMsg(ctx, "USER DENIED: The user has denied the grant approval request. Stop the current task immediately.", "用户拒绝：用户已拒绝 Grant 审批请求。请立即停止当前任务。"), DecisionSource: SourceGrantDeny, MatchedPattern: strings.Join(allPatterns, "; ")}
-	}
-
-	return CheckResult{Decision: Allow, Message: policyFmt(ctx, "grant approved, %d patterns", "Grant 已批准，共 %d 条模式", len(finalPatterns)), DecisionSource: SourceGrantAllow, MatchedPattern: strings.Join(finalPatterns, "; ")}
 }
 
 // matchGrantPatterns 从 DB 中查找已批准 grant 的 items，用通配匹配命令

@@ -44,9 +44,6 @@ type Manager struct {
 
 	mu      sync.Mutex
 	handles map[int64]*ConvHandle
-
-	pendingMu       sync.Mutex
-	pendingMentions map[int64][]map[string]any // convID → mentions for next user msg append
 }
 
 // NewManager constructs a Manager. Does no I/O; the gormStore lazy-binds to
@@ -56,33 +53,12 @@ func NewManager(opts ManagerOptions) *Manager {
 		opts.MaxRounds = 50
 	}
 	m := &Manager{
-		opts:            opts,
-		handles:         make(map[int64]*ConvHandle),
-		pendingMentions: make(map[int64][]map[string]any),
+		opts:    opts,
+		handles: make(map[int64]*ConvHandle),
 	}
-	m.store = NewGormStore(m)
+	m.store = NewGormStore()
 	m.recorder = agentstore.NewRecorder(m.store)
 	return m
-}
-
-// StashMentions records mentions to be persisted with the next user-message
-// Append on the given conversation. Called by app_ai before Send/Edit when the
-// raw user input contained @-mentions. The gormStore consumes this on the next
-// AppendMessage(role=user) for the same convID.
-func (m *Manager) StashMentions(convID int64, mentions []map[string]any) {
-	m.pendingMu.Lock()
-	defer m.pendingMu.Unlock()
-	m.pendingMentions[convID] = mentions
-}
-
-// PopPendingMentions returns and clears the stashed mentions for convID.
-// Implements pendingMentionsProvider for gormStore.
-func (m *Manager) PopPendingMentions(convID int64) []map[string]any {
-	m.pendingMu.Lock()
-	defer m.pendingMu.Unlock()
-	out := m.pendingMentions[convID]
-	delete(m.pendingMentions, convID)
-	return out
 }
 
 // CloseHandle removes and shuts down the handle for convID. No-op if not
@@ -158,6 +134,9 @@ func (m *Manager) Handle(ctx context.Context, convID int64) (*ConvHandle, error)
 	// 让 Send/Edit 能在写 fresh user-append 前 prime bridge 跳过它，避免
 	// 重复 user 气泡 + 空 asst 占位（详见 bridge.skipNextUser 注释）。
 	h.AttachBridge(bridge)
+	// request_permission 工具走 GrantApprover → 复用 per-conv gateway 的
+	// emitter/resolver 通道（弹审批卡 + 持久化 grants）。
+	h.AttachGateway(gw)
 	// LIFO order: teardown runs in reverse — bridgeCancel first (stop emit
 	// translation), then unbind (release the recorder watch).
 	// gateway 没有后台 goroutine 了：RequestSingle 是同步调用，ctx 由 hook 的

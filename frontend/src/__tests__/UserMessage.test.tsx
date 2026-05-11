@@ -52,6 +52,21 @@ describe("UserMessage", () => {
     expect(useTabStore.getState().tabs.some((t) => t.id === "info-asset-42")).toBe(true);
   });
 
+  it("越界 mention 整体丢弃，不会把短文本吞成 chip", () => {
+    // 回归 "继续" 被渲染成 chip 的 bug：content 长度远小于 mention.end，
+    // 旧逻辑会 slice(0, 13) 拿到整条 "继续" 渲染为 button。修复后该 mention
+    // 视为脏数据丢弃，渲染回纯文本。
+    const msg = {
+      role: "user",
+      content: "继续",
+      mentions: [{ assetId: 42, name: "prod-db", start: 0, end: 13 }],
+      blocks: [],
+    } as any;
+    render(<UserMessage index={0} msg={msg} />);
+    expect(screen.getByText("继续")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /prod-db/ })).not.toBeInTheDocument();
+  });
+
   it("keeps the copy button when edit is available and triggers onEdit", async () => {
     const onEdit = vi.fn();
     const msg = {

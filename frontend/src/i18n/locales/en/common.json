@@ -824,6 +824,13 @@
       "tooltip": "Token usage for this reply"
     },
     "retrying": "Retrying",
+    "partial": {
+      "errored": "Generation interrupted (error)",
+      "canceled": "Stopped",
+      "tokensLimit": "Token limit reached",
+      "timeout": "Request timed out",
+      "unknown": "Generation interrupted"
+    },
     "workDirNotSet": "(workdir not set)",
     "newConversation": "New conversation",
     "sidebar": {

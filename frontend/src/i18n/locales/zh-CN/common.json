@@ -809,6 +809,13 @@
       "tooltip": "本次回复 token 使用量"
     },
     "retrying": "重试中",
+    "partial": {
+      "errored": "生成中断（出错）",
+      "canceled": "已停止",
+      "tokensLimit": "已达 token 上限",
+      "timeout": "请求超时",
+      "unknown": "生成中断"
+    },
     "workDirNotSet": "(工作目录未设置)",
     "newConversation": "新对话",
     "sidebar": {

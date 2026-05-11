@@ -10,6 +10,7 @@ import {
   ArrowUp,
   ArrowDown,
   Database,
+  AlertCircle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -797,6 +798,7 @@ const AssistantMessage = memo(function AssistantMessage({
             <BubbleSegment key={si} blocks={seg.blocks} streaming={msg.streaming && si === segments.length - 1} />
           )
         )}
+        <PartialBanner msg={msg} />
         <AssistantToolbar msg={msg} index={index} sending={sending} onRegenerate={onRegenerate} />
       </div>
     );
@@ -813,7 +815,46 @@ const AssistantMessage = memo(function AssistantMessage({
         </Markdown>
         {msg.streaming && <Loader2 className="h-3 w-3 animate-spin inline-block ml-1" />}
       </div>
+      <PartialBanner msg={msg} />
       <AssistantToolbar msg={msg} index={index} sending={sending} onRegenerate={onRegenerate} />
+    </div>
+  );
+});
+
+// PartialBanner 渲染 assistant 气泡尾部的"中断状态"提示。
+// 数据源是 msg.partialReason / msg.partialDetail —— 这两个字段同时承载
+// (1) 历史回放（convertDisplayMessages 从后端 partial_reason/partial_detail 列读出来）
+// (2) 运行时流式（aiStore 收到 "error"/"stopped" 事件后写入）
+// 两条路径写同一字段，保证刷新前后渲染完全一致。
+const PartialBanner = memo(function PartialBanner({ msg }: { msg: ChatMessage }) {
+  const { t } = useTranslation();
+  const reason = msg.partialReason;
+  if (!reason) return null;
+  const reasonLabel = (() => {
+    switch (reason) {
+      case "errored":
+        return t("ai.partial.errored", "生成中断（出错）");
+      case "canceled":
+        return t("ai.partial.canceled", "已停止");
+      case "tokens_limit":
+        return t("ai.partial.tokensLimit", "已达 token 上限");
+      case "timeout":
+        return t("ai.partial.timeout", "请求超时");
+      default:
+        return t("ai.partial.unknown", "生成中断");
+    }
+  })();
+  const tone =
+    reason === "errored" || reason === "timeout"
+      ? "border-destructive/40 bg-destructive/10 text-destructive"
+      : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  return (
+    <div role="status" className={`flex items-start gap-2 max-w-[95%] rounded-md border px-3 py-2 text-xs ${tone}`}>
+      <AlertCircle className="h-3.5 w-3.5 mt-[1px] shrink-0" />
+      <div className="min-w-0 break-words">
+        <div className="font-semibold">{reasonLabel}</div>
+        {msg.partialDetail ? <div className="opacity-90 mt-0.5">{msg.partialDetail}</div> : null}
+      </div>
     </div>
   );
 });

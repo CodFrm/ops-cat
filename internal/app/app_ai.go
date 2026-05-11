@@ -83,10 +83,13 @@ func (a *App) resetManager(prov provider.Provider, model string) {
 		a.pendingAIApprovals.Store(confirmID, ch)
 		return ch, func() { a.pendingAIApprovals.Delete(confirmID) }
 	})
-	// PolicyChecker 走 nil confirmFunc / grant func —— v2 不再用 CommandPolicyChecker
-	// 的内嵌确认回调，审批由 cago policy hook 经 ApprovalGateway 处理。这里只是
-	// 让 deps 持有一个非 nil 实例，方便 ai.* 工具 handler 在 ctx.WithPolicyChecker
-	// 取出（部分 handler 仅用于读 SubmitGrantMulti API）。
+	// PolicyChecker 走 nil confirmFunc —— v2 审批分两条腿：
+	//   - 单命令策略 NeedConfirm：cago policy hook (aiagent.newPolicyHook) →
+	//     ApprovalGateway.RequestSingle 弹卡。
+	//   - request_permission (grant 申请)：tool handler → ai.GetGrantApprover →
+	//     ApprovalGateway.RequestGrant 弹卡 + 落 grant_repo。
+	// CommandPolicyChecker 仍由 ai 层一些只读路径 (policy 求值 / matchGrantPatterns)
+	// 持有；confirmFunc 为 nil 时 handleConfirm 早退 —— PreToolUse 已先一步处理。
 	policyChecker := ai.NewCommandPolicyChecker(nil)
 	deps := aiagent.NewDeps(a.sshPool, policyChecker)
 	a.mgr = aiagent.NewManager(aiagent.ManagerOptions{
@@ -119,13 +122,25 @@ func (a *App) InitAIProvider() {
 
 // --- AI 操作 ---
 
-// ConversationDisplayMessage 返回给前端的会话消息（用于恢复显示）
+// ConversationDisplayMessage 返回给前端的会话消息（用于恢复显示）。
+// SortOrder 是后端 conversation_messages 表的 sort_order，前端编辑/重生成时
+// 必须传它给 EditAIMessage/RegenerateAIMessage —— 因为 buildDisplayMessages 会
+// 合并多轮 assistant + 吸收 tool-result-only 行，前端 messages 数组的 index 和
+// 后端 sort_order 不再 1:1。合并后的 assistant 取首条 assistant 的 sort_order。
 type ConversationDisplayMessage struct {
-	Role       string                             `json:"role"`
-	Content    string                             `json:"content"`
-	Blocks     []conversation_entity.ContentBlock `json:"blocks"`
-	Mentions   []conversation_entity.MentionRef   `json:"mentions"`
-	TokenUsage *conversation_entity.TokenUsage    `json:"tokenUsage,omitempty"`
+	Role string `json:"role"`
+	// PartialReason 是 cago agent.PartialState 的字符串值（"errored"/"canceled"/
+	// "tokens_limit"/"timeout"）。空串表示消息正常完成。前端按此渲染气泡尾部
+	// 的中断/错误提示，与运行时收到 "error"/"stopped" 事件的渲染路径一致。
+	PartialReason string `json:"partialReason,omitempty"`
+	// PartialDetail 是 PartialReason 对应的人类可读详情，例如 errored 时的
+	// err.Error()、canceled 时的取消原因。空串时前端按 PartialReason 显示通用文案。
+	PartialDetail string                             `json:"partialDetail,omitempty"`
+	Content       string                             `json:"content"`
+	Blocks        []conversation_entity.ContentBlock `json:"blocks"`
+	Mentions      []conversation_entity.MentionRef   `json:"mentions"`
+	TokenUsage    *conversation_entity.TokenUsage    `json:"tokenUsage,omitempty"`
+	SortOrder     int                                `json:"sortOrder"`
 }
 
 // CreateConversation 创建新会话
@@ -285,11 +300,14 @@ func buildDisplayMessages(msgs []*conversation_entity.Message) []ConversationDis
 				mentions, _ := m.GetMentions()
 				tokenUsage, _ := m.GetTokenUsage()
 				out = append(out, ConversationDisplayMessage{
-					Role:       m.Role,
-					Content:    text,
-					Blocks:     blocks,
-					Mentions:   mentions,
-					TokenUsage: tokenUsage,
+					Role:          m.Role,
+					PartialReason: m.PartialReason,
+					PartialDetail: m.PartialDetail,
+					Content:       text,
+					Blocks:        blocks,
+					Mentions:      mentions,
+					TokenUsage:    tokenUsage,
+					SortOrder:     m.SortOrder,
 				})
 				mergePending = false
 				continue
@@ -297,13 +315,16 @@ func buildDisplayMessages(msgs []*conversation_entity.Message) []ConversationDis
 		}
 
 		// v2 path.
+		// tool-role 行（cago v2 provider/types.go:12 RoleTool = "tool"）整条就是
+		// tool_result——回填到上条 assistant 的 tool block，并 mergePending 让下
+		// 一条 assistant fold 进来。老 v1 数据用 role="user" + onlyToolResults 表达
+		// 同样语义，一起兼容。
+		if m.Role == "tool" || (m.Role == "user" && onlyToolResults(raw)) {
+			mergeToolResultsIntoLastAssistant(out, raw)
+			mergePending = true
+			continue
+		}
 		if m.Role == "user" {
-			// 若 user 行只有 tool_result 块 → 回填到上一条 assistant 的 tool block，跳过此行。
-			if onlyToolResults(raw) {
-				mergeToolResultsIntoLastAssistant(out, raw)
-				mergePending = true
-				continue
-			}
 			displayText := extractV2UserDisplay(raw)
 			if displayText == "" {
 				// 空 user 行（连 display 都没有）跳过；不动 mergePending——
@@ -311,11 +332,14 @@ func buildDisplayMessages(msgs []*conversation_entity.Message) []ConversationDis
 				continue
 			}
 			mentions, _ := m.GetMentions()
+			// user 消息没有 partial 概念（cago 只在 assistant 上打 PartialReason）；
+			// 这里不带 PartialReason/Detail，前端零值降级。
 			out = append(out, ConversationDisplayMessage{
-				Role:    "user",
-				Content: displayText,
-				Blocks:  []conversation_entity.ContentBlock{{Type: "text", Content: displayText}},
-				Mentions: mentions,
+				Role:      "user",
+				Content:   displayText,
+				Blocks:    []conversation_entity.ContentBlock{{Type: "text", Content: displayText}},
+				Mentions:  mentions,
+				SortOrder: m.SortOrder,
 			})
 			mergePending = false
 			continue
@@ -337,14 +361,22 @@ func buildDisplayMessages(msgs []*conversation_entity.Message) []ConversationDis
 				prev.Content += content
 			}
 			prev.TokenUsage = sumTokenUsage(prev.TokenUsage, tokenUsage)
+			// 多轮 assistant 折叠：partial 状态以**当前这条**为准——前面几条
+			// 必然 finalized（否则 cago 不会启动下一轮），最后一条才可能 errored/
+			// canceled/timeout。零值表示这一条正常完成，整组也按完成渲染。
+			prev.PartialReason = m.PartialReason
+			prev.PartialDetail = m.PartialDetail
 			mergePending = false
 			continue
 		}
 		out = append(out, ConversationDisplayMessage{
-			Role:       m.Role,
-			Content:    content,
-			Blocks:     blocks,
-			TokenUsage: tokenUsage,
+			Role:          m.Role,
+			PartialReason: m.PartialReason,
+			PartialDetail: m.PartialDetail,
+			Content:       content,
+			Blocks:        blocks,
+			TokenUsage:    tokenUsage,
+			SortOrder:     m.SortOrder,
 		})
 		mergePending = false
 	}
@@ -591,35 +623,12 @@ func (a *App) buildCagoProvider(p *ai_provider_entity.AIProvider) (provider.Prov
 	}
 }
 
-// mentionsToStash 把 ai.MentionedAsset 切片转成 gormStore 旁路接收的形态。空切片
-// 返回 nil，避免 store 误把空 stash 当成「显式清空」(影响 PopPendingMentions
-// 的 nil 判断)。Asset 字段映射保持与 v1 持久化兼容：assetId/name/type/host/groupPath；
-// start/end 是前端 buildSegments 渲染 chip 必需的偏移——不传刷新后整个 chip 变成空 button。
-func mentionsToStash(ms []ai.MentionedAsset) []map[string]any {
-	if len(ms) == 0 {
-		return nil
-	}
-	out := make([]map[string]any, 0, len(ms))
-	for _, m := range ms {
-		out = append(out, map[string]any{
-			"assetId":   m.AssetID,
-			"name":      m.Name,
-			"type":      m.Type,
-			"host":      m.Host,
-			"groupPath": m.GroupPath,
-			"start":     m.Start,
-			"end":       m.End,
-		})
-	}
-	return out
-}
-
 // SendAIMessage 发送一轮对话到 cago Manager。首条消息时自动创建会话 + 设置标题。
 // cago 自身持久化历史，因此只把最后一条 user 消息当作 prompt 传入。
 //
-// aiCtx.MentionedAssets 会被渲染成 LLM 看到的 mention context，并以 stash 旁路
-// 落到 conversation_messages.mentions 列（gormStore.AppendMessage 在 user role 时
-// 消费）。raw 保留用户原文用于前端展示；llmBody 是带 mention prefix 的扩展版。
+// mention 元数据通过 inline XML 标签携带在 llmBody 里（ai.WrapMentions 包装），
+// gormStore.AppendMessage 在 user role 时反向 ai.ParseMentions 落到 row.Mentions——
+// 元数据与消息正文原子绑定，无需 stash 旁路。raw 保留用户原文用于前端展示。
 func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AIContext) error {
 	ctx := a.langCtx()
 
@@ -658,13 +667,7 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 	if a.mgr == nil {
 		return fmt.Errorf("请先配置 AI Provider")
 	}
-	body := prompt
-	if mentionCtx := ai.RenderMentionContext(aiCtx.MentionedAssets); mentionCtx != "" {
-		body = mentionCtx + "\n\n" + prompt
-	}
-	if stash := mentionsToStash(aiCtx.MentionedAssets); stash != nil {
-		a.mgr.StashMentions(convID, stash)
-	}
+	body := ai.WrapMentions(prompt, aiCtx.MentionedAssets)
 	h, err := a.mgr.Handle(ctx, convID)
 	if err != nil {
 		return err
@@ -673,19 +676,12 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 }
 
 // QueueAIMessage 在生成过程中通过 cago Steer 注入用户消息。
-// 若消息带 @ 提及的资产，将资产上下文渲染后 prepend 到消息正文，并把 mentions
-// stash 到 Manager 让 gormStore 在 AppendMessage 时落 mentions 列。
+// mention 元数据通过 inline XML 标签携带在 llmBody 里，gormStore 反向解析落库。
 func (a *App) QueueAIMessage(convID int64, content string, mentions []ai.MentionedAsset) error {
-	body := content
-	if mentionCtx := ai.RenderMentionContext(mentions); mentionCtx != "" {
-		body = mentionCtx + "\n\n" + content
-	}
 	if a.mgr == nil {
 		return fmt.Errorf("会话 %d 没有正在运行的生成", convID)
 	}
-	if stash := mentionsToStash(mentions); stash != nil {
-		a.mgr.StashMentions(convID, stash)
-	}
+	body := ai.WrapMentions(content, mentions)
 	h, err := a.mgr.Handle(a.langCtx(), convID)
 	if err != nil {
 		return err
@@ -694,18 +690,12 @@ func (a *App) QueueAIMessage(convID int64, content string, mentions []ai.Mention
 }
 
 // EditAIMessage 截断 conv 在 idx 处，重新追加 user 消息并重生成。
-// mentions 通过 Manager stash 旁路落库，与 SendAIMessage 一致。
+// mention 元数据通过 inline XML 标签携带在 llmBody 里，与 SendAIMessage 一致。
 func (a *App) EditAIMessage(convID int64, idx int, content string, mentions []ai.MentionedAsset) error {
 	if a.mgr == nil {
 		return fmt.Errorf("请先配置 AI Provider")
 	}
-	body := content
-	if mentionCtx := ai.RenderMentionContext(mentions); mentionCtx != "" {
-		body = mentionCtx + "\n\n" + content
-	}
-	if stash := mentionsToStash(mentions); stash != nil {
-		a.mgr.StashMentions(convID, stash)
-	}
+	body := ai.WrapMentions(content, mentions)
 	h, err := a.mgr.Handle(a.langCtx(), convID)
 	if err != nil {
 		return err
@@ -791,4 +781,3 @@ func (a *App) subscribeAIFlushAck() {
 		}
 	})
 }
-

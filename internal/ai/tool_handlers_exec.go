@@ -11,6 +11,7 @@ import (
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 
+	"github.com/opskat/opskat/internal/service/asset_svc"
 	"github.com/opskat/opskat/internal/service/credential_resolver"
 
 	"github.com/pkg/sftp"
@@ -35,7 +36,10 @@ func handleRequestGrant(ctx context.Context, args map[string]any) (string, error
 		return "", fmt.Errorf("items must not be empty")
 	}
 
-	var grantItems []GrantItem
+	// 在 ai 层把 GrantItem 展平为 ApprovalItem，并补上 AssetName（gateway 解耦
+	// asset_svc，由 ai 层这边的 handler 负责名字解析）。AssetName 查不到时留空，
+	// 前端审批卡仍能渲染（按 ID 显示）—— 不让一次名字查询失败导致整条 grant 申请失败。
+	var approvalItems []ApprovalItem
 	for _, raw := range rawItems {
 		if raw.AssetID == 0 {
 			return "", fmt.Errorf("each item must have a non-zero asset_id")
@@ -50,19 +54,43 @@ func handleRequestGrant(ctx context.Context, args map[string]any) (string, error
 		if len(patterns) == 0 {
 			continue
 		}
-		grantItems = append(grantItems, GrantItem{AssetID: raw.AssetID, Patterns: patterns})
+		assetName := ""
+		if asset, err := asset_svc.Asset().Get(ctx, raw.AssetID); err == nil && asset != nil {
+			assetName = asset.Name
+		}
+		// reason 不放进每条 item 的 Detail —— 它是整次申请的整体描述，gateway
+		// 已经走 StreamEvent.Description 字段单独发出，前端 ApprovalBlock 那边
+		// 也是按 description 渲染（不读 Item.Detail）。
+		for _, p := range patterns {
+			approvalItems = append(approvalItems, ApprovalItem{
+				Type:      "grant",
+				AssetID:   raw.AssetID,
+				AssetName: assetName,
+				Command:   p,
+			})
+		}
 	}
-	if len(grantItems) == 0 {
+	if len(approvalItems) == 0 {
 		return "", fmt.Errorf("no valid command patterns provided")
 	}
 
-	checker := GetPolicyChecker(ctx)
-	if checker == nil {
-		return "", fmt.Errorf("permission checker not available")
+	approver := GetGrantApprover(ctx)
+	if approver == nil {
+		// 兜底文案与 v1 ai.CommandPolicyChecker.SubmitGrantMulti 一致，方便 audit / 用户回溯。
+		// 正常 AI 流程下 ConvHandle.Send 会注入 ApprovalGateway 作为 GrantApprover；
+		// 没注入说明 ctx 走了非托管路径（脱离 aiagent.Manager 的工具直跑），属配置错误。
+		return policyMsg(ctx, "no grant approval mechanism", "无 Grant 审批机制"), nil
 	}
 
-	result := checker.SubmitGrantMulti(ctx, grantItems, reason)
-	return result.Message, nil
+	approved, finalPatterns := approver.RequestGrant(ctx, approvalItems, reason)
+	if !approved {
+		return policyMsg(ctx,
+			"USER DENIED: The user has denied the grant approval request. Stop the current task immediately.",
+			"用户拒绝：用户已拒绝 Grant 审批请求。请立即停止当前任务。"), nil
+	}
+	return policyFmt(ctx,
+		"grant approved, %d patterns",
+		"Grant 已批准，共 %d 条模式", len(finalPatterns)), nil
 }
 
 func handleRunCommand(ctx context.Context, args map[string]any) (string, error) {

@@ -10,11 +10,11 @@ import (
 
 type fakeMentionResolver struct{}
 
-func (f *fakeMentionResolver) Expand(ctx context.Context, raw string) (expanded string, mentions []map[string]any, openTabs []string, err error) {
+func (f *fakeMentionResolver) Expand(ctx context.Context, raw string) (expanded string, openTabs []string, err error) {
 	if raw == "@srv1 status" {
-		return "[server srv1 (id=1)] status", []map[string]any{{"asset_id": 1, "asset_name": "srv1"}}, []string{"asset:1"}, nil
+		return `<mention asset-id="1" name="srv1">@srv1</mention> status`, []string{"asset:1"}, nil
 	}
-	return raw, nil, nil, nil
+	return raw, nil, nil
 }
 
 type captureTabOpener struct{ opened []string }
@@ -29,7 +29,7 @@ func TestMentionsHook_RewritesAndOpensTab(t *testing.T) {
 	h := newMentionsHook(&fakeMentionResolver{}, opener)
 	out, err := h(context.Background(), &agent.UserPromptInput{Text: "@srv1 status"})
 	assert.NoError(t, err)
-	assert.Equal(t, "[server srv1 (id=1)] status", out.ModifiedText)
+	assert.Equal(t, `<mention asset-id="1" name="srv1">@srv1</mention> status`, out.ModifiedText)
 	assert.Equal(t, []string{"asset:1"}, opener.opened)
 }
 

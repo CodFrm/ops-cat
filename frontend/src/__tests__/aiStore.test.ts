@@ -528,6 +528,39 @@ describe("conversationMessages (Phase 1)", () => {
     expect(cms.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["hello"]);
   });
 
+  // 回归 "继续" 被渲染成 chip 按钮的 bug：第二条无 mention 的消息不能聚合历史 mentions。
+  // 否则后端 ai.WrapMentions 会拿到旧 mention 元数据并 stash 到下一条 row 上。
+  it("sendToTab 不聚合历史 mentions —— 后续无 mention 消息的 aiContext.mentionedAssets 为空", async () => {
+    const tabId = "ai-77";
+    useTabStore.setState({
+      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 77, title: "t" } }],
+      activeTabId: tabId,
+    });
+    useAIStore.setState({
+      tabStates: { [tabId]: createTabState() },
+      conversationMessages: {
+        77: [
+          {
+            role: "user",
+            content: "@prod-db 看",
+            mentions: [{ assetId: 1, name: "prod-db", start: 0, end: 8 }],
+            blocks: [],
+          },
+          { role: "assistant", content: "ok", blocks: [] },
+        ],
+      },
+      conversationStreaming: { 77: { sending: false, pendingQueue: [] } },
+    });
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+
+    await useAIStore.getState().sendToTab(tabId, "继续");
+
+    expect(SendAIMessage).toHaveBeenCalled();
+    const lastCall = vi.mocked(SendAIMessage).mock.calls[vi.mocked(SendAIMessage).mock.calls.length - 1];
+    const aiCtx: any = lastCall[2];
+    expect(aiCtx?.mentionedAssets ?? []).toEqual([]);
+  });
+
   it("sendToTab syncs local and backend titles for the first user message", async () => {
     const tabId = "ai-52";
     vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);

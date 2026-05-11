@@ -28,7 +28,7 @@ func setupGormStore(t *testing.T) (context.Context, agentstore.Store) {
 	conversation_repo.RegisterConversation(conversation_repo.NewConversation())
 	// Seed conversation row so foreign-key style invariants are happy
 	require.NoError(t, gdb.Exec(`INSERT INTO conversations (id, title, provider_type) VALUES (1, 'test', 'mock')`).Error)
-	return context.Background(), NewGormStore(nil)
+	return context.Background(), NewGormStore()
 }
 
 // mustEncode encodes a typed agent.Message to the on-wire StoredMessage form
@@ -78,12 +78,14 @@ func TestGormStore_UpdateMessage_FillsPartialAndUsage(t *testing.T) {
 		Role:          agent.RoleAssistant,
 		Content:       []agent.ContentBlock{agent.TextBlock{Text: "done"}},
 		PartialReason: agent.PartialErrored,
+		PartialDetail: "upstream busy: 503",
 		Usage:         &usage,
 	}))
 	require.NoError(t, err)
 
 	msgs := loadDecoded(t, ctx, s, "1")
 	assert.Equal(t, agent.PartialErrored, msgs[0].PartialReason)
+	assert.Equal(t, "upstream busy: 503", msgs[0].PartialDetail, "error detail must round-trip through DB")
 	require.NotNil(t, msgs[0].Usage)
 	assert.Equal(t, 15, msgs[0].Usage.TotalTokens)
 }
@@ -113,6 +115,7 @@ func TestGormStore_LoadFixesStreamingTail(t *testing.T) {
 	msgs := loadDecoded(t, ctx, s, "1")
 	require.Len(t, msgs, 2)
 	assert.Equal(t, agent.PartialErrored, msgs[1].PartialReason, "streaming tail should be rewritten to errored on load")
+	assert.NotEmpty(t, msgs[1].PartialDetail, "crash-recovery should backfill a detail string so UI can render the error state")
 	tb, ok := msgs[1].Content[0].(agent.TextBlock)
 	require.True(t, ok)
 	assert.Equal(t, "half ", tb.Text, "partial content preserved")
@@ -193,6 +196,78 @@ func TestGormStore_LoadEmpty_ReturnsNil(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, sms, "empty conv should return nil messages per cago Store contract")
 	assert.Equal(t, agentstore.BranchInfo{}, branch)
+}
+
+// TestGormStore_ParsesInlineMentionsFromTextBlock 回归"继续被渲染成 chip"那个 bug：
+//  1. user 消息的 LLM body (TextBlock) 含 inline <mention> 标签 → row.Mentions
+//     应解析出 assetId/name/start/end 全字段（取代旧 StashMentions 旁路）
+//  2. 紧接着一条无 mention 的 user 消息 → row.Mentions 必须为 "[]"，不能继承上一条的
+//     mention（旧旁路的 bug 就是这条没被弹空，落到了这条 row 上）
+func TestGormStore_ParsesInlineMentionsFromTextBlock(t *testing.T) {
+	ctx, s := setupGormStore(t)
+
+	llmBody := `<mention asset-id="37" name="local-docker" type="ssh" host="192.168.8.141" group="本地" start="0" end="13">@local-docker</mention> 看看容器`
+	require.NoError(t, s.AppendMessage(ctx, "1", 0, mustEncode(t, agent.Message{
+		Role: agent.RoleUser,
+		Content: []agent.ContentBlock{
+			agent.TextBlock{Text: llmBody},
+			agent.DisplayTextBlock{Text: "@local-docker 看看容器"},
+		},
+	})))
+
+	rows, err := conversation_repo.Conversation().LoadOrdered(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Contains(t, rows[0].Mentions, `"assetId":37`)
+	assert.Contains(t, rows[0].Mentions, `"name":"local-docker"`)
+	assert.Contains(t, rows[0].Mentions, `"start":0`)
+	assert.Contains(t, rows[0].Mentions, `"end":13`)
+}
+
+func TestGormStore_NoMentionFallsBackToEmptyArray(t *testing.T) {
+	ctx, s := setupGormStore(t)
+
+	require.NoError(t, s.AppendMessage(ctx, "1", 0, mustEncode(t, agent.Message{
+		Role:    agent.RoleUser,
+		Content: []agent.ContentBlock{agent.TextBlock{Text: "plain question"}},
+	})))
+
+	rows, err := conversation_repo.Conversation().LoadOrdered(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "[]", rows[0].Mentions, "无 <mention> 标签应该写空数组，不沿用上条")
+}
+
+// 回归"继续"被渲染成 chip 按钮的根因：旧 StashMentions 旁路如果第二条 user 消息
+// 没有清空 stash，会把第一条的 mention offset 打到第二条 row 上。新 XML inline 路径
+// 不再有旁路，只读自身 TextBlock，应该天然无串扰。
+func TestGormStore_SecondUserMsgWithoutMentionIsClean(t *testing.T) {
+	ctx, s := setupGormStore(t)
+
+	// msg 0: 带 mention
+	require.NoError(t, s.AppendMessage(ctx, "1", 0, mustEncode(t, agent.Message{
+		Role: agent.RoleUser,
+		Content: []agent.ContentBlock{
+			agent.TextBlock{Text: `<mention asset-id="37" name="local-docker" type="ssh" host="" group="" start="0" end="13">@local-docker</mention> 看`},
+			agent.DisplayTextBlock{Text: "@local-docker 看"},
+		},
+	})))
+	// msg 1: assistant
+	require.NoError(t, s.AppendMessage(ctx, "1", 1, mustEncode(t, agent.Message{
+		Role:    agent.RoleAssistant,
+		Content: []agent.ContentBlock{agent.TextBlock{Text: "ok"}},
+	})))
+	// msg 2: 用户继续，无 mention
+	require.NoError(t, s.AppendMessage(ctx, "1", 2, mustEncode(t, agent.Message{
+		Role:    agent.RoleUser,
+		Content: []agent.ContentBlock{agent.TextBlock{Text: "继续"}},
+	})))
+
+	rows, err := conversation_repo.Conversation().LoadOrdered(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, rows, 3)
+	assert.Contains(t, rows[0].Mentions, `"assetId":37`, "msg 0 应保留它自己的 mention")
+	assert.Equal(t, "[]", rows[2].Mentions, "msg 2 不应继承 msg 0 的 mention")
 }
 
 func TestGormStore_ImageBlockInlineRoundTrip(t *testing.T) {

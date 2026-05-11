@@ -276,17 +276,20 @@ func (m *opsMentionResolver) assetByName(ctx context.Context, name string) *asse
 	return m.index[name]
 }
 
-func (m *opsMentionResolver) Expand(ctx context.Context, raw string) (string, []map[string]any, []string, error) {
-	matches := mentionPattern.FindAllStringSubmatch(raw, -1)
-	if len(matches) == 0 {
-		return raw, nil, nil, nil
+func (m *opsMentionResolver) Expand(ctx context.Context, raw string) (string, []string, error) {
+	indices := mentionPattern.FindAllStringSubmatchIndex(raw, -1)
+	if len(indices) == 0 {
+		return raw, nil, nil
 	}
 	seen := map[string]bool{}
 	var mentioned []ai.MentionedAsset
-	var stash []map[string]any
 	var tabs []string
-	for _, match := range matches {
-		name := match[1]
+	// 按 match 顺序收 mention 元数据，start/end 是 raw 中对应 "@name" 字面的
+	// JS UTF-16 偏移（前端 UserMessage.buildSegments 渲染 chip 用同一约定）。
+	for _, idx := range indices {
+		matchStart, matchEnd := idx[0], idx[1] // "@name" 在 raw 中的 byte 范围
+		nameStart := idx[2]
+		name := raw[nameStart:idx[3]]
 		if seen[name] {
 			continue
 		}
@@ -297,28 +300,21 @@ func (m *opsMentionResolver) Expand(ctx context.Context, raw string) (string, []
 		}
 		// Host 存在 Asset.Config 的 JSON 里（按 type 不同字段），解析成本高且对
 		// mention 上下文展示用处有限——名字+ID+类型已经足够让模型识别。留空。
-		ma := ai.MentionedAsset{
+		mentioned = append(mentioned, ai.MentionedAsset{
 			AssetID:   a.ID,
 			Name:      a.Name,
 			Type:      a.Type,
 			Host:      "",
 			GroupPath: "",
-		}
-		mentioned = append(mentioned, ma)
-		stash = append(stash, map[string]any{
-			"assetId":   ma.AssetID,
-			"name":      ma.Name,
-			"type":      ma.Type,
-			"host":      ma.Host,
-			"groupPath": ma.GroupPath,
+			Start:     ai.ByteToUTF16(raw, matchStart),
+			End:       ai.ByteToUTF16(raw, matchEnd),
 		})
 		tabs = append(tabs, fmt.Sprintf("asset:%d", a.ID))
 	}
 	if len(mentioned) == 0 {
-		return raw, nil, nil, nil
+		return raw, nil, nil
 	}
-	expanded := ai.RenderMentionContext(mentioned) + "\n\n" + raw
-	return expanded, stash, tabs, nil
+	return ai.WrapMentions(raw, mentioned), tabs, nil
 }
 
 // === Tab Opener ===

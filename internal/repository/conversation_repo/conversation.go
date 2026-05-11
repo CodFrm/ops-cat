@@ -30,7 +30,7 @@ type ConversationRepo interface {
 	AppendAt(ctx context.Context, conversationID int64, sortOrder int, msg *conversation_entity.Message) error
 
 	// UpdateAt 按 (conversationID, sortOrder) 自然键更新已有消息行。
-	// 只写 role/blocks/mentions/token_usage/partial_reason/createtime；
+	// 只写 role/blocks/mentions/token_usage/partial_reason/partial_detail/createtime；
 	// id 与 conversation_id 不变。
 	UpdateAt(ctx context.Context, conversationID int64, sortOrder int, msg *conversation_entity.Message) error
 
@@ -160,6 +160,7 @@ func (r *conversationRepo) UpdateAt(ctx context.Context, conversationID int64, s
 			"mentions":       msg.Mentions,
 			"token_usage":    msg.TokenUsage,
 			"partial_reason": msg.PartialReason,
+			"partial_detail": msg.PartialDetail,
 			"createtime":     msg.Createtime,
 		}).Error
 }
