@@ -28,29 +28,6 @@ func TestMessage_V2Fields(t *testing.T) {
 	})
 }
 
-func TestConversation_StateRoundTrip(t *testing.T) {
-	Convey("Conversation StateValues 往返", t, func() {
-		c := &Conversation{ThreadID: "t-1"}
-		Convey("非空写入后能读回", func() {
-			So(c.SetStateValues(map[string]string{"k": "v"}), ShouldBeNil)
-			got, err := c.GetStateValues()
-			So(err, ShouldBeNil)
-			So(got["k"], ShouldEqual, "v")
-		})
-		Convey("nil/空 map 写入清空列", func() {
-			c.StateValues = `{"x":"y"}`
-			So(c.SetStateValues(nil), ShouldBeNil)
-			So(c.StateValues, ShouldEqual, "")
-		})
-		Convey("空列读取返回 nil", func() {
-			c.StateValues = ""
-			got, err := c.GetStateValues()
-			So(err, ShouldBeNil)
-			So(got, ShouldBeNil)
-		})
-	})
-}
-
 func TestMessageMentionsRoundtrip(t *testing.T) {
 	Convey("SetMentions/GetMentions 往返", t, func() {
 		msg := &Message{}

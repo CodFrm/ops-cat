@@ -51,7 +51,7 @@ func normalizeConversationTitle(title string) string {
 // 切换 provider 时若不重置 Manager，旧 *aiagent.ConvHandle 会继续持有旧 provider
 // 引用，必须重启软件才能生效。
 func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
-	prov, err := a.buildCagoProvider(p)
+	prov, err := a.buildProvider(p)
 	if err != nil {
 		return err
 	}
@@ -647,8 +647,8 @@ func (a *App) DeleteConversation(id int64) error {
 	return nil
 }
 
-// buildCagoProvider 用 OpsKat 的 AIProvider 配置构建 cago provider.Provider。
-func (a *App) buildCagoProvider(p *ai_provider_entity.AIProvider) (provider.Provider, error) {
+// buildProvider 用 OpsKat 的 AIProvider 配置构建 provider.Provider。
+func (a *App) buildProvider(p *ai_provider_entity.AIProvider) (provider.Provider, error) {
 	apiKey, err := ai_provider_svc.AIProvider().DecryptAPIKey(p)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt api key: %w", err)

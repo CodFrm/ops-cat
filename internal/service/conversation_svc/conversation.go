@@ -2,8 +2,6 @@ package conversation_svc
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"sync"
 	"time"
 
@@ -26,11 +24,6 @@ type ConversationSvc interface {
 
 	// 消息持久化
 	LoadMessages(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error)
-
-	// UpdateConversationState 把 cago Session 的 ThreadID + State.Values 写入
-	// conversations 表的 thread_id / state_values 列。values 序列化为 JSON；
-	// 空 map / nil 映射到空字符串（GetStateValues 返回 nil）。
-	UpdateConversationState(ctx context.Context, conversationID int64, threadID string, values map[string]string) error
 }
 
 type conversationSvc struct {
@@ -96,14 +89,3 @@ func (s *conversationSvc) LoadMessages(ctx context.Context, conversationID int64
 	return conversation_repo.Conversation().ListMessages(ctx, conversationID)
 }
 
-func (s *conversationSvc) UpdateConversationState(ctx context.Context, conversationID int64, threadID string, values map[string]string) error {
-	var jsonStr string
-	if len(values) > 0 {
-		b, err := json.Marshal(values)
-		if err != nil {
-			return fmt.Errorf("marshal state values: %w", err)
-		}
-		jsonStr = string(b)
-	}
-	return conversation_repo.Conversation().UpdateState(ctx, conversationID, threadID, jsonStr)
-}

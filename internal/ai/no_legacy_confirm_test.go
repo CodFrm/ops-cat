@@ -136,34 +136,3 @@ func TestHandleExecK8s_NoLegacyConfirm(t *testing.T) {
 		t.Fatalf("legacy confirmFunc 被调用了 %d 次 —— in-handler check 又被加回 handleExecK8s", got)
 	}
 }
-
-// TestCheckKafkaToolPermission_NoOp 钉死 kafka stub 的 no-op 契约。
-//
-// 历史：checkKafkaToolPermission 曾经走 GetPolicyChecker(ctx).CheckForAsset 做策略 + confirm，
-// 与 PreToolUse policyHook 重叠，造成双卡。现在改成无条件返回 (Allow, true)，调用方那 7 处
-// `if result, ok := ...; !ok` 写法不变，但永远走 ok=true 分支。
-//
-// 这条测试同时覆盖 "ctx 里有 PolicyChecker（带 confirmFunc）也不该被触发" —— 是另一种回归
-// 形式（有人把 GetPolicyChecker 那段挂回来）。
-func TestCheckKafkaToolPermission_NoOp(t *testing.T) {
-	checker, calls := noLegacyChecker()
-
-	// 干净 ctx：函数应当 Allow + true，不接触任何依赖。
-	result, ok := checkKafkaToolPermission(context.Background(), 1, "topic.delete *")
-	if result.Decision != Allow {
-		t.Errorf("clean ctx: decision = %v, want Allow", result.Decision)
-	}
-	if !ok {
-		t.Errorf("clean ctx: ok = false, want true（callsites 写法是 if !ok { return result.Message }）")
-	}
-
-	// 即使把 PolicyChecker 塞进 ctx，stub 也不该 reach 它。
-	ctx := WithPolicyChecker(context.Background(), checker)
-	result, ok = checkKafkaToolPermission(ctx, 1, "topic.delete *")
-	if result.Decision != Allow || !ok {
-		t.Errorf("with PolicyChecker: decision=%v ok=%v, want Allow+true", result.Decision, ok)
-	}
-	if got := calls.Load(); got != 0 {
-		t.Fatalf("kafka stub 调用了 confirmFunc %d 次 —— in-handler 防御又被挂回 checkKafkaToolPermission", got)
-	}
-}

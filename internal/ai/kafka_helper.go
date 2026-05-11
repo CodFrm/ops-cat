@@ -46,12 +46,8 @@ func handleKafkaCluster(ctx context.Context, args map[string]any) (string, error
 	if assetID == 0 {
 		return "", fmt.Errorf("missing required parameter: asset_id")
 	}
-	command, err := kafkaClusterCommand(operation)
-	if err != nil {
+	if _, err := kafkaClusterCommand(operation); err != nil {
 		return "", err
-	}
-	if result, ok := checkKafkaToolPermission(ctx, assetID, command); !ok {
-		return result.Message, nil
 	}
 
 	svc, release := kafkaServiceFromCtx(ctx)
@@ -94,12 +90,8 @@ func handleKafkaTopic(ctx context.Context, args map[string]any) (string, error) 
 	if assetID == 0 {
 		return "", fmt.Errorf("missing required parameter: asset_id")
 	}
-	command, err := kafkaTopicCommand(operation, argString(args, "topic"))
-	if err != nil {
+	if _, err := kafkaTopicCommand(operation, argString(args, "topic")); err != nil {
 		return "", err
-	}
-	if result, ok := checkKafkaToolPermission(ctx, assetID, command); !ok {
-		return result.Message, nil
 	}
 
 	svc, release := kafkaServiceFromCtx(ctx)
@@ -182,12 +174,8 @@ func handleKafkaConsumerGroup(ctx context.Context, args map[string]any) (string,
 	if assetID == 0 {
 		return "", fmt.Errorf("missing required parameter: asset_id")
 	}
-	command, err := kafkaConsumerGroupCommand(operation, argString(args, "group"))
-	if err != nil {
+	if _, err := kafkaConsumerGroupCommand(operation, argString(args, "group")); err != nil {
 		return "", err
-	}
-	if result, ok := checkKafkaToolPermission(ctx, assetID, command); !ok {
-		return result.Message, nil
 	}
 
 	svc, release := kafkaServiceFromCtx(ctx)
@@ -233,12 +221,8 @@ func handleKafkaACL(ctx context.Context, args map[string]any) (string, error) {
 	if assetID == 0 {
 		return "", fmt.Errorf("missing required parameter: asset_id")
 	}
-	command, err := kafkaACLCommand(operation)
-	if err != nil {
+	if _, err := kafkaACLCommand(operation); err != nil {
 		return "", err
-	}
-	if result, ok := checkKafkaToolPermission(ctx, assetID, command); !ok {
-		return result.Message, nil
 	}
 
 	svc, release := kafkaServiceFromCtx(ctx)
@@ -274,12 +258,8 @@ func handleKafkaSchema(ctx context.Context, args map[string]any) (string, error)
 	if assetID == 0 {
 		return "", fmt.Errorf("missing required parameter: asset_id")
 	}
-	command, err := kafkaSchemaCommand(operation, argString(args, "subject"))
-	if err != nil {
+	if _, err := kafkaSchemaCommand(operation, argString(args, "subject")); err != nil {
 		return "", err
-	}
-	if result, ok := checkKafkaToolPermission(ctx, assetID, command); !ok {
-		return result.Message, nil
 	}
 
 	svc, release := kafkaServiceFromCtx(ctx)
@@ -341,12 +321,8 @@ func handleKafkaConnect(ctx context.Context, args map[string]any) (string, error
 	if assetID == 0 {
 		return "", fmt.Errorf("missing required parameter: asset_id")
 	}
-	command, err := kafkaConnectCommand(operation, argString(args, "connector"))
-	if err != nil {
+	if _, err := kafkaConnectCommand(operation, argString(args, "connector")); err != nil {
 		return "", err
-	}
-	if result, ok := checkKafkaToolPermission(ctx, assetID, command); !ok {
-		return result.Message, nil
 	}
 
 	svc, release := kafkaServiceFromCtx(ctx)
@@ -428,12 +404,8 @@ func handleKafkaMessage(ctx context.Context, args map[string]any) (string, error
 	if assetID == 0 {
 		return "", fmt.Errorf("missing required parameter: asset_id")
 	}
-	command, err := kafkaMessageCommand(operation, topic)
-	if err != nil {
+	if _, err := kafkaMessageCommand(operation, topic); err != nil {
 		return "", err
-	}
-	if result, ok := checkKafkaToolPermission(ctx, assetID, command); !ok {
-		return result.Message, nil
 	}
 
 	svc, release := kafkaServiceFromCtx(ctx)
@@ -473,19 +445,6 @@ func handleKafkaMessage(ctx context.Context, args map[string]any) (string, error
 	default:
 		return "", fmt.Errorf("unsupported kafka_message operation: %s", operation)
 	}
-}
-
-// checkKafkaToolPermission 历史上是 in-handler 的策略防御，cago 迁移之后只服务 AI 路径
-// （opsctl 不注 PolicyChecker），且 PreToolUse aiagent.policyHook 已经统一 gate 过；这里
-// 再走 checker.CheckForAsset 会触发 legacy makeCommandConfirmFunc 弹第二张审批卡。
-//
-// 保留函数本体而不是删 7 处 call site 是为了让 kafkaXxxCommand 计算的策略命令字符串
-// 仍然作为 operation 合法性校验用（topic/group 必填等），以及保留未来重新接入策略
-// 时只改一处的余地。
-//
-//nolint:unparam // bool 永远 true，但调用方写法是 if !ok { ... }，签名保留方便回插。
-func checkKafkaToolPermission(_ context.Context, _ int64, _ string) (CheckResult, bool) {
-	return CheckResult{Decision: Allow}, true
 }
 
 func normalizeKafkaOperation(operation, fallback string) string {

@@ -2,7 +2,6 @@ package conversation_svc
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 
@@ -194,56 +193,6 @@ func TestConversationSvc_Delete(t *testing.T) {
 
 			err := Conversation().Delete(ctx, 2)
 			assert.NoError(t, err) // 消息删除失败只打日志，不返回错误
-		})
-	})
-}
-
-func TestConversationSvc_UpdateConversationState(t *testing.T) {
-	convey.Convey("UpdateConversationState 写入 thread_id 与 state_values JSON", t, func() {
-		convey.Convey("非空 values 序列化为 JSON", func() {
-			ctx, mockRepo := setupTest(t)
-
-			values := map[string]string{"k1": "v1", "k2": "v2"}
-			mockRepo.EXPECT().UpdateState(gomock.Any(), int64(1), "thread-abc", gomock.Any()).DoAndReturn(
-				func(_ context.Context, _ int64, _ string, jsonStr string) error {
-					assert.NotEmpty(t, jsonStr)
-					var got map[string]string
-					assert.NoError(t, json.Unmarshal([]byte(jsonStr), &got))
-					assert.Equal(t, values, got)
-					return nil
-				},
-			)
-
-			err := Conversation().UpdateConversationState(ctx, 1, "thread-abc", values)
-			assert.NoError(t, err)
-		})
-
-		convey.Convey("nil values 写入空字符串", func() {
-			ctx, mockRepo := setupTest(t)
-
-			mockRepo.EXPECT().UpdateState(gomock.Any(), int64(2), "tid", "").Return(nil)
-
-			err := Conversation().UpdateConversationState(ctx, 2, "tid", nil)
-			assert.NoError(t, err)
-		})
-
-		convey.Convey("空 map 写入空字符串", func() {
-			ctx, mockRepo := setupTest(t)
-
-			mockRepo.EXPECT().UpdateState(gomock.Any(), int64(3), "tid", "").Return(nil)
-
-			err := Conversation().UpdateConversationState(ctx, 3, "tid", map[string]string{})
-			assert.NoError(t, err)
-		})
-
-		convey.Convey("repo 错误透传", func() {
-			ctx, mockRepo := setupTest(t)
-
-			mockRepo.EXPECT().UpdateState(gomock.Any(), int64(4), "tid", gomock.Any()).
-				Return(errors.New("db"))
-
-			err := Conversation().UpdateConversationState(ctx, 4, "tid", map[string]string{"a": "b"})
-			assert.Error(t, err)
 		})
 	})
 }

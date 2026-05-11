@@ -199,20 +199,6 @@ func (mr *MockConversationRepoMockRecorder) UpdateAt(ctx, conversationID, sortOr
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateAt", reflect.TypeOf((*MockConversationRepo)(nil).UpdateAt), ctx, conversationID, sortOrder, msg)
 }
 
-// UpdateState mocks base method.
-func (m *MockConversationRepo) UpdateState(ctx context.Context, conversationID int64, threadID, stateValuesJSON string) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UpdateState", ctx, conversationID, threadID, stateValuesJSON)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// UpdateState indicates an expected call of UpdateState.
-func (mr *MockConversationRepoMockRecorder) UpdateState(ctx, conversationID, threadID, stateValuesJSON any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateState", reflect.TypeOf((*MockConversationRepo)(nil).UpdateState), ctx, conversationID, threadID, stateValuesJSON)
-}
-
 // UpdateTitle mocks base method.
 func (m *MockConversationRepo) UpdateTitle(ctx context.Context, id int64, title string, updatetime int64) error {
 	m.ctrl.T.Helper()

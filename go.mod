@@ -3,7 +3,7 @@ module github.com/opskat/opskat
 go 1.26.0
 
 require (
-	github.com/cago-frame/agents v0.0.0-00010101000000-000000000000
+	github.com/cago-frame/agents v0.0.0-20260511105020-2db8af7abe3c
 	github.com/cago-frame/cago v0.0.0-20260307042250-c4ff92923947
 	github.com/coder/websocket v1.8.14
 	github.com/fsnotify/fsnotify v1.10.0
@@ -180,7 +180,3 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2 // indirect
 )
-
-// replace github.com/wailsapp/wails/v2 v2.10.2 => /Users/codfrm/go/pkg/mod
-
-replace github.com/cago-frame/agents => /Users/codfrm/Code/cago/agents

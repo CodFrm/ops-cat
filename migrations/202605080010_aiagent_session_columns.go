@@ -6,7 +6,6 @@ import (
 )
 
 // migration202605080010
-//   - conversations 加 thread_id / state_values（cago Session 平铺）
 //   - conversation_messages 删 content / tool_calls / tool_call_id，加
 //     partial_reason / partial_detail，建 (conversation_id, sort_order) 唯一索引；
 //     DROP 之前先把空 blocks 行的 content 折成 [{type:"text", text:...}]
@@ -17,9 +16,6 @@ func migration202605080010() *gormigrate.Migration {
 		ID: "202605080010",
 		Migrate: func(tx *gorm.DB) error {
 			stmts := []string{
-				`ALTER TABLE conversations ADD COLUMN thread_id VARCHAR(255) NOT NULL DEFAULT ''`,
-				`ALTER TABLE conversations ADD COLUMN state_values TEXT`,
-
 				// backfill：空 blocks 但 content 非空的行，把 content 折成
 				// [{"type":"text","text":...}]，与前端 deserializeBlocks 的 TextBlock 协议一致。
 				// 必须在 DROP COLUMN content 之前跑。

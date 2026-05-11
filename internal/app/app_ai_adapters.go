@@ -199,7 +199,7 @@ func extractPolicyTarget(toolName string, args map[string]any) (int64, string, s
 }
 
 func isLocalKind(kind string) bool {
-	return kind == "local_bash" || kind == "local_write" || kind == "local_edit"
+	return strings.HasPrefix(kind, "local_")
 }
 
 func policyAssetTypeForKind(kind string) string {

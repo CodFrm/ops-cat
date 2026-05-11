@@ -3,7 +3,6 @@ package conversation_repo
 
 import (
 	"context"
-	"time"
 
 	"github.com/cago-frame/cago/database/db"
 	"gorm.io/gorm"
@@ -41,10 +40,6 @@ type ConversationRepo interface {
 	// LoadOrdered 按 sort_order ASC 返回指定会话的所有消息行。
 	LoadOrdered(ctx context.Context, conversationID int64) ([]*conversation_entity.Message, error)
 
-	// UpdateState 写入 cago Session 的 thread_id / state_values，并刷新 updatetime。
-	// stateValuesJSON 已是序列化好的 JSON 字符串（service 层负责 marshal）；
-	// 空字符串视为清空（GetStateValues 返回 nil）。
-	UpdateState(ctx context.Context, conversationID int64, threadID, stateValuesJSON string) error
 }
 
 var defaultConversation ConversationRepo
@@ -182,12 +177,3 @@ func (r *conversationRepo) LoadOrdered(ctx context.Context, conversationID int64
 	return msgs, nil
 }
 
-func (r *conversationRepo) UpdateState(ctx context.Context, conversationID int64, threadID, stateValuesJSON string) error {
-	return db.Ctx(ctx).Model(&conversation_entity.Conversation{}).
-		Where("id = ?", conversationID).
-		Updates(map[string]any{
-			"thread_id":    threadID,
-			"state_values": stateValuesJSON,
-			"updatetime":   time.Now().Unix(),
-		}).Error
-}
