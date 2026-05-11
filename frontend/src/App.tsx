@@ -14,7 +14,6 @@ import { LeftPanel } from "@/components/layout/LeftPanel";
 import { SideTabList } from "@/components/layout/SideTabList";
 import { AssetForm } from "@/components/asset/AssetForm";
 import { GroupDialog } from "@/components/asset/GroupDialog";
-import { PermissionDialog } from "@/components/ai/PermissionDialog";
 import { OpsctlApprovalDialog } from "@/components/approval/OpsctlApprovalDialog";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
@@ -461,7 +460,6 @@ function App() {
             defaultGroupId={defaultGroupId}
           />
           <GroupDialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen} editGroup={editingGroup} />
-          <PermissionDialog />
           <OpsctlApprovalDialog />
           <Toaster richColors />
         </TooltipProvider>

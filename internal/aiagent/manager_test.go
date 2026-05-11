@@ -32,13 +32,15 @@ func (noopTabOpener) Open(_ context.Context, _ string) error { return nil }
 
 type allowChecker struct{}
 
-func (allowChecker) Check(_ context.Context, _ string, _ map[string]any) (bool, string, error) {
-	return true, "", nil
+func (allowChecker) Check(_ context.Context, _ string, _ map[string]any) (PolicyOutcome, error) {
+	return PolicyOutcome{Decision: PolicyAllow}, nil
 }
 
 type discardAudit struct{}
 
-func (discardAudit) Write(_ context.Context, _, _, _ string, _ bool) error { return nil }
+func (discardAudit) Write(_ context.Context, _, _, _ string, _ bool, _ *ai.CheckResult) error {
+	return nil
+}
 
 func setupManager(t *testing.T, prov provider.Provider) *Manager {
 	gdb, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

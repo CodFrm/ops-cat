@@ -56,8 +56,14 @@ func (h *ConvHandle) Conv() *agent.Conversation { return h.conv }
 // so the UI can render the user's raw input unchanged while the LLM sees the
 // expanded form. (See Task 3 / Task 4 for the cago-side support.)
 func (h *ConvHandle) Send(ctx context.Context, raw, llmBody string) error {
+	// Steer 路径必须始终挂 WithSteerDisplay(raw)：bridge.OnConvChange 用 display
+	// 字段区分「队列 drain 的 user msg」(需要 emit queue_consumed_batch 让前端 pop
+	// 本地 pendingQueue) 和「新 turn 的首条 user msg」(前端已自己 push，bridge 不
+	// 该再 echo)。如果 raw == llmBody 时不挂 display，display="" → bridge 把空串塞
+	// 进 pending → frontend 过滤掉 → 本地 pendingQueue 永远不被消费，UI 上排队
+	// 气泡停在 pending 状态。
 	steerOpts := []agent.SteerOption{}
-	if raw != "" && raw != llmBody {
+	if raw != "" {
 		steerOpts = append(steerOpts, agent.WithSteerDisplay(raw))
 	}
 	err := h.runner.Steer(ctx, llmBody, steerOpts...)
@@ -68,6 +74,9 @@ func (h *ConvHandle) Send(ctx context.Context, raw, llmBody string) error {
 		return err
 	}
 
+	// Send 路径（新 turn）：前端已经 push 了 user 气泡，所以 display 仅在 mention
+	// 扩展导致 raw != llmBody 时挂上（让历史回放渲染 raw 而不是 expanded body），
+	// 否则 bridge 会把同一条 user msg echo 回去造成重复气泡。
 	sendOpts := []agent.SendOption{}
 	if raw != "" && raw != llmBody {
 		sendOpts = append(sendOpts, agent.WithSendDisplay(raw))

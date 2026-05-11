@@ -74,7 +74,6 @@ type App struct {
 	aiModel                 string            // 当前激活 AIProvider.Model；Manager 构造时透传
 	mgr                     *aiagent.Manager  // cago v2 多会话 Manager（per-convID *ConvHandle）
 	githubAuthCancel        context.CancelFunc
-	permissionChan          chan ai.PermissionResponse // 前端权限响应 channel（CLI 工具用）
 	pendingAIApprovals      sync.Map                   // map[string]chan ai.ApprovalResponse（AI 审批用）
 	pendingOpsctlApprovals  sync.Map                   // map[string]chan ai.ApprovalResponse（opsctl 审批用）
 	approvalServer          *approval.Server           // opsctl 审批 Unix socket 服务
@@ -103,7 +102,6 @@ func NewApp(skill SkillContent) *App {
 		skillContent:   skill,
 		sshManager:     mgr,
 		sftpService:    sftp_svc.NewService(mgr),
-		permissionChan: make(chan ai.PermissionResponse, 1),
 		shutdownCh:     make(chan struct{}),
 		flushAckCh:     make(chan struct{}, 1),
 	}

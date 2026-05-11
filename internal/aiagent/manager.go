@@ -16,8 +16,10 @@ import (
 // applied for MaxRounds.
 type ManagerOptions struct {
 	Provider      provider.Provider
+	Model         string
 	System        string
 	Tools         []agent.Tool
+	Deps          *Deps // per-Manager 共用：SSH/Mongo/Kafka 缓存。Manager.Close 时关闭。
 	MaxRounds     int
 	RetryPolicy   agent.RetryPolicy
 	Emitter       EventEmitter
@@ -144,16 +146,12 @@ func (m *Manager) Handle(ctx context.Context, convID int64) (*ConvHandle, error)
 	// Recorder: subscribes Conv.Watch → Store writes. Returns unsubscribe.
 	unbind := m.recorder.Bind(conv)
 
-	// Approval gateway Run goroutine.
-	gwCtx, gwCancel := context.WithCancel(context.Background())
-	go gw.Run(gwCtx)
-
 	h := NewConvHandle(convID, conv, r)
 	// LIFO order: teardown runs in reverse — bridgeCancel first (stop emit
-	// translation), then gateway (deny in-flight pending), then unbind
-	// (release the recorder watch).
+	// translation), then unbind (release the recorder watch).
+	// gateway 没有后台 goroutine 了：RequestSingle 是同步调用，ctx 由 hook 的
+	// turn ctx 控制，turn 取消时它自己 select<-ctx.Done() 返回 deny。
 	h.AddTeardown(func() { unbind() })
-	h.AddTeardown(func() { gwCancel(); _ = gw.Close() })
 	h.AddTeardown(func() { bridgeCancel() })
 
 	m.mu.Lock()
@@ -169,7 +167,7 @@ func (m *Manager) Handle(ctx context.Context, convID int64) (*ConvHandle, error)
 	return h, nil
 }
 
-// Close shuts down all per-conv handles. Idempotent.
+// Close shuts down all per-conv handles and releases Deps. Idempotent.
 func (m *Manager) Close() error {
 	m.mu.Lock()
 	handles := m.handles
@@ -177,6 +175,9 @@ func (m *Manager) Close() error {
 	m.mu.Unlock()
 	for _, h := range handles {
 		_ = h.Close()
+	}
+	if m.opts.Deps != nil {
+		_ = m.opts.Deps.Close()
 	}
 	return nil
 }
@@ -190,14 +191,19 @@ func (m *Manager) Close() error {
 // allow-list that would drift from PolicyChecker. Tiny per-call overhead is
 // acceptable for ~10 active convs.
 func (m *Manager) buildAgentOptions(gw *ApprovalGateway, rc *roundsCounter) []agent.Option {
+	// decisionStore 是 per-Handle 的 policy → audit 旁路：PreHook 写决策，
+	// PostHook Pop 给 AuditWriter。ToolUseID 是 turn-uniq 的，不必跨 handle 共享。
+	decisionStore := newToolDecisionStore()
 	opts := []agent.Option{
+		agent.Model(m.opts.Model),
 		agent.System(m.opts.System),
 		agent.Tools(m.opts.Tools...),
 		agent.UserPromptSubmit(newMentionsHook(m.opts.Mention, m.opts.TabOpener)),
-		agent.PreToolUse("", newPolicyHook(m.opts.PolicyChecker)),
+		// policy hook 内部直接调用 gw.RequestSingle 处理 NeedConfirm 分支：
+		// PreToolUse 链路上只有这一处审批入口，避免重复弹卡。
+		agent.PreToolUse("", newPolicyHook(m.opts.PolicyChecker, gw, decisionStore)),
 		agent.PreToolUse("", rc.Hook()),
-		agent.PreToolUse("", gw.Hook()),
-		agent.PostToolUse("", newAuditHook(m.opts.AuditWriter)),
+		agent.PostToolUse("", newAuditHook(m.opts.AuditWriter, decisionStore)),
 		agent.PostToolUse("dispatch_subagent", newSubagentDispatchHook(2000)),
 		agent.OnRunnerStart(func(_ context.Context, _ *agent.Runner) error {
 			rc.Reset()

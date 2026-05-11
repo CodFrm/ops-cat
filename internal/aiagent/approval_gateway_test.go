@@ -5,9 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cago-frame/agents/agent"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/opskat/opskat/internal/ai"
 )
@@ -55,131 +53,123 @@ func (f *fakeResolver) Resolver() PendingResolver {
 	}
 }
 
+// 本地工具命中 grants → RequestSingle 直接合成 allow，不发 wails 事件。
 func TestApprovalGateway_LocalGrantShortCircuit(t *testing.T) {
 	em := &apprCaptureEmitter{}
 	grants := &fakeGrants{hasAllowed: true}
 	res := newFakeResolver()
 	g := NewApprovalGateway(42, em, grants, res.Resolver())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go g.Run(ctx)
 
-	hook := g.Hook()
-	out, err := hook(ctx, &agent.PreToolUseInput{
-		ToolName: "Write", ToolUseID: "tu_1",
-		Input: map[string]any{"path": "/tmp/x"},
-	})
-	require.NoError(t, err)
-	assert.Equal(t, agent.DecisionApprove, out.Decision)
-	// No emit (short-circuit), resolver not called.
+	resp := g.RequestSingle(context.Background(), "local_write",
+		[]ai.ApprovalItem{{Type: "local_write", Command: "/tmp/x"}}, "")
+	assert.Equal(t, "allow", resp.Decision)
 	assert.Empty(t, em.events, "local grant should suppress all emits")
-
-	_ = g.Close()
 }
 
-func TestApprovalGateway_UserApproves(t *testing.T) {
+// local_bash 即使 grants 命中也不能短路 —— bash 永不放行。
+func TestApprovalGateway_LocalBashIgnoresGrant(t *testing.T) {
 	em := &apprCaptureEmitter{}
-	grants := &fakeGrants{}
+	grants := &fakeGrants{hasAllowed: true}
 	res := newFakeResolver()
 	g := NewApprovalGateway(42, em, grants, res.Resolver())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go g.Run(ctx)
+	res.respCh <- ai.ApprovalResponse{Decision: "allow"}
 
-	// Pre-arm the response so the gateway sees "approve" once it emits the request.
-	res.respCh <- ai.ApprovalResponse{Decision: "approve"}
-
-	hook := g.Hook()
-	out, err := hook(ctx, &agent.PreToolUseInput{
-		ToolName: "ssh.exec", ToolUseID: "tu_2",
-		Input: map[string]any{"cmd": "ls"},
-	})
-	require.NoError(t, err)
-	assert.Equal(t, agent.DecisionApprove, out.Decision)
-
-	// Two emits: approval_request + approval_result
-	require.Len(t, em.events, 2)
+	resp := g.RequestSingle(context.Background(), "local_bash",
+		[]ai.ApprovalItem{{Type: "local_bash", Command: "rm -rf /"}}, "")
+	assert.Equal(t, "allow", resp.Decision)
+	// 必须发出弹卡（说明 grants 短路没生效）。
+	assert.Len(t, em.events, 2)
 	assert.Equal(t, "approval_request", em.events[0].Type)
-	assert.Equal(t, "ssh.exec", em.events[0].ToolName)
-	assert.Equal(t, "approval_result", em.events[1].Type)
-	assert.Equal(t, "approve", em.events[1].Content)
-
-	_ = g.Close()
 }
 
+// 用户 allow → RequestSingle 返回 allow，两个事件按序发出。
+func TestApprovalGateway_UserAllows(t *testing.T) {
+	em := &apprCaptureEmitter{}
+	res := newFakeResolver()
+	g := NewApprovalGateway(42, em, &fakeGrants{}, res.Resolver())
+	res.respCh <- ai.ApprovalResponse{Decision: "allow"}
+
+	resp := g.RequestSingle(context.Background(), "exec",
+		[]ai.ApprovalItem{{Type: "exec", AssetID: 1, Command: "ls"}}, "")
+	assert.Equal(t, "allow", resp.Decision)
+
+	assert.Len(t, em.events, 2)
+	assert.Equal(t, "approval_request", em.events[0].Type)
+	assert.Equal(t, "exec", em.events[0].Kind)
+	assert.Equal(t, "approval_result", em.events[1].Type)
+	assert.Equal(t, "allow", em.events[1].Content)
+}
+
+// 用户 deny → RequestSingle 返回 deny。
 func TestApprovalGateway_UserDenies(t *testing.T) {
 	em := &apprCaptureEmitter{}
 	res := newFakeResolver()
 	g := NewApprovalGateway(42, em, &fakeGrants{}, res.Resolver())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go g.Run(ctx)
-
 	res.respCh <- ai.ApprovalResponse{Decision: "deny"}
 
-	hook := g.Hook()
-	out, err := hook(ctx, &agent.PreToolUseInput{
-		ToolName: "rm.file", ToolUseID: "tu_3",
-		Input: map[string]any{},
-	})
-	require.NoError(t, err)
-	assert.Equal(t, agent.DecisionDeny, out.Decision)
-
-	_ = g.Close()
+	resp := g.RequestSingle(context.Background(), "exec",
+		[]ai.ApprovalItem{{Type: "exec", Command: "rm -rf /"}}, "")
+	assert.Equal(t, "deny", resp.Decision)
 }
 
-func TestApprovalGateway_AlwaysGrantPersists(t *testing.T) {
+// allowAll + local_write → 落 grants；bash 不落。
+func TestApprovalGateway_AllowAllPersistsForLocalWrite(t *testing.T) {
 	em := &apprCaptureEmitter{}
 	grants := &fakeGrants{}
 	res := newFakeResolver()
 	g := NewApprovalGateway(42, em, grants, res.Resolver())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go g.Run(ctx)
+	res.respCh <- ai.ApprovalResponse{Decision: "allowAll"}
 
-	res.respCh <- ai.ApprovalResponse{Decision: "always"}
-
-	hook := g.Hook()
-	out, err := hook(ctx, &agent.PreToolUseInput{
-		ToolName: "Write", ToolUseID: "tu_4",
-		Input: map[string]any{},
-	})
-	require.NoError(t, err)
-	assert.Equal(t, agent.DecisionApprove, out.Decision)
-	assert.Equal(t, []string{"conv_42:Write"}, grants.saved, "always should persist via grants.Save")
-
-	_ = g.Close()
+	g.RequestSingle(context.Background(), "local_write",
+		[]ai.ApprovalItem{{Type: "local_write", Command: "/tmp/x"}}, "")
+	assert.Equal(t, []string{"conv_42:write"}, grants.saved)
 }
 
-func TestApprovalGateway_CtxCancelDeniesPending(t *testing.T) {
+func TestApprovalGateway_AllowAllSkipsBash(t *testing.T) {
+	em := &apprCaptureEmitter{}
+	grants := &fakeGrants{}
+	res := newFakeResolver()
+	g := NewApprovalGateway(42, em, grants, res.Resolver())
+	res.respCh <- ai.ApprovalResponse{Decision: "allowAll"}
+
+	g.RequestSingle(context.Background(), "local_bash",
+		[]ai.ApprovalItem{{Type: "local_bash", Command: "rm -rf /"}}, "")
+	assert.Empty(t, grants.saved, "bash allowAll must not persist")
+}
+
+// 非 local_* 工具 allowAll 不落 grants（资产维度走另一条 grant 路径，由
+// policy hook 自身负责）。
+func TestApprovalGateway_AllowAllSkipsAssetKind(t *testing.T) {
+	em := &apprCaptureEmitter{}
+	grants := &fakeGrants{}
+	res := newFakeResolver()
+	g := NewApprovalGateway(42, em, grants, res.Resolver())
+	res.respCh <- ai.ApprovalResponse{Decision: "allowAll"}
+
+	g.RequestSingle(context.Background(), "exec",
+		[]ai.ApprovalItem{{Type: "exec", AssetID: 1, Command: "ls"}}, "")
+	assert.Empty(t, grants.saved, "asset-kind allowAll handled elsewhere")
+}
+
+// ctx 取消时 RequestSingle 立即返回 deny。
+func TestApprovalGateway_CtxCancelDenies(t *testing.T) {
 	em := &apprCaptureEmitter{}
 	res := newFakeResolver()
 	g := NewApprovalGateway(42, em, &fakeGrants{}, res.Resolver())
 	ctx, cancel := context.WithCancel(context.Background())
-	go g.Run(ctx)
 
-	hookDone := make(chan struct{})
+	done := make(chan ai.ApprovalResponse, 1)
 	go func() {
-		defer close(hookDone)
-		hook := g.Hook()
-		out, err := hook(context.Background(), &agent.PreToolUseInput{
-			ToolName: "stuck", ToolUseID: "tu_stuck",
-			Input: map[string]any{},
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, agent.DecisionDeny, out.Decision, "ctx cancel should deny pending")
+		done <- g.RequestSingle(ctx, "exec",
+			[]ai.ApprovalItem{{Type: "exec", Command: "stuck"}}, "")
 	}()
-
-	// Wait until the gateway is blocked on the resolver, then cancel.
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 	cancel()
 
 	select {
-	case <-hookDone:
-		// good
+	case resp := <-done:
+		assert.Equal(t, "deny", resp.Decision)
 	case <-time.After(2 * time.Second):
-		t.Fatal("hook did not return after ctx cancel")
+		t.Fatal("RequestSingle did not return after ctx cancel")
 	}
-
-	_ = g.Close()
 }

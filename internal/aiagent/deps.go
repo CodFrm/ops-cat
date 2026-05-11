@@ -6,40 +6,40 @@ import (
 	"github.com/opskat/opskat/internal/sshpool"
 )
 
-// Deps is the per-Conversation (per-coding.System) dependency bag.
-// Tools, hooks, and observers borrow from it.
+// Deps 是 per-ConvHandle 的依赖包：tools 共用同一组 SSH/Mongo/Kafka 缓存
+// （同一会话内复用连接），policy checker 走 App 共享实例。
 //
-// Lifetime invariants:
-//   - sshPool is App-shared (one process-wide instance) — provided by the App.
-//   - sshCache, mongoCache, kafkaSvc are per-Conversation; constructed per Deps,
-//     closed via Deps.Close() when the System closes.
+// 生命周期：
+//   - SSHPool / PolicyChecker：App 共享，外部传入，Close 不动。
+//   - SSHCache / MongoCache / KafkaService：per-ConvHandle，NewDeps 新建，
+//     Close 时释放。
 type Deps struct {
 	// App-shared (do NOT close from Deps)
-	SSHPool *sshpool.Pool
+	SSHPool       *sshpool.Pool
+	PolicyChecker *ai.CommandPolicyChecker
 
-	// Per-Conversation (closed by Deps.Close)
+	// Per-ConvHandle (closed by Deps.Close)
 	SSHCache     *ai.SSHClientCache
 	MongoCache   *ai.MongoDBClientCache
 	KafkaService *kafka_svc.Service
-
-	// Reused references
-	PolicyChecker *ai.CommandPolicyChecker
 }
 
-// NewDeps constructs a fresh per-Conversation Deps bag.
-// pool MUST be the App-shared SSH pool; checker MUST be the App-shared checker.
+// NewDeps 新建 per-ConvHandle Deps。pool / checker 是 App 共享实例。
 func NewDeps(pool *sshpool.Pool, checker *ai.CommandPolicyChecker) *Deps {
 	return &Deps{
 		SSHPool:       pool,
+		PolicyChecker: checker,
 		SSHCache:      ai.NewSSHClientCache(),
 		MongoCache:    ai.NewMongoDBClientCache(),
 		KafkaService:  kafka_svc.New(pool),
-		PolicyChecker: checker,
 	}
 }
 
-// Close releases per-Conversation resources. Idempotent.
+// Close 释放 per-ConvHandle 资源。幂等。
 func (d *Deps) Close() error {
+	if d == nil {
+		return nil
+	}
 	if d.KafkaService != nil {
 		d.KafkaService.Close()
 		d.KafkaService = nil

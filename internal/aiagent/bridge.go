@@ -28,6 +28,14 @@ type eventBridge struct {
 
 	mu      sync.Mutex
 	pending []string
+
+	// inThinking marks that the most recently emitted runner delta was a
+	// thinking delta. When the next non-thinking event arrives (text, tool,
+	// turn end, done, cancel, error), the bridge emits a synthetic
+	// "thinking_done" before that event so the frontend can transition the
+	// running thinking block to completed. cago has no explicit thinking-end
+	// event; we infer the boundary from the next observable event.
+	inThinking bool
 }
 
 // newBridge constructs a bridge for the given conversation. The bridge does
@@ -71,17 +79,24 @@ func (b *eventBridge) OnRunnerEvent(_ context.Context, ev agent.Event) {
 		})
 	}
 
+	// thinking_done boundary inference: if the last delta was thinking and now
+	// we're about to emit anything else, flush a thinking_done first.
+	b.maybeEmitThinkingDone(ev.Kind)
+
 	switch ev.Kind {
 	case agent.EventTextDelta:
 		b.emit.Emit(b.convID, ai.StreamEvent{Type: "content", Content: ev.Delta})
 
 	case agent.EventThinkingDelta:
+		b.inThinking = true
 		b.emit.Emit(b.convID, ai.StreamEvent{Type: "thinking", Content: ev.Delta})
 
 	case agent.EventPreToolUse:
 		if ev.Tool != nil {
+			// 前端 streamEvent reducer 只识别 "tool_start"（建工具气泡）+ "tool_result"
+			// （回填结果），错发 "tool_call" 会被静默丢弃，导致工具调用整段不渲染。
 			b.emit.Emit(b.convID, ai.StreamEvent{
-				Type:       "tool_call",
+				Type:       "tool_start",
 				ToolName:   ev.Tool.Name,
 				ToolInput:  stringifyMap(ev.Tool.Input),
 				ToolCallID: ev.Tool.ToolUseID,
@@ -109,6 +124,21 @@ func (b *eventBridge) OnRunnerEvent(_ context.Context, ev agent.Event) {
 			}
 		}
 
+	case agent.EventMessageEnd:
+		// cago 把每轮 LLM 调用的 token 用量挂在 MessageEnd 的 Event.Usage 上。
+		// 不发的话前端 TokenUsageBadge 永远是空 —— 用户拿不到本次成本。
+		if ev.Usage != nil {
+			b.emit.Emit(b.convID, ai.StreamEvent{
+				Type: "usage",
+				Usage: &ai.Usage{
+					InputTokens:         ev.Usage.PromptTokens,
+					OutputTokens:        ev.Usage.CompletionTokens,
+					CacheReadTokens:     ev.Usage.CachedTokens,
+					CacheCreationTokens: ev.Usage.CacheCreationTokens,
+				},
+			})
+		}
+
 	case agent.EventError:
 		errMsg := ""
 		if ev.Error != nil {
@@ -132,10 +162,26 @@ func (b *eventBridge) OnRunnerEvent(_ context.Context, ev agent.Event) {
 	case agent.EventDone:
 		b.emit.Emit(b.convID, ai.StreamEvent{Type: "done"})
 
-	case agent.EventCancelled, agent.EventTurnEnd, agent.EventMessageEnd,
+	case agent.EventCancelled, agent.EventTurnEnd,
 		agent.EventToolDelta, agent.EventCompacted:
 		// Observational or handled elsewhere — nothing to emit.
+		// (EventMessageEnd is handled above for the usage emit.)
 	}
+}
+
+// maybeEmitThinkingDone emits a synthetic "thinking_done" event when leaving
+// a thinking run. Idempotent: clears inThinking after emit. Called inside
+// OnRunnerEvent before the kind-specific switch so the event order is
+// thinking_delta…thinking_done…content / tool_start / done.
+func (b *eventBridge) maybeEmitThinkingDone(nextKind agent.EventKind) {
+	if !b.inThinking {
+		return
+	}
+	if nextKind == agent.EventThinkingDelta {
+		return // still thinking; not a boundary
+	}
+	b.inThinking = false
+	b.emit.Emit(b.convID, ai.StreamEvent{Type: "thinking_done"})
 }
 
 // extractDisplayText finds the first MetadataBlock{Key:"display"} in the

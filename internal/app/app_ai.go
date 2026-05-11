@@ -55,16 +55,22 @@ func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
 	}
 	a.aiProvider = prov
 	a.aiModel = p.Model
-	a.resetManager(prov)
+	a.resetManager(prov, p.Model)
 	return nil
 }
 
 // resetManager closes any existing Manager and constructs a new one bound
 // to the given cago provider. Called when the active AI Provider changes.
 //
-// TODO(Task 22+): 真实 system prompt（语言 + 扩展 skill MD）、tools registry、
-// audit / policy / mention adapter 仍是 stub；当前用 passthrough 让骨架先跑通。
-func (a *App) resetManager(prov provider.Provider) {
+// 工具/策略/审计/提及/打 tab 都用真实适配器：
+//   - Tools: aiagent.OpsTools(deps) 把 ai.AllToolDefs() 全包成 agent.Tool
+//   - System: aiagent.StaticSystemPrompt(a.lang)
+//   - PolicyChecker: opsPolicyChecker —— 走 ai.CheckPermission，NeedConfirm 时
+//     通过 ApprovalGateway 弹卡（policy hook 内部完成审批 round trip）
+//   - AuditWriter: opsAuditWriter —— 写 audit_repo
+//   - Mention: opsMentionResolver —— 扫描 @name → asset_repo 查询 → 渲染 context
+//   - TabOpener: opsTabOpener —— 通过 wailsRuntime.EventsEmit 让前端开 tab
+func (a *App) resetManager(prov provider.Provider, model string) {
 	if a.mgr != nil {
 		_ = a.mgr.Close()
 	}
@@ -77,44 +83,28 @@ func (a *App) resetManager(prov provider.Provider) {
 		a.pendingAIApprovals.Store(confirmID, ch)
 		return ch, func() { a.pendingAIApprovals.Delete(confirmID) }
 	})
+	// PolicyChecker 走 nil confirmFunc / grant func —— v2 不再用 CommandPolicyChecker
+	// 的内嵌确认回调，审批由 cago policy hook 经 ApprovalGateway 处理。这里只是
+	// 让 deps 持有一个非 nil 实例，方便 ai.* 工具 handler 在 ctx.WithPolicyChecker
+	// 取出（部分 handler 仅用于读 SubmitGrantMulti API）。
+	policyChecker := ai.NewCommandPolicyChecker(nil)
+	deps := aiagent.NewDeps(a.sshPool, policyChecker)
 	a.mgr = aiagent.NewManager(aiagent.ManagerOptions{
 		Provider:      prov,
-		System:        "", // TODO Task 22: assemble from a.lang + extension skill MD
-		Tools:         nil,
+		Model:         model,
+		System:        aiagent.StaticSystemPrompt(a.lang),
+		Tools:         aiagent.OpsTools(deps),
+		Deps:          deps,
 		MaxRounds:     50,
 		Emitter:       emitter,
 		Resolver:      resolver,
 		LocalGrants:   aiagent.NewRepoLocalGrantStore(),
-		AuditWriter:   noopAuditWriter{},
-		PolicyChecker: passthroughPolicyChecker{},
-		Mention:       passthroughMentionResolver{},
-		TabOpener:     noopTabOpener{},
+		AuditWriter:   newOpsAuditWriter(),
+		PolicyChecker: newOpsPolicyChecker(),
+		Mention:       newOpsMentionResolver(),
+		TabOpener:     newOpsTabOpener(a),
 	})
 }
-
-// Stub adapters — replaced by real impls in a future task. They preserve
-// behavior compatibility (no policy denials, no mentions expansion, no audit).
-type noopAuditWriter struct{}
-
-func (noopAuditWriter) Write(_ context.Context, _, _, _ string, _ bool) error {
-	return nil
-}
-
-type passthroughPolicyChecker struct{}
-
-func (passthroughPolicyChecker) Check(_ context.Context, _ string, _ map[string]any) (bool, string, error) {
-	return true, "", nil
-}
-
-type passthroughMentionResolver struct{}
-
-func (passthroughMentionResolver) Expand(_ context.Context, raw string) (string, []map[string]any, []string, error) {
-	return raw, nil, nil, nil
-}
-
-type noopTabOpener struct{}
-
-func (noopTabOpener) Open(_ context.Context, _ string) error { return nil }
 
 // InitAIProvider 启动时加载激活的 Provider
 func (a *App) InitAIProvider() {
@@ -254,49 +244,127 @@ func (a *App) LoadConversationMessages(id int64) ([]ConversationDisplayMessage, 
 }
 
 // buildDisplayMessages 把 cago v2 schema 的 conversation_messages 行聚合成前端
-// 展示用的 ConversationDisplayMessage 列表。当前实现仅处理 text 块；rich
-// rendering（tool calls、thinking、metadata）留待后续 Task。
+// 展示用的 ConversationDisplayMessage 列表。
+//
+// 还原原则（与前端流式状态机对齐）：
+//   - assistant 行 → 一条 assistant 消息，blocks 包含 text/thinking/tool（tool
+//     状态默认 completed、content 为空、稍后被 tool_result 行回填）。
+//   - user 行 → 若 blocks 全是 tool_result，则把 result content 按 toolCallId
+//     回填到上一条 assistant 的 tool block，不单独产出消息（前端 tool 块本来
+//     就把 call+result 合并展示）。否则当成普通 user 消息。
+//   - metadata.display 用作 user 消息的 raw 显示文本（mention 扩展后保 raw）。
 func buildDisplayMessages(msgs []*conversation_entity.Message) []ConversationDisplayMessage {
 	out := make([]ConversationDisplayMessage, 0, len(msgs))
 	for _, m := range msgs {
-		// First try the legacy ContentBlock decode path (v1 shape).
-		text := ""
-		if blocks, err := m.GetBlocks(); err == nil {
-			for _, b := range blocks {
-				if b.Type == "text" {
-					text += b.Content
-				}
+		var raw []map[string]any
+		if m.Blocks != "" {
+			if err := json.Unmarshal([]byte(m.Blocks), &raw); err != nil {
+				raw = nil
 			}
 		}
-		// Fall back to v2 raw shape: [{"type":"text","text":"..."}, ...]
-		if text == "" {
-			text = extractV2Text(m.Blocks)
+		// Legacy ContentBlock 形状兜底（status 字段命中前端 schema 才匹配）。
+		if raw == nil || !looksLikeV2Blocks(raw) {
+			if blocks, err := m.GetBlocks(); err == nil && len(blocks) > 0 {
+				text := ""
+				for _, b := range blocks {
+					if b.Type == "text" {
+						text += b.Content
+					}
+				}
+				if text == "" {
+					continue
+				}
+				mentions, _ := m.GetMentions()
+				tokenUsage, _ := m.GetTokenUsage()
+				out = append(out, ConversationDisplayMessage{
+					Role:       m.Role,
+					Content:    text,
+					Blocks:     blocks,
+					Mentions:   mentions,
+					TokenUsage: tokenUsage,
+				})
+				continue
+			}
 		}
-		if text == "" {
+
+		// v2 path.
+		if m.Role == "user" {
+			// 若 user 行只有 tool_result 块 → 回填到上一条 assistant 的 tool block，跳过此行。
+			if onlyToolResults(raw) {
+				mergeToolResultsIntoLastAssistant(out, raw)
+				continue
+			}
+			displayText := extractV2UserDisplay(raw)
+			if displayText == "" {
+				continue
+			}
+			mentions, _ := m.GetMentions()
+			out = append(out, ConversationDisplayMessage{
+				Role:    "user",
+				Content: displayText,
+				Blocks:  []conversation_entity.ContentBlock{{Type: "text", Content: displayText}},
+				Mentions: mentions,
+			})
 			continue
 		}
-		mentions, _ := m.GetMentions()
+
+		// assistant / system.
+		blocks, content := decodeV2AssistantBlocks(raw)
+		if len(blocks) == 0 && content == "" {
+			continue
+		}
 		tokenUsage, _ := m.GetTokenUsage()
 		out = append(out, ConversationDisplayMessage{
 			Role:       m.Role,
-			Content:    text,
-			Blocks:     nil, // rich blocks deferred; frontend may degrade to plain text
-			Mentions:   mentions,
+			Content:    content,
+			Blocks:     blocks,
 			TokenUsage: tokenUsage,
 		})
 	}
 	return out
 }
 
-// extractV2Text walks the raw cago-v2 blocks JSON and concatenates all text
-// blocks. Returns "" on parse failure or when no text is present.
-func extractV2Text(blocksJSON string) string {
-	if blocksJSON == "" {
-		return ""
+// looksLikeV2Blocks 判断 raw 是否是 cago v2 形状（type ∈ {text,tool_use,tool_result,thinking,metadata,image}）。
+// v1 ContentBlock 有 toolName/toolInput/content/status 等字段；v2 用 name/input/text 等。
+func looksLikeV2Blocks(raw []map[string]any) bool {
+	for _, b := range raw {
+		t, _ := b["type"].(string)
+		switch t {
+		case "tool_use", "tool_result", "thinking", "metadata", "image":
+			return true
+		case "text":
+			if _, ok := b["text"]; ok {
+				return true
+			}
+		}
 	}
-	var raw []map[string]any
-	if err := json.Unmarshal([]byte(blocksJSON), &raw); err != nil {
-		return ""
+	return false
+}
+
+func onlyToolResults(raw []map[string]any) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	for _, b := range raw {
+		t, _ := b["type"].(string)
+		if t != "tool_result" {
+			return false
+		}
+	}
+	return true
+}
+
+// extractV2UserDisplay 优先返回 metadata.display 的 raw 文本（mention 扩展前的
+// 用户原文）；否则拼接所有 text 块。
+func extractV2UserDisplay(raw []map[string]any) string {
+	for _, b := range raw {
+		if t, _ := b["type"].(string); t == "metadata" {
+			if k, _ := b["key"].(string); k == "display" {
+				if s, _ := b["value"].(string); s != "" {
+					return s
+				}
+			}
+		}
 	}
 	var sb strings.Builder
 	for _, b := range raw {
@@ -304,6 +372,113 @@ func extractV2Text(blocksJSON string) string {
 			if s, _ := b["text"].(string); s != "" {
 				sb.WriteString(s)
 			}
+		}
+	}
+	return sb.String()
+}
+
+// decodeV2AssistantBlocks 把 v2 raw blocks 转成前端 ContentBlock 序列。
+// content 是拼接出来的纯文本（消息 plain text 回退用，包含所有 text 块的文本）。
+func decodeV2AssistantBlocks(raw []map[string]any) ([]conversation_entity.ContentBlock, string) {
+	blocks := make([]conversation_entity.ContentBlock, 0, len(raw))
+	var sb strings.Builder
+	for _, b := range raw {
+		t, _ := b["type"].(string)
+		switch t {
+		case "text":
+			s, _ := b["text"].(string)
+			if s == "" {
+				continue
+			}
+			blocks = append(blocks, conversation_entity.ContentBlock{Type: "text", Content: s})
+			sb.WriteString(s)
+		case "thinking":
+			s, _ := b["text"].(string)
+			if s == "" {
+				continue
+			}
+			blocks = append(blocks, conversation_entity.ContentBlock{Type: "thinking", Content: s, Status: "completed"})
+		case "tool_use":
+			id, _ := b["id"].(string)
+			name, _ := b["name"].(string)
+			var inputJSON string
+			if inp, ok := b["input"]; ok && inp != nil {
+				if mb, err := json.Marshal(inp); err == nil {
+					inputJSON = string(mb)
+				}
+			}
+			blocks = append(blocks, conversation_entity.ContentBlock{
+				Type:       "tool",
+				ToolName:   name,
+				ToolInput:  inputJSON,
+				ToolCallID: id,
+				Status:     "completed",
+			})
+		}
+	}
+	return blocks, sb.String()
+}
+
+// mergeToolResultsIntoLastAssistant 把 tool_result 块的 content 回填到 out 中
+// 最近一条 assistant 消息里 toolCallId 匹配的 tool block。
+func mergeToolResultsIntoLastAssistant(out []ConversationDisplayMessage, raw []map[string]any) {
+	if len(out) == 0 {
+		return
+	}
+	// 反向找最后一条 assistant。
+	lastIdx := -1
+	for i := len(out) - 1; i >= 0; i-- {
+		if out[i].Role == "assistant" {
+			lastIdx = i
+			break
+		}
+	}
+	if lastIdx < 0 {
+		return
+	}
+	target := &out[lastIdx]
+	for _, b := range raw {
+		if t, _ := b["type"].(string); t != "tool_result" {
+			continue
+		}
+		callID, _ := b["tool_use_id"].(string)
+		isErr, _ := b["is_error"].(bool)
+		content := flattenToolResultContent(b["content"])
+		for j := range target.Blocks {
+			if target.Blocks[j].Type == "tool" && target.Blocks[j].ToolCallID == callID {
+				target.Blocks[j].Content = content
+				if isErr {
+					target.Blocks[j].Status = "error"
+				}
+				break
+			}
+		}
+	}
+}
+
+// flattenToolResultContent 把 tool_result.content（嵌套 ContentBlock 列表）
+// 平铺成一段文本：text 块直接拼接，其余块用 [type] 占位。
+func flattenToolResultContent(v any) string {
+	arr, ok := v.([]any)
+	if !ok {
+		return ""
+	}
+	var sb strings.Builder
+	for _, item := range arr {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		t, _ := m["type"].(string)
+		switch t {
+		case "text":
+			if s, _ := m["text"].(string); s != "" {
+				sb.WriteString(s)
+			}
+		default:
+			sb.WriteString("[")
+			sb.WriteString(t)
+			sb.WriteString("]")
 		}
 	}
 	return sb.String()
@@ -359,9 +534,33 @@ func (a *App) buildCagoProvider(p *ai_provider_entity.AIProvider) (provider.Prov
 	}
 }
 
+// mentionsToStash 把 ai.MentionedAsset 切片转成 gormStore 旁路接收的形态。空切片
+// 返回 nil，避免 store 误把空 stash 当成「显式清空」(影响 PopPendingMentions
+// 的 nil 判断)。Asset 字段映射保持与 v1 持久化兼容：assetId/name/type/host/groupPath。
+func mentionsToStash(ms []ai.MentionedAsset) []map[string]any {
+	if len(ms) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, map[string]any{
+			"assetId":   m.AssetID,
+			"name":      m.Name,
+			"type":      m.Type,
+			"host":      m.Host,
+			"groupPath": m.GroupPath,
+		})
+	}
+	return out
+}
+
 // SendAIMessage 发送一轮对话到 cago Manager。首条消息时自动创建会话 + 设置标题。
 // cago 自身持久化历史，因此只把最后一条 user 消息当作 prompt 传入。
-func (a *App) SendAIMessage(convID int64, messages []ai.Message, _ ai.AIContext) error {
+//
+// aiCtx.MentionedAssets 会被渲染成 LLM 看到的 mention context，并以 stash 旁路
+// 落到 conversation_messages.mentions 列（gormStore.AppendMessage 在 user role 时
+// 消费）。raw 保留用户原文用于前端展示；llmBody 是带 mention prefix 的扩展版。
+func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AIContext) error {
 	ctx := a.langCtx()
 
 	if convID == 0 {
@@ -399,17 +598,23 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, _ ai.AIContext)
 	if a.mgr == nil {
 		return fmt.Errorf("请先配置 AI Provider")
 	}
+	body := prompt
+	if mentionCtx := ai.RenderMentionContext(aiCtx.MentionedAssets); mentionCtx != "" {
+		body = mentionCtx + "\n\n" + prompt
+	}
+	if stash := mentionsToStash(aiCtx.MentionedAssets); stash != nil {
+		a.mgr.StashMentions(convID, stash)
+	}
 	h, err := a.mgr.Handle(ctx, convID)
 	if err != nil {
 		return err
 	}
-	// raw == llmBody for now (mention expansion deferred). When the real
-	// MentionResolver is wired in a follow-up, llmBody differs from raw.
-	return h.Send(ctx, prompt, prompt)
+	return h.Send(ctx, prompt, body)
 }
 
 // QueueAIMessage 在生成过程中通过 cago Steer 注入用户消息。
-// 若消息带 @ 提及的资产，将资产上下文渲染后 prepend 到消息正文。
+// 若消息带 @ 提及的资产，将资产上下文渲染后 prepend 到消息正文，并把 mentions
+// stash 到 Manager 让 gormStore 在 AppendMessage 时落 mentions 列。
 func (a *App) QueueAIMessage(convID int64, content string, mentions []ai.MentionedAsset) error {
 	body := content
 	if mentionCtx := ai.RenderMentionContext(mentions); mentionCtx != "" {
@@ -417,6 +622,9 @@ func (a *App) QueueAIMessage(convID int64, content string, mentions []ai.Mention
 	}
 	if a.mgr == nil {
 		return fmt.Errorf("会话 %d 没有正在运行的生成", convID)
+	}
+	if stash := mentionsToStash(mentions); stash != nil {
+		a.mgr.StashMentions(convID, stash)
 	}
 	h, err := a.mgr.Handle(a.langCtx(), convID)
 	if err != nil {
@@ -426,19 +634,27 @@ func (a *App) QueueAIMessage(convID int64, content string, mentions []ai.Mention
 }
 
 // EditAIMessage 截断 conv 在 idx 处，重新追加 user 消息并重生成。
-func (a *App) EditAIMessage(convID int64, idx int, content string) error {
+// mentions 通过 Manager stash 旁路落库，与 SendAIMessage 一致。
+func (a *App) EditAIMessage(convID int64, idx int, content string, mentions []ai.MentionedAsset) error {
 	if a.mgr == nil {
 		return fmt.Errorf("请先配置 AI Provider")
+	}
+	body := content
+	if mentionCtx := ai.RenderMentionContext(mentions); mentionCtx != "" {
+		body = mentionCtx + "\n\n" + content
+	}
+	if stash := mentionsToStash(mentions); stash != nil {
+		a.mgr.StashMentions(convID, stash)
 	}
 	h, err := a.mgr.Handle(a.langCtx(), convID)
 	if err != nil {
 		return err
 	}
-	return h.Edit(a.langCtx(), idx, content, content)
+	return h.Edit(a.langCtx(), idx, content, body)
 }
 
 // RegenerateAIMessage 截断指定 assistant 消息及其后所有消息，从前一条 user
-// 消息重新生成。
+// 消息重新生成。不引入新的 user 消息，因此无需 mentions 参数。
 func (a *App) RegenerateAIMessage(convID int64, assistIdx int) error {
 	if a.mgr == nil {
 		return fmt.Errorf("请先配置 AI Provider")
@@ -512,11 +728,3 @@ func (a *App) subscribeAIFlushAck() {
 	})
 }
 
-// RespondPermission 前端响应权限确认请求
-func (a *App) RespondPermission(behavior, message string) {
-	resp := ai.PermissionResponse{Behavior: behavior, Message: message}
-	select {
-	case a.permissionChan <- resp:
-	default:
-	}
-}

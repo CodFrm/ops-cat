@@ -13,20 +13,20 @@ const subagentTruncateSuffix = "…[截断]"
 // newSubagentDispatchHook returns a PostToolUse hook that truncates the text
 // output of the `dispatch_subagent` tool. Other tools pass through unchanged.
 //
-// Truncation operates per-block: each TextBlock contributes its bytes against
+// Truncation operates per-block: each TextBlock contributes its runes against
 // the budget. When the budget is exhausted in the middle of a TextBlock, the
-// block is truncated at maxLen with a "…[截断]" suffix and any subsequent blocks
-// are dropped. Non-text blocks (ToolUse / Image / etc.) are preserved as-is and
-// don't consume the byte budget — they're rare in subagent output.
+// block is truncated at maxRunes with a "…[截断]" suffix and any subsequent
+// blocks are dropped. Non-text blocks (ToolUse / Image / etc.) are preserved
+// as-is and don't consume the budget — they're rare in subagent output.
 //
-// maxLen counts in BYTES, matching how Go strings index. UTF-8 multi-byte
-// runes may be split mid-byte; for an ASCII-heavy summary this is fine.
-func newSubagentDispatchHook(maxLen int) agent.PostToolUseHook {
+// maxRunes counts in UNICODE CODE POINTS, so CJK characters stay intact at the
+// truncation boundary. (Byte counting would split UTF-8 mid-rune → mojibake.)
+func newSubagentDispatchHook(maxRunes int) agent.PostToolUseHook {
 	return func(ctx context.Context, in *agent.PostToolUseInput) (*agent.PostToolUseOutput, error) {
 		if in.ToolName != "dispatch_subagent" || in.Output == nil {
 			return &agent.PostToolUseOutput{}, nil
 		}
-		truncated, didTruncate := truncateBlocks(in.Output.Content, maxLen)
+		truncated, didTruncate := truncateBlocks(in.Output.Content, maxRunes)
 		if !didTruncate {
 			return &agent.PostToolUseOutput{}, nil
 		}
@@ -40,28 +40,27 @@ func newSubagentDispatchHook(maxLen int) agent.PostToolUseHook {
 	}
 }
 
-// truncateBlocks walks blocks, accumulating text-block bytes against the
+// truncateBlocks walks blocks, accumulating text-block runes against the
 // remaining budget. Returns the truncated slice plus a bool indicating whether
 // truncation actually happened.
-func truncateBlocks(blocks []agent.ContentBlock, maxLen int) ([]agent.ContentBlock, bool) {
+func truncateBlocks(blocks []agent.ContentBlock, maxRunes int) ([]agent.ContentBlock, bool) {
 	out := make([]agent.ContentBlock, 0, len(blocks))
-	remaining := maxLen
+	remaining := maxRunes
 	truncated := false
-	for i, b := range blocks {
+	for _, b := range blocks {
 		tb, ok := b.(agent.TextBlock)
 		if !ok {
 			out = append(out, b)
 			continue
 		}
-		if len(tb.Text) > remaining {
-			out = append(out, agent.TextBlock{Text: tb.Text[:remaining] + subagentTruncateSuffix})
+		runes := []rune(tb.Text)
+		if len(runes) > remaining {
+			out = append(out, agent.TextBlock{Text: string(runes[:remaining]) + subagentTruncateSuffix})
 			truncated = true
-			// Drop all subsequent blocks — beyond the budget.
-			_ = i // consumed explicitly for clarity
 			break
 		}
 		out = append(out, tb)
-		remaining -= len(tb.Text)
+		remaining -= len(runes)
 	}
 	return out, truncated
 }
