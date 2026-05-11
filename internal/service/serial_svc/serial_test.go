@@ -80,6 +80,12 @@ func (p *fakePort) writeStrings() []string {
 	return out
 }
 
+func (p *fakePort) getCloseCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.closeCount
+}
+
 func TestSessionExecCommandSerializesWrites(t *testing.T) {
 	port := &fakePort{}
 	sess := &Session{ID: "serial-1", port: port}
@@ -97,6 +103,10 @@ func TestSessionExecCommandSerializesWrites(t *testing.T) {
 		defer sess.mu.Unlock()
 		return sess.cmdCapture != nil
 	}, time.Second, 5*time.Millisecond)
+	sess.mu.Lock()
+	capture := sess.cmdCapture
+	sess.mu.Unlock()
+	capture.Append([]byte("OK\r\n"))
 
 	writeDone := make(chan error, 1)
 	go func() {
@@ -156,6 +166,73 @@ func TestSessionExecCommandCollectsAllCapturedOutput(t *testing.T) {
 		assert.Len(t, out, 512)
 	case <-time.After(time.Second):
 		t.Fatal("ExecCommand did not finish")
+	}
+}
+
+func TestSessionExecCommandReturnsErrorOnMaxTimeout(t *testing.T) {
+	port := &fakePort{}
+	sess := &Session{ID: "serial-timeout", port: port}
+
+	resultCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		out, err := sess.ExecCommand("show data", 200*time.Millisecond, 40*time.Millisecond)
+		resultCh <- out
+		errCh <- err
+	}()
+
+	require.Eventually(t, func() bool {
+		sess.mu.Lock()
+		defer sess.mu.Unlock()
+		return sess.cmdCapture != nil
+	}, time.Second, 5*time.Millisecond)
+	sess.mu.Lock()
+	capture := sess.cmdCapture
+	sess.mu.Unlock()
+	capture.Append([]byte("partial output"))
+
+	select {
+	case out := <-resultCh:
+		assert.Equal(t, "partial output", out)
+		err := <-errCh
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errCommandTimedOut)
+	case <-time.After(time.Second):
+		t.Fatal("ExecCommand did not time out")
+	}
+}
+
+func TestSessionExecCommandReturnsErrorWhenSessionClosed(t *testing.T) {
+	port := &fakePort{}
+	sess := &Session{ID: "serial-closed", port: port}
+
+	resultCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		out, err := sess.ExecCommand("show data", 200*time.Millisecond, time.Second)
+		resultCh <- out
+		errCh <- err
+	}()
+
+	require.Eventually(t, func() bool {
+		sess.mu.Lock()
+		defer sess.mu.Unlock()
+		return sess.cmdCapture != nil
+	}, time.Second, 5*time.Millisecond)
+	sess.mu.Lock()
+	capture := sess.cmdCapture
+	sess.mu.Unlock()
+	capture.Append([]byte("partial output"))
+	sess.Close()
+
+	select {
+	case out := <-resultCh:
+		assert.Equal(t, "partial output", out)
+		err := <-errCh
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errSessionClosed)
+	case <-time.After(time.Second):
+		t.Fatal("ExecCommand did not stop after session close")
 	}
 }
 
@@ -294,6 +371,48 @@ func TestManagerSetCallbacksStartsReaderOnlyOnce(t *testing.T) {
 		return !ok
 	}, time.Second, 5*time.Millisecond)
 	assert.Equal(t, 1, gotMaxActiveReads)
+}
+
+func TestManagerWatchCallbackSetupClosesUninitializedSession(t *testing.T) {
+	port := &fakePort{}
+	sess := &Session{ID: "serial-orphan", port: port}
+	mgr := NewManager()
+	mgr.sessions.Store(sess.ID, sess)
+
+	mgr.watchCallbackSetup(sess, 20*time.Millisecond)
+
+	require.Eventually(t, func() bool {
+		_, ok := mgr.GetSession(sess.ID)
+		return !ok
+	}, time.Second, 5*time.Millisecond)
+	assert.True(t, sess.IsClosed())
+	assert.Equal(t, 1, port.getCloseCount())
+}
+
+func TestManagerWatchCallbackSetupKeepsSessionAfterCallbacks(t *testing.T) {
+	releaseRead := make(chan struct{})
+	port := &fakePort{
+		readFn: func([]byte) (int, error) {
+			<-releaseRead
+			return 0, io.EOF
+		},
+	}
+	sess := &Session{ID: "serial-callback-ready", port: port}
+	mgr := NewManager()
+	mgr.sessions.Store(sess.ID, sess)
+
+	mgr.watchCallbackSetup(sess, 20*time.Millisecond)
+	mgr.SetCallbacks(sess.ID, nil, nil)
+
+	time.Sleep(50 * time.Millisecond)
+	_, ok := mgr.GetSession(sess.ID)
+	assert.True(t, ok)
+
+	close(releaseRead)
+	require.Eventually(t, func() bool {
+		_, ok := mgr.GetSession(sess.ID)
+		return !ok
+	}, time.Second, 5*time.Millisecond)
 }
 
 func TestBuildSerialModeRejectsInvalidStopBits(t *testing.T) {

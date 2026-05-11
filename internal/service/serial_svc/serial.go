@@ -23,6 +23,13 @@ type CommandManager interface {
 	GetSessionByAssetID(assetID int64) (CommandSession, bool)
 }
 
+var (
+	errSessionClosed   = errors.New("session is closed")
+	errCommandTimedOut = errors.New("serial command timed out")
+)
+
+const callbackSetupGracePeriod = 5 * time.Second
+
 type commandCapture struct {
 	mu     sync.Mutex
 	chunks [][]byte
@@ -67,15 +74,17 @@ func (c *commandCapture) Drain() []byte {
 
 // Session 表示一个活跃的串口终端会话
 type Session struct {
-	ID       string
-	AssetID  int64
-	port     serial.Port
-	writeMu  sync.Mutex
-	mu       sync.Mutex
-	closed   bool
+	ID            string
+	AssetID       int64
+	port          serial.Port
+	writeMu       sync.Mutex
+	mu            sync.Mutex
+	closed        bool
 	readerStarted bool
-	onData   func(data []byte)      // 终端输出回调
-	onClosed func(sessionID string) // 会话关闭回调
+	closedCh      chan struct{}
+	readerReadyCh chan struct{}
+	onData        func(data []byte)      // 终端输出回调
+	onClosed      func(sessionID string) // 会话关闭回调
 
 	// AI 命令执行辅助：当 cmdCapture 非 nil 时，readOutput 会同时向此收集器追加数据副本。
 	cmdCapture *commandCapture
@@ -92,7 +101,7 @@ func (s *Session) writeLocked(data []byte) error {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		return fmt.Errorf("session is closed")
+		return errSessionClosed
 	}
 	port := s.port
 	s.mu.Unlock()
@@ -105,20 +114,40 @@ func (s *Session) Resize(cols, rows int) error {
 	return nil // no-op for serial
 }
 
+func (s *Session) ensureClosedChLocked() chan struct{} {
+	if s.closedCh == nil {
+		s.closedCh = make(chan struct{})
+	}
+	return s.closedCh
+}
+
+func (s *Session) ensureReaderReadyChLocked() chan struct{} {
+	if s.readerReadyCh == nil {
+		s.readerReadyCh = make(chan struct{})
+	}
+	return s.readerReadyCh
+}
+
+func (s *Session) closeLocked() (serial.Port, func(string), string, bool) {
+	if s.closed {
+		return nil, nil, "", false
+	}
+	closedCh := s.ensureClosedChLocked()
+	s.closed = true
+	close(closedCh)
+	return s.port, s.onClosed, s.ID, true
+}
+
 // Close 关闭串口会话
 func (s *Session) Close() {
 	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
+	port, onClosed, sessionID, ok := s.closeLocked()
+	s.mu.Unlock()
+	if !ok {
 		return
 	}
-	s.closed = true
-	port := s.port
-	onClosed := s.onClosed
-	sessionID := s.ID
-	s.mu.Unlock()
 	if err := port.Close(); err != nil && !isPortClosedError(err) {
-		logger.Default().Warn("close serial port", zap.String("sessionID", s.ID), zap.Error(err))
+		logger.Default().Warn("close serial port", zap.String("sessionID", sessionID), zap.Error(err))
 	}
 	if onClosed != nil {
 		go onClosed(sessionID)
@@ -134,10 +163,11 @@ func (s *Session) ExecCommand(command string, silenceTimeout, maxTimeout time.Du
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		return "", fmt.Errorf("session is closed")
+		return "", errSessionClosed
 	}
 	capture := newCommandCapture()
 	s.cmdCapture = capture
+	closedCh := s.ensureClosedChLocked()
 	s.mu.Unlock()
 
 	defer func() {
@@ -158,15 +188,21 @@ func (s *Session) ExecCommand(command string, silenceTimeout, maxTimeout time.Du
 	maxTimer := time.NewTimer(maxTimeout)
 	defer silenceTimer.Stop()
 	defer maxTimer.Stop()
+	appendCapturedOutput := func() bool {
+		data := capture.Drain()
+		if len(data) == 0 {
+			return false
+		}
+		output = append(output, data...)
+		return true
+	}
 
 	for {
 		select {
 		case <-capture.signal:
-			data := capture.Drain()
-			if len(data) == 0 {
+			if !appendCapturedOutput() {
 				continue
 			}
-			output = append(output, data...)
 			// 收到数据后重置静默计时器
 			if !silenceTimer.Stop() {
 				select {
@@ -177,10 +213,15 @@ func (s *Session) ExecCommand(command string, silenceTimeout, maxTimeout time.Du
 			silenceTimer.Reset(silenceTimeout)
 		case <-silenceTimer.C:
 			// 输出静默，认为命令执行完毕
+			appendCapturedOutput()
 			return string(output), nil
 		case <-maxTimer.C:
 			// 超过最大等待时间
-			return string(output), nil
+			appendCapturedOutput()
+			return string(output), fmt.Errorf("%w after %s", errCommandTimedOut, maxTimeout)
+		case <-closedCh:
+			appendCapturedOutput()
+			return string(output), errSessionClosed
 		}
 	}
 }
@@ -241,6 +282,7 @@ func (m *Manager) ListPorts() ([]SerialPortInfo, error) {
 }
 
 // Connect 打开串口连接，返回 sessionId。调用方通过 SetCallbacks 设置回调。
+// 若未在宽限时间内设置回调，会话会自动关闭并清理，避免悬挂。
 func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
 	mode, err := buildSerialMode(cfg)
 	if err != nil {
@@ -296,6 +338,7 @@ func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
 	}
 
 	m.sessions.Store(sessionID, sess)
+	m.watchCallbackSetup(sess, callbackSetupGracePeriod)
 
 	return sessionID, nil
 }
@@ -312,6 +355,7 @@ func (m *Manager) SetCallbacks(sessionID string, onData func(data []byte), onClo
 	sess.onData = onData
 	sess.onClosed = onClosed
 	if !sess.readerStarted && !sess.closed {
+		close(sess.ensureReaderReadyChLocked())
 		sess.readerStarted = true
 		startReader = true
 	}
@@ -321,6 +365,70 @@ func (m *Manager) SetCallbacks(sessionID string, onData func(data []byte), onClo
 	if startReader {
 		go m.readOutput(sess)
 	}
+}
+
+func (m *Manager) watchCallbackSetup(sess *Session, timeout time.Duration) {
+	if timeout <= 0 {
+		return
+	}
+
+	sess.mu.Lock()
+	if sess.closed || sess.readerStarted {
+		sess.mu.Unlock()
+		return
+	}
+	readyCh := sess.ensureReaderReadyChLocked()
+	closedCh := sess.ensureClosedChLocked()
+	sessionID := sess.ID
+	sess.mu.Unlock()
+
+	go func() {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+
+		select {
+		case <-readyCh:
+			return
+		case <-closedCh:
+			return
+		case <-timer.C:
+			if m.closeSessionWithoutCallbacks(sessionID) {
+				logger.Default().Warn(
+					"close serial session without callbacks",
+					zap.String("sessionID", sessionID),
+					zap.Duration("timeout", timeout),
+				)
+			}
+		}
+	}()
+}
+
+func (m *Manager) closeSessionWithoutCallbacks(sessionID string) bool {
+	v, ok := m.sessions.Load(sessionID)
+	if !ok {
+		return false
+	}
+
+	sess := v.(*Session)
+	sess.mu.Lock()
+	if sess.closed || sess.readerStarted {
+		sess.mu.Unlock()
+		return false
+	}
+	port, onClosed, sessionID, shouldClose := sess.closeLocked()
+	sess.mu.Unlock()
+	if !shouldClose {
+		return false
+	}
+
+	m.sessions.Delete(sessionID)
+	if err := port.Close(); err != nil && !isPortClosedError(err) {
+		logger.Default().Warn("close serial port after callback setup timeout", zap.String("sessionID", sessionID), zap.Error(err))
+	}
+	if onClosed != nil {
+		go onClosed(sessionID)
+	}
+	return true
 }
 
 // readOutput 持续从串口读取数据并回调。
