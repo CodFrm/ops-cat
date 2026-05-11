@@ -15,15 +15,26 @@ import (
 	"github.com/opskat/opskat/internal/repository/conversation_repo"
 )
 
+// pendingMentionsProvider lets the store pull stashed mentions for a user
+// message at AppendMessage time. Manager implements this.
+type pendingMentionsProvider interface {
+	PopPendingMentions(convID int64) []map[string]any
+}
+
 // gormStore 把 cago agent.Conversation 的增量变更落到 conversation_messages 的
 // (conversation_id, sort_order) 行上。配合 agent/store.Recorder 监听 Conv.Watch 使用。
 type gormStore struct {
-	repo conversation_repo.ConversationRepo
+	repo     conversation_repo.ConversationRepo
+	mentions pendingMentionsProvider // may be nil (e.g., in unit tests)
 }
 
 // NewGormStore returns an agent/store.Store backed by OpsKat's conversation_repo.
-func NewGormStore() agentstore.Store {
-	return &gormStore{repo: conversation_repo.Conversation()}
+// provider may be nil (used in unit tests where no Manager is involved).
+func NewGormStore(provider pendingMentionsProvider) agentstore.Store {
+	return &gormStore{
+		repo:     conversation_repo.Conversation(),
+		mentions: provider,
+	}
 }
 
 // newGormStoreWithRepo lets tests inject a fake repo without touching the global registry.
@@ -47,6 +58,17 @@ func (g *gormStore) AppendMessage(ctx context.Context, sessionID string, index i
 	row, err := messageToRow(convID, index, msg)
 	if err != nil {
 		return err
+	}
+	// Sidechannel: if a pendingMentions provider is wired and this is a user
+	// message, replace the row's Mentions column with the stashed mentions
+	// (richer than what extractMentions can pull from MetadataBlocks alone).
+	if g.mentions != nil && msg.Role == agent.RoleUser {
+		if stashed := g.mentions.PopPendingMentions(convID); stashed != nil {
+			mb, err := json.Marshal(stashed)
+			if err == nil {
+				row.Mentions = string(mb)
+			}
+		}
 	}
 	return g.repo.AppendAt(ctx, convID, index, row)
 }

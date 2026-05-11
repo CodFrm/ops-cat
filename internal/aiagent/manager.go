@@ -42,6 +42,9 @@ type Manager struct {
 
 	mu      sync.Mutex
 	handles map[int64]*ConvHandle
+
+	pendingMu       sync.Mutex
+	pendingMentions map[int64][]map[string]any // convID → mentions for next user msg append
 }
 
 // NewManager constructs a Manager. Does no I/O; the gormStore lazy-binds to
@@ -50,13 +53,47 @@ func NewManager(opts ManagerOptions) *Manager {
 	if opts.MaxRounds == 0 {
 		opts.MaxRounds = 50
 	}
-	s := NewGormStore()
-	return &Manager{
-		opts:     opts,
-		store:    s,
-		recorder: agentstore.NewRecorder(s),
-		handles:  make(map[int64]*ConvHandle),
+	m := &Manager{
+		opts:            opts,
+		handles:         make(map[int64]*ConvHandle),
+		pendingMentions: make(map[int64][]map[string]any),
 	}
+	m.store = NewGormStore(m)
+	m.recorder = agentstore.NewRecorder(m.store)
+	return m
+}
+
+// StashMentions records mentions to be persisted with the next user-message
+// Append on the given conversation. Called by app_ai before Send/Edit when the
+// raw user input contained @-mentions. The gormStore consumes this on the next
+// AppendMessage(role=user) for the same convID.
+func (m *Manager) StashMentions(convID int64, mentions []map[string]any) {
+	m.pendingMu.Lock()
+	defer m.pendingMu.Unlock()
+	m.pendingMentions[convID] = mentions
+}
+
+// PopPendingMentions returns and clears the stashed mentions for convID.
+// Implements pendingMentionsProvider for gormStore.
+func (m *Manager) PopPendingMentions(convID int64) []map[string]any {
+	m.pendingMu.Lock()
+	defer m.pendingMu.Unlock()
+	out := m.pendingMentions[convID]
+	delete(m.pendingMentions, convID)
+	return out
+}
+
+// CloseHandle removes and shuts down the handle for convID. No-op if not
+// cached. Used by app_ai when a conversation is deleted.
+func (m *Manager) CloseHandle(convID int64) error {
+	m.mu.Lock()
+	h, ok := m.handles[convID]
+	delete(m.handles, convID)
+	m.mu.Unlock()
+	if ok {
+		return h.Close()
+	}
+	return nil
 }
 
 // Handle returns the ConvHandle for convID, creating it (and loading the conv

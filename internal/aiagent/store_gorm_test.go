@@ -28,7 +28,7 @@ func setupGormStore(t *testing.T) (context.Context, agentstore.Store) {
 	conversation_repo.RegisterConversation(conversation_repo.NewConversation())
 	// Seed conversation row so foreign-key style invariants are happy
 	require.NoError(t, gdb.Exec(`INSERT INTO conversations (id, title, provider_type) VALUES (1, 'test', 'mock')`).Error)
-	return context.Background(), NewGormStore()
+	return context.Background(), NewGormStore(nil)
 }
 
 func TestGormStore_AppendAndLoad(t *testing.T) {

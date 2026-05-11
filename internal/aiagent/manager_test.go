@@ -3,6 +3,7 @@ package aiagent
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/cago-frame/agents/agent"
 	"github.com/cago-frame/agents/provider"
@@ -95,6 +96,37 @@ func TestManager_DifferentConvsIndependent(t *testing.T) {
 
 	require.NoError(t, h1.Send(context.Background(), "x", "x"))
 	require.NoError(t, h2.Send(context.Background(), "y", "y"))
+}
+
+func TestManager_StashAndPopMentions(t *testing.T) {
+	prov := providertest.New().QueueStream(
+		provider.StreamChunk{ContentDelta: "ack"},
+		provider.StreamChunk{FinishReason: provider.FinishStop},
+	)
+	m := setupManager(t, prov)
+	defer func() { _ = m.Close() }()
+
+	mentions := []map[string]any{{"asset_id": float64(42), "asset_name": "srv1"}}
+	m.StashMentions(1, mentions)
+
+	h, err := m.Handle(context.Background(), 1)
+	require.NoError(t, err)
+	require.NoError(t, h.Send(context.Background(), "hi @srv1", "hi [server srv1]"))
+
+	// Recorder writes happen asynchronously via Conv.Watch; poll briefly.
+	var msgs []*conversation_entity.Message
+	require.Eventually(t, func() bool {
+		got, err := conversation_repo.Conversation().LoadOrdered(context.Background(), 1)
+		if err != nil || len(got) == 0 {
+			return false
+		}
+		msgs = got
+		return msgs[0].Mentions != "" && msgs[0].Mentions != "[]"
+	}, 2*time.Second, 10*time.Millisecond, "user message with mentions should land in DB")
+
+	assert.Contains(t, msgs[0].Mentions, "srv1")
+	// After Pop, the stash should be empty for next call
+	assert.Empty(t, m.PopPendingMentions(1))
 }
 
 func TestManager_Handle_LoadsExistingConv(t *testing.T) {
