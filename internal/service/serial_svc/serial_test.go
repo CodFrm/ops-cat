@@ -169,6 +169,45 @@ func TestSessionExecCommandCollectsAllCapturedOutput(t *testing.T) {
 	}
 }
 
+func TestSessionExecCommandWaitsForFirstOutputBeyondSilenceTimeout(t *testing.T) {
+	port := &fakePort{}
+	sess := &Session{ID: "serial-delayed-first-output", port: port}
+
+	resultCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		out, err := sess.ExecCommand("show data", 40*time.Millisecond, 200*time.Millisecond)
+		resultCh <- out
+		errCh <- err
+	}()
+
+	require.Eventually(t, func() bool {
+		sess.mu.Lock()
+		defer sess.mu.Unlock()
+		return sess.cmdCapture != nil
+	}, time.Second, 5*time.Millisecond)
+
+	select {
+	case out := <-resultCh:
+		err := <-errCh
+		t.Fatalf("ExecCommand returned before first output arrived, out=%q err=%v", out, err)
+	case <-time.After(60 * time.Millisecond):
+	}
+
+	sess.mu.Lock()
+	capture := sess.cmdCapture
+	sess.mu.Unlock()
+	capture.Append([]byte("delayed output"))
+
+	select {
+	case out := <-resultCh:
+		require.NoError(t, <-errCh)
+		assert.Equal(t, "delayed output", out)
+	case <-time.After(time.Second):
+		t.Fatal("ExecCommand did not finish after delayed first output")
+	}
+}
+
 func TestSessionExecCommandReturnsErrorOnMaxTimeout(t *testing.T) {
 	port := &fakePort{}
 	sess := &Session{ID: "serial-timeout", port: port}

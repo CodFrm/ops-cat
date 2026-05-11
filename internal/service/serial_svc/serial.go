@@ -184,10 +184,31 @@ func (s *Session) ExecCommand(command string, silenceTimeout, maxTimeout time.Du
 	}
 
 	var output []byte
-	silenceTimer := time.NewTimer(silenceTimeout)
+	var silenceTimer *time.Timer
+	var silenceTimerC <-chan time.Time
 	maxTimer := time.NewTimer(maxTimeout)
-	defer silenceTimer.Stop()
 	defer maxTimer.Stop()
+	stopSilenceTimer := func() {
+		if silenceTimer == nil {
+			return
+		}
+		if !silenceTimer.Stop() {
+			select {
+			case <-silenceTimer.C:
+			default:
+			}
+		}
+	}
+	defer stopSilenceTimer()
+	resetSilenceTimer := func() {
+		if silenceTimer == nil {
+			silenceTimer = time.NewTimer(silenceTimeout)
+			silenceTimerC = silenceTimer.C
+			return
+		}
+		stopSilenceTimer()
+		silenceTimer.Reset(silenceTimeout)
+	}
 	appendCapturedOutput := func() bool {
 		data := capture.Drain()
 		if len(data) == 0 {
@@ -203,15 +224,9 @@ func (s *Session) ExecCommand(command string, silenceTimeout, maxTimeout time.Du
 			if !appendCapturedOutput() {
 				continue
 			}
-			// 收到数据后重置静默计时器
-			if !silenceTimer.Stop() {
-				select {
-				case <-silenceTimer.C:
-				default:
-				}
-			}
-			silenceTimer.Reset(silenceTimeout)
-		case <-silenceTimer.C:
+			// 仅在收到首个输出后开始/重置静默计时，避免设备首包较慢时过早返回。
+			resetSilenceTimer()
+		case <-silenceTimerC:
 			// 输出静默，认为命令执行完毕
 			appendCapturedOutput()
 			return string(output), nil
