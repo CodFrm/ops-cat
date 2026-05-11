@@ -37,6 +37,10 @@ Currently supports SSH servers, MySQL/PostgreSQL databases, Redis, MongoDB, and 
 
 **If you find it useful, please give us a Star ⭐ — it means a lot!**
 
+## Intro Video
+
+https://github.com/user-attachments/assets/2af6e52e-637c-4398-9c8b-8b39b4238b12
+
 ## Demo
 
 https://github.com/user-attachments/assets/035fc0df-230c-456b-87bd-8a4a125feaec

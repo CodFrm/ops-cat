@@ -247,6 +247,7 @@ export function SSHConfigSection({
           placeholder={t("asset.passwordPlaceholder")}
           hasExistingPassword={!!encryptedPassword}
           editAssetId={editAssetId}
+          onUsernameChange={setUsername}
         />
       )}
 
@@ -270,7 +271,19 @@ export function SSHConfigSection({
             <div className="grid gap-2">
               <Label>{t("asset.selectKey")}</Label>
               {managedKeys.length > 0 ? (
-                <Select value={String(credentialId)} onValueChange={(v) => setCredentialId(Number(v))}>
+                <Select
+                  value={String(credentialId)}
+                  onValueChange={(v) => {
+                    const id = Number(v);
+                    setCredentialId(id);
+                    if (id !== 0) {
+                      const cred = managedKeys.find((k) => k.id === id);
+                      if (cred && cred.username) {
+                        setUsername(cred.username);
+                      }
+                    }
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder={t("asset.selectKeyPlaceholder")} />
                   </SelectTrigger>
@@ -278,7 +291,8 @@ export function SSHConfigSection({
                     <SelectItem value="0">{t("asset.selectKeyPlaceholder")}</SelectItem>
                     {managedKeys.map((k) => (
                       <SelectItem key={k.id} value={String(k.id)}>
-                        {k.name} ({(k.keyType || "").toUpperCase()})
+                        {k.name}
+                        {k.username ? ` (${k.username})` : ""} ({(k.keyType || "").toUpperCase()})
                       </SelectItem>
                     ))}
                   </SelectContent>

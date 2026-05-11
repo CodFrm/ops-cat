@@ -11,6 +11,7 @@ import (
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/pkg/dirsync"
+	"github.com/opskat/opskat/internal/pkg/sshkeepalive"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
@@ -20,19 +21,22 @@ import (
 
 // sharedClient 封装 SSH 连接，支持引用计数共享
 type sharedClient struct {
-	client   *ssh.Client
-	mu       sync.Mutex
-	refCount int
-	closers  []io.Closer // 跳板机 client 等额外资源
-	closed   bool
+	client        *ssh.Client
+	mu            sync.Mutex
+	refCount      int
+	closers       []io.Closer // 跳板机 client 等额外资源
+	closed        bool
+	stopKeepalive func()
 }
 
 func newSharedClient(client *ssh.Client, closers []io.Closer) *sharedClient {
-	return &sharedClient{
+	sc := &sharedClient{
 		client:   client,
 		refCount: 1,
 		closers:  closers,
 	}
+	sc.stopKeepalive = sshkeepalive.Start(client, sshkeepalive.Interval)
+	return sc
 }
 
 func (sc *sharedClient) acquire() {
@@ -47,6 +51,9 @@ func (sc *sharedClient) release() {
 	sc.refCount--
 	if sc.refCount <= 0 && !sc.closed {
 		sc.closed = true
+		if sc.stopKeepalive != nil {
+			sc.stopKeepalive()
+		}
 		if err := sc.client.Close(); err != nil {
 			logger.Default().Warn("close client", zap.Error(err))
 		}

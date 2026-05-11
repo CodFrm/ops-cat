@@ -581,7 +581,8 @@
       "splitH": "Split Horizontal",
       "splitV": "Split Vertical",
       "connected": "Connected",
-      "disconnected": "Disconnected"
+      "disconnected": "Disconnected",
+      "closedHint": "[Connection closed — press Enter to reconnect]"
     },
     "contextMenu": {
       "copy": "Copy",

@@ -7,6 +7,7 @@ import { EventsOn, EventsOff } from "../../../wailsjs/runtime/runtime";
 import { bytesToBase64 } from "@/lib/terminalEncode";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { withTerminalFontFallback } from "@/data/terminalFonts";
+import i18n from "@/i18n";
 
 export interface TerminalInstance {
   term: XTerminal;
@@ -16,11 +17,10 @@ export interface TerminalInstance {
 }
 
 interface InternalInstance extends TerminalInstance {
+  isClosed: boolean;
   dispose: () => void;
 }
 
-// Persistent xterm instances keyed by sessionId. Lifted out of React so split-pane
-// re-renders don't unmount/dispose the terminal and lose scrollback.
 const registry = new Map<string, InternalInstance>();
 
 export function getOrCreateTerminal(
@@ -65,24 +65,41 @@ export function getOrCreateTerminal(
   });
 
   const closedEvent = `${eventPrefix}:closed:${sessionId}`;
-  EventsOn(closedEvent, () => {
-    term.write("\r\n\x1b[31m[Connection closed]\x1b[0m\r\n");
-    useTerminalStore.getState().markClosed(sessionId);
-  });
+
+  // 先声明再赋值,以便 instance.dispose 闭包可以引用 onKeyDispose
+  // 而不依赖前向引用 const(可读性更好)。
+  // eslint-disable-next-line prefer-const
+  let onKeyDispose: { dispose: () => void };
 
   const instance: InternalInstance = {
     term,
     fitAddon,
     searchAddon,
     container,
+    isClosed: false,
     dispose: () => {
       onDataDispose.dispose();
+      onKeyDispose.dispose();
       EventsOff(dataEvent);
       EventsOff(closedEvent);
       term.dispose();
       registry.delete(sessionId);
     },
   };
+
+  onKeyDispose = term.onKey(({ key }) => {
+    if (instance.isClosed && key === "\r") {
+      instance.isClosed = false;
+      useTerminalStore.getState().reconnectBySession(sessionId);
+    }
+  });
+
+  EventsOn(closedEvent, () => {
+    const hint = i18n.t("ssh.session.closedHint");
+    term.write(`\r\n\x1b[31m${hint}\x1b[0m\r\n`);
+    useTerminalStore.getState().markClosed(sessionId);
+    instance.isClosed = true;
+  });
 
   registry.set(sessionId, instance);
   return instance;

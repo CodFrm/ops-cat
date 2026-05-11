@@ -566,7 +566,8 @@
       "splitH": "水平分割",
       "splitV": "垂直分割",
       "connected": "已连接",
-      "disconnected": "已断开"
+      "disconnected": "已断开",
+      "closedHint": "[连接已断开 — 按回车重连]"
     },
     "contextMenu": {
       "copy": "复制",
