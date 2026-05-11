@@ -66,20 +66,17 @@ func TestApprovalGateway_LocalGrantShortCircuit(t *testing.T) {
 	assert.Empty(t, em.events, "local grant should suppress all emits")
 }
 
-// local_bash 即使 grants 命中也不能短路 —— bash 永不放行。
-func TestApprovalGateway_LocalBashIgnoresGrant(t *testing.T) {
+// local_bash grants 命中后直接合成 allow，与 write/edit 一致。
+func TestApprovalGateway_LocalBashHonorsGrant(t *testing.T) {
 	em := &apprCaptureEmitter{}
 	grants := &fakeGrants{hasAllowed: true}
 	res := newFakeResolver()
 	g := NewApprovalGateway(42, em, grants, res.Resolver())
-	res.respCh <- ai.ApprovalResponse{Decision: "allow"}
 
 	resp := g.RequestSingle(context.Background(), "local_bash",
 		[]ai.ApprovalItem{{Type: "local_bash", Command: "rm -rf /"}}, "")
 	assert.Equal(t, "allow", resp.Decision)
-	// 必须发出弹卡（说明 grants 短路没生效）。
-	assert.Len(t, em.events, 2)
-	assert.Equal(t, "approval_request", em.events[0].Type)
+	assert.Empty(t, em.events, "local grant should suppress all emits for bash too")
 }
 
 // 用户 allow → RequestSingle 返回 allow，两个事件按序发出。
@@ -112,7 +109,7 @@ func TestApprovalGateway_UserDenies(t *testing.T) {
 	assert.Equal(t, "deny", resp.Decision)
 }
 
-// allowAll + local_write → 落 grants；bash 不落。
+// allowAll + local_write → 落 grants。
 func TestApprovalGateway_AllowAllPersistsForLocalWrite(t *testing.T) {
 	em := &apprCaptureEmitter{}
 	grants := &fakeGrants{}
@@ -125,7 +122,8 @@ func TestApprovalGateway_AllowAllPersistsForLocalWrite(t *testing.T) {
 	assert.Equal(t, []string{"conv_42:write"}, grants.saved)
 }
 
-func TestApprovalGateway_AllowAllSkipsBash(t *testing.T) {
+// allowAll + local_bash 同样落 grants（与 write/edit 对称）。
+func TestApprovalGateway_AllowAllPersistsForLocalBash(t *testing.T) {
 	em := &apprCaptureEmitter{}
 	grants := &fakeGrants{}
 	res := newFakeResolver()
@@ -134,7 +132,7 @@ func TestApprovalGateway_AllowAllSkipsBash(t *testing.T) {
 
 	g.RequestSingle(context.Background(), "local_bash",
 		[]ai.ApprovalItem{{Type: "local_bash", Command: "rm -rf /"}}, "")
-	assert.Empty(t, grants.saved, "bash allowAll must not persist")
+	assert.Equal(t, []string{"conv_42:bash"}, grants.saved)
 }
 
 // 非 local_* 工具 allowAll 不落 grants（资产维度走另一条 grant 路径，由

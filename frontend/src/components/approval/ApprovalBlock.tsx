@@ -26,8 +26,9 @@ export function ApprovalBlock({ block }: ApprovalBlockProps) {
   const items = block.approvalItems || [];
   const kind = block.approvalKind || "single";
   const localKind = isLocalKind(kind);
-  // bash 永远不开 allowAll；write / edit 走"本次会话起永久放行此工具"。
-  const allowRemember = !localKind || kind === KIND_LOCAL_WRITE || kind === KIND_LOCAL_EDIT;
+  // bash / write / edit 三个本地工具都支持"本次会话起永久放行此工具"，落 ai_local_tool_grants
+  // 表（session_id = conv_<convID>）。后端 ApprovalGateway.RequestSingle 同源解禁 bash。
+  const allowRemember = true;
 
   const [editedCommands, setEditedCommands] = useState<Record<number, string>>(() => {
     const map: Record<number, string> = {};
@@ -209,7 +210,7 @@ export function ApprovalBlock({ block }: ApprovalBlockProps) {
             >
               {t("ai.approvalDeny")}
             </Button>
-            {/* bash 不支持 remember—— allowAll 永远不弹此按钮，避免给用户错觉以为可以"放过 bash"。 */}
+            {/* 本地工具（bash / write / edit）走"本次会话允许此工具"——一次放行，本会话内同工具后续不再弹卡。 */}
             {allowRemember && localKind && (
               <Button
                 size="sm"

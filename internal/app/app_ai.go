@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/cago-frame/agents/agent"
 	"github.com/cago-frame/agents/provider"
 	"github.com/cago-frame/agents/provider/anthropics"
 	openaiCago "github.com/cago-frame/agents/provider/openai"
@@ -92,11 +94,31 @@ func (a *App) resetManager(prov provider.Provider, model string) {
 	// 持有；confirmFunc 为 nil 时 handleConfirm 早退 —— PreToolUse 已先一步处理。
 	policyChecker := ai.NewCommandPolicyChecker(nil)
 	deps := aiagent.NewDeps(a.sshPool, policyChecker)
+	// cago coding 工作目录是 per-conversation 的（每个 conv 有自己的 WorkDir 字段，
+	// 由前端选择器设置）。Manager 在 Handle() 时通过 CwdResolver 读 conv.WorkDir；
+	// 空字符串 / 解析失败时退回 DefaultCwd = ~/.opskat。
+	defaultCwd, err := defaultConversationWorkDir()
+	if err != nil {
+		logger.Default().Warn("resolve default aiagent cwd, fallback to empty", zap.Error(err))
+		defaultCwd = ""
+	}
+	cwdResolver := func(ctx context.Context, convID int64) (string, error) {
+		conv, err := conversation_svc.Conversation().Get(ctx, convID)
+		if err != nil {
+			return "", err
+		}
+		if conv == nil {
+			return "", nil
+		}
+		return conv.WorkDir, nil
+	}
 	a.mgr = aiagent.NewManager(aiagent.ManagerOptions{
 		Provider:      prov,
 		Model:         model,
 		System:        aiagent.StaticSystemPrompt(a.lang),
 		Tools:         aiagent.OpsTools(deps),
+		CwdResolver:   cwdResolver,
+		DefaultCwd:    defaultCwd,
 		Deps:          deps,
 		MaxRounds:     50,
 		Emitter:       emitter,
@@ -106,6 +128,17 @@ func (a *App) resetManager(prov provider.Provider, model string) {
 		PolicyChecker: newOpsPolicyChecker(),
 		Mention:       newOpsMentionResolver(),
 		TabOpener:     newOpsTabOpener(a),
+		// 默认走 cago 内置 retry：对 408/425/429/5xx + 网络超时 / EOF / connection reset
+		// 这类瞬时错误自动重试 2 次（共 3 次尝试），指数退避 500ms→1s→2s（封顶 10s）。
+		// 不配 ShouldRetry 即用默认分类器；非瞬时错误（4xx 业务错误 / 模型逻辑错）不会被
+		// 误判为可重试。cago 在每次重试前把已 stream 的 partial 落成 PartialErrored 并
+		// openPartial 新分片，bridge.go 把 EventRetry 转成前端 "retry" 事件，前端再补
+		// 新 assistant 占位继续 stream，刷新前后视图一致。
+		RetryPolicy: agent.RetryPolicy{
+			MaxAttempts:  3,
+			InitialDelay: 500 * time.Millisecond,
+			MaxDelay:     10 * time.Second,
+		},
 	})
 }
 
@@ -191,7 +224,9 @@ func (a *App) UpdateConversationTitle(id int64, title string) error {
 	return fmt.Errorf("更新会话标题失败: %w", err)
 }
 
-// UpdateConversationCwd 更新会话工作目录（cwd 由前端选择器设置）
+// UpdateConversationCwd 更新会话工作目录（cwd 由前端选择器设置）。
+// 改动后关掉已缓存的 ConvHandle —— 下次 Handle() 会按新 WorkDir 重建 coding.System，
+// 否则 read/write/edit/bash 仍指向旧目录。
 func (a *App) UpdateConversationCwd(id int64, cwd string) error {
 	ctx := a.langCtx()
 	if err := conversation_svc.Conversation().UpdateWorkDir(ctx, id, cwd); err != nil {
@@ -199,6 +234,9 @@ func (a *App) UpdateConversationCwd(id int64, cwd string) error {
 			return fmt.Errorf("会话不存在: %w", err)
 		}
 		return fmt.Errorf("更新会话工作目录失败: %w", err)
+	}
+	if a.mgr != nil {
+		_ = a.mgr.CloseHandle(id)
 	}
 	return nil
 }
@@ -348,7 +386,14 @@ func buildDisplayMessages(msgs []*conversation_entity.Message) []ConversationDis
 		// assistant / system.
 		blocks, content := decodeV2AssistantBlocks(raw)
 		if len(blocks) == 0 && content == "" {
-			continue
+			// stop-before-content 路径：cago openPartial 已经写了一行
+			// 空 assistant + PartialReason=canceled/errored；这种行携带
+			// "已停止"/"出错" 状态，前端 PartialBanner 渲染时需要它，且
+			// regenerate 必须靠它的 sort_order 找截断点。
+			// 真正"既没内容也没 partial 状态"的脏数据才继续跳过。
+			if m.PartialReason == "" {
+				continue
+			}
 		}
 		tokenUsage, _ := m.GetTokenUsage()
 		if mergePending && m.Role == "assistant" && len(out) > 0 && out[len(out)-1].Role == "assistant" {

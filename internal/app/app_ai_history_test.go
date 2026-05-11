@@ -201,6 +201,64 @@ func TestBuildDisplayMessages_MultiRoundMergedTakesLastPartialState(t *testing.T
 	assert.Equal(t, "upstream 503", asst.PartialDetail)
 }
 
+// TestBuildDisplayMessages_EmptyCancelledAssistantKept 保护 stop-before-content
+// 路径：cago openPartial 立刻 append 空 assistant + PartialReason=streaming，
+// 用户立即 stop → finalizePartial(canceled, "")，DB 里就是一条 blocks=[]、
+// PartialReason="canceled" 的 assistant 行。旧实现按 len(blocks)==0 && content==""
+// 直接 continue 跳掉，刷新后用户看不到"已停止"气泡，也丢失了 sort_order →
+// regenerate 永远拿不到截断点。
+func TestBuildDisplayMessages_EmptyCancelledAssistantKept(t *testing.T) {
+	rows := []*conversation_entity.Message{
+		{
+			ID:         1,
+			Role:       "user",
+			Blocks:     mustJSON(t, []map[string]any{{"type": "text", "text": "你是谁？"}}),
+			SortOrder:  0,
+			Createtime: 1,
+		},
+		{
+			ID:            2,
+			Role:          "assistant",
+			Blocks:        "[]",
+			PartialReason: "canceled",
+			SortOrder:     1,
+			Createtime:    2,
+		},
+	}
+
+	out := buildDisplayMessages(rows)
+	require.Len(t, out, 2, "stop-before-content 的空 assistant 必须保留以渲染已停止气泡")
+	asst := out[1]
+	assert.Equal(t, "assistant", asst.Role)
+	assert.Equal(t, "canceled", asst.PartialReason)
+	assert.Equal(t, 1, asst.SortOrder, "regenerate 需要这个 sort_order 找截断点")
+}
+
+// TestBuildDisplayMessages_EmptyAssistantWithoutPartialReasonDropped 保留旧行为：
+// 真正空的 assistant（既没内容也没 partial 状态）仍然跳过，避免老脏数据冒出来。
+func TestBuildDisplayMessages_EmptyAssistantWithoutPartialReasonDropped(t *testing.T) {
+	rows := []*conversation_entity.Message{
+		{
+			ID:         1,
+			Role:       "user",
+			Blocks:     mustJSON(t, []map[string]any{{"type": "text", "text": "q"}}),
+			SortOrder:  0,
+			Createtime: 1,
+		},
+		{
+			ID:         2,
+			Role:       "assistant",
+			Blocks:     "[]",
+			SortOrder:  1,
+			Createtime: 2,
+		},
+	}
+
+	out := buildDisplayMessages(rows)
+	require.Len(t, out, 1)
+	assert.Equal(t, "user", out[0].Role)
+}
+
 func mustJSON(t *testing.T, v any) string {
 	t.Helper()
 	b, err := json.Marshal(v)

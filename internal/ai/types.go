@@ -58,7 +58,7 @@ type Usage struct {
 
 // StreamEvent 流式响应事件
 type StreamEvent struct {
-	Type       string     `json:"type"`                   // "content" | "tool_start" | "tool_result" | "tool_call" | "approval_request" | "approval_result" | "agent_start" | "agent_end" | "done" | "error" | "thinking" | "thinking_done" | "stopped" | "retry" | "usage" | "queue_consumed" | "queue_consumed_batch"
+	Type       string     `json:"type"`                   // "content" | "tool_start" | "tool_result" | "tool_call" | "approval_request" | "approval_result" | "agent_start" | "agent_end" | "done" | "error" | "thinking" | "thinking_done" | "stopped" | "retry" | "usage" | "queue_consumed" | "queue_consumed_batch" | "message_indexed"
 	Content    string     `json:"content,omitempty"`      // type=content/tool_result/approval_result/agent_end/queue_consumed 时的文本
 	ToolName   string     `json:"tool_name,omitempty"`    // type=tool_start/tool_result 时的工具名
 	ToolInput  string     `json:"tool_input,omitempty"`   // type=tool_start 时的输入摘要
@@ -78,6 +78,18 @@ type StreamEvent struct {
 	QueueContents []string `json:"queue_contents,omitempty"`
 	// type=usage 时的 token 统计（前端累加到当前 assistant 消息）
 	Usage *Usage `json:"usage,omitempty"`
+	// type=retry 时的退避时间（毫秒），前端用它做倒计时进度。
+	// cago 把 backoff 算好放在 EventRetry.Delay 里，bridge.go 透传过来。
+	RetryDelayMs int64 `json:"retry_delay_ms,omitempty"`
+	// type=retry 时的第几次失败（1-indexed）；用 int 比 "2/?" 字符串更易格式化。
+	RetryAttempt int `json:"retry_attempt,omitempty"`
+	// type=message_indexed 时承载新落库的消息的 cago Conversation index（即 DB
+	// sort_order）。指针 + omitempty：sortOrder=0 是合法值（第一条），不能被
+	// omitempty 吞掉。前端按 role 把它回填到对应占位上，edit/regenerate 才能
+	// 拿到截断点。
+	SortOrder *int `json:"sort_order,omitempty"`
+	// type=message_indexed 时的角色（user/assistant）。前端按 role 匹配占位。
+	Role string `json:"role,omitempty"`
 }
 
 // PermissionResponse 权限响应

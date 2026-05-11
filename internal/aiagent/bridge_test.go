@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/cago-frame/agents/agent"
 	"github.com/stretchr/testify/assert"
@@ -63,13 +64,18 @@ func TestBridge_RetryEvent(t *testing.T) {
 		Kind: agent.EventRetry,
 		Retry: &agent.RetryEvent{
 			Attempt: 2,
-			Delay:   0,
+			Delay:   1500 * time.Millisecond,
 			Cause:   errors.New("503"),
 		},
 	})
-	assert.Equal(t, "retry", em.events[0].Type)
-	assert.Contains(t, em.events[0].Content, "2/")
-	assert.Contains(t, em.events[0].Error, "503")
+	require := assert.New(t)
+	require.Equal("retry", em.events[0].Type)
+	require.Contains(em.events[0].Content, "2/")
+	require.Contains(em.events[0].Error, "503")
+	// 新字段：前端 RetryCountdownBubble 用 RetryDelayMs/RetryAttempt 做倒计时。
+	// 没透传过去前端只能拿 "N/?" 字符串做不了进度条。
+	require.Equal(2, em.events[0].RetryAttempt)
+	require.Equal(int64(1500), em.events[0].RetryDelayMs)
 }
 
 func TestBridge_QueueConsumedBatch_AggregatesUserAppends(t *testing.T) {
@@ -106,15 +112,55 @@ func TestBridge_QueueConsumedBatch_NonUserAppendIgnored(t *testing.T) {
 	em := &captureEmitter{}
 	b := newBridge(42, em)
 
-	// Assistant message append shouldn't queue anything
+	// Assistant message append shouldn't queue anything, but it must emit
+	// message_indexed so the frontend can fill the streaming placeholder's
+	// sortOrder（regenerate/edit 都按 sortOrder 走，没它就静默失败）。
 	asstMsg := agent.Message{Role: agent.RoleAssistant, Content: []agent.ContentBlock{agent.TextBlock{Text: "hi"}}}
-	b.OnConvChange(context.Background(), agent.Change{Kind: agent.ChangeAppended, Index: 0, Message: &asstMsg})
+	b.OnConvChange(context.Background(), agent.Change{Kind: agent.ChangeAppended, Index: 3, Message: &asstMsg})
 
 	b.OnRunnerEvent(context.Background(), agent.Event{Kind: agent.EventTextDelta, Delta: "hello"})
 
-	// Expected: only "content", no batch flush
+	// Expected: message_indexed (from assistant append) then content.
+	assert.Equal(t, []string{"message_indexed", "content"}, eventTypes(em.events))
+	idx := em.events[0]
+	assert.Equal(t, "assistant", idx.Role)
+	if assert.NotNil(t, idx.SortOrder) {
+		assert.Equal(t, 3, *idx.SortOrder)
+	}
+}
+
+func TestBridge_AssistantAppend_EmitsMessageIndexed(t *testing.T) {
+	// cago openPartial 在 turn 起手就 conv.Append(空 assistant + PartialReason=streaming)，
+	// Recorder 同步把这行写库（有 SortOrder）。bridge 必须把这个 sort_order 透传给
+	// 前端，否则 stop-before-content 时占位 sortOrder 一直为空，regenerate/edit 都
+	// 拿不到 idx 跑去 RegenerateAIMessage(convId, sortOrder) —— 后端不知道截哪儿。
+	em := &captureEmitter{}
+	b := newBridge(42, em)
+
+	asst := agent.Message{Role: agent.RoleAssistant, PartialReason: agent.PartialStreaming}
+	b.OnConvChange(context.Background(), agent.Change{Kind: agent.ChangeAppended, Index: 7, Message: &asst})
+
 	assert.Len(t, em.events, 1)
-	assert.Equal(t, "content", em.events[0].Type)
+	ev := em.events[0]
+	assert.Equal(t, "message_indexed", ev.Type)
+	assert.Equal(t, "assistant", ev.Role)
+	if assert.NotNil(t, ev.SortOrder) {
+		assert.Equal(t, 7, *ev.SortOrder)
+	}
+}
+
+func TestBridge_AssistantAppend_IgnoresFinalizedAndOtherChanges(t *testing.T) {
+	// ChangeFinalized / ChangeTruncated 不需要再发 message_indexed — Append 已经
+	// 一次性把 sort_order 通报给前端，Finalize 只是改 PartialReason，前端按现有
+	// stopped/error 路径打状态即可。
+	em := &captureEmitter{}
+	b := newBridge(42, em)
+
+	asst := agent.Message{Role: agent.RoleAssistant}
+	b.OnConvChange(context.Background(), agent.Change{Kind: agent.ChangeFinalized, Index: 4, Message: &asst})
+	b.OnConvChange(context.Background(), agent.Change{Kind: agent.ChangeTruncated, Index: 2})
+
+	assert.Len(t, em.events, 0)
 }
 
 func TestBridge_PreToolUse_EmitsToolStart(t *testing.T) {
@@ -465,7 +511,7 @@ func TestBridge_SkipNextUserAppend_DoesNotConsumeAssistantAppend(t *testing.T) {
 	asst := agent.Message{Role: agent.RoleAssistant, Content: []agent.ContentBlock{
 		agent.TextBlock{Text: "..."},
 	}}
-	b.OnConvChange(context.Background(), agent.Change{Kind: agent.ChangeAppended, Message: &asst})
+	b.OnConvChange(context.Background(), agent.Change{Kind: agent.ChangeAppended, Index: 1, Message: &asst})
 
 	// 现在才轮到真正的 user-append——flag 还要在。
 	userMsg := agent.Message{Role: agent.RoleUser, Content: []agent.ContentBlock{
@@ -475,5 +521,7 @@ func TestBridge_SkipNextUserAppend_DoesNotConsumeAssistantAppend(t *testing.T) {
 
 	b.OnRunnerEvent(context.Background(), agent.Event{Kind: agent.EventTextDelta, Delta: "x"})
 
-	assert.Equal(t, []string{"content"}, eventTypes(em.events))
+	// assistant append 仍然 emit message_indexed（不消耗 skipNextUser 标记）；
+	// 接着的 user-append 被 skip 标记吞掉，所以没有 queue_consumed_batch。
+	assert.Equal(t, []string{"message_indexed", "content"}, eventTypes(em.events))
 }

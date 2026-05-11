@@ -63,30 +63,46 @@ func newBridge(convID int64, em EventEmitter) *eventBridge {
 	return &eventBridge{convID: convID, emit: em}
 }
 
-// OnConvChange handles a single Conv.Watch Change. Append-of-user-message
-// records the display string into pending; everything else is ignored.
-// (Recorder owns persistence; bridge only cares about user-append signals
-// for the queue_consumed_batch UX feature.)
+// OnConvChange handles a single Conv.Watch Change.
+//
+// 两条职责：
+//
+//	(1) ChangeAppended + RoleUser：把 raw display 缓存到 pending，等下一个
+//	    runner 事件一起 flush 成 queue_consumed_batch（steer drain UX）。
+//	    Send-new-turn / Edit 路径会先 SkipNextUserAppend，消费一次后跳过。
+//	(2) ChangeAppended + RoleAssistant：cago openPartial 在 turn 起手就
+//	    append 空 assistant + PartialReason=streaming（Recorder 同步写库拿到
+//	    sort_order）。bridge 必须把 sort_order 透传给前端，否则 stop-before
+//	    -content 时占位 sortOrder 一直为空，regenerate/edit 全部静默失败。
+//
+// 其他 Change（Truncated/Finalized）由 Recorder 直接写库，bridge 不重复关心。
 func (b *eventBridge) OnConvChange(_ context.Context, ch agent.Change) {
 	if ch.Kind != agent.ChangeAppended || ch.Message == nil {
 		return
 	}
-	if ch.Message.Role != agent.RoleUser {
-		return
-	}
-	display := extractDisplayText(ch.Message.Content)
-	b.mu.Lock()
-	if b.skipNextUser {
-		// Send-new-turn / Edit 路径：前端已经本地 push 了 user 气泡，bridge 不
-		// 该再 echo。DisplayTextBlock 同时承担「历史回放渲染」职责，所以它必须
-		// 经由 Recorder 落库（Audience 含 ToStore），但这里不能再走
-		// queue_consumed_batch 链路。
-		b.skipNextUser = false
+	switch ch.Message.Role {
+	case agent.RoleUser:
+		display := extractDisplayText(ch.Message.Content)
+		b.mu.Lock()
+		if b.skipNextUser {
+			// Send-new-turn / Edit 路径：前端已经本地 push 了 user 气泡，bridge 不
+			// 该再 echo。DisplayTextBlock 同时承担「历史回放渲染」职责，所以它必须
+			// 经由 Recorder 落库（Audience 含 ToStore），但这里不能再走
+			// queue_consumed_batch 链路。
+			b.skipNextUser = false
+			b.mu.Unlock()
+			return
+		}
+		b.pending = append(b.pending, display)
 		b.mu.Unlock()
-		return
+	case agent.RoleAssistant:
+		idx := ch.Index
+		b.emit.Emit(b.convID, ai.StreamEvent{
+			Type:      "message_indexed",
+			Role:      string(agent.RoleAssistant),
+			SortOrder: &idx,
+		})
 	}
-	b.pending = append(b.pending, display)
-	b.mu.Unlock()
 }
 
 // OnRunnerEvent handles a single Runner Event. Before processing the event,
@@ -180,9 +196,13 @@ func (b *eventBridge) OnRunnerEvent(_ context.Context, ev agent.Event) {
 				cause = ev.Retry.Cause.Error()
 			}
 			b.emit.Emit(b.convID, ai.StreamEvent{
-				Type:    "retry",
-				Content: fmt.Sprintf("%d/?", ev.Retry.Attempt),
-				Error:   cause,
+				Type: "retry",
+				// Content 留着 "N/?" 字串作历史回放兼容；新字段 RetryAttempt /
+				// RetryDelayMs 让前端能做倒计时 + 更可控的文案格式化。
+				Content:      fmt.Sprintf("%d/?", ev.Retry.Attempt),
+				Error:        cause,
+				RetryAttempt: ev.Retry.Attempt,
+				RetryDelayMs: ev.Retry.Delay.Milliseconds(),
 			})
 		}
 

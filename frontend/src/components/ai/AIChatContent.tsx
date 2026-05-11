@@ -11,6 +11,10 @@ import {
   ArrowDown,
   Database,
   AlertCircle,
+  CircleSlash,
+  Clock,
+  Gauge,
+  RotateCw,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -764,22 +768,26 @@ const AssistantMessage = memo(function AssistantMessage({
     return (
       <div className="flex flex-col items-start gap-1.5">
         <span className="text-xs font-semibold text-primary tracking-wide">Assistant</span>
-        <div className="rounded-xl rounded-bl-sm bg-muted px-3.5 py-2.5 max-w-[95%] shadow-sm">
-          <div className="flex items-center gap-1 py-1">
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce"
-              style={{ animationDelay: "0ms" }}
-            />
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce"
-              style={{ animationDelay: "150ms" }}
-            />
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce"
-              style={{ animationDelay: "300ms" }}
-            />
+        {msg.retryStatus ? (
+          <RetryCountdownBubble status={msg.retryStatus} />
+        ) : (
+          <div className="rounded-xl rounded-bl-sm bg-muted px-3.5 py-2.5 max-w-[95%] shadow-sm">
+            <div className="flex items-center gap-1 py-1">
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce"
+                style={{ animationDelay: "0ms" }}
+              />
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce"
+                style={{ animationDelay: "150ms" }}
+              />
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce"
+                style={{ animationDelay: "300ms" }}
+              />
+            </div>
           </div>
-        </div>
+        )}
       </div>
     );
   }
@@ -821,6 +829,61 @@ const AssistantMessage = memo(function AssistantMessage({
   );
 });
 
+// RetryCountdownBubble 在 cago 退避窗口里取代默认的"三点跳动"占位，显示
+//   ⟳ 正在重试 (1.8s) · 503 Service Unavailable
+//
+// 数据源是占位消息的 msg.retryStatus（aiStore case "retry" 写入）。这是运行时
+// 状态——不持久化，刷新会话不会重建：cago 已经在后端把上一段 partial 落成
+// errored，PartialBanner 自然显示出来；倒计时只在 backoff 这几百毫秒/秒内可见。
+//
+// 倒计时对齐策略：startedAt 是前端收到 retry 事件那一刻 Date.now()，与后端
+// cago 实际 sleep 起点有一段 IPC 延迟。所以：
+//   - remaining > 0  → 显示秒数（与 cago 退避窗口大致对齐）
+//   - remaining <= 0 → 切到"正在请求模型..."，不再吐负数；此时要么 IPC 慢
+//     了一点，要么后端已经发起新请求 in-flight。第一个 delta 一到，
+//     AssistantMessage 的 empty 分支就让位给 hasBlocks 分支，整个 bubble
+//     自然消失，不需要手动清 retryStatus。
+const RetryCountdownBubble = memo(function RetryCountdownBubble({
+  status,
+}: {
+  status: NonNullable<ChatMessage["retryStatus"]>;
+}) {
+  const { t } = useTranslation();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    // 100ms 一档：足够丝滑，又不会让 React 反复 reconcile 太多次。
+    // 倒计时结束后切到"请求中"状态，仍保留 tick 用于 cause 长度无关的稳定 layout。
+    const id = window.setInterval(() => setNow(Date.now()), 100);
+    return () => window.clearInterval(id);
+  }, [status.startedAt, status.delayMs]);
+  const remaining = status.startedAt + status.delayMs - now;
+  const showCountdown = remaining > 0;
+  const seconds = showCountdown ? (remaining / 1000).toFixed(1) : "0.0";
+  // progress: 0(刚开始) → 1(退避结束)。delayMs=0 时直接当作请求中。
+  const progress = status.delayMs > 0 ? Math.max(0, Math.min(1, 1 - remaining / status.delayMs)) : 1;
+  return (
+    <div className="flex flex-col items-start gap-1 max-w-[95%]">
+      <div className="inline-flex items-center gap-2 rounded-xl rounded-bl-sm bg-muted px-3 py-2 text-xs shadow-sm">
+        <RotateCw className="h-3.5 w-3.5 text-muted-foreground animate-spin" style={{ animationDuration: "1.5s" }} />
+        <span className="font-medium text-foreground/80">
+          {showCountdown
+            ? t("ai.retry.countdown", "重试中 {{s}}s", { s: seconds })
+            : t("ai.retry.requesting", "正在请求模型...")}
+        </span>
+        {status.cause ? <span className="text-muted-foreground truncate max-w-[260px]">· {status.cause}</span> : null}
+      </div>
+      {status.delayMs > 0 && (
+        <div className="h-0.5 w-full max-w-[260px] rounded-full bg-muted-foreground/10 overflow-hidden">
+          <div
+            className="h-full bg-muted-foreground/40 transition-[width] duration-100 ease-linear"
+            style={{ width: `${progress * 100}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+});
+
 // PartialBanner 渲染 assistant 气泡尾部的"中断状态"提示。
 // 数据源是 msg.partialReason / msg.partialDetail —— 这两个字段同时承载
 // (1) 历史回放（convertDisplayMessages 从后端 partial_reason/partial_detail 列读出来）
@@ -830,30 +893,61 @@ const PartialBanner = memo(function PartialBanner({ msg }: { msg: ChatMessage })
   const { t } = useTranslation();
   const reason = msg.partialReason;
   if (!reason) return null;
-  const reasonLabel = (() => {
+
+  // canceled = 用户主动停止，是正常路径，用 inline 行内细线（不画 alert 框）
+  // errored / timeout = 出错，需要 destructive 色但保持克制
+  // tokens_limit = 触达上限，warning 提示
+  if (reason === "canceled") {
+    return (
+      <div
+        role="status"
+        className="inline-flex items-center gap-1.5 mt-1 px-2 py-0.5 rounded-full bg-muted/60 text-[11px] text-muted-foreground border border-border/50"
+      >
+        <CircleSlash className="h-3 w-3" />
+        <span>{t("ai.partial.canceled", "已停止")}</span>
+        {msg.partialDetail ? <span className="opacity-70">· {msg.partialDetail}</span> : null}
+      </div>
+    );
+  }
+
+  const config = (() => {
     switch (reason) {
       case "errored":
-        return t("ai.partial.errored", "生成中断（出错）");
-      case "canceled":
-        return t("ai.partial.canceled", "已停止");
-      case "tokens_limit":
-        return t("ai.partial.tokensLimit", "已达 token 上限");
+        return {
+          label: t("ai.partial.errored", "生成中断"),
+          icon: AlertCircle,
+          tone: "border-destructive/30 bg-destructive/5 text-destructive",
+        };
       case "timeout":
-        return t("ai.partial.timeout", "请求超时");
+        return {
+          label: t("ai.partial.timeout", "请求超时"),
+          icon: Clock,
+          tone: "border-destructive/30 bg-destructive/5 text-destructive",
+        };
+      case "tokens_limit":
+        return {
+          label: t("ai.partial.tokensLimit", "已达 token 上限"),
+          icon: Gauge,
+          tone: "border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300",
+        };
       default:
-        return t("ai.partial.unknown", "生成中断");
+        return {
+          label: t("ai.partial.unknown", "生成中断"),
+          icon: AlertCircle,
+          tone: "border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300",
+        };
     }
   })();
-  const tone =
-    reason === "errored" || reason === "timeout"
-      ? "border-destructive/40 bg-destructive/10 text-destructive"
-      : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  const Icon = config.icon;
   return (
-    <div role="status" className={`flex items-start gap-2 max-w-[95%] rounded-md border px-3 py-2 text-xs ${tone}`}>
-      <AlertCircle className="h-3.5 w-3.5 mt-[1px] shrink-0" />
+    <div
+      role="status"
+      className={`inline-flex items-start gap-1.5 mt-1 max-w-[95%] rounded-md border px-2 py-1 text-[11px] leading-snug ${config.tone}`}
+    >
+      <Icon className="h-3 w-3 mt-[1px] shrink-0" />
       <div className="min-w-0 break-words">
-        <div className="font-semibold">{reasonLabel}</div>
-        {msg.partialDetail ? <div className="opacity-90 mt-0.5">{msg.partialDetail}</div> : null}
+        <span className="font-medium">{config.label}</span>
+        {msg.partialDetail ? <span className="opacity-80 ml-1">· {msg.partialDetail}</span> : null}
       </div>
     </div>
   );

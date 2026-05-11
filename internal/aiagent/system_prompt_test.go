@@ -20,11 +20,10 @@ func TestStaticSystemPrompt_CoversAllSections(t *testing.T) {
 		"batch_command",
 		"request_permission",
 		"exec_tool",
-		// subagentRouting
-		"Sub-agent routing",
-		"ops-explorer",
-		"ops-batch",
-		"ops-readonly",
+		// subagent routing 现在由 cago coding 动态 prompt 生成（含 dispatch_subagent +
+		// explore/plan/general-purpose）；OpsKat 不再自己列 ops-* 子 agent，因为它们
+		// 实际未注册。如果将来通过 coding.WithExtraSubagents 接回 ops-* 三种，再在此
+		// 测试加守卫。
 		// mentionProtocol
 		"@-mention protocol",
 		"Assets referenced in the user's message",

@@ -4,16 +4,14 @@ import "strings"
 
 // StaticSystemPrompt 返回拼到 cago 默认系统提示之后的 OpsKat 段（通过
 // coding.AppendSystem 注入）。Cago 自己已经会列出全部 tools 与生成 cwd / date /
-// project-context / skills 段，本函数只补 OpsKat 场景需要、cago 默认涵盖不到
-// 的部分：
+// project-context / skills / dispatch_subagent 的 routing 提示，本函数只补
+// OpsKat 场景需要、cago 默认涵盖不到的部分：
 //
 //   - opsIdentity: 重申主身份（cago 默认 SystemIntro 把模型定位为通用 "coding
 //     agent"，与 OpsKat 的 ops 助手定位并存可能让模型摇摆，这里明确两者关系）
 //   - languageHint: 语言偏好
 //   - opsToolPlaybook: list_assets / exec_* / batch_command / request_permission
 //     的协作模式（每个工具的 description 只描述自己，缺横向搭配指引）
-//   - subagentRouting: 6 种 dispatch_subagent type 的选择策略（cago 默认 3 种
-//   - ops-* 3 种）
 //   - mentionProtocol: 解释 @assetname 协议（每轮 mention 由 promptHook 动态注入；
 //     这里给模型一个常驻语义说明）
 //   - approvalContext: 审批 / 拒绝是 first-class 流程，被拒必须停
@@ -27,7 +25,6 @@ func StaticSystemPrompt(language string) string {
 		opsIdentity,
 		languageHint(language),
 		opsToolPlaybook,
-		subagentRouting,
 		mentionProtocol,
 		approvalContext,
 		knowledgeGuidance,
@@ -64,17 +61,6 @@ const opsToolPlaybook = `# OpsKat tool playbook
 - **Pre-authorize patterns** → ` + "`request_permission`" + ` lets you submit shell-style command patterns the user reviews and grants for the session, so subsequent matching calls run without re-prompting. Use this when you anticipate many similar commands.
 - **Extension tools** → ` + "`exec_tool`" + ` is the dispatcher for installed-extension tools; the extension's SKILL.md (when loaded) appears in per-turn context with usage details.
 - For k8s: see the ` + "`exec_k8s`" + ` guidance in the knowledge section below — do not shell out to kubectl via ` + "`bash` or `run_command`" + `.`
-
-const subagentRouting = `# Sub-agent routing (` + "`dispatch_subagent`" + `)
-
-Six types are registered. Pick by the task shape:
-
-- ` + "`ops-explorer`" + ` — investigate OpsKat infra (read-leaning ops tools, request_permission). Use for "what's the state of <fleet>" tasks.
-- ` + "`ops-batch`" + ` — execute the same operation across many assets (run_command / exec_sql / exec_redis / exec_mongo + batch_command). Use when the parent task is a multi-host rollout.
-- ` + "`ops-readonly`" + ` — strictly inventory inspection (list/get assets+groups, no execution). Use when you only need a snapshot, not a probe.
-- ` + "`explore`" + ` — read-only **code** exploration of the conversation's cwd. Use to locate symbols / read files / answer "where is X defined".
-- ` + "`plan`" + ` — architecture planning for code changes in the cwd. Use for designing a multi-step implementation.
-- ` + "`general-purpose`" + ` — catch-all subtask that doesn't fit the others; has read/write/edit/bash. Avoid spawning when a direct tool call is sufficient.`
 
 const mentionProtocol = `# @-mention protocol
 

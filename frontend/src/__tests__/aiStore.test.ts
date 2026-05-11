@@ -14,6 +14,8 @@ import {
   DeleteConversation,
   LoadConversationMessages,
   SendAIMessage,
+  EditAIMessage,
+  RegenerateAIMessage,
   StopAIGeneration,
   UpdateConversationTitle,
 } from "../../wailsjs/go/app/App";
@@ -1210,6 +1212,177 @@ describe("editAndResendConversation", () => {
   });
 });
 
+describe("regenerateConversation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useAIStore.setState({
+      tabStates: {},
+      conversations: [],
+      conversationMessages: {},
+      conversationStreaming: {},
+      sidebarTabs: [],
+      activeSidebarTabId: null,
+    });
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+    vi.mocked(EditAIMessage).mockResolvedValue(undefined as any);
+    vi.mocked(RegenerateAIMessage).mockResolvedValue(undefined as any);
+    vi.mocked(StopAIGeneration).mockResolvedValue(undefined as any);
+    vi.mocked(EventsOn).mockReturnValue(() => {});
+  });
+
+  it("calls RegenerateAIMessage with the assistant's sortOrder, not SendAIMessage", async () => {
+    useAIStore.setState({
+      conversationMessages: {
+        77: [
+          { role: "user", content: "q1", blocks: [], sortOrder: 0 },
+          { role: "assistant", content: "a1", blocks: [], sortOrder: 1 },
+          { role: "user", content: "q2", blocks: [], sortOrder: 2 },
+          { role: "assistant", content: "a2", blocks: [], sortOrder: 3 },
+        ],
+      },
+      conversationStreaming: { 77: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().regenerateConversation(77, 3);
+
+    expect(RegenerateAIMessage).toHaveBeenCalledTimes(1);
+    expect(RegenerateAIMessage).toHaveBeenCalledWith(77, 3);
+    expect(SendAIMessage).not.toHaveBeenCalled();
+
+    const msgs = useAIStore.getState().conversationMessages[77];
+    expect(msgs.map((m) => [m.role, m.content])).toEqual([
+      ["user", "q1"],
+      ["assistant", "a1"],
+      ["user", "q2"],
+      ["assistant", ""],
+    ]);
+  });
+
+  it("ignores invalid indexes and non-assistant targets", async () => {
+    useAIStore.setState({
+      conversationMessages: {
+        78: [
+          { role: "user", content: "hello", blocks: [], sortOrder: 0 },
+          { role: "assistant", content: "world", blocks: [], sortOrder: 1 },
+        ],
+      },
+      conversationStreaming: { 78: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().regenerateConversation(78, -1);
+    await useAIStore.getState().regenerateConversation(78, 0);
+    await useAIStore.getState().regenerateConversation(78, 99);
+
+    expect(RegenerateAIMessage).not.toHaveBeenCalled();
+    expect(SendAIMessage).not.toHaveBeenCalled();
+    expect(useAIStore.getState().conversationMessages[78].map((m) => [m.role, m.content])).toEqual([
+      ["user", "hello"],
+      ["assistant", "world"],
+    ]);
+  });
+
+  it("aborts when the target assistant has no sortOrder (not persisted yet)", async () => {
+    useAIStore.setState({
+      conversationMessages: {
+        79: [
+          { role: "user", content: "hi", blocks: [], sortOrder: 0 },
+          { role: "assistant", content: "wip", blocks: [] },
+        ],
+      },
+      conversationStreaming: { 79: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().regenerateConversation(79, 1);
+
+    expect(RegenerateAIMessage).not.toHaveBeenCalled();
+    expect(SendAIMessage).not.toHaveBeenCalled();
+  });
+
+  it("fills sortOrder via message_indexed event so regenerate works after stop-before-content", async () => {
+    // 现场：用户发消息 → cago openPartial 立刻 append 空 assistant（DB 写库，
+    // 拿到 sort_order=1）→ bridge 必须 emit message_indexed 把 sortOrder 透传
+    // 给前端 → 用户立即停止 → 占位 streaming=false 且 partialReason="canceled"
+    // 但 sortOrder=1（不再是 null）→ 点重新生成能调用 RegenerateAIMessage(convId, 1)。
+    const callbacks: Array<(event: any) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((_eventName: string, handler: (event: any) => void) => {
+      callbacks.push(handler);
+      return vi.fn();
+    }) as any);
+
+    useAIStore.setState({
+      sidebarTabs: [
+        {
+          id: "sidebar-81",
+          conversationId: 81,
+          title: "t",
+          createdAt: 1,
+          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+        },
+      ],
+      activeSidebarTabId: "sidebar-81",
+      conversationMessages: { 81: [] },
+      conversationStreaming: { 81: { sending: false, pendingQueue: [] } },
+    });
+
+    // 发起一次 send → 注册 listener，本地 push user + 空 streaming assistant 占位。
+    await useAIStore.getState().sendFromSidebarTab("sidebar-81", "你是谁？");
+    expect(callbacks.length).toBeGreaterThan(0);
+
+    // bridge 在 openPartial 后通过 Conv.Watch 把 sort_order 透传过来；user 占位
+    // sortOrder 我们暂时不在 emit 路径上（保留 send-new-turn 的 skipNextUser
+    // 流程），所以这条事件只针对 assistant。
+    callbacks[0]({ type: "message_indexed", role: "assistant", sort_order: 1 });
+
+    let msgs = useAIStore.getState().conversationMessages[81];
+    expect(msgs[msgs.length - 1].sortOrder).toBe(1);
+
+    // 用户立刻 stop —— placeholder 进 cancelled 态但仍有 sortOrder。
+    callbacks[0]({ type: "stopped" });
+    msgs = useAIStore.getState().conversationMessages[81];
+    expect(msgs[msgs.length - 1].streaming).toBe(false);
+    expect(msgs[msgs.length - 1].partialReason).toBe("canceled");
+    expect(msgs[msgs.length - 1].sortOrder).toBe(1);
+
+    // 点重新生成 → 应该真的调 RegenerateAIMessage(81, 1)，不再静默 return。
+    const assistantIdx = msgs.length - 1;
+    await useAIStore.getState().regenerateConversation(81, assistantIdx);
+    expect(RegenerateAIMessage).toHaveBeenCalledTimes(1);
+    expect(RegenerateAIMessage).toHaveBeenCalledWith(81, 1);
+  });
+
+  it("stops in-flight generation before re-issuing regenerate", async () => {
+    vi.useFakeTimers();
+    const callbacks: Array<(event: any) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((_eventName: string, handler: (event: any) => void) => {
+      callbacks.push(handler);
+      return vi.fn();
+    }) as any);
+    vi.mocked(StopAIGeneration).mockImplementation(async () => {
+      callbacks[0]?.({ type: "stopped" });
+    });
+
+    useAIStore.setState({
+      conversationMessages: {
+        80: [
+          { role: "user", content: "q", blocks: [], sortOrder: 0 },
+          { role: "assistant", content: "partial", blocks: [], sortOrder: 1, streaming: true },
+        ],
+      },
+      conversationStreaming: { 80: { sending: true, pendingQueue: [{ text: "queued" }] } },
+    });
+
+    await useAIStore.getState().regenerateConversation(80, 1);
+    await vi.runAllTimersAsync();
+
+    expect(StopAIGeneration).toHaveBeenCalledWith(80);
+    expect(RegenerateAIMessage).toHaveBeenCalledWith(80, 1);
+    expect(useAIStore.getState().conversationStreaming[80].pendingQueue).toEqual([]);
+    vi.useRealTimers();
+  });
+});
+
 describe("sidebar and main tab multi-host behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1822,5 +1995,136 @@ describe("aiStore queue_consumed_batch", () => {
     // content 走 RAF 缓冲；这里只断言尾部 asst 的 blocks/content 还在 streaming，
     // 至少把 batch 的尾 asst 视为活跃流目标即可。
     expect(tail.streaming).toBe(true);
+  });
+});
+
+// cago 退避重试在前端的落地：
+//   - 上一段 partial 收尾成 errored（PartialBanner 给出 "重试中 N/? · cause"）
+//   - 新增一条空 streaming 占位，带 retryStatus 让 UI 渲染倒计时气泡
+//   - 倒计时数据用后端 RetryDelayMs / RetryAttempt（不是 "N/?" 字符串）
+//   - 用户在 backoff 窗口里点 stop 时：retryStatus 被清掉，沿用 canceled 路径
+//   - 重发会替换整条 messages 数组，retryStatus 自然消失
+describe("aiStore retry 倒计时占位", () => {
+  const buildSidebarTab = (convId: number) => ({
+    id: `sidebar-${convId}`,
+    conversationId: convId,
+    title: "新对话",
+    createdAt: 1,
+    uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+  });
+
+  type StreamEvt = { type: string; [k: string]: unknown };
+
+  async function captureHandler(convId: number) {
+    const callbacks: Array<(event: StreamEvt) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((eventName: string, handler: (event: StreamEvt) => void) => {
+      if (eventName === `ai:event:${convId}`) callbacks.push(handler);
+      return () => {};
+    }) as any);
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+
+    useAIStore.setState({
+      sidebarTabs: [buildSidebarTab(convId)],
+      activeSidebarTabId: `sidebar-${convId}`,
+      conversationMessages: { [convId]: [] },
+      conversationStreaming: { [convId]: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendFromSidebarTab(`sidebar-${convId}`, "首条消息");
+    if (callbacks.length === 0) throw new Error("EventsOn handler not registered");
+    return callbacks[0];
+  }
+
+  function getMessages(convId: number) {
+    return useAIStore.getState().conversationMessages[convId] || [];
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useAIStore.setState({
+      tabStates: {},
+      conversations: [],
+      conversationMessages: {},
+      conversationStreaming: {},
+      sidebarTabs: [],
+      activeSidebarTabId: null,
+    });
+  });
+
+  it("retry 事件把上一段标 errored + 追加带 retryStatus 的新占位", async () => {
+    const convId = 410;
+    const fire = await captureHandler(convId);
+
+    // 先 stream 一点东西到老占位上，让 errored 那条不是空的（更贴近真实场景）
+    fire({ type: "content", content: "正在思考" });
+
+    fire({
+      type: "retry",
+      content: "2/?",
+      error: "503 Service Unavailable",
+      retry_attempt: 2,
+      retry_delay_ms: 1500,
+    });
+
+    const msgs = getMessages(convId);
+    // [user, errored-asst, streaming-asst(retry)]
+    expect(msgs.map((m) => m.role)).toEqual(["user", "assistant", "assistant"]);
+
+    const errored = msgs[1];
+    expect(errored.streaming).toBe(false);
+    expect(errored.partialReason).toBe("errored");
+    expect(errored.partialDetail).toContain("503");
+    expect(errored.retryStatus).toBeUndefined();
+
+    const next = msgs[2];
+    expect(next.streaming).toBe(true);
+    expect(next.blocks).toEqual([]);
+    expect(next.retryStatus).toMatchObject({
+      attempt: 2,
+      cause: "503 Service Unavailable",
+      delayMs: 1500,
+    });
+    expect(typeof next.retryStatus?.startedAt).toBe("number");
+  });
+
+  it("用户在 backoff 窗口里点 stop：retryStatus 被清掉，沿用 canceled 状态", async () => {
+    const convId = 411;
+    const fire = await captureHandler(convId);
+
+    fire({ type: "retry", content: "1/?", error: "EOF", retry_attempt: 1, retry_delay_ms: 800 });
+    // 占位带 retryStatus
+    expect(getMessages(convId).slice(-1)[0].retryStatus).toBeTruthy();
+
+    vi.mocked(StopAIGeneration).mockResolvedValue(undefined as any);
+    await useAIStore.getState().stopConversation(convId);
+
+    const tail = getMessages(convId).slice(-1)[0];
+    // markLastAssistantPartial 把 retryStatus 清成 undefined，避免 dead-data
+    // 与 canceled 渲染路径冲突（PartialBanner 会显示"已停止"而非倒计时）
+    expect(tail.retryStatus).toBeUndefined();
+    expect(tail.streaming).toBe(false);
+    expect(tail.partialReason).toBe("canceled");
+  });
+
+  it("retry 后下一个 content 事件落到新占位（不是被 errored 那条）", async () => {
+    const convId = 412;
+    const fire = await captureHandler(convId);
+
+    fire({ type: "content", content: "失败前的内容" });
+    fire({ type: "retry", content: "1/?", error: "timeout", retry_attempt: 1, retry_delay_ms: 200 });
+    fire({ type: "content", content: "重试成功的内容" });
+
+    // RAF 缓冲：触发一帧让 buffer flush 到 blocks（vitest 的 happy-dom 同步执行 RAF）
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+
+    const msgs = getMessages(convId);
+    expect(msgs).toHaveLength(3);
+    // 老占位保持失败前的内容，新占位拿到重试后的内容
+    const oldText = msgs[1].blocks.find((b) => b.type === "text") as { content: string } | undefined;
+    const newText = msgs[2].blocks.find((b) => b.type === "text") as { content: string } | undefined;
+    expect(oldText?.content).toBe("失败前的内容");
+    expect(newText?.content).toBe("重试成功的内容");
   });
 });

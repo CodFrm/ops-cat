@@ -58,10 +58,10 @@ func (g *ApprovalGateway) SetActivateFunc(fn func()) { g.activate = fn }
 // RequestSingle 发起一次单项审批，阻塞等用户决策或 ctx 取消。
 //
 // 对本地 cago 工具（kind 以 "local_" 开头）做两个特殊处理：
-//   - 进入前先查 LocalGrantStore：若 (除 local_bash 外) 该 toolName 已有会话级
-//     放行记录，直接返回合成 allow，跳过 UI 弹卡。
-//   - 用户选 "allowAll" 时，把该 toolName 落 grants（同样豁免 bash —— bash 不
-//     允许永久放行，每次都必须确认，避免一次 "remember" 把 shell 注入面打开）。
+//   - 进入前先查 LocalGrantStore：若该 toolName 已有会话级放行记录，直接
+//     返回合成 allow，跳过 UI 弹卡。
+//   - 用户选 "allowAll" 时，把该 toolName 落 grants，本会话内后续同工具调用
+//     全部直接放行。bash / write / edit 同等对待。
 //
 // 返回 ai.ApprovalResponse.Decision ∈ {"allow", "allowAll", "deny"}；ctx 取消
 // 视作 "deny"。
@@ -70,7 +70,7 @@ func (g *ApprovalGateway) RequestSingle(ctx context.Context, kind string, items 
 	localTool := localToolName(kind) // 非 local_* 时为空串
 
 	// 本地工具命中已记忆的会话级放行 → 直接合成 allow。
-	if localTool != "" && kind != "local_bash" && g.grants != nil {
+	if localTool != "" && g.grants != nil {
 		if g.grants.Has(ctx, sessionID, localTool) {
 			return ai.ApprovalResponse{Decision: "allow"}
 		}
@@ -93,8 +93,9 @@ func (g *ApprovalGateway) RequestSingle(ctx context.Context, kind string, items 
 	select {
 	case resp := <-ch:
 		g.emitResult(confirmID, resp.Decision)
-		// allowAll 在 write/edit 上落 grants；bash 永远不落 —— allowAll 退化为单次 allow。
-		if resp.Decision == "allowAll" && localTool != "" && kind != "local_bash" && g.grants != nil {
+		// allowAll 在所有本地工具（bash / write / edit）上都落 grants —— 本会话内
+		// 后续同工具调用 Has() 命中跳过弹卡。
+		if resp.Decision == "allowAll" && localTool != "" && g.grants != nil {
 			g.grants.Save(ctx, sessionID, localTool)
 		}
 		return resp

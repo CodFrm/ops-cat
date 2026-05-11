@@ -3,6 +3,7 @@ import { create } from "zustand";
 import {
   SendAIMessage,
   EditAIMessage,
+  RegenerateAIMessage,
   StopAIGeneration,
   QueueAIMessage,
   GetActiveAIProvider,
@@ -84,6 +85,16 @@ export interface ChatMessage {
   // PartialReason 对应的人类可读详情（errored 时是 err.Error()，cancelled 时是
   // 取消原因，等等）。空时按 partialReason 显示通用文案。
   partialDetail?: string;
+  // 仅运行时占位用：cago retry 把上一段 partial 落成 errored 后开了新 partial，
+  // 在 backoff 窗口里这条新占位还没收到任何 delta —— UI 渲染倒计时气泡用它
+  // 取代默认的"三点跳动"。第一个 content/thinking/tool delta 把占位喂满后，
+  // 这字段就被自然遮蔽（hasBlocks 走另一分支），不持久化到后端。
+  retryStatus?: {
+    attempt: number; // 1-indexed 失败次数
+    cause: string; // 错误原因（HTTP/网络层 msg）
+    delayMs: number; // 后端给的退避时长
+    startedAt: number; // Date.now() 时刻，组件做 (startedAt + delayMs - now) 倒计时
+  };
 }
 
 export interface PendingQueueItem {
@@ -124,6 +135,16 @@ interface StreamEventData {
     cache_creation_tokens?: number;
     cache_read_tokens?: number;
   };
+  // retry 事件：cago 退避时长 + 失败次数；前端用来做倒计时进度。
+  retry_delay_ms?: number;
+  retry_attempt?: number;
+  // message_indexed 事件：cago Conv.Watch ChangeAppended 时由 bridge 透传，
+  // 把刚 append 的消息的后端 sort_order 告诉前端，让流式占位拿到 sortOrder。
+  // 没有它，stop-before-content 时 placeholder.sortOrder 始终为 null，
+  // regenerate/edit 走到 RegenerateAIMessage(convId, sortOrder) 时被
+  // `sortOrder == null` 检查吞掉，UI 上点"重新生成"完全没反应。
+  sort_order?: number;
+  role?: string;
 }
 
 // Sidebar 专用 UI 态（inputDraft / scrollTop / editTarget）。workspace tab 不使用这些字段，
@@ -835,53 +856,137 @@ function drainQueue(convId: number) {
 
   // 触发新一轮发送（空内容表示使用已有消息）
   setTimeout(() => {
-    _sendForConversation(convId, "").catch(() => {});
+    sendTurn(convId, "").catch(() => {});
   }, 0);
 }
 
-// replay 前先让旧 listener 和 pending queue 失效，避免 stop 产生的迟到事件回放到新分支。
-function prepareConversationForReplay(convId: number) {
+// replay 前的清理：stop 在途生成 + 失效旧 listener + 截断 state 到分支点。
+// 编辑重发 / 重新生成共用——三条 dispatch（sendTurn/editTurn/regenerateTurn）
+// 接管之后才能在干净的本地状态上跑。
+async function prepareReplay(convId: number, nextMessages: ChatMessage[]): Promise<void> {
+  const streaming = useAIStore.getState().conversationStreaming[convId] || { sending: false, pendingQueue: [] };
   conversationStopRequests.delete(convId);
   invalidateConvListenerForReplay(convId);
   updateConversation(convId, { sending: false, pendingQueue: [] });
-}
-
-// 先把会话消息截断到编辑点之前，再以统一发送链路重建 assistant 占位消息。
-function resetConversationForReplay(convId: number, messages: ChatMessage[]) {
-  updateConversation(convId, { messages, sending: false, pendingQueue: [] });
-}
-
-// 把“编辑并重发”和“重新生成”统一到一条 replay 流程里，避免两套截断逻辑继续分叉。
-// editSortOrder >= 0 时走后端 EditAIMessage（先 Truncate(sortOrder) 再 Append 新 user
-// 再 Resend），保证 DB 也截断；否则走普通 SendAIMessage（追加新 user）。
-async function replayConversation(
-  convId: number,
-  nextMessages: ChatMessage[],
-  content: string,
-  mentions?: MentionRef[],
-  editSortOrder?: number
-) {
-  const streaming = useAIStore.getState().conversationStreaming[convId] || { sending: false, pendingQueue: [] };
-  prepareConversationForReplay(convId);
   if (streaming.sending) {
     await useAIStore.getState().stopConversation(convId);
   }
+  updateConversation(convId, { messages: nextMessages, sending: false, pendingQueue: [] });
+}
 
-  resetConversationForReplay(convId, nextMessages);
+// 开启一轮 conv stream：推 assistant 占位 + 装 conv 维度 listener + sending=true。
+// 三条 dispatch 共享，不引入 send/edit/regenerate 之间的相互依赖。
+function beginConvStream(convId: number, baseMessages: ChatMessage[]): void {
+  const assistantMsg: ChatMessage = {
+    role: "assistant",
+    content: "",
+    blocks: [],
+    streaming: true,
+  };
+  updateConversation(convId, {
+    messages: [...baseMessages, assistantMsg],
+    sending: true,
+  });
 
-  if (content.trim()) {
-    await _sendForConversation(convId, content, mentions, editSortOrder);
-    return;
+  const listener = getOrCreateConvListener(convId);
+  listener.generation++;
+  const myGeneration = listener.generation;
+  if (listener.cancel) {
+    listener.cancel();
+    listener.cancel = null;
   }
+  listener.cancel = EventsOn(`ai:event:${convId}`, (event: StreamEventData) => {
+    if (myGeneration !== listener.generation) return;
+    handleStreamEvent(convId, event);
+  });
+}
 
-  if (nextMessages.length === 0) return;
-  await _sendForConversation(convId, "");
+// dispatch 失败时回滚 UI：占位 assistant 仍留在 messages 里供错误展示，但 sending=false + 取消 listener。
+function endConvStreamOnError(convId: number): void {
+  updateConversation(convId, { sending: false });
+  cleanupConvListener(convId);
+}
+
+// 在 user 点击停止后到 bridge 实际 emit "stopped" 之间，cago 仍会把 LLM 已经
+// 在途的 chunk 当成 EventTextDelta/ThinkingDelta 推上来。把这些「迟到」的可视
+// 流量在 frontend 这一层直接吞掉——`stopped`/`done`/`usage`/`error` 仍然放行，
+// 用于把消息收尾、token 计费、状态过渡。
+const LATE_STREAM_EVENTS = new Set([
+  "content",
+  "thinking",
+  "thinking_done",
+  "tool_start",
+  "tool_result",
+  "agent_start",
+  "agent_end",
+  "retry",
+]);
+
+// 把最近一条 assistant 消息标成 partial 终止状态：
+//   - reason="canceled" → 用户主动停止（"stopped" 事件 / stopConversation）
+//   - reason="errored"  → 报错终止（"error" 事件 / "retry" 时的上一段 partial）
+// running 的 tool/agent 翻成 cancelled，running 的 thinking 翻成 completed；
+// partialReason / partialDetail 已存在则保留，避免覆盖更精确的语义（idempotent）。
+// keepSending=true 用于 retry 路径——会话继续，仅是当前 partial 结束。
+function markLastAssistantPartial(
+  convId: number,
+  reason: "canceled" | "errored",
+  detail?: string,
+  options?: { keepSending?: boolean }
+) {
+  const msgs = useAIStore.getState().conversationMessages[convId] || [];
+  const updated = updateLastAssistant(msgs, (msg) => {
+    const newBlocks = msg.blocks.map((b) => {
+      if (b.type === "tool" && b.status === "running") {
+        return { ...b, status: "cancelled" as const };
+      }
+      if (b.type === "thinking" && b.status === "running") {
+        return { ...b, status: "completed" as const };
+      }
+      if (b.type === "agent" && b.status === "running") {
+        return {
+          ...b,
+          status: "cancelled" as const,
+          childBlocks: b.childBlocks?.map((c) => (c.status === "running" ? { ...c, status: "cancelled" as const } : c)),
+        };
+      }
+      return b;
+    });
+    return {
+      ...msg,
+      blocks: newBlocks,
+      streaming: false,
+      partialReason: msg.partialReason || reason,
+      partialDetail: msg.partialDetail || detail || "",
+      // 占位已经被 finalize（user stop / 出错 / 上一段被 retry 落盘）→ 不再处于
+      // 等待新 attempt 的 backoff 状态，倒计时数据就没意义了。留着也只是 dead data，
+      // 但万一未来有其他渲染分支读了 retryStatus 会引起误会，干脆清掉。
+      retryStatus: undefined,
+    };
+  });
+  const patch: Parameters<typeof updateConversation>[1] = options?.keepSending ? {} : { sending: false };
+  if (updated) patch.messages = updated;
+  if (updated || !options?.keepSending) updateConversation(convId, patch);
+}
+
+function markLastAssistantCanceled(convId: number, detail?: string) {
+  markLastAssistantPartial(convId, "canceled", detail);
+}
+
+function markLastAssistantErrored(convId: number, detail?: string, options?: { keepSending?: boolean }) {
+  markLastAssistantPartial(convId, "errored", detail, options);
 }
 
 // 事件处理：核心流式状态机，完全基于 convId
 function handleStreamEvent(convId: number, event: StreamEventData) {
   const currentMsgs = useAIStore.getState().conversationMessages[convId] || [];
   if (!currentMsgs) return;
+
+  // 停止已发起：丢掉所有迟到的内容/工具事件，避免 user 点了停止之后还在打字。
+  // 终态事件（stopped/done/error/usage）依然放行，由各自 case 收尾并清状态。
+  if (conversationStopRequests.has(convId) && LATE_STREAM_EVENTS.has(event.type)) {
+    return;
+  }
 
   // 高频事件缓冲：content/thinking 通过 RAF 合并，每帧最多一次状态更新
   if (event.type === "content" || event.type === "thinking") {
@@ -906,6 +1011,27 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
   const msgs = useAIStore.getState().conversationMessages[convId] || currentMsgs;
 
   switch (event.type) {
+    case "message_indexed": {
+      // bridge 在 cago Conv.Watch ChangeAppended（assistant）时透传 sort_order：
+      // openPartial 同步把空 assistant 写库，sortOrder 立刻可知。把它回填到
+      // 最后一条同 role 且尚未拿到 sortOrder 的占位消息上 —— 后续 stop / done
+      // 走到 regenerate/edit 时，target.sortOrder 不再为 null，RPC 拿得到截断点。
+      //
+      // 反向找：流式占位永远是最后一条同 role 消息，避免给历史里的脏数据回填。
+      const idx = event.sort_order;
+      const role = event.role;
+      if (idx == null || !role) break;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === role && msgs[i].sortOrder == null) {
+          const next = msgs.slice();
+          next[i] = { ...msgs[i], sortOrder: idx };
+          updateConversation(convId, { messages: next });
+          break;
+        }
+      }
+      break;
+    }
+
     case "usage": {
       if (!event.usage) break;
       const delta = event.usage;
@@ -1194,32 +1320,12 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
 
     case "stopped": {
       cleanupStreamBuffer(convId);
-      const updated = updateLastAssistant(msgs, (msg) => {
-        const newBlocks = msg.blocks.map((b) => {
-          if (b.type === "tool" && b.status === "running") {
-            return { ...b, status: "cancelled" as const };
-          }
-          if (b.type === "thinking" && b.status === "running") {
-            return { ...b, status: "completed" as const };
-          }
-          if (b.type === "agent" && b.status === "running") {
-            return {
-              ...b,
-              status: "cancelled" as const,
-              childBlocks: b.childBlocks?.map((c) =>
-                c.status === "running" ? { ...c, status: "cancelled" as const } : c
-              ),
-            };
-          }
-          return b;
-        });
-        return { ...msg, blocks: newBlocks, streaming: false };
-      });
-      if (updated) {
-        updateConversation(convId, { messages: updated, sending: false });
-      } else {
-        updateConversation(convId, { sending: false });
-      }
+      // partialReason=canceled + 子块 running→cancelled，与 user 点 stop 时本地
+      // 立即写入的标记保持一致——刷新前后 PartialBanner 渲染同一份数据，
+      // 不再出现「重进来才显示已停止」。
+      markLastAssistantCanceled(convId);
+      // 兜底：服务端单方面 cancel（非 user 点 stop）也要把后续迟到 delta 关掉。
+      conversationStopRequests.add(convId);
 
       useAIStore.getState().fetchConversations();
 
@@ -1232,12 +1338,41 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
     }
 
     case "retry": {
-      const reason = event.error ? `: ${event.error}` : "";
-      const updated = updateLastAssistant(msgs, (msg) => ({
-        ...msg,
-        blocks: appendText(msg.blocks, `\n\n*${i18n.t("ai.retrying", "重试中")} (${event.content})${reason}*`),
-      }));
-      if (updated) updateConversation(convId, { messages: updated });
+      // cago 的 retry 语义（见 agents/agent/retry.go handleRetry）：把当前 partial
+      // 落成 PartialErrored（保留已 stream 的 text/thinking/tool 作为下次 LLM 的
+      // 历史上下文），然后 sleep(Delay) 后再 openPartial 起新分片继续 stream。
+      //
+      // 前端必须同步这个边界：
+      //   (1) 当前 assistant 占位标 errored（PartialBanner 出来），running 子块收尾
+      //   (2) 追加新的空 assistant 占位，附带 retryStatus 在 backoff 窗口里渲染
+      //       倒计时气泡（不是默认的"三点跳动"）；下一个 delta 喂进 blocks 后，
+      //       AssistantMessage 的 empty 分支不再命中，倒计时自然消失
+      //   (3) 后续 content/thinking/tool delta 落到这条新占位
+      cleanupStreamBuffer(convId);
+      const attemptLabel = event.content || "";
+      const cause = event.error || "";
+      // 上一段 errored 的 detail：放失败次数 + 原因，让 PartialBanner 能看出
+      // "是被重试了一次"，而不是孤立的最终错误。
+      const detail = attemptLabel && cause ? `${attemptLabel} · ${cause}` : attemptLabel || cause || "";
+      markLastAssistantErrored(convId, detail, { keepSending: true });
+      const next = useAIStore.getState().conversationMessages[convId] || msgs;
+      updateConversation(convId, {
+        messages: [
+          ...next,
+          {
+            role: "assistant" as const,
+            content: "",
+            blocks: [],
+            streaming: true,
+            retryStatus: {
+              attempt: event.retry_attempt || 0,
+              cause,
+              delayMs: event.retry_delay_ms || 0,
+              startedAt: Date.now(),
+            },
+          },
+        ],
+      });
       break;
     }
 
@@ -1288,20 +1423,13 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
 
     case "error": {
       cleanupStreamBuffer(convId);
-      // 把错误信息写到 message 的 partialReason/partialDetail 上（而不是拼到 blocks
-      // 末尾）。这样 live 渲染路径与历史回放（convertDisplayMessages）走同一套字段，
-      // 刷新会话后渲染结果完全一致——不再出现"刷新前看得到错误气泡，刷新后丢了"的现象。
-      const updated = updateLastAssistant(msgs, (msg) => ({
-        ...msg,
-        partialReason: "errored",
-        partialDetail: event.error || msg.partialDetail || "",
-        streaming: false,
-      }));
-      if (updated) {
-        updateConversation(convId, { messages: updated, sending: false });
-      } else {
-        updateConversation(convId, { sending: false });
-      }
+      // partialReason="errored" + 把 running 的 tool/agent/thinking 收尾。
+      // live 渲染路径与刷新后 convertDisplayMessages 读后端 partial_reason/列的渲染
+      // 完全一致，不再出现 "刷新前看得到错误气泡，刷新后丢了" 或 "工具一直转圈"。
+      markLastAssistantErrored(convId, event.error);
+      // cago 把 error 视为 turn 终止：不会再有 EventDone，也不该再处理迟到的 delta。
+      // 与 stopped 路径对齐，避免错误后还在打字。
+      conversationStopRequests.add(convId);
 
       cleanupConversationIfUnused(convId);
       break;
@@ -1430,10 +1558,28 @@ function expandToAPIMessages(messages: ChatMessage[]): ai.Message[] {
   return out;
 }
 
-// 核心发送：完全基于 convId，共享给 sendToTab / sendFromSidebar / regenerate / editAndResend。
-// editSortOrder >= 0 时切到 EditAIMessage 路径：后端会 Truncate(sortOrder) → Append(new user) → Resend，
-// 真正把 DB 里旧消息删干净。否则走普通 SendAIMessage（h.Send 仅 append）。
-async function _sendForConversation(convId: number, content: string, mentions?: MentionRef[], editSortOrder?: number) {
+// 收集当前打开的非 AI tab 作为 LLM 的资产上下文。仅 sendTurn 需要——
+// edit/regenerate 都不引入新的 AIContext，由后端基于已存历史 resend。
+function collectOpenTabsContext(): ai.TabInfo[] {
+  return useTabStore
+    .getState()
+    .tabs.filter(
+      (t): t is Tab & { meta: { assetId: number; assetName?: string } } =>
+        t.type !== "ai" && t.type !== "page" && t.meta != null && "assetId" in t.meta
+    )
+    .map(
+      (t) =>
+        new ai.TabInfo({
+          type: t.type,
+          assetId: t.meta.assetId || 0,
+          assetName: t.meta.assetName || t.label || "",
+        })
+    );
+}
+
+// 普通发送 / drain：append user（drain 跳过）→ 调 SendAIMessage。
+// 生成中时改走 QueueAIMessage 排队，不开新 stream。
+async function sendTurn(convId: number, content: string, mentions?: MentionRef[]): Promise<void> {
   conversationStopRequests.delete(convId);
   const state = useAIStore.getState();
   const streaming = state.conversationStreaming[convId] || { sending: false, pendingQueue: [] };
@@ -1449,49 +1595,19 @@ async function _sendForConversation(convId: number, content: string, mentions?: 
     return;
   }
 
-  // 空内容 = drain/regen 发送（消息已经在 state 中）
+  // 空内容 = drain（queued 消息已 push 到 state 中，直接 resend 当前 tail）
   const isDrainSend = !content.trim();
   const currentMsgs = state.conversationMessages[convId] || [];
-  const newMessages = [...currentMsgs];
+  const baseMessages: ChatMessage[] = isDrainSend
+    ? [...currentMsgs]
+    : [...currentMsgs, { role: "user", content, mentions, blocks: [] }];
+  if (isDrainSend && baseMessages.length === 0) return;
 
-  if (isDrainSend) {
-    if (newMessages.length === 0) return;
-    updateConversation(convId, { sending: true });
-  } else {
-    newMessages.push({
-      role: "user",
-      content,
-      mentions,
-      blocks: [],
-    });
-    updateConversation(convId, { messages: newMessages, sending: true });
+  if (!isDrainSend) {
+    updateConversation(convId, { messages: baseMessages });
   }
 
-  const assistantMsg: ChatMessage = {
-    role: "assistant",
-    content: "",
-    blocks: [],
-    streaming: true,
-  };
-  updateConversation(convId, {
-    messages: [...newMessages, assistantMsg],
-  });
-
-  // Set up event listener (keyed by conversationId)
-  const listener = getOrCreateConvListener(convId);
-  listener.generation++;
-  const myGeneration = listener.generation;
-
-  if (listener.cancel) {
-    listener.cancel();
-    listener.cancel = null;
-  }
-
-  const eventName = `ai:event:${convId}`;
-  listener.cancel = EventsOn(eventName, (event: StreamEventData) => {
-    if (myGeneration !== listener.generation) return;
-    handleStreamEvent(convId, event);
-  });
+  beginConvStream(convId, baseMessages);
 
   // 仅 DeepSeek-v4 thinking 模式强制要求"带 tool_calls 的 assistant 必须回传 reasoning_content"，
   // 且需要历史中间 tool_calls 可见才能跨 turn 继续推理；其他 provider（Anthropic / OpenAI / Kimi 等）
@@ -1499,44 +1615,55 @@ async function _sendForConversation(convId: number, content: string, mentions?: 
   const modelName = useAIStore.getState().modelName;
   const needExpand = modelName.startsWith("deepseek-v4");
   const apiMessages = needExpand
-    ? expandToAPIMessages(newMessages)
-    : newMessages.map((m) => new ai.Message({ role: m.role, content: m.content }));
-
-  // 收集当前 Tab 上下文
-  const allTabs = useTabStore.getState().tabs;
-  const openTabs = allTabs
-    .filter(
-      (t): t is Tab & { meta: { assetId: number; assetName?: string } } =>
-        t.type !== "ai" && t.type !== "page" && t.meta != null && "assetId" in t.meta
-    )
-    .map(
-      (t) =>
-        new ai.TabInfo({
-          type: t.type,
-          assetId: t.meta.assetId || 0,
-          assetName: t.meta.assetName || t.label || "",
-        })
-    );
+    ? expandToAPIMessages(baseMessages)
+    : baseMessages.map((m) => new ai.Message({ role: m.role, content: m.content }));
 
   // 只用本次发送消息自带的 mentions —— 后端 ai.WrapMentions 会把它们包成 inline
   // <mention> XML 在 LLM body 里，gormStore 反向解析落 row.Mentions。聚合历史
   // mentions 会让旧 start/end 偏移误污染下一行（"继续" 被渲染为 chip 那个 bug）。
   const mentionedAssets = resolveMentionedAssets(mentions);
-
-  const aiContext = new ai.AIContext({ openTabs, mentionedAssets });
+  const aiContext = new ai.AIContext({
+    openTabs: collectOpenTabsContext(),
+    mentionedAssets,
+  });
 
   try {
-    if (editSortOrder != null && editSortOrder >= 0) {
-      // 后端 h.Edit 会 Truncate(sortOrder) + Append(user) + Resend。
-      // bridge.SkipNextUserAppend 保证不会 echo 一条重复的 user 气泡——
-      // 前端这边 L1437-1454 已经本地 push 了新 user + assistant 占位。
-      await EditAIMessage(convId, editSortOrder, content, mentionedAssets);
-    } else {
-      await SendAIMessage(convId, apiMessages, aiContext);
-    }
+    await SendAIMessage(convId, apiMessages, aiContext);
   } catch {
-    updateConversation(convId, { sending: false });
-    cleanupConvListener(convId);
+    endConvStreamOnError(convId);
+  }
+}
+
+// 编辑重发：本地 push 新 user 气泡 → 调 EditAIMessage(sortOrder)。
+// 后端 h.Edit 会 Truncate(sortOrder) + Append(user) + Resend；bridge.SkipNextUserAppend
+// 保证不会 echo 一条重复的 user 气泡（前端已本地 push）。
+async function editTurn(convId: number, sortOrder: number, content: string, mentions?: MentionRef[]): Promise<void> {
+  conversationStopRequests.delete(convId);
+  const currentMsgs = useAIStore.getState().conversationMessages[convId] || [];
+  const baseMessages: ChatMessage[] = [...currentMsgs, { role: "user", content, mentions, blocks: [] }];
+  updateConversation(convId, { messages: baseMessages });
+
+  beginConvStream(convId, baseMessages);
+
+  try {
+    await EditAIMessage(convId, sortOrder, content, resolveMentionedAssets(mentions));
+  } catch {
+    endConvStreamOnError(convId);
+  }
+}
+
+// 重新生成：不引入新 user，只截 + resend。
+// 后端 h.Regenerate 会 Truncate(sortOrder) + Resend，从被截断点前的最近一条 user 重新生成。
+async function regenerateTurn(convId: number, sortOrder: number): Promise<void> {
+  conversationStopRequests.delete(convId);
+  const baseMessages = useAIStore.getState().conversationMessages[convId] || [];
+
+  beginConvStream(convId, baseMessages);
+
+  try {
+    await RegenerateAIMessage(convId, sortOrder);
+  } catch {
+    endConvStreamOnError(convId);
   }
 }
 
@@ -2115,7 +2242,7 @@ export const useAIStore = create<AIState>((set, get) => {
         await updateConversationTitleForMessage(convId, content);
       }
 
-      await _sendForConversation(convId, content, mentions);
+      await sendTurn(convId, content, mentions);
     },
 
     sendFromSidebarTab: async (tabId: string, content: string, mentions?: MentionRef[]) => {
@@ -2152,7 +2279,7 @@ export const useAIStore = create<AIState>((set, get) => {
       if (shouldSyncConversationTitleBeforeSend(convId, content)) {
         await updateConversationTitleForMessage(convId, content);
       }
-      await _sendForConversation(convId, content, mentions);
+      await sendTurn(convId, content, mentions);
     },
 
     editAndResendConversation: async (
@@ -2178,16 +2305,31 @@ export const useAIStore = create<AIState>((set, get) => {
       }
 
       const truncated = messages.slice(0, messageIndex);
+      await prepareReplay(convId, truncated);
+
       // 前端 messages 索引 ≠ 后端 sort_order（buildDisplayMessages 合并多轮 assistant
       // + 吸收 tool-result 行），必须把 target 自身的 sortOrder 传给后端 Truncate。
       // 流式占位的 user 消息没有 sortOrder——这类消息后端还没存，直接走 fallback
       // 普通 send，避免 EditAIMessage 拿到无效 idx。
-      const editSortOrder = target.sortOrder;
-      // 从被编辑消息之前的稳定历史重新发送，确保后续分支完全替换。
-      await replayConversation(convId, truncated, content, mentions, editSortOrder);
+      const sortOrder = target.sortOrder;
+      if (sortOrder != null && sortOrder >= 0) {
+        await editTurn(convId, sortOrder, content, mentions);
+      } else {
+        await sendTurn(convId, content, mentions);
+      }
     },
 
     stopConversation: async (convId: number) => {
+      // 用户一点 stop 就立刻：
+      // (1) 设 stop 请求标记，丢掉之后从 bridge 飘过来的 content/thinking/tool 事件
+      //     (cago 把 LLM 已 in-flight 的 chunk 排到 EventCancelled 之前推上来，
+      //     不过滤的话用户会看到"已经停了还在打字")
+      // (2) 立刻把当前 assistant 消息标 partialReason=canceled、streaming=false、
+      //     running 子块翻成 cancelled——不等后端 RPC 回环，bubble 即时出现
+      // (3) 再把 stop 信号下发后端，让 cago 真正断开 LLM 流
+      conversationStopRequests.add(convId);
+      cleanupStreamBuffer(convId);
+      markLastAssistantCanceled(convId);
       try {
         await StopAIGeneration(convId);
       } catch {
@@ -2203,7 +2345,7 @@ export const useAIStore = create<AIState>((set, get) => {
       if (!tab) return;
       const convId = (tab.meta as AITabMeta).conversationId;
       if (convId) {
-        await StopAIGeneration(convId);
+        await get().stopConversation(convId);
       }
     },
 
@@ -2220,8 +2362,18 @@ export const useAIStore = create<AIState>((set, get) => {
       const messages = get().conversationMessages[convId] || [];
       if (messageIndex < 0 || messageIndex >= messages.length) return;
 
+      const target = messages[messageIndex];
+      if (!target || target.role !== "assistant") return;
+
+      // 后端 h.Regenerate 需要 assistant 的 sort_order 做 Truncate。
+      // 没有 sortOrder 表示这条还在 stream / 未落 DB，按 UI 契约不会出现（toolbar 只在 !streaming 时显示），
+      // 兜底直接 abort——避免误调 SendAIMessage 走旧的"只 append 不截断"路径。
+      const sortOrder = target.sortOrder;
+      if (sortOrder == null || sortOrder < 0) return;
+
       const truncated = messages.slice(0, messageIndex);
-      await replayConversation(convId, truncated, "");
+      await prepareReplay(convId, truncated);
+      await regenerateTurn(convId, sortOrder);
     },
 
     removeFromQueue: (convId: number, index: number) => {
