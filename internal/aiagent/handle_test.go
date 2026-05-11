@@ -69,7 +69,7 @@ func TestConvHandle_SendNewTurnWhenNoActive(t *testing.T) {
 	)
 	h, em, cancel := setupHandle(t, prov)
 	defer cancel()
-	defer h.Close()
+	defer func() { _ = h.Close() }()
 
 	err := h.Send(context.Background(), "raw text", "expanded body")
 	require.NoError(t, err)
@@ -83,7 +83,7 @@ func TestConvHandle_Cancel(t *testing.T) {
 	prov := providertest.New().QueueStreamFunc(neverEndingStream())
 	h, em, cancel := setupHandle(t, prov)
 	defer cancel()
-	defer h.Close()
+	defer func() { _ = h.Close() }()
 
 	go func() { _ = h.Send(context.Background(), "hi", "hi") }()
 	waitFor(t, func() bool { return len(em.snapshot()) > 0 })
@@ -108,7 +108,7 @@ func TestConvHandle_Edit(t *testing.T) {
 		QueueStream(provider.StreamChunk{ContentDelta: "new"}, provider.StreamChunk{FinishReason: provider.FinishStop})
 	h, _, cancel := setupHandle(t, prov)
 	defer cancel()
-	defer h.Close()
+	defer func() { _ = h.Close() }()
 
 	require.NoError(t, h.Send(context.Background(), "u1", "u1"))
 	require.NoError(t, h.Edit(context.Background(), 0, "u1-edit", "u1-edit"))
@@ -127,7 +127,7 @@ func TestConvHandle_Regenerate(t *testing.T) {
 		QueueStream(provider.StreamChunk{ContentDelta: "v2"}, provider.StreamChunk{FinishReason: provider.FinishStop})
 	h, _, cancel := setupHandle(t, prov)
 	defer cancel()
-	defer h.Close()
+	defer func() { _ = h.Close() }()
 
 	require.NoError(t, h.Send(context.Background(), "u", "u"))
 	// conv = [user("u"), assistant("v1")]; regenerate truncates assistant idx=1 and resends.

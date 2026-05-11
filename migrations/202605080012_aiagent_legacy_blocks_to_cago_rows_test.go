@@ -106,7 +106,7 @@ func scanRawMsgRows(t *testing.T, db *gorm.DB, convID int64) []rawMsgRow {
 		ORDER BY sort_order ASC
 	`, convID).Rows()
 	require.NoError(t, err)
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []rawMsgRow
 	for rows.Next() {
 		var r rawMsgRow

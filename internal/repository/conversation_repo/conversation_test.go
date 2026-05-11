@@ -13,6 +13,8 @@ import (
 	"github.com/opskat/opskat/internal/model/entity/conversation_entity"
 )
 
+const testTokenUsageJSON = `{"total":42}` //nolint:gosec // false positive: test fixture JSON, not a credential
+
 // setupTest 每个测试一份独立的内存 SQLite，并通过 db.SetDefault 绑定到 cago db.Ctx(ctx)，
 // 与同仓库的 snippet_repo 测试一致。
 func setupTest(t *testing.T) (context.Context, ConversationRepo) {
@@ -58,7 +60,7 @@ func TestUpdateAt_UpdatesRow(t *testing.T) {
 	require.NoError(t, repo.AppendAt(ctx, 1, 0, &conversation_entity.Message{ConversationID: 1, Role: "assistant", Blocks: `[]`, SortOrder: 0}))
 	err := repo.UpdateAt(ctx, 1, 0, &conversation_entity.Message{
 		ConversationID: 1, Role: "assistant", Blocks: `[{"type":"text","text":"done"}]`,
-		PartialReason: "errored", TokenUsage: `{"total":42}`, SortOrder: 0,
+		PartialReason: "errored", TokenUsage: testTokenUsageJSON, SortOrder: 0,
 	})
 	require.NoError(t, err)
 	got, err := repo.LoadOrdered(ctx, 1)

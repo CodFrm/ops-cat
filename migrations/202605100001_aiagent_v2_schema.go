@@ -31,7 +31,7 @@ func migration202605100001() *gormigrate.Migration {
 			if err != nil {
 				return fmt.Errorf("backfill scan: %w", err)
 			}
-			defer rows.Close()
+			defer func() { _ = rows.Close() }()
 			type pair struct {
 				id      int64
 				content string

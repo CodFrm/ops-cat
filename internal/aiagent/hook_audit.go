@@ -17,12 +17,6 @@ type AuditWriter interface {
 	Write(ctx context.Context, toolName, inputJSON, outputJSON string, isError bool) error
 }
 
-// noopAuditWriter is the default when SystemOptions.AuditWriter is nil.
-// Task 21 replaces this with a real implementation.
-type noopAuditWriter struct{}
-
-func (noopAuditWriter) Write(_ context.Context, _, _, _ string, _ bool) error { return nil }
-
 // newAuditHook returns a PostToolUseHook that serializes input + output to JSON
 // and calls AuditWriter.Write. Output blocks are serialized via the same
 // serializeBlocks helper used by gormStore (Task 9), so the audit JSON shape

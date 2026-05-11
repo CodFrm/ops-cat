@@ -6,6 +6,11 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
+const (
+	testMentionsJSON   = `[]`
+	testTokenUsageJSON = `{"prompt":10,"completion":5}` //nolint:gosec // false positive: test fixture JSON, not a credential
+)
+
 func TestMessage_V2Fields(t *testing.T) {
 	Convey("Message v2 字段", t, func() {
 		m := Message{
@@ -13,8 +18,8 @@ func TestMessage_V2Fields(t *testing.T) {
 			ConversationID: 42,
 			Role:           "assistant",
 			Blocks:         `[{"type":"text","text":"hi"}]`,
-			Mentions:       `[]`,
-			TokenUsage:     `{"prompt":10,"completion":5}`,
+			Mentions:       testMentionsJSON,
+			TokenUsage:     testTokenUsageJSON,
 			PartialReason:  "errored",
 			SortOrder:      3,
 		}

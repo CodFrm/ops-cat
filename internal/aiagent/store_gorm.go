@@ -37,11 +37,6 @@ func NewGormStore(provider pendingMentionsProvider) agentstore.Store {
 	}
 }
 
-// newGormStoreWithRepo lets tests inject a fake repo without touching the global registry.
-func newGormStoreWithRepo(r conversation_repo.ConversationRepo) agentstore.Store {
-	return &gormStore{repo: r}
-}
-
 func parseSessionID(s string) (int64, error) {
 	id, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {

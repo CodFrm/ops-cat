@@ -50,12 +50,12 @@ func migration202605080012() *gormigrate.Migration {
 			for rows.Next() {
 				var id int64
 				if err := rows.Scan(&id); err != nil {
-					rows.Close()
+					_ = rows.Close()
 					return err
 				}
 				convIDs = append(convIDs, id)
 			}
-			rows.Close()
+			_ = rows.Close()
 			if err := rows.Err(); err != nil {
 				return err
 			}
@@ -137,12 +137,12 @@ func expandLegacyConversation(tx *gorm.DB, convID int64) error {
 			&r.Mentions, &r.TokenUsage, &r.SortOrder, &r.Createtime,
 			&r.CagoID, &r.Kind, &r.Origin, &r.MsgTime,
 		); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		dbRows = append(dbRows, r)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}

@@ -33,7 +33,6 @@ func (Conversation) TableName() string {
 	return "conversations"
 }
 
-
 // GetStateValues 反序列化 cago Session State.Values。
 func (c *Conversation) GetStateValues() (map[string]string, error) {
 	if c.StateValues == "" {
@@ -65,9 +64,9 @@ type Message struct {
 	ID             int64  `gorm:"column:id;primaryKey;autoIncrement"`
 	ConversationID int64  `gorm:"column:conversation_id;not null;uniqueIndex:idx_conv_msg_unique,priority:1"`
 	Role           string `gorm:"column:role;type:varchar(20);not null"`
-	Blocks         string `gorm:"column:blocks;type:text"`              // []ContentBlock JSON（含 MetadataBlock）
-	Mentions       string `gorm:"column:mentions;type:text"`            // []ai.MentionedAsset JSON
-	TokenUsage     string `gorm:"column:token_usage;type:text"`         // *agent.Usage JSON，仅 assistant 可能有
+	Blocks         string `gorm:"column:blocks;type:text"`      // []ContentBlock JSON（含 MetadataBlock）
+	Mentions       string `gorm:"column:mentions;type:text"`    // []ai.MentionedAsset JSON
+	TokenUsage     string `gorm:"column:token_usage;type:text"` // *agent.Usage JSON，仅 assistant 可能有
 	PartialReason  string `gorm:"column:partial_reason;type:varchar(16);not null;default:''"`
 	SortOrder      int    `gorm:"column:sort_order;not null;default:0;uniqueIndex:idx_conv_msg_unique,priority:2"`
 	Createtime     int64  `gorm:"column:createtime"`

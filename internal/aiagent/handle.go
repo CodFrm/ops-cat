@@ -83,7 +83,7 @@ func (h *ConvHandle) Send(ctx context.Context, raw, llmBody string) error {
 }
 
 // Cancel cancels the currently active turn. The partial assistant message gets
-// finalized with PartialReason=cancelled. Returns nil even if no turn is
+// finalized with PartialReason=canceled. Returns nil even if no turn is
 // active (idempotent).
 func (h *ConvHandle) Cancel(reason string) error {
 	if reason == "" {
