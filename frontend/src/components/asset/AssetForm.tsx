@@ -1776,8 +1776,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                     : assetType !== "mongodb"
                       ? !host
                       : mongoConnectionMode === "uri"
-                      ? !connectionURI
-                      : !host)
+                        ? !connectionURI
+                        : !host)
               }
               className="gap-1 w-fit"
             >
