@@ -2,7 +2,9 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import {
   compareExternalEditSession,
+  deleteExternalEditSession,
   type ExternalEditCompareResult,
+  type ExternalEditDeleteResult,
   type ExternalEditEvent,
   type ExternalEditSaveResult,
   type ExternalEditSession,
@@ -23,6 +25,11 @@ export interface ExternalEditConflictView {
   latestSnapshot?: ExternalEditSession;
 }
 
+export interface ExternalEditErrorView {
+  documentKey: string;
+  session: ExternalEditSession;
+}
+
 interface ExternalEditState {
   sessions: Record<string, ExternalEditSession>;
   loading: boolean;
@@ -31,22 +38,28 @@ interface ExternalEditState {
   // 普通保存成功仍然通过 session 列表和 toast 反馈，避免把所有后端返回都升级成阻塞弹窗。
   pendingConflict: ExternalEditSaveResult | null;
   compareResult: ExternalEditCompareResult | null;
+  selectedError: ExternalEditSession | null;
   fetchSessions: () => Promise<void>;
   saveSession: (sessionId: string) => Promise<ExternalEditSaveResult>;
   refreshSession: (sessionId: string) => Promise<ExternalEditSession>;
   compareSession: (sessionId: string) => Promise<ExternalEditCompareResult>;
+  deleteSession: (sessionId: string, removeLocal: boolean) => Promise<ExternalEditDeleteResult>;
   resolveConflict: (
     sessionId: string,
     resolution: "overwrite" | "recreate" | "reread"
   ) => Promise<ExternalEditSaveResult>;
   dismissConflict: () => void;
   dismissCompare: () => void;
+  openErrorDetail: (sessionId: string) => void;
+  dismissErrorDetail: () => void;
   applyEvent: (event: ExternalEditEvent) => void;
 }
 
 export function buildExternalEditDocuments(sessions: Record<string, ExternalEditSession>): ExternalEditDocumentView[] {
   const byDocument = new Map<string, ExternalEditSession>();
   for (const session of Object.values(sessions)) {
+    if (session.hidden || session.recordState === "completed" || session.recordState === "abandoned") continue;
+    if (session.recordState === "error") continue;
     const current = byDocument.get(session.documentKey);
     if (!current || compareDocumentSession(session, current) < 0) {
       byDocument.set(session.documentKey, session);
@@ -63,6 +76,7 @@ export function buildExternalEditConflicts(
   const grouped = new Map<string, ExternalEditSession[]>();
   for (const session of Object.values(sessions)) {
     if (!session.documentKey) continue;
+    if (session.hidden) continue;
     if (session.state !== "conflict" && session.state !== "remote_missing" && session.state !== "stale") continue;
     const current = grouped.get(session.documentKey) || [];
     current.push(session);
@@ -89,6 +103,13 @@ export function buildExternalEditConflicts(
   return conflicts.sort((left, right) => right.primaryDraft.updatedAt - left.primaryDraft.updatedAt);
 }
 
+export function buildExternalEditErrors(sessions: Record<string, ExternalEditSession>): ExternalEditErrorView[] {
+  return Object.values(sessions)
+    .filter((session) => !session.hidden && session.recordState === "error" && session.lastError)
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .map((session) => ({ documentKey: session.documentKey, session }));
+}
+
 function compareDocumentSession(left: ExternalEditSession, right: ExternalEditSession): number {
   const rank = (session: ExternalEditSession) => {
     switch (session.state) {
@@ -97,14 +118,16 @@ function compareDocumentSession(left: ExternalEditSession, right: ExternalEditSe
       case "conflict":
       case "remote_missing":
         return 1;
-      case "clean":
+      case "error":
         return 2;
-      case "expired":
+      case "clean":
         return 3;
-      case "stale":
+      case "expired":
         return 4;
-      default:
+      case "stale":
         return 5;
+      default:
+        return 6;
     }
   };
   const rankDiff = rank(left) - rank(right);
@@ -130,6 +153,7 @@ export const useExternalEditStore = create<ExternalEditState>((set) => ({
   savingSessionId: null,
   pendingConflict: null,
   compareResult: null,
+  selectedError: null,
 
   fetchSessions: async () => {
     set({ loading: true });
@@ -184,6 +208,30 @@ export const useExternalEditStore = create<ExternalEditState>((set) => ({
     }
   },
 
+  deleteSession: async (sessionId, removeLocal) => {
+    set({ savingSessionId: sessionId });
+    try {
+      const result = await deleteExternalEditSession(sessionId, removeLocal);
+      set((state) => {
+        const next = { ...state.sessions };
+        if (removeLocal || result.session?.id === sessionId) {
+          if (removeLocal) {
+            delete next[sessionId];
+          } else if (result.session) {
+            next[result.session.id] = result.session;
+          }
+        }
+        return {
+          sessions: next,
+          selectedError: state.selectedError?.id === sessionId ? null : state.selectedError,
+        };
+      });
+      return result;
+    } finally {
+      set({ savingSessionId: null });
+    }
+  },
+
   resolveConflict: async (sessionId, resolution) => {
     set({ savingSessionId: sessionId });
     try {
@@ -201,6 +249,11 @@ export const useExternalEditStore = create<ExternalEditState>((set) => ({
 
   dismissConflict: () => set({ pendingConflict: null }),
   dismissCompare: () => set({ compareResult: null }),
+  openErrorDetail: (sessionId) =>
+    set((state) => ({
+      selectedError: state.sessions[sessionId] || null,
+    })),
+  dismissErrorDetail: () => set({ selectedError: null }),
 
   applyEvent: (event) => {
     // 前端把 external-edit:event 当成后端状态机的单一事实来源：
@@ -219,6 +272,8 @@ export const useExternalEditStore = create<ExternalEditState>((set) => ({
               : event.type === "session_saved"
                 ? null
                 : state.pendingConflict,
+          selectedError:
+            event.session && state.selectedError?.id === event.session.id ? event.session : state.selectedError,
         }));
         break;
       case "session_cleaned": {
@@ -227,7 +282,10 @@ export const useExternalEditStore = create<ExternalEditState>((set) => ({
         set((state) => {
           const next = { ...state.sessions };
           delete next[sessionId];
-          return { sessions: next };
+          return {
+            sessions: next,
+            selectedError: state.selectedError?.id === sessionId ? null : state.selectedError,
+          };
         });
         break;
       }

@@ -963,6 +963,7 @@
     "panel": {
       "title": "外部编辑",
       "conflicts": "冲突文件",
+      "errors": "待恢复文件",
       "remoteSnapshotReady": "已获取远端新副本",
       "reviewInList": "到下方列表处理"
     },
@@ -973,7 +974,10 @@
       "compare": "比对差异",
       "reread": "打开远程新版本",
       "overwrite": "覆盖远程",
-      "saveAgain": "重新创建远程文件"
+      "saveAgain": "重新创建远程文件",
+      "viewError": "查看错误",
+      "hideRecord": "仅删除记录",
+      "deleteLocal": "删除记录并删本地副本"
     },
     "state": {
       "clean": "已同步",
@@ -983,9 +987,22 @@
       "stale": "冲突副本",
       "expired": "会话已过期"
     },
+    "recordState": {
+      "active": "编辑中",
+      "conflict": "待处理冲突",
+      "error": "待恢复",
+      "completed": "已完成",
+      "abandoned": "已隐藏"
+    },
     "conflict": {
       "remoteChangedTitle": "远程文件已变更",
       "remoteMissingTitle": "远程文件不存在"
+    },
+    "error": {
+      "title": "同步失败详情",
+      "summaryLabel": "失败摘要",
+      "stepLabel": "失败步骤",
+      "suggestionLabel": "建议动作"
     },
     "compare": {
       "title": "只读差异比对",

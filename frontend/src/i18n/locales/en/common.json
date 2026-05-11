@@ -978,6 +978,7 @@
     "panel": {
       "title": "External Edit",
       "conflicts": "Conflicting Files",
+      "errors": "Recoverable Files",
       "remoteSnapshotReady": "remote snapshot ready",
       "reviewInList": "Review in list"
     },
@@ -988,7 +989,10 @@
       "compare": "Compare",
       "reread": "Open Remote Version",
       "overwrite": "Overwrite Remote",
-      "saveAgain": "Recreate Remote File"
+      "saveAgain": "Recreate Remote File",
+      "viewError": "View Error",
+      "hideRecord": "Delete Record Only",
+      "deleteLocal": "Delete Record and Local Draft"
     },
     "state": {
       "clean": "Synced",
@@ -998,9 +1002,22 @@
       "stale": "Conflict Copy",
       "expired": "Session Expired"
     },
+    "recordState": {
+      "active": "Editing",
+      "conflict": "Conflict Pending",
+      "error": "Needs Recovery",
+      "completed": "Completed",
+      "abandoned": "Hidden"
+    },
     "conflict": {
       "remoteChangedTitle": "Remote File Changed",
       "remoteMissingTitle": "Remote File Missing"
+    },
+    "error": {
+      "title": "Sync Failure Details",
+      "summaryLabel": "Summary",
+      "stepLabel": "Failed Step",
+      "suggestionLabel": "Suggested Action"
     },
     "compare": {
       "title": "Read-only Diff",

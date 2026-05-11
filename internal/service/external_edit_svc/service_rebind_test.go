@@ -666,3 +666,119 @@ func TestExternalEditRereadKeepsPrimaryDraftAndTracksLatestSnapshot(t *testing.T
 	require.Equal(t, sessionStateStale, original.State)
 	require.Equal(t, reread.Session.ID, original.SupersededBySessionID)
 }
+
+func TestExternalEditCompletedRecordBecomesHiddenAfterSave(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+	markDirtyLocalCopy(t, session, []byte("hello saved\n"))
+
+	result, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusSaved, result.Status)
+	require.NotNil(t, result.Session)
+	require.Equal(t, recordStateCompleted, result.Session.RecordState)
+	require.True(t, result.Session.Hidden)
+}
+
+func TestExternalEditManualRestoredDraftDoesNotAutoSave(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+
+	h.svc.mu.Lock()
+	h.svc.sessions[session.ID].SaveMode = saveModeManualRestore
+	h.svc.mu.Unlock()
+
+	markDirtyLocalCopy(t, session, []byte("restored manual\n"))
+	h.svc.reconcileLocalCopy(session.ID)
+	time.Sleep(autoSaveDebounce + 200*time.Millisecond)
+	require.Empty(t, h.remote.writes)
+
+	manual, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusSaved, manual.Status)
+	require.Equal(t, recordStateCompleted, manual.Session.RecordState)
+}
+
+func TestExternalEditDeleteRecordOnlyMarksAbandonedAndHidden(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+
+	result, err := h.svc.DeleteSession(session.ID, false)
+	require.NoError(t, err)
+	require.Equal(t, "deleted_record_only", result.Status)
+	require.NotNil(t, result.Session)
+	require.Equal(t, recordStateAbandoned, result.Session.RecordState)
+	require.True(t, result.Session.Hidden)
+
+	stored := h.refreshSession(t, session.ID)
+	require.Equal(t, recordStateAbandoned, stored.RecordState)
+	require.True(t, stored.Hidden)
+}
+
+func TestExternalEditDeleteWithLocalFailureFallsBackToError(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(session.WorkspaceDir, "nested"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(session.WorkspaceDir, "nested", "child.txt"), []byte("busy"), 0o600))
+	// 删除目录失败不容易在测试环境稳定复现，直接制造越界路径来触发 cleanup 保护分支。
+	h.svc.mu.Lock()
+	h.svc.sessions[session.ID].WorkspaceDir = filepath.Join(h.manifest, "..", "escape")
+	h.svc.mu.Unlock()
+
+	_, err := h.svc.DeleteSession(session.ID, true)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "删除本地副本失败")
+
+	stored := h.refreshSession(t, session.ID)
+	require.Equal(t, recordStateError, stored.RecordState)
+	require.NotNil(t, stored.LastError)
+	require.Equal(t, "delete_local_copy", stored.LastError.Step)
+}
+
+func TestExternalEditRestoreKeepsCompletedAndAbandonedHidden(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	completed := h.openSession(t, "ssh-b", "/srv/app/completed.txt", "/srv/app/completed.txt", []byte("hello\n"))
+	markDirtyLocalCopy(t, completed, []byte("saved\n"))
+	saved, err := h.svc.Save(context.Background(), completed.ID)
+	require.NoError(t, err)
+	require.True(t, saved.Session.Hidden)
+
+	abandoned := h.openSession(t, "ssh-b", "/srv/app/abandoned.txt", "/srv/app/abandoned.txt", []byte("draft\n"))
+	_, err = h.svc.DeleteSession(abandoned.ID, false)
+	require.NoError(t, err)
+
+	require.NoError(t, h.svc.Close())
+
+	cfg := &bootstrap.AppConfig{
+		ExternalEditDefaultEditorID: "system-text",
+		ExternalEditWorkspaceRoot:   h.manifest,
+	}
+	reopened, err := NewService(Options{
+		DataDir:        h.manifest,
+		ConfigProvider: func() *bootstrap.AppConfig { return cfg },
+		ConfigSaver:    func(next *bootstrap.AppConfig) error { *cfg = *next; return nil },
+		Remote:         h.remote,
+		FindSessions:   func(int64) []string { return []string{"ssh-b"} },
+		Assets:         rebindAssetFinder{},
+		Audit:          h.audit,
+		Emit:           func(Event) {},
+		Launch:         launcherFunc(func(string, []string) error { return nil }),
+		Now:            h.svc.now,
+	})
+	require.NoError(t, err)
+	require.NoError(t, reopened.Start(context.Background()))
+	defer func() { _ = reopened.Close() }()
+
+	completedRestored := reopened.getSession(completed.ID)
+	require.NotNil(t, completedRestored)
+	require.Equal(t, recordStateCompleted, completedRestored.RecordState)
+	require.True(t, completedRestored.Hidden)
+	require.Equal(t, saveModeManualRestore, completedRestored.SaveMode)
+
+	abandonedRestored := reopened.getSession(abandoned.ID)
+	require.NotNil(t, abandonedRestored)
+	require.Equal(t, recordStateAbandoned, abandonedRestored.RecordState)
+	require.True(t, abandonedRestored.Hidden)
+	require.Equal(t, saveModeManualRestore, abandonedRestored.SaveMode)
+}

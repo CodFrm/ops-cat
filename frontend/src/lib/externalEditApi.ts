@@ -61,7 +61,16 @@ export interface ExternalEditSession {
   lastLocalSha256: string;
   dirty: boolean;
   state: string;
+  recordState?: "active" | "conflict" | "error" | "completed" | "abandoned";
+  saveMode?: "auto_live" | "manual_restored";
+  hidden: boolean;
   expired: boolean;
+  lastError?: {
+    step: string;
+    summary: string;
+    suggestion: string;
+    at: number;
+  };
   sourceSessionId?: string;
   supersededBySessionId?: string;
   createdAt: number;
@@ -80,6 +89,12 @@ export interface ExternalEditSaveResult {
     latestSnapshotSessionId?: string;
   };
   automatic?: boolean;
+}
+
+export interface ExternalEditDeleteResult {
+  status: string;
+  message?: string;
+  session?: ExternalEditSession;
 }
 
 export interface ExternalEditEvent {
@@ -114,6 +129,7 @@ declare global {
           RefreshExternalEditSession?: (sessionId: string) => MaybePromise<ExternalEditSession>;
           ResolveExternalEditConflict?: (sessionId: string, resolution: string) => MaybePromise<ExternalEditSaveResult>;
           CompareExternalEditSession?: (sessionId: string) => MaybePromise<ExternalEditCompareResult>;
+          DeleteExternalEditSession?: (sessionId: string, removeLocal: boolean) => MaybePromise<ExternalEditDeleteResult>;
         };
       };
     };
@@ -168,4 +184,8 @@ export function resolveExternalEditConflict(sessionId: string, resolution: strin
 
 export function compareExternalEditSession(sessionId: string) {
   return appBindings().CompareExternalEditSession!(sessionId);
+}
+
+export function deleteExternalEditSession(sessionId: string, removeLocal: boolean) {
+  return appBindings().DeleteExternalEditSession!(sessionId, removeLocal);
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowRightLeft, RefreshCw, Upload } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, RefreshCw, Trash2, Upload } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -22,6 +22,7 @@ import { sftp_svc } from "../../../wailsjs/go/models";
 import { CodeDiffViewer } from "@/components/CodeDiffViewer";
 import { openExternalEdit, type ExternalEditSession } from "@/lib/externalEditApi";
 import {
+  buildExternalEditErrors,
   buildExternalEditConflicts,
   buildExternalEditDocuments,
   useExternalEditStore,
@@ -95,8 +96,12 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
   const pendingConflict = useExternalEditStore((s) => s.pendingConflict);
   const dismissConflict = useExternalEditStore((s) => s.dismissConflict);
   const dismissCompare = useExternalEditStore((s) => s.dismissCompare);
+  const deleteSession = useExternalEditStore((s) => s.deleteSession);
+  const dismissErrorDetail = useExternalEditStore((s) => s.dismissErrorDetail);
   const compareResult = useExternalEditStore((s) => s.compareResult);
   const compareSession = useExternalEditStore((s) => s.compareSession);
+  const selectedError = useExternalEditStore((s) => s.selectedError);
+  const openErrorDetail = useExternalEditStore((s) => s.openErrorDetail);
   const refreshSession = useExternalEditStore((s) => s.refreshSession);
   const resolveConflict = useExternalEditStore((s) => s.resolveConflict);
   const savingSessionId = useExternalEditStore((s) => s.savingSessionId);
@@ -116,6 +121,10 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
   );
   const conflictDocuments = useMemo(
     () => buildExternalEditConflicts(allExternalSessions).filter((entry) => entry.primaryDraft.assetId === assetId),
+    [allExternalSessions, assetId]
+  );
+  const errorDocuments = useMemo(
+    () => buildExternalEditErrors(allExternalSessions).filter((entry) => entry.session.assetId === assetId),
     [allExternalSessions, assetId]
   );
 
@@ -250,6 +259,17 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
     [compareSession, setError]
   );
 
+  const handleDeleteExternalEdit = useCallback(
+    async (session: ExternalEditSession, removeLocal: boolean) => {
+      try {
+        await deleteSession(session.id, removeLocal);
+      } catch (error) {
+        setError(String(error));
+      }
+    },
+    [deleteSession, setError]
+  );
+
   const handleCtxAction = useCallback(
     (action: string) => {
       if (!ctxMenu) return;
@@ -379,7 +399,7 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
               setSelected={setSelected}
             />
 
-            {(externalSessions.length > 0 || conflictDocuments.length > 0) && (
+            {(externalSessions.length > 0 || conflictDocuments.length > 0 || errorDocuments.length > 0) && (
               <div className="border-t px-2 py-2 space-y-2">
                 <div className="text-[11px] font-medium text-muted-foreground">{t("externalEdit.panel.title")}</div>
                 {conflictDocuments.length > 0 && (
@@ -473,6 +493,40 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                     })}
                   </div>
                 )}
+                {errorDocuments.length > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground/80">
+                      {t("externalEdit.panel.errors")}
+                    </div>
+                    {errorDocuments.map(({ session }) => {
+                      const fileName = session.remotePath.split("/").filter(Boolean).pop() || session.remotePath;
+                      return (
+                        <div
+                          key={session.id}
+                          className="rounded border border-rose-400/30 bg-rose-500/5 px-2 py-2 text-[11px] flex items-start justify-between gap-2"
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">{fileName}</div>
+                            <div className="truncate text-muted-foreground">{session.lastError?.summary}</div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Button size="xs" variant="outline" onClick={() => openErrorDetail(session.id)}>
+                              <AlertTriangle className="mr-1 h-3 w-3" />
+                              {t("externalEdit.actions.viewError")}
+                            </Button>
+                            <Button size="xs" variant="outline" onClick={() => void handleDeleteExternalEdit(session, false)}>
+                              {t("externalEdit.actions.hideRecord")}
+                            </Button>
+                            <Button size="xs" variant="destructive" onClick={() => void handleDeleteExternalEdit(session, true)}>
+                              <Trash2 className="mr-1 h-3 w-3" />
+                              {t("externalEdit.actions.deleteLocal")}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <div className="space-y-1">
                   {externalSessions.map((session) => {
                     const fileName = session.remotePath.split("/").filter(Boolean).pop() || session.remotePath;
@@ -509,6 +563,9 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                             onClick={() => void handleSaveExternalEdit(session)}
                           >
                             {savingSessionId === session.id ? t("action.saving") : t("externalEdit.actions.sync")}
+                          </Button>
+                          <Button size="xs" variant="ghost" onClick={() => void handleDeleteExternalEdit(session, false)}>
+                            {t("externalEdit.actions.hideRecord")}
                           </Button>
                         </div>
                       </div>
@@ -578,6 +635,31 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                 modified={compareResult?.localContent || ""}
                 language="plaintext"
               />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!selectedError} onOpenChange={(open) => !open && dismissErrorDetail()}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{t("externalEdit.error.title")}</DialogTitle>
+            <DialogDescription>
+              {selectedError ? `${selectedError.remotePath}` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div>
+              <div className="text-xs text-muted-foreground">{t("externalEdit.error.summaryLabel")}</div>
+              <div>{selectedError?.lastError?.summary || ""}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">{t("externalEdit.error.stepLabel")}</div>
+              <div>{selectedError?.lastError?.step || ""}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">{t("externalEdit.error.suggestionLabel")}</div>
+              <div>{selectedError?.lastError?.suggestion || ""}</div>
             </div>
           </div>
         </DialogContent>
