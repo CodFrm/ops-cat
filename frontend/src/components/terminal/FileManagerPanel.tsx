@@ -176,6 +176,19 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
         .filter((session) => session.assetId === assetId),
     [allExternalSessions, assetId]
   );
+  const retainedDraftsByActiveSessionId = useMemo(() => {
+    const result = new Map<string, ExternalEditSession[]>();
+    for (const session of Object.values(allExternalSessions)) {
+      if (session.hidden || session.state !== "stale" || !session.supersededBySessionId) continue;
+      const retainedDrafts = result.get(session.supersededBySessionId) || [];
+      retainedDrafts.push(session);
+      result.set(session.supersededBySessionId, retainedDrafts);
+    }
+    for (const retainedDrafts of result.values()) {
+      retainedDrafts.sort((left, right) => right.updatedAt - left.updatedAt);
+    }
+    return result;
+  }, [allExternalSessions]);
   const conflictDocuments = useMemo(
     () => buildExternalEditConflicts(allExternalSessions).filter((entry) => entry.primaryDraft.assetId === assetId),
     [allExternalSessions, assetId]
@@ -721,6 +734,7 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                   {externalSessions.map((session) => {
                     const fileName = session.remotePath.split("/").filter(Boolean).pop() || session.remotePath;
                     const isRereadDraft = !!session.sourceSessionId;
+                    const retainedDrafts = retainedDraftsByActiveSessionId.get(session.id) || [];
                     // stale 副本只用于保留冲突现场，不允许继续从面板直接覆盖回远端；
                     // 其余状态只有在本地确实有待处理变更时才展示可操作入口，避免误触发空保存。
                     const actionable =
@@ -745,7 +759,10 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                           <div className="flex items-center gap-1.5">
                             <div className="truncate font-medium">{fileName}</div>
                             {isRereadDraft && (
-                              <span className="rounded-full border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                              <span
+                                className="rounded-full border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                                data-testid="external-edit-active-reread-draft"
+                              >
                                 {t("externalEdit.panel.rereadDraft")}
                               </span>
                             )}
@@ -756,6 +773,25 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                             {autoSavePhase === "pending" ? ` · ${t("externalEdit.panel.autoSavePending")}` : ""}
                             {autoSavePhase === "running" ? ` · ${t("externalEdit.panel.autoSaveRunning")}` : ""}
                           </div>
+                          {retainedDrafts.length > 0 && (
+                            <details
+                              className="mt-1 rounded border border-dashed bg-background/50 px-2 py-1"
+                              data-testid="external-edit-retained-drafts"
+                            >
+                              <summary className="cursor-pointer text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
+                                {t("externalEdit.panel.retainedDraft")}
+                              </summary>
+                              <div className="mt-1 space-y-1">
+                                {retainedDrafts.map((draft) => (
+                                  <div key={draft.id} className="min-w-0 rounded bg-muted/30 px-2 py-1">
+                                    <div className="truncate font-medium">{fileName}</div>
+                                    <div className="truncate text-muted-foreground">{draft.remotePath}</div>
+                                    <div className="truncate text-muted-foreground">{t(`externalEdit.state.${draft.state}`)}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
+                          )}
                         </div>
                         <div className="flex items-center gap-1">
                           {isAutoSaving && (

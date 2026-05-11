@@ -289,9 +289,11 @@ describe("FileManagerPanel", () => {
 
     render(<FileManagerPanel assetId={101} tabId="tab1" sessionId="s1" isOpen width={280} onWidthChange={vi.fn()} />);
 
-    expect((await screen.findAllByText("externalEdit.panel.rereadDraft")).length).toBeGreaterThan(0);
-    expect(screen.getByText("externalEdit.panel.conflicts")).toBeInTheDocument();
-    expect(screen.getByTestId("external-edit-main-draft")).toHaveTextContent("externalEdit.panel.rereadDraft");
+    expect(await screen.findByTestId("external-edit-active-reread-draft")).toHaveTextContent(
+      "externalEdit.panel.rereadDraft"
+    );
+    expect(screen.queryByText("externalEdit.panel.conflicts")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("external-edit-main-draft")).not.toBeInTheDocument();
     expect(screen.getByTestId("external-edit-retained-drafts")).toHaveTextContent("externalEdit.panel.retainedDraft");
     expect(screen.getByTestId("external-edit-retained-drafts")).toHaveTextContent("externalEdit.state.stale");
     expect(screen.getByText((content) => content.includes("externalEdit.panel.rereadBaselineHint"))).toBeInTheDocument();

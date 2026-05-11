@@ -120,7 +120,7 @@ export function buildExternalEditConflicts(sessions: Record<string, ExternalEdit
             session.recordState !== "error"
         )
         .sort(compareDocumentSession)[0];
-    const primaryDraft = livePrimaryDraft || retainedDraft;
+    const primaryDraft = livePrimaryDraft;
     if (!primaryDraft) continue;
 
     conflicts.push({

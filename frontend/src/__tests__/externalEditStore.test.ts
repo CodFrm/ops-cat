@@ -230,7 +230,7 @@ describe("buildExternalEditConflicts", () => {
     expect(conflicts[0]?.latestSnapshot?.id).toBe("snapshot");
   });
 
-  it("keeps a retained stale draft discoverable after reread creates a new active draft", () => {
+  it("keeps retained-only reread documents out of the conflict view", () => {
     const conflicts = buildExternalEditConflicts({
       retained: {
         id: "retained",
@@ -292,9 +292,6 @@ describe("buildExternalEditConflicts", () => {
       },
     });
 
-    expect(conflicts).toHaveLength(1);
-    expect(conflicts[0]?.primaryDraft.id).toBe("retained");
-    expect(conflicts[0]?.retainedDraft?.id).toBe("retained");
-    expect(conflicts[0]?.activeDraft?.id).toBe("active");
+    expect(conflicts).toHaveLength(0);
   });
 });
