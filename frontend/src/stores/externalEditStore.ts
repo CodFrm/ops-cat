@@ -120,16 +120,15 @@ export function buildExternalEditConflicts(sessions: Record<string, ExternalEdit
             session.recordState !== "error"
         )
         .sort(compareDocumentSession)[0];
-    if (activeDraft) continue;
-    const primaryDraft = activeDraft || livePrimaryDraft || retainedDraft;
+    const primaryDraft = livePrimaryDraft || retainedDraft;
     if (!primaryDraft) continue;
 
     conflicts.push({
       documentKey,
       primaryDraft,
       retainedDraft,
-      activeDraft: undefined,
-      latestSnapshot: undefined,
+      activeDraft,
+      latestSnapshot: activeDraft,
       showRetainedDrafts: true,
     });
   }

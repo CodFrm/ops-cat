@@ -223,7 +223,7 @@ describe("FileManagerPanel", () => {
     expect(screen.getByRole("button", { name: "externalEdit.actions.overwrite" })).toBeDisabled();
   });
 
-  it("shows reread drafts as the active document instead of keeping the old conflict block", async () => {
+  it("shows reread drafts as the main document while keeping the old draft discoverable", async () => {
     useExternalEditStore.setState({
       sessions: {
         stale: {
@@ -289,9 +289,11 @@ describe("FileManagerPanel", () => {
 
     render(<FileManagerPanel assetId={101} tabId="tab1" sessionId="s1" isOpen width={280} onWidthChange={vi.fn()} />);
 
-    expect(await screen.findByText("externalEdit.panel.rereadDraft")).toBeInTheDocument();
-    expect(screen.queryByText("externalEdit.panel.conflicts")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("external-edit-retained-drafts")).not.toBeInTheDocument();
+    expect((await screen.findAllByText("externalEdit.panel.rereadDraft")).length).toBeGreaterThan(0);
+    expect(screen.getByText("externalEdit.panel.conflicts")).toBeInTheDocument();
+    expect(screen.getByTestId("external-edit-main-draft")).toHaveTextContent("externalEdit.panel.rereadDraft");
+    expect(screen.getByTestId("external-edit-retained-drafts")).toHaveTextContent("externalEdit.panel.retainedDraft");
+    expect(screen.getByTestId("external-edit-retained-drafts")).toHaveTextContent("externalEdit.state.stale");
     expect(screen.getByText((content) => content.includes("externalEdit.panel.rereadBaselineHint"))).toBeInTheDocument();
   });
 
