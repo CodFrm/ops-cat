@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, ArrowRightLeft, RefreshCw, Trash2, Upload } from "lucide-react";
 import {
@@ -48,6 +56,49 @@ interface FileManagerPanelProps {
   onWidthChange: (width: number) => void;
 }
 
+type CompareResizeEdge = "top" | "right" | "bottom" | "left" | "top-left" | "top-right" | "bottom-right" | "bottom-left";
+
+const COMPARE_DIALOG_MIN_WIDTH = 900;
+const COMPARE_DIALOG_MIN_HEIGHT = 620;
+const COMPARE_DIALOG_INITIAL_WIDTH = 1680;
+const COMPARE_DIALOG_INITIAL_HEIGHT = 920;
+
+const COMPARE_RESIZE_HANDLES: Array<{ edge: CompareResizeEdge; className: string; cursorClass: string }> = [
+  { edge: "top", className: "left-4 right-4 top-0 h-2 -translate-y-1/2", cursorClass: "cursor-ns-resize" },
+  { edge: "right", className: "right-0 top-4 bottom-4 w-2 translate-x-1/2", cursorClass: "cursor-ew-resize" },
+  { edge: "bottom", className: "left-4 right-4 bottom-0 h-2 translate-y-1/2", cursorClass: "cursor-ns-resize" },
+  { edge: "left", className: "left-0 top-4 bottom-4 w-2 -translate-x-1/2", cursorClass: "cursor-ew-resize" },
+  {
+    edge: "top-left",
+    className: "left-0 top-0 h-4 w-4 -translate-x-1/2 -translate-y-1/2",
+    cursorClass: "cursor-nwse-resize",
+  },
+  {
+    edge: "top-right",
+    className: "right-0 top-0 h-4 w-4 translate-x-1/2 -translate-y-1/2",
+    cursorClass: "cursor-nesw-resize",
+  },
+  {
+    edge: "bottom-right",
+    className: "right-0 bottom-0 h-4 w-4 translate-x-1/2 translate-y-1/2",
+    cursorClass: "cursor-nwse-resize",
+  },
+  {
+    edge: "bottom-left",
+    className: "left-0 bottom-0 h-4 w-4 -translate-x-1/2 translate-y-1/2",
+    cursorClass: "cursor-nesw-resize",
+  },
+];
+
+function clampCompareDialogSize(width: number, height: number) {
+  const maxWidth = Math.max(COMPARE_DIALOG_MIN_WIDTH, Math.floor(window.innerWidth * 0.98));
+  const maxHeight = Math.max(COMPARE_DIALOG_MIN_HEIGHT, Math.floor(window.innerHeight * 0.96));
+  return {
+    width: Math.min(Math.max(width, COMPARE_DIALOG_MIN_WIDTH), maxWidth),
+    height: Math.min(Math.max(height, COMPARE_DIALOG_MIN_HEIGHT), maxHeight),
+  };
+}
+
 export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onWidthChange }: FileManagerPanelProps) {
   const { t } = useTranslation();
   const {
@@ -85,6 +136,11 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
   const loadedRef = useRef(false);
   const lastSessionRef = useRef<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const compareDialogRef = useRef<HTMLDivElement>(null);
+  const [compareDialogSize, setCompareDialogSize] = useState(() => ({
+    width: COMPARE_DIALOG_INITIAL_WIDTH,
+    height: COMPARE_DIALOG_INITIAL_HEIGHT,
+  }));
 
   const startUpload = useSFTPStore((s) => s.startUpload);
   const startUploadDir = useSFTPStore((s) => s.startUploadDir);
@@ -100,6 +156,7 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
   const dismissErrorDetail = useExternalEditStore((s) => s.dismissErrorDetail);
   const compareResult = useExternalEditStore((s) => s.compareResult);
   const compareSession = useExternalEditStore((s) => s.compareSession);
+  const autoSavePhases = useExternalEditStore((s) => s.autoSavePhases);
   const selectedError = useExternalEditStore((s) => s.selectedError);
   const openErrorDetail = useExternalEditStore((s) => s.openErrorDetail);
   const refreshSession = useExternalEditStore((s) => s.refreshSession);
@@ -136,6 +193,46 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
     startUploadFile,
   });
   const { handleResizeStart, isResizing, outerRef } = useResizeHandle({ onWidthChange, panelRef, width });
+
+  const handleCompareResizeStart = useCallback((edge: CompareResizeEdge, event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const rect = compareDialogRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startWidth = rect.width;
+    const startHeight = rect.height;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+
+    document.body.style.cursor = edge.includes("left") || edge.includes("right") ? "ew-resize" : "ns-resize";
+    if (edge.includes("top") && edge.includes("right")) document.body.style.cursor = "nesw-resize";
+    if (edge.includes("bottom") && edge.includes("left")) document.body.style.cursor = "nesw-resize";
+    if (edge.includes("top") && edge.includes("left")) document.body.style.cursor = "nwse-resize";
+    if (edge.includes("bottom") && edge.includes("right")) document.body.style.cursor = "nwse-resize";
+    document.body.style.userSelect = "none";
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const widthDelta =
+        edge.includes("left") ? startX - moveEvent.clientX : edge.includes("right") ? moveEvent.clientX - startX : 0;
+      const heightDelta =
+        edge.includes("top") ? startY - moveEvent.clientY : edge.includes("bottom") ? moveEvent.clientY - startY : 0;
+      setCompareDialogSize(clampCompareDialogSize(startWidth + widthDelta, startHeight + heightDelta));
+    };
+
+    const onPointerUp = () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+    };
+
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+  }, []);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -408,7 +505,7 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                       {t("externalEdit.panel.conflicts")}
                     </div>
                     {conflictDocuments.map(
-                      ({ documentKey, primaryDraft, retainedDraft, activeDraft, latestSnapshot }) => {
+                      ({ documentKey, primaryDraft, retainedDraft, activeDraft, latestSnapshot, showRetainedDrafts }) => {
                         const fileName =
                           primaryDraft.remotePath.split("/").filter(Boolean).pop() || primaryDraft.remotePath;
                         const sameNameCount = Object.values(allExternalSessions).filter((session) => {
@@ -422,8 +519,24 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                         const rereadDisabled = savingSessionId === primaryDraft.id || primaryDraft.state !== "conflict";
                         const overwriteDisabled =
                           savingSessionId === primaryDraft.id || primaryDraft.state !== "conflict";
-                        const recreateDisabled =
-                          savingSessionId === primaryDraft.id || primaryDraft.state !== "remote_missing";
+                        const mainDraft = activeDraft || primaryDraft;
+                        const secondaryDrafts = showRetainedDrafts
+                          ? ([primaryDraft, retainedDraft].filter(
+                          (session, index, sessions) =>
+                            !!session &&
+                            session.id !== mainDraft.id &&
+                            sessions.findIndex((candidate) => candidate?.id === session.id) === index
+                            ) as ExternalEditSession[])
+                          : [];
+                        const recreateReason =
+                          primaryDraft.state !== "remote_missing"
+                            ? t("externalEdit.panel.recreateUnavailableState")
+                            : savingSessionId === primaryDraft.id
+                              ? t("externalEdit.panel.recreateUnavailableBusy")
+                              : activeDraft && activeDraft.id !== primaryDraft.id
+                                ? t("externalEdit.panel.recreateUnavailableActiveDraft")
+                                : "";
+                        const recreateDisabled = recreateReason.length > 0;
                         return (
                           <div
                             key={documentKey}
@@ -436,113 +549,126 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                                   <div className="truncate text-muted-foreground">{primaryDraft.remotePath}</div>
                                 )}
                                 <div className="truncate text-muted-foreground">
-                                  {t(`externalEdit.state.${primaryDraft.state}`)}
+                                  {t(`externalEdit.state.${mainDraft.state}`)}
                                   {activeDraft || latestSnapshot
                                     ? ` · ${t("externalEdit.panel.remoteSnapshotReady")}`
                                     : ""}
                                 </div>
                               </div>
                             </div>
-                            <div className="mt-2 grid gap-2 lg:grid-cols-2">
-                              <div className="rounded border bg-background/80 px-2 py-2">
+                            <div className="mt-2 space-y-2">
+                              <div
+                                className="rounded border bg-background/80 px-2 py-2"
+                                data-testid="external-edit-main-draft"
+                              >
                                 <div className="text-[10px] uppercase tracking-wide text-muted-foreground/80">
-                                  {primaryDraft.state === "stale"
-                                    ? t("externalEdit.panel.retainedDraft")
-                                    : t("externalEdit.panel.currentDraft")}
+                                  {activeDraft ? t("externalEdit.panel.rereadDraft") : t("externalEdit.panel.currentDraft")}
                                 </div>
                                 <div className="mt-1 truncate font-medium">{fileName}</div>
                                 {showPath && (
-                                  <div className="truncate text-muted-foreground">{primaryDraft.remotePath}</div>
+                                  <div className="truncate text-muted-foreground">{mainDraft.remotePath}</div>
                                 )}
                                 <div className="truncate text-muted-foreground">
-                                  {t(`externalEdit.state.${primaryDraft.state}`)}
+                                  {t(`externalEdit.state.${mainDraft.state}`)}
+                                  {activeDraft ? ` · ${t("externalEdit.panel.rereadDraftHint")}` : ""}
                                 </div>
                               </div>
-                              {retainedDraft && retainedDraft.id !== primaryDraft.id && (
-                                <div className="rounded border bg-background/80 px-2 py-2">
-                                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground/80">
+                              {secondaryDrafts.length > 0 && (
+                                <details
+                                  className="rounded border border-dashed bg-background/50 px-2 py-1.5"
+                                  data-testid="external-edit-retained-drafts"
+                                >
+                                  <summary className="cursor-pointer text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
                                     {t("externalEdit.panel.retainedDraft")}
+                                  </summary>
+                                  <div className="mt-1 space-y-1">
+                                    {secondaryDrafts.map((draft) => (
+                                      <div key={draft.id} className="min-w-0 rounded bg-muted/30 px-2 py-1">
+                                        <div className="truncate font-medium">{fileName}</div>
+                                        {showPath && (
+                                          <div className="truncate text-muted-foreground">{draft.remotePath}</div>
+                                        )}
+                                        <div className="truncate text-muted-foreground">
+                                          {t(`externalEdit.state.${draft.state}`)}
+                                        </div>
+                                      </div>
+                                    ))}
                                   </div>
-                                  <div className="mt-1 truncate font-medium">{fileName}</div>
-                                  {showPath && (
-                                    <div className="truncate text-muted-foreground">{retainedDraft.remotePath}</div>
-                                  )}
-                                  <div className="truncate text-muted-foreground">
-                                    {t(`externalEdit.state.${retainedDraft.state}`)}
-                                  </div>
-                                </div>
-                              )}
-                              {activeDraft && (
-                                <div className="rounded border bg-background/80 px-2 py-2">
-                                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground/80">
-                                    {t("externalEdit.panel.rereadDraft")}
-                                  </div>
-                                  <div className="mt-1 truncate font-medium">{fileName}</div>
-                                  {showPath && (
-                                    <div className="truncate text-muted-foreground">{activeDraft.remotePath}</div>
-                                  )}
-                                  <div className="truncate text-muted-foreground">
-                                    {t(`externalEdit.state.${activeDraft.state}`)}
-                                  </div>
-                                </div>
+                                </details>
                               )}
                             </div>
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              <Button
-                                size="xs"
-                                variant="outline"
-                                disabled={compareDisabled}
-                                onClick={() => void handleCompareExternalEdit(primaryDraft)}
-                              >
-                                <ArrowRightLeft className="mr-1 h-3 w-3" />
-                                {t("externalEdit.actions.compare")}
-                              </Button>
-                              <Button
-                                size="xs"
-                                variant="outline"
-                                disabled={rereadDisabled}
-                                onClick={async () => {
-                                  try {
-                                    await resolveConflict(primaryDraft.id, "reread");
-                                    dismissConflict();
-                                  } catch (error) {
-                                    setError(String(error));
-                                  }
-                                }}
-                              >
-                                {t("externalEdit.actions.reread")}
-                              </Button>
-                              <Button
-                                size="xs"
-                                variant="destructive"
-                                disabled={overwriteDisabled}
-                                onClick={async () => {
-                                  try {
-                                    await resolveConflict(primaryDraft.id, "overwrite");
-                                    dismissConflict();
-                                  } catch (error) {
-                                    setError(String(error));
-                                  }
-                                }}
-                              >
-                                {t("externalEdit.actions.overwrite")}
-                              </Button>
-                              <Button
-                                size="xs"
-                                variant="outline"
-                                disabled={recreateDisabled}
-                                onClick={async () => {
-                                  try {
-                                    await resolveConflict(primaryDraft.id, "recreate");
-                                    dismissConflict();
-                                  } catch (error) {
-                                    setError(String(error));
-                                  }
-                                }}
-                              >
-                                {t("externalEdit.actions.saveAgain")}
-                              </Button>
-                            </div>
+                            {primaryDraft.state === "remote_missing" ? (
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {!recreateDisabled && (
+                                  <Button
+                                    size="xs"
+                                    variant="outline"
+                                    onClick={async () => {
+                                      try {
+                                        await resolveConflict(primaryDraft.id, "recreate");
+                                        dismissConflict();
+                                      } catch (error) {
+                                        setError(String(error));
+                                      }
+                                    }}
+                                  >
+                                    {t("externalEdit.actions.saveAgain")}
+                                  </Button>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  disabled={compareDisabled}
+                                  onClick={() => void handleCompareExternalEdit(primaryDraft)}
+                                >
+                                  <ArrowRightLeft className="mr-1 h-3 w-3" />
+                                  {t("externalEdit.actions.compare")}
+                                </Button>
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  disabled={rereadDisabled}
+                                  onClick={async () => {
+                                    try {
+                                      await resolveConflict(primaryDraft.id, "reread");
+                                      dismissConflict();
+                                    } catch (error) {
+                                      setError(String(error));
+                                    }
+                                  }}
+                                >
+                                  {t("externalEdit.actions.reread")}
+                                </Button>
+                                <Button
+                                  size="xs"
+                                  variant="destructive"
+                                  disabled={overwriteDisabled}
+                                  onClick={async () => {
+                                    try {
+                                      await resolveConflict(primaryDraft.id, "overwrite");
+                                      dismissConflict();
+                                    } catch (error) {
+                                      setError(String(error));
+                                    }
+                                  }}
+                                >
+                                  {t("externalEdit.actions.overwrite")}
+                                </Button>
+                              </div>
+                            )}
+                            {primaryDraft.state === "conflict" && (
+                              <div className="mt-1 text-[10px] text-muted-foreground">
+                                {t("externalEdit.panel.rereadBaselineHint")}
+                              </div>
+                            )}
+                            {primaryDraft.state === "remote_missing" && (
+                              <div className="mt-1 text-[10px] text-muted-foreground">
+                                {recreateReason || t("externalEdit.panel.recreateReadyHint")}
+                              </div>
+                            )}
                           </div>
                         );
                       }
@@ -600,12 +726,22 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                     const actionable =
                       session.state !== "stale" &&
                       (session.dirty || session.state === "conflict" || session.state === "remote_missing");
+                    const autoSavePhase = autoSavePhases[session.documentKey];
+                    const isAutoSaving = autoSavePhase === "pending" || autoSavePhase === "running";
                     return (
                       <div
                         key={session.id}
-                        className="rounded border bg-muted/20 px-2 py-1.5 text-[11px] flex items-center justify-between gap-2"
+                        className={cn(
+                          "rounded border bg-muted/20 px-2 py-1.5 text-[11px] flex items-center justify-between gap-2",
+                          isAutoSaving && "border-primary/40 bg-primary/5"
+                        )}
                       >
                         <div className="min-w-0">
+                          {isRereadDraft && (
+                            <div className="mb-1 rounded border border-primary/20 bg-primary/5 px-2 py-1 text-[10px] text-primary">
+                              {t("externalEdit.panel.rereadBaselineHint")}
+                            </div>
+                          )}
                           <div className="flex items-center gap-1.5">
                             <div className="truncate font-medium">{fileName}</div>
                             {isRereadDraft && (
@@ -617,9 +753,23 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                           <div className="truncate text-muted-foreground">
                             {t(`externalEdit.state.${session.state}`)}
                             {isRereadDraft ? ` · ${t("externalEdit.panel.rereadDraftHint")}` : ""}
+                            {autoSavePhase === "pending" ? ` · ${t("externalEdit.panel.autoSavePending")}` : ""}
+                            {autoSavePhase === "running" ? ` · ${t("externalEdit.panel.autoSaveRunning")}` : ""}
                           </div>
                         </div>
                         <div className="flex items-center gap-1">
+                          {isAutoSaving && (
+                            <div
+                              className="mr-1 rounded-full border border-primary/30 bg-background px-2 py-1 text-[10px] font-medium text-primary"
+                              data-testid="external-edit-autosave-phase"
+                            >
+                              {t(
+                                autoSavePhase === "running"
+                                  ? "externalEdit.panel.autoSaveRunning"
+                                  : "externalEdit.panel.autoSavePending"
+                              )}
+                            </div>
+                          )}
                           <Button
                             size="xs"
                             variant="outline"
@@ -632,7 +782,7 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                           <Button
                             size="xs"
                             variant="outline"
-                            disabled={!actionable || savingSessionId === session.id}
+                            disabled={!actionable || savingSessionId === session.id || autoSavePhase === "running"}
                             onClick={() => void handleSaveExternalEdit(session)}
                           >
                             {savingSessionId === session.id ? t("action.saving") : t("externalEdit.actions.sync")}
@@ -694,7 +844,31 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
       />
 
       <Dialog open={!!compareResult} onOpenChange={(open) => !open && dismissCompare()}>
-        <DialogContent className="flex h-[88vh] max-w-[min(96vw,1600px)] flex-col overflow-hidden p-0">
+        <DialogContent
+          ref={compareDialogRef}
+          className="flex max-h-[96vh] max-w-[98vw] overflow-hidden p-0"
+          data-testid="external-edit-compare-dialog"
+          style={{
+            width: `min(98vw, ${compareDialogSize.width}px)`,
+            height: `min(96vh, ${compareDialogSize.height}px)`,
+            minWidth: `min(92vw, ${COMPARE_DIALOG_MIN_WIDTH}px)`,
+            minHeight: `min(86vh, ${COMPARE_DIALOG_MIN_HEIGHT}px)`,
+          }}
+        >
+          {COMPARE_RESIZE_HANDLES.map((handle) => (
+            <div
+              key={handle.edge}
+              aria-label={`resize ${handle.edge}`}
+              className={cn(
+                "absolute z-10 rounded-sm bg-transparent transition-colors hover:bg-primary/25",
+                handle.className,
+                handle.cursorClass
+              )}
+              data-testid={`external-edit-compare-resize-${handle.edge}`}
+              role="separator"
+              onPointerDown={(event) => handleCompareResizeStart(handle.edge, event)}
+            />
+          ))}
           <DialogHeader className="border-b px-6 py-4">
             <DialogTitle>{t("externalEdit.compare.title")}</DialogTitle>
             <DialogDescription>
@@ -702,10 +876,21 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
             </DialogDescription>
           </DialogHeader>
           <div className="flex min-h-0 flex-1 flex-col px-6 py-4">
-            <div className="mb-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-              <div>{t("externalEdit.compare.helper")}</div>
-              <div className="rounded-full border border-border bg-background px-2 py-1 font-medium">
-                {t("externalEdit.compare.readOnly")}
+            <div className="mb-3 rounded border bg-muted/20 px-3 py-2">
+              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                <div>{t("externalEdit.compare.helper")}</div>
+                <div className="rounded-full border border-border bg-background px-2 py-1 font-medium">
+                  {t("externalEdit.compare.readOnly")}
+                </div>
+              </div>
+              <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 text-[11px] text-muted-foreground">
+                <div className="truncate rounded bg-background px-2 py-1 font-medium">
+                  {t("externalEdit.compare.remoteSnapshot")}
+                </div>
+                <ArrowRightLeft className="h-3.5 w-3.5" />
+                <div className="truncate rounded bg-background px-2 py-1 text-right font-medium">
+                  {t("externalEdit.compare.localDraft")}
+                </div>
               </div>
             </div>
             <div className="min-h-0 flex-1">

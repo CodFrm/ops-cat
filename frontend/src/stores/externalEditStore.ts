@@ -25,6 +25,7 @@ export interface ExternalEditConflictView {
   retainedDraft?: ExternalEditSession;
   activeDraft?: ExternalEditSession;
   latestSnapshot?: ExternalEditSession;
+  showRetainedDrafts: boolean;
 }
 
 export interface ExternalEditErrorView {
@@ -36,6 +37,7 @@ interface ExternalEditState {
   sessions: Record<string, ExternalEditSession>;
   loading: boolean;
   savingSessionId: string | null;
+  autoSavePhases: Record<string, "pending" | "running">;
   // pendingConflict 只承载“需要用户二次决策”的保存结果，
   // 普通保存成功仍然通过 session 列表和 toast 反馈，避免把所有后端返回都升级成阻塞弹窗。
   pendingConflict: ExternalEditSaveResult | null;
@@ -58,13 +60,29 @@ interface ExternalEditState {
 }
 
 export function buildExternalEditDocuments(sessions: Record<string, ExternalEditSession>): ExternalEditDocumentView[] {
-  const byDocument = new Map<string, ExternalEditSession>();
+  const grouped = new Map<string, ExternalEditSession[]>();
   for (const session of Object.values(sessions)) {
     if (session.hidden || session.recordState === "completed" || session.recordState === "abandoned") continue;
     if (session.recordState === "error") continue;
-    const current = byDocument.get(session.documentKey);
-    if (!current || compareDocumentSession(session, current) < 0) {
-      byDocument.set(session.documentKey, session);
+    if (!session.documentKey) continue;
+    const current = grouped.get(session.documentKey) || [];
+    current.push(session);
+    grouped.set(session.documentKey, current);
+  }
+
+  const byDocument = new Map<string, ExternalEditSession>();
+  for (const [documentKey, relatedSessions] of grouped.entries()) {
+    const rereadDraft = relatedSessions
+      .filter((session) => session.sourceSessionId && session.state !== "stale" && session.recordState !== "error")
+      .sort(compareDocumentSession)[0];
+    if (rereadDraft) {
+      byDocument.set(documentKey, rereadDraft);
+      continue;
+    }
+
+    const current = relatedSessions.sort(compareDocumentSession)[0];
+    if (current) {
+      byDocument.set(documentKey, current);
     }
   }
   return Array.from(byDocument.entries())
@@ -87,12 +105,9 @@ export function buildExternalEditConflicts(sessions: Record<string, ExternalEdit
     const retainedDraft = relatedSessions
       .filter((session) => session.state === "stale")
       .sort(compareDocumentSession)[0];
-    const primaryDraft =
-      relatedSessions
-        .filter((session) => session.state === "conflict" || session.state === "remote_missing")
-        .sort(compareDocumentSession)[0] || retainedDraft;
-    if (!primaryDraft) continue;
-
+    const livePrimaryDraft = relatedSessions
+      .filter((session) => session.state === "conflict" || session.state === "remote_missing")
+      .sort(compareDocumentSession)[0];
     const activeDraft =
       (retainedDraft?.supersededBySessionId
         ? relatedSessions.find((session) => session.id === retainedDraft.supersededBySessionId)
@@ -100,19 +115,22 @@ export function buildExternalEditConflicts(sessions: Record<string, ExternalEdit
       relatedSessions
         .filter(
           (session) =>
-            session.id !== primaryDraft.id &&
-            session.sourceSessionId === primaryDraft.id &&
+            session.sourceSessionId &&
             session.state !== "stale" &&
             session.recordState !== "error"
         )
         .sort(compareDocumentSession)[0];
+    if (activeDraft) continue;
+    const primaryDraft = activeDraft || livePrimaryDraft || retainedDraft;
+    if (!primaryDraft) continue;
 
     conflicts.push({
       documentKey,
       primaryDraft,
       retainedDraft,
-      activeDraft,
-      latestSnapshot: activeDraft?.sourceSessionId === primaryDraft.id ? activeDraft : undefined,
+      activeDraft: undefined,
+      latestSnapshot: undefined,
+      showRetainedDrafts: true,
     });
   }
   return conflicts.sort((left, right) => right.primaryDraft.updatedAt - left.primaryDraft.updatedAt);
@@ -162,10 +180,21 @@ function upsertSession(state: ExternalEditState, session?: ExternalEditSession):
   };
 }
 
+function compareRemoteMissingResultToSaveResult(result: ExternalEditCompareResult): ExternalEditSaveResult {
+  return {
+    status: "remote_missing",
+    message: result.message,
+    session: result.session,
+    conflict: result.conflict,
+    automatic: false,
+  };
+}
+
 export const useExternalEditStore = create<ExternalEditState>((set) => ({
   sessions: {},
   loading: false,
   savingSessionId: null,
+  autoSavePhases: {},
   pendingConflict: null,
   compareResult: null,
   selectedError: null,
@@ -216,7 +245,12 @@ export const useExternalEditStore = create<ExternalEditState>((set) => ({
     set({ savingSessionId: sessionId });
     try {
       const result = await compareExternalEditSession(sessionId);
-      set({ compareResult: result });
+      set((state) => ({
+        sessions: upsertSession(state, result.session),
+        compareResult: result.status === "remote_missing" ? null : result,
+        pendingConflict:
+          result.status === "remote_missing" ? compareRemoteMissingResultToSaveResult(result) : state.pendingConflict,
+      }));
       return result;
     } finally {
       set({ savingSessionId: null });
@@ -281,6 +315,14 @@ export const useExternalEditStore = create<ExternalEditState>((set) => ({
       case "session_conflict":
         set((state) => ({
           sessions: upsertSession(state, event.session),
+          autoSavePhases:
+            event.session?.documentKey && state.autoSavePhases[event.session.documentKey]
+              ? (() => {
+                  const next = { ...state.autoSavePhases };
+                  delete next[event.session.documentKey];
+                  return next;
+                })()
+              : state.autoSavePhases,
           pendingConflict:
             event.type === "session_conflict"
               ? event.saveResult || state.pendingConflict
@@ -291,14 +333,33 @@ export const useExternalEditStore = create<ExternalEditState>((set) => ({
             event.session && state.selectedError?.id === event.session.id ? event.session : state.selectedError,
         }));
         break;
+      case "session_auto_save": {
+        const documentKey = event.autoSave?.documentKey;
+        if (!documentKey) return;
+        set((state) => {
+          const next = { ...state.autoSavePhases };
+          if (event.autoSave?.phase === "pending" || event.autoSave?.phase === "running") {
+            next[documentKey] = event.autoSave.phase;
+          } else {
+            delete next[documentKey];
+          }
+          return { autoSavePhases: next };
+        });
+        break;
+      }
       case "session_cleaned": {
         if (!event.session?.id) return;
         const sessionId = event.session.id;
         set((state) => {
           const next = { ...state.sessions };
           delete next[sessionId];
+          const nextPhases = { ...state.autoSavePhases };
+          if (event.session?.documentKey) {
+            delete nextPhases[event.session.documentKey];
+          }
           return {
             sessions: next,
+            autoSavePhases: nextPhases,
             selectedError: state.selectedError?.id === sessionId ? null : state.selectedError,
           };
         });

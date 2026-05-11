@@ -65,6 +65,7 @@ const (
 	eventSessionSaved    = "session_saved"
 	eventSessionConflict = "session_conflict"
 	eventSessionCleaned  = "session_cleaned"
+	eventSessionAutoSave = "session_auto_save"
 )
 
 const (
@@ -79,13 +80,22 @@ const (
 )
 
 const (
+	autoSavePhasePending = "pending"
+	autoSavePhaseRunning = "running"
+	autoSavePhaseIdle    = "idle"
+)
+
+const (
 	textEncodingUTF8    = "utf-8"
 	textEncodingUTF16LE = "utf-16le"
 	textEncodingUTF16BE = "utf-16be"
 	textEncodingGB18030 = "gb18030"
 )
 
-const autoSaveDebounce = 1200 * time.Millisecond
+const (
+	reconcileSettleDelay = 100 * time.Millisecond
+	autoSaveDebounce     = 500 * time.Millisecond
+)
 
 const externalEditReconnectHint = "请在同一资产中重新打开该远程文件后再继续同步"
 
@@ -207,26 +217,28 @@ type ErrorSnapshot struct {
 // Session 是桌面端外部编辑的单一事实记录：
 // 它同时串起远端基线、本地副本、编辑器选择、冲突状态和恢复信息，前后端都围绕这份记录推进状态。
 type Session struct {
-	ID                    string         `json:"id"`
-	AssetID               int64          `json:"assetId"`
-	AssetName             string         `json:"assetName"`
-	DocumentKey           string         `json:"documentKey"`
-	SessionID             string         `json:"sessionId"`
-	RemotePath            string         `json:"remotePath"`
-	RemoteRealPath        string         `json:"remoteRealPath"`
-	LocalPath             string         `json:"localPath"`
-	WorkspaceRoot         string         `json:"workspaceRoot"`
-	WorkspaceDir          string         `json:"workspaceDir"`
-	EditorID              string         `json:"editorId"`
-	EditorName            string         `json:"editorName"`
-	EditorPath            string         `json:"editorPath"`
-	EditorArgs            []string       `json:"editorArgs,omitempty"`
-	OriginalSHA256        string         `json:"originalSha256"`
-	OriginalSize          int64          `json:"originalSize"`
-	OriginalModTime       int64          `json:"originalModTime"`
-	OriginalEncoding      string         `json:"originalEncoding"`
-	OriginalBOM           string         `json:"originalBom,omitempty"`
-	OriginalByteSample    string         `json:"originalByteSample,omitempty"`
+	ID             string   `json:"id"`
+	AssetID        int64    `json:"assetId"`
+	AssetName      string   `json:"assetName"`
+	DocumentKey    string   `json:"documentKey"`
+	SessionID      string   `json:"sessionId"`
+	RemotePath     string   `json:"remotePath"`
+	RemoteRealPath string   `json:"remoteRealPath"`
+	LocalPath      string   `json:"localPath"`
+	WorkspaceRoot  string   `json:"workspaceRoot"`
+	WorkspaceDir   string   `json:"workspaceDir"`
+	EditorID       string   `json:"editorId"`
+	EditorName     string   `json:"editorName"`
+	EditorPath     string   `json:"editorPath"`
+	EditorArgs     []string `json:"editorArgs,omitempty"`
+	// OriginalSHA256 保留旧字段名以兼容现有 manifest / IPC，语义上等同于当前 document 的 baseHash。
+	OriginalSHA256     string `json:"originalSha256"`
+	OriginalSize       int64  `json:"originalSize"`
+	OriginalModTime    int64  `json:"originalModTime"`
+	OriginalEncoding   string `json:"originalEncoding"`
+	OriginalBOM        string `json:"originalBom,omitempty"`
+	OriginalByteSample string `json:"originalByteSample,omitempty"`
+	// LastLocalSHA256 同样保留兼容字段名，语义上等同于最近一次落盘的 localHash。
 	LastLocalSHA256       string         `json:"lastLocalSha256"`
 	Dirty                 bool           `json:"dirty"`
 	State                 string         `json:"state"`
@@ -252,6 +264,37 @@ type Conflict struct {
 	LatestSnapshotSessionID string `json:"latestSnapshotSessionId,omitempty"`
 }
 
+func sessionBaseHash(session *Session) string {
+	if session == nil {
+		return ""
+	}
+	return session.OriginalSHA256
+}
+
+func setSessionBaseHash(session *Session, hash string) {
+	if session == nil {
+		return
+	}
+	session.OriginalSHA256 = hash
+}
+
+func sessionLocalHash(session *Session) string {
+	if session == nil {
+		return ""
+	}
+	if session.LastLocalSHA256 != "" {
+		return session.LastLocalSHA256
+	}
+	return sessionBaseHash(session)
+}
+
+func setSessionLocalHash(session *Session, hash string) {
+	if session == nil {
+		return
+	}
+	session.LastLocalSHA256 = hash
+}
+
 type SaveResult struct {
 	Status    string    `json:"status"`
 	Message   string    `json:"message,omitempty"`
@@ -275,6 +318,18 @@ type CompareResult struct {
 	LocalContent            string `json:"localContent"`
 	RemoteContent           string `json:"remoteContent"`
 	ReadOnly                bool   `json:"readOnly"`
+	Status                  string `json:"status,omitempty"`
+	Message                 string `json:"message,omitempty"`
+	Session                 *Session `json:"session,omitempty"`
+	Conflict                *Conflict `json:"conflict,omitempty"`
+}
+
+// AutoSaveStatus 只描述运行期的自动保存瞬时阶段。
+// 它通过 runtime event 给前端做反馈，不会落到 manifest / Session 持久状态中。
+type AutoSaveStatus struct {
+	DocumentKey string `json:"documentKey"`
+	SessionID   string `json:"sessionId,omitempty"`
+	Phase       string `json:"phase"`
 }
 
 type auditSessionPayload struct {
@@ -311,9 +366,10 @@ type auditSaveResultPayload struct {
 }
 
 type Event struct {
-	Type       string      `json:"type"`
-	Session    *Session    `json:"session,omitempty"`
-	SaveResult *SaveResult `json:"saveResult,omitempty"`
+	Type       string          `json:"type"`
+	Session    *Session        `json:"session,omitempty"`
+	SaveResult *SaveResult     `json:"saveResult,omitempty"`
+	AutoSave   *AutoSaveStatus `json:"autoSave,omitempty"`
 }
 
 type documentTransport struct {
@@ -510,7 +566,7 @@ func (s *Service) SaveSettings(input SettingsInput) (*Settings, error) {
 
 	editors := s.detectEditors(customEditors, input.DefaultEditorID)
 	defaultID := strings.TrimSpace(input.DefaultEditorID)
-	if defaultID == "" {
+	if defaultID == "" || !containsEditorID(editors, defaultID) {
 		defaultID = firstAvailableEditorID(editors)
 	}
 	if defaultID != "" && !containsAvailableEditor(editors, defaultID) {
@@ -782,7 +838,8 @@ func (s *Service) Refresh(sessionID string) (*Session, error) {
 		return nil, fmt.Errorf("读取本地副本失败: %w", err)
 	}
 	localHash := hashBytes(localData)
-	dirty := current.Dirty || localHash != current.OriginalSHA256
+	baseHash := sessionBaseHash(current)
+	dirty := current.Dirty || localHash != baseHash
 
 	if transport.Missing {
 		refreshed := s.markSessionState(sessionID, sessionStateRemoteMissing, dirty, localHash)
@@ -808,8 +865,9 @@ func (s *Service) Refresh(sessionID string) (*Session, error) {
 	}
 
 	nextState := sessionStateClean
+	remoteHash := remoteInfo.SHA256
 	switch {
-	case remoteInfo.SHA256 != current.OriginalSHA256:
+	case remoteHash != baseHash:
 		nextState = sessionStateConflict
 	case dirty:
 		nextState = sessionStateDirty
@@ -873,9 +931,10 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 	}
 
 	localHash := hashBytes(localData)
+	baseHash := sessionBaseHash(session)
 	// dirty 标记来自 watcher，hash 则来自当前磁盘内容；
 	// 两者同时成立才说明确实需要回写，避免“watch 尚未来得及落地”或“内容没变只是触发了写入时间”造成误保存。
-	if localHash == session.OriginalSHA256 && !session.Dirty {
+	if localHash == baseHash && !session.Dirty {
 		result := &SaveResult{
 			Status:    saveStatusNoop,
 			Message:   "本地副本没有新的变更",
@@ -948,7 +1007,8 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 				}
 				return nil, saveErr
 			}
-			if remoteInfo.SHA256 != session.OriginalSHA256 {
+			remoteHash := remoteInfo.SHA256
+			if remoteHash != baseHash {
 				result := s.markSessionState(sessionID, sessionStateConflict, true, localHash)
 				saveResult := &SaveResult{
 					Status:    saveStatusConflict,
@@ -958,7 +1018,7 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 					Automatic: automatic,
 				}
 				s.pauseAutoSaveForDocument(result.DocumentKey)
-				s.writeAudit(result, "external_edit_conflict_remote_changed", true, map[string]any{"resolution": resolution, "remoteSha256": remoteInfo.SHA256, "remoteBytes": len(remoteData)}, saveResult, nil)
+				s.writeAudit(result, "external_edit_conflict_remote_changed", true, map[string]any{"resolution": resolution, "remoteSha256": remoteHash, "remoteBytes": len(remoteData)}, saveResult, nil)
 				s.emit(Event{Type: eventSessionConflict, Session: result, SaveResult: saveResult})
 				return saveResult, nil
 			}
@@ -977,6 +1037,10 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 	}
 
 	if err := s.remote.WriteFile(session.SessionID, session.RemotePath, localData); err != nil {
+		if isRemoteMissingError(err) {
+			saveResult := s.markRemoteMissingConflict(sessionID, session, localHash, automatic, resolution, "write_remote_file")
+			return saveResult, nil
+		}
 		s.writeAudit(session, "external_edit_save", false, map[string]any{"resolution": resolution}, nil, err)
 		saveErr := fmt.Errorf("保存远程文件失败: %w", err)
 		failed := s.recordError(sessionID, "write_remote_file", saveErr)
@@ -1014,6 +1078,30 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 	s.emit(Event{Type: eventSessionSaved, Session: savedSession, SaveResult: saveResult})
 	s.resumeAutoSaveForDocument(savedSession.DocumentKey)
 	return saveResult, nil
+}
+
+func (s *Service) markRemoteMissingConflict(sessionID string, session *Session, localHash string, automatic bool, resolution string, source string) *SaveResult {
+	if sessionID == "" && session != nil {
+		sessionID = session.ID
+	}
+	result := s.markSessionState(sessionID, sessionStateRemoteMissing, true, localHash)
+	saveResult := &SaveResult{
+		Status:    saveStatusRemoteMissing,
+		Message:   "远程文件不存在，请先确认是否需要重新创建远程文件",
+		Session:   result,
+		Conflict:  s.describeConflict(result, ""),
+		Automatic: automatic,
+	}
+	if result != nil {
+		s.pauseAutoSaveForDocument(result.DocumentKey)
+	}
+	request := map[string]any{"resolution": resolution}
+	if source != "" {
+		request["source"] = source
+	}
+	s.writeAudit(result, "external_edit_conflict_remote_missing", true, request, saveResult, nil)
+	s.emit(Event{Type: eventSessionConflict, Session: result, SaveResult: saveResult})
+	return saveResult
 }
 
 func (s *Service) loadManifest() error {
@@ -1154,7 +1242,7 @@ func (s *Service) scheduleReconcile(changedPath string) {
 			timer.Stop()
 		}
 		sessionID := id
-		s.reconcileTimers[id] = time.AfterFunc(250*time.Millisecond, func() {
+		s.reconcileTimers[id] = time.AfterFunc(reconcileSettleDelay, func() {
 			s.reconcileLocalCopy(sessionID)
 		})
 	}
@@ -1171,7 +1259,8 @@ func (s *Service) reconcileLocalCopy(sessionID string) {
 		return
 	}
 	localHash := hashBytes(data)
-	dirty := localHash != session.OriginalSHA256
+	baseHash := sessionBaseHash(session)
+	dirty := localHash != baseHash
 	nextState := sessionStateClean
 	if session.Expired {
 		nextState = sessionStateExpired
@@ -1192,11 +1281,11 @@ func (s *Service) reconcileLocalCopy(sessionID string) {
 		s.cancelAutoSaveForDocument(session.DocumentKey)
 		return
 	}
-	if current.LastLocalSHA256 == localHash && current.Dirty == dirty && current.State == nextState {
+	if sessionLocalHash(current) == localHash && current.Dirty == dirty && current.State == nextState {
 		s.mu.Unlock()
 		return
 	}
-	current.LastLocalSHA256 = localHash
+	setSessionLocalHash(current, localHash)
 	current.Dirty = dirty
 	current.State = nextState
 	if current.RecordState == "" || current.RecordState == recordStateCompleted || current.RecordState == recordStateAbandoned {
@@ -1223,7 +1312,7 @@ func (s *Service) scheduleAutoSave(session *Session) {
 	if session == nil || strings.TrimSpace(session.DocumentKey) == "" {
 		return
 	}
-	attemptKey := session.DocumentKey + ":" + session.LastLocalSHA256
+	attemptKey := session.DocumentKey + ":" + sessionLocalHash(session)
 
 	s.mu.Lock()
 	if s.autoSavePaused[session.DocumentKey] || s.autoSaveTried[session.DocumentKey] == attemptKey {
@@ -1239,9 +1328,15 @@ func (s *Service) scheduleAutoSave(session *Session) {
 		s.runAutoSave(documentKey, primarySessionID, attemptKey)
 	})
 	s.mu.Unlock()
+	s.emitAutoSavePhase(documentKey, primarySessionID, autoSavePhasePending, session)
 }
 
 func (s *Service) runAutoSave(documentKey, sessionID, attemptKey string) {
+	if strings.TrimSpace(documentKey) == "" {
+		return
+	}
+	defer s.emitAutoSavePhase(documentKey, sessionID, autoSavePhaseIdle, nil)
+
 	session := s.getSession(sessionID)
 	if session == nil || session.DocumentKey != documentKey {
 		return
@@ -1264,8 +1359,10 @@ func (s *Service) runAutoSave(documentKey, sessionID, attemptKey string) {
 		return
 	}
 	s.autoSaveTried[documentKey] = attemptKey
+	runningSession := cloneSession(currentSession)
 	s.mu.Unlock()
 
+	s.emitAutoSavePhase(documentKey, sessionID, autoSavePhaseRunning, runningSession)
 	result, err := s.saveInternal(context.Background(), sessionID, "", true)
 	if err != nil {
 		logger.Default().Warn("auto save external edit document failed", zap.String("documentKey", documentKey), zap.Error(err))
@@ -1302,9 +1399,9 @@ func (s *Service) markSaved(sessionID, localHash string, localData []byte, remot
 	} else {
 		session.OriginalSize = int64(len(localData))
 	}
-	session.OriginalSHA256 = localHash
+	setSessionBaseHash(session, localHash)
 	session.OriginalByteSample = byteSampleHex(localData)
-	session.LastLocalSHA256 = localHash
+	setSessionLocalHash(session, localHash)
 	session.Dirty = false
 	session.State = sessionStateClean
 	session.RecordState = recordStateCompleted
@@ -1340,7 +1437,7 @@ func (s *Service) markSessionState(sessionID, state string, dirty bool, localHas
 		}
 	}
 	if localHash != "" {
-		session.LastLocalSHA256 = localHash
+		setSessionLocalHash(session, localHash)
 	}
 	session.UpdatedAt = s.now().Unix()
 	if err := s.saveManifestLocked(); err != nil {
@@ -1448,6 +1545,7 @@ func (s *Service) pauseAutoSaveForDocument(documentKey string) {
 		timer.Stop()
 		delete(s.autoSaveTimers, documentKey)
 	}
+	s.emitAutoSavePhase(documentKey, "", autoSavePhaseIdle, nil)
 }
 
 func (s *Service) resumeAutoSaveForDocument(documentKey string) {
@@ -1475,6 +1573,26 @@ func (s *Service) cancelAutoSaveForDocument(documentKey string) {
 	if !s.autoSavePaused[documentKey] {
 		delete(s.autoSaveTried, documentKey)
 	}
+	s.emitAutoSavePhase(documentKey, "", autoSavePhaseIdle, nil)
+}
+
+func (s *Service) emitAutoSavePhase(documentKey, sessionID, phase string, session *Session) {
+	documentKey = strings.TrimSpace(documentKey)
+	phase = strings.TrimSpace(phase)
+	if documentKey == "" || phase == "" {
+		return
+	}
+
+	event := Event{
+		Type:    eventSessionAutoSave,
+		Session: cloneSession(session),
+		AutoSave: &AutoSaveStatus{
+			DocumentKey: documentKey,
+			SessionID:   strings.TrimSpace(sessionID),
+			Phase:       phase,
+		},
+	}
+	s.emit(event)
 }
 
 func (s *Service) addWatchLocked(dir string) error {
@@ -1801,7 +1919,7 @@ func (s *Service) rereadRemoteSession(sessionID string) (*SaveResult, error) {
 	remoteData, remoteInfo, err := s.remote.ReadFile(current.SessionID, current.RemotePath)
 	if err != nil {
 		if isRemoteMissingError(err) {
-			result := s.markSessionState(sessionID, sessionStateRemoteMissing, true, current.LastLocalSHA256)
+			result := s.markSessionState(sessionID, sessionStateRemoteMissing, true, sessionLocalHash(current))
 			saveResult := &SaveResult{
 				Status:   saveStatusRemoteMissing,
 				Message:  "远程文件不存在，请先确认是否需要重新创建远程文件",
@@ -1964,7 +2082,18 @@ func (s *Service) Compare(sessionID string) (*CompareResult, error) {
 	remoteData, remoteInfo, err := s.remote.ReadFile(primary.SessionID, primary.RemotePath)
 	if err != nil {
 		if isRemoteMissingError(err) {
-			return nil, fmt.Errorf("远程文件不存在，当前无法比对")
+			saveResult := s.markRemoteMissingConflict(primary.ID, primary, sessionLocalHash(primary), false, "", "compare")
+			return &CompareResult{
+				DocumentKey:           primary.DocumentKey,
+				PrimaryDraftSessionID: primary.ID,
+				FileName:              filepath.Base(primary.RemotePath),
+				RemotePath:            primary.RemotePath,
+				ReadOnly:              true,
+				Status:                saveResult.Status,
+				Message:               saveResult.Message,
+				Session:               saveResult.Session,
+				Conflict:              saveResult.Conflict,
+			}, nil
 		}
 		return nil, fmt.Errorf("读取远程文件失败: %w", err)
 	}
@@ -2340,11 +2469,11 @@ func (s *Service) hydrateSessionEncodingLocked(session *Session) error {
 	if session.OriginalSize == 0 {
 		session.OriginalSize = int64(len(data))
 	}
-	if session.OriginalSHA256 == "" {
-		session.OriginalSHA256 = hashBytes(data)
+	if sessionBaseHash(session) == "" {
+		setSessionBaseHash(session, hashBytes(data))
 	}
 	if session.LastLocalSHA256 == "" {
-		session.LastLocalSHA256 = hashBytes(data)
+		setSessionLocalHash(session, hashBytes(data))
 	}
 	return nil
 }
@@ -2695,6 +2824,15 @@ func validateExecutable(execPath string) (string, error) {
 func containsAvailableEditor(editors []Editor, editorID string) bool {
 	for _, editor := range editors {
 		if editor.ID == editorID && editor.Available {
+			return true
+		}
+	}
+	return false
+}
+
+func containsEditorID(editors []Editor, editorID string) bool {
+	for _, editor := range editors {
+		if editor.ID == editorID {
 			return true
 		}
 	}

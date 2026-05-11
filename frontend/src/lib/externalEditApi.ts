@@ -52,12 +52,14 @@ export interface ExternalEditSession {
   editorName: string;
   editorPath: string;
   editorArgs?: string[];
+  // `originalSha256` 保留现有 IPC 字段名，语义上等同于当前 document 的 baseHash。
   originalSha256: string;
   originalSize: number;
   originalModTime: number;
   originalEncoding: string;
   originalBom?: string;
   originalByteSample?: string;
+  // `lastLocalSha256` 同样是兼容字段名，语义上等同于最近一次落盘的 localHash。
   lastLocalSha256: string;
   dirty: boolean;
   state: string;
@@ -101,6 +103,11 @@ export interface ExternalEditEvent {
   type: string;
   session?: ExternalEditSession;
   saveResult?: ExternalEditSaveResult;
+  autoSave?: {
+    documentKey: string;
+    sessionId?: string;
+    phase: "pending" | "running" | "idle";
+  };
 }
 
 export interface ExternalEditCompareResult {
@@ -112,6 +119,14 @@ export interface ExternalEditCompareResult {
   localContent: string;
   remoteContent: string;
   readOnly: boolean;
+  status?: string;
+  message?: string;
+  session?: ExternalEditSession;
+  conflict?: {
+    documentKey: string;
+    primaryDraftSessionId: string;
+    latestSnapshotSessionId?: string;
+  };
 }
 
 declare global {
@@ -129,7 +144,10 @@ declare global {
           RefreshExternalEditSession?: (sessionId: string) => MaybePromise<ExternalEditSession>;
           ResolveExternalEditConflict?: (sessionId: string, resolution: string) => MaybePromise<ExternalEditSaveResult>;
           CompareExternalEditSession?: (sessionId: string) => MaybePromise<ExternalEditCompareResult>;
-          DeleteExternalEditSession?: (sessionId: string, removeLocal: boolean) => MaybePromise<ExternalEditDeleteResult>;
+          DeleteExternalEditSession?: (
+            sessionId: string,
+            removeLocal: boolean
+          ) => MaybePromise<ExternalEditDeleteResult>;
         };
       };
     };

@@ -27,16 +27,18 @@ type rebindRemoteFile struct {
 }
 
 type rebindRemoteStub struct {
-	mu      sync.Mutex
-	files   map[string]map[string]rebindRemoteFile
-	missing map[string]map[string]error
-	writes  []string
+	mu          sync.Mutex
+	files       map[string]map[string]rebindRemoteFile
+	missing     map[string]map[string]error
+	writeErrors map[string]map[string]error
+	writes      []string
 }
 
 func newRebindRemoteStub() *rebindRemoteStub {
 	return &rebindRemoteStub{
-		files:   make(map[string]map[string]rebindRemoteFile),
-		missing: make(map[string]map[string]error),
+		files:       make(map[string]map[string]rebindRemoteFile),
+		missing:     make(map[string]map[string]error),
+		writeErrors: make(map[string]map[string]error),
 	}
 }
 
@@ -64,6 +66,16 @@ func (r *rebindRemoteStub) SetError(sessionID, remotePath string, err error) {
 		r.missing[sessionID] = make(map[string]error)
 	}
 	r.missing[sessionID][remotePath] = err
+}
+
+func (r *rebindRemoteStub) SetWriteError(sessionID, remotePath string, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.writeErrors[sessionID] == nil {
+		r.writeErrors[sessionID] = make(map[string]error)
+	}
+	r.writeErrors[sessionID][remotePath] = err
 }
 
 func (r *rebindRemoteStub) ClearError(sessionID, remotePath string) {
@@ -113,6 +125,11 @@ func (r *rebindRemoteStub) WriteFile(sessionID, remotePath string, data []byte) 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if byPath := r.writeErrors[sessionID]; byPath != nil {
+		if err, ok := byPath[remotePath]; ok {
+			return err
+		}
+	}
 	if err := r.lookupErrorLocked(sessionID, remotePath); err != nil {
 		return err
 	}
@@ -198,12 +215,15 @@ type rebindHarness struct {
 	audit    *rebindAuditRepo
 	manifest string
 	now      time.Time
+	events   []Event
+	eventsMu sync.Mutex
 }
 
 func newRebindHarness(t *testing.T, finder func(int64) []string) *rebindHarness {
 	t.Helper()
 
 	dataDir := t.TempDir()
+	h := &rebindHarness{}
 	cfg := &bootstrap.AppConfig{
 		ExternalEditDefaultEditorID: "system-text",
 		ExternalEditWorkspaceRoot:   dataDir,
@@ -222,8 +242,12 @@ func newRebindHarness(t *testing.T, finder func(int64) []string) *rebindHarness 
 		FindSessions: finder,
 		Assets:       rebindAssetFinder{},
 		Audit:        audit,
-		Emit:         func(Event) {},
-		Launch:       launcherFunc(func(string, []string) error { return nil }),
+		Emit: func(event Event) {
+			h.eventsMu.Lock()
+			defer h.eventsMu.Unlock()
+			h.events = append(h.events, event)
+		},
+		Launch: launcherFunc(func(string, []string) error { return nil }),
 		Now: func() time.Time {
 			return currentTime
 		},
@@ -234,13 +258,20 @@ func newRebindHarness(t *testing.T, finder func(int64) []string) *rebindHarness 
 		_ = svc.Close()
 	})
 
-	return &rebindHarness{
-		svc:      svc,
-		remote:   remote,
-		audit:    audit,
-		manifest: dataDir,
-		now:      currentTime,
-	}
+	h.svc = svc
+	h.remote = remote
+	h.audit = audit
+	h.manifest = dataDir
+	h.now = currentTime
+	return h
+}
+
+func (h *rebindHarness) snapshotEvents() []Event {
+	h.eventsMu.Lock()
+	defer h.eventsMu.Unlock()
+	cloned := make([]Event, len(h.events))
+	copy(cloned, h.events)
+	return cloned
 }
 
 func (h *rebindHarness) openSession(t *testing.T, sessionID, remotePath, realPath string, data []byte) *Session {
@@ -399,6 +430,70 @@ func TestExternalEditSaveStillSupportsRecreateAfterRebind(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, saveStatusSaved, recreated.Status)
 	require.Equal(t, "external_edit_recreate", h.audit.lastTool())
+}
+
+func TestExternalEditSaveWriteRemoteMissingStaysRecoverable(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+	markDirtyLocalCopy(t, session, []byte("local dirty\n"))
+	h.remote.SetWriteError("ssh-b", "/srv/app/demo.txt", os.ErrNotExist)
+
+	result, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusRemoteMissing, result.Status)
+	require.Equal(t, sessionStateRemoteMissing, result.Session.State)
+	require.NotNil(t, result.Conflict)
+	require.Equal(t, "external_edit_conflict_remote_missing", h.audit.lastTool())
+}
+
+func TestExternalEditOverwriteWriteRemoteMissingStaysRecoverable(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+	markDirtyLocalCopy(t, session, []byte("local overwrite\n"))
+	h.remote.SetFile("ssh-b", "/srv/app/demo.txt", []byte("remote changed\n"), "/srv/app/demo.txt")
+	conflict, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, conflict.Status)
+
+	h.remote.SetWriteError("ssh-b", "/srv/app/demo.txt", os.ErrNotExist)
+	result, err := h.svc.Resolve(context.Background(), session.ID, resolutionOverwrite)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusRemoteMissing, result.Status)
+	require.Equal(t, sessionStateRemoteMissing, result.Session.State)
+	require.NotNil(t, result.Conflict)
+	require.Equal(t, "external_edit_conflict_remote_missing", h.audit.lastTool())
+}
+
+func TestExternalEditOpenReuseKeepsBaseAndLocalHash(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+
+	markDirtyLocalCopy(t, session, []byte("hello again\n"))
+	h.svc.reconcileLocalCopy(session.ID)
+
+	reopened, err := h.svc.Open(context.Background(), OpenRequest{
+		AssetID:    session.AssetID,
+		SessionID:  "ssh-b",
+		RemotePath: session.RemotePath,
+	})
+	require.NoError(t, err)
+	require.Equal(t, session.ID, reopened.ID)
+	require.Equal(t, hashBytes([]byte("hello\n")), sessionBaseHash(reopened))
+	require.Equal(t, hashBytes([]byte("hello again\n")), sessionLocalHash(reopened))
+}
+
+func TestExternalEditSaveAdvancesBaseHashAfterSuccessfulUpload(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+	localData := []byte("hello saved\n")
+	markDirtyLocalCopy(t, session, localData)
+
+	result, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusSaved, result.Status)
+	require.NotNil(t, result.Session)
+	require.Equal(t, hashBytes(localData), sessionBaseHash(result.Session))
+	require.Equal(t, hashBytes(localData), sessionLocalHash(result.Session))
 }
 
 func TestExternalEditResolveOverwriteRebindsBeforeContinuing(t *testing.T) {
@@ -697,6 +792,37 @@ func TestExternalEditCompareReturnsReadOnlyDiffWithoutWritingRemote(t *testing.T
 	assert.Equal(t, "external_edit_compare", h.audit.lastTool())
 }
 
+func TestExternalEditCompareRemoteMissingKeepsRecoverableState(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+	markDirtyLocalCopy(t, session, []byte("local draft\n"))
+
+	h.remote.SetFile("ssh-b", "/srv/app/demo.txt", []byte("remote changed\n"), "/srv/app/demo.txt")
+	conflict, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, conflict.Status)
+
+	h.remote.SetError("ssh-b", "/srv/app/demo.txt", os.ErrNotExist)
+	diff, err := h.svc.Compare(session.ID)
+	require.NoError(t, err)
+	require.NotNil(t, diff)
+	require.Equal(t, saveStatusRemoteMissing, diff.Status)
+	require.NotNil(t, diff.Session)
+	require.NotNil(t, diff.Conflict)
+
+	current := h.refreshSession(t, session.ID)
+	require.Equal(t, sessionStateRemoteMissing, current.State)
+	require.Equal(t, recordStateConflict, current.RecordState)
+
+	events := h.snapshotEvents()
+	require.NotEmpty(t, events)
+	last := events[len(events)-1]
+	require.Equal(t, eventSessionConflict, last.Type)
+	require.Equal(t, saveStatusRemoteMissing, last.SaveResult.Status)
+	require.Equal(t, sessionStateRemoteMissing, last.Session.State)
+	assert.Equal(t, "external_edit_conflict_remote_missing", h.audit.lastTool())
+}
+
 func TestExternalEditRereadKeepsPrimaryDraftAndTracksLatestSnapshot(t *testing.T) {
 	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b", "ssh-c"} })
 	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
@@ -908,4 +1034,58 @@ func TestExternalEditDeleteRecordOnlyCancelsPendingAutoSave(t *testing.T) {
 	stored := h.refreshSession(t, session.ID)
 	require.Equal(t, recordStateAbandoned, stored.RecordState)
 	require.True(t, stored.Hidden)
+}
+
+func TestExternalEditAutoSaveEmitsPendingRunningAndSavedTimeline(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+
+	markDirtyLocalCopy(t, session, []byte("autosave timeline\n"))
+	h.svc.reconcileLocalCopy(session.ID)
+
+	require.Eventually(t, func() bool {
+		events := h.snapshotEvents()
+		hasPending := false
+		hasRunning := false
+		hasSaved := false
+		for _, event := range events {
+			if event.Type == eventSessionAutoSave && event.AutoSave != nil && event.AutoSave.DocumentKey == session.DocumentKey {
+				hasPending = hasPending || event.AutoSave.Phase == autoSavePhasePending
+				hasRunning = hasRunning || event.AutoSave.Phase == autoSavePhaseRunning
+			}
+			if event.Type == eventSessionSaved && event.Session != nil && event.Session.ID == session.ID && event.SaveResult != nil && event.SaveResult.Automatic {
+				hasSaved = true
+			}
+		}
+		return hasPending && hasRunning && hasSaved
+	}, 2*time.Second, 20*time.Millisecond)
+}
+
+func TestExternalEditAutoSaveStillEntersConflictAfterRemoteCompare(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+
+	markDirtyLocalCopy(t, session, []byte("autosave local\n"))
+	h.remote.SetFile("ssh-b", "/srv/app/demo.txt", []byte("remote changed\n"), "/srv/app/demo.txt")
+	h.svc.reconcileLocalCopy(session.ID)
+
+	require.Eventually(t, func() bool {
+		current := h.refreshSession(t, session.ID)
+		return current.State == sessionStateConflict
+	}, 2*time.Second, 20*time.Millisecond)
+
+	current := h.refreshSession(t, session.ID)
+	require.Equal(t, sessionStateConflict, current.State)
+
+	events := h.snapshotEvents()
+	foundConflict := false
+	for _, event := range events {
+		if event.Type == eventSessionConflict && event.Session != nil && event.Session.ID == session.ID && event.SaveResult != nil {
+			require.True(t, event.SaveResult.Automatic)
+			require.Equal(t, saveStatusConflict, event.SaveResult.Status)
+			foundConflict = true
+		}
+	}
+	require.True(t, foundConflict)
+	require.Empty(t, h.remote.writes)
 }

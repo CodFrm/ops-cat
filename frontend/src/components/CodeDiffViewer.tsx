@@ -17,10 +17,13 @@ export interface CodeDiffViewerProps {
 
 const DEFAULT_OPTIONS: MonacoNS.editor.IDiffEditorConstructionOptions = {
   automaticLayout: true,
+  diffAlgorithm: "advanced",
   renderSideBySide: true,
+  useInlineViewWhenSpaceIsLimited: false,
   readOnly: true,
   originalEditable: false,
   lineNumbers: "on",
+  glyphMargin: true,
   renderIndicators: true,
   splitViewDefaultRatio: 0.5,
   enableSplitViewResizing: true,
@@ -31,7 +34,7 @@ const DEFAULT_OPTIONS: MonacoNS.editor.IDiffEditorConstructionOptions = {
   minimap: { enabled: false },
   diffWordWrap: "on",
   wordWrap: "on",
-  scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
+  scrollbar: { alwaysConsumeMouseWheel: false, verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
   fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
 };
 
@@ -72,16 +75,20 @@ export function CodeDiffViewer({
 
   const showHeader = originalTitle || modifiedTitle || badge;
   const header = showHeader ? (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b bg-muted/20 px-4 py-2 text-xs">
-      <div className="min-w-0 truncate font-medium text-muted-foreground">{originalTitle || ""}</div>
+    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b bg-muted/30 px-4 py-2 text-xs">
+      <div className="min-w-0 truncate rounded bg-background px-2 py-1 font-medium text-muted-foreground">
+        {originalTitle || ""}
+      </div>
       {badge ? (
-        <div className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+        <div className="rounded-full border border-border bg-background px-2 py-1 text-[10px] font-medium text-muted-foreground">
           {badge}
         </div>
       ) : (
         <div />
       )}
-      <div className="min-w-0 truncate text-right font-medium text-muted-foreground">{modifiedTitle || ""}</div>
+      <div className="min-w-0 truncate rounded bg-background px-2 py-1 text-right font-medium text-muted-foreground">
+        {modifiedTitle || ""}
+      </div>
     </div>
   ) : null;
 
@@ -89,7 +96,7 @@ export function CodeDiffViewer({
     const message = monacoLoadError instanceof Error ? monacoLoadError.message : String(monacoLoadError);
     return (
       <div
-        className={`relative flex h-full w-full flex-col overflow-hidden rounded border bg-background ${className ?? ""}`}
+        className={`relative flex h-full w-full flex-col overflow-hidden rounded border bg-background shadow-inner ${className ?? ""}`}
       >
         {header}
         <div className="relative flex h-full w-full flex-col items-center justify-center gap-2 p-4 text-xs text-muted-foreground">
@@ -110,7 +117,7 @@ export function CodeDiffViewer({
   if (!monacoReady) {
     return (
       <div
-        className={`relative flex h-full w-full flex-col overflow-hidden rounded border bg-background ${className ?? ""}`}
+        className={`relative flex h-full w-full flex-col overflow-hidden rounded border bg-background shadow-inner ${className ?? ""}`}
       >
         {header}
         <div className="relative h-full w-full" style={{ height }} />
@@ -120,7 +127,7 @@ export function CodeDiffViewer({
 
   return (
     <div
-      className={`relative flex h-full w-full flex-col overflow-hidden rounded border bg-background ${className ?? ""}`}
+      className={`relative flex h-full w-full flex-col overflow-hidden rounded border bg-background shadow-inner ${className ?? ""}`}
     >
       {header}
       <DiffEditor
