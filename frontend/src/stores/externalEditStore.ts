@@ -22,6 +22,8 @@ export interface ExternalEditDocumentView {
 export interface ExternalEditConflictView {
   documentKey: string;
   primaryDraft: ExternalEditSession;
+  retainedDraft?: ExternalEditSession;
+  activeDraft?: ExternalEditSession;
   latestSnapshot?: ExternalEditSession;
 }
 
@@ -70,14 +72,11 @@ export function buildExternalEditDocuments(sessions: Record<string, ExternalEdit
     .sort((left, right) => right.session.updatedAt - left.session.updatedAt);
 }
 
-export function buildExternalEditConflicts(
-  sessions: Record<string, ExternalEditSession>
-): ExternalEditConflictView[] {
+export function buildExternalEditConflicts(sessions: Record<string, ExternalEditSession>): ExternalEditConflictView[] {
   const grouped = new Map<string, ExternalEditSession[]>();
   for (const session of Object.values(sessions)) {
     if (!session.documentKey) continue;
     if (session.hidden) continue;
-    if (session.state !== "conflict" && session.state !== "remote_missing" && session.state !== "stale") continue;
     const current = grouped.get(session.documentKey) || [];
     current.push(session);
     grouped.set(session.documentKey, current);
@@ -85,21 +84,37 @@ export function buildExternalEditConflicts(
 
   const conflicts: ExternalEditConflictView[] = [];
   for (const [documentKey, relatedSessions] of grouped.entries()) {
-      const primaryDraft =
-        relatedSessions
-          .filter((session) => session.state === "conflict" || session.state === "remote_missing")
-          .sort(compareDocumentSession)[0] ||
-        relatedSessions.filter((session) => session.state === "stale").sort(compareDocumentSession)[0];
-      if (!primaryDraft) continue;
-      const latestSnapshot = Object.values(sessions)
-        .filter((session) => session.documentKey === documentKey && session.sourceSessionId === primaryDraft.id && session.state === "clean")
+    const retainedDraft = relatedSessions
+      .filter((session) => session.state === "stale")
+      .sort(compareDocumentSession)[0];
+    const primaryDraft =
+      relatedSessions
+        .filter((session) => session.state === "conflict" || session.state === "remote_missing")
+        .sort(compareDocumentSession)[0] || retainedDraft;
+    if (!primaryDraft) continue;
+
+    const activeDraft =
+      (retainedDraft?.supersededBySessionId
+        ? relatedSessions.find((session) => session.id === retainedDraft.supersededBySessionId)
+        : undefined) ||
+      relatedSessions
+        .filter(
+          (session) =>
+            session.id !== primaryDraft.id &&
+            session.sourceSessionId === primaryDraft.id &&
+            session.state !== "stale" &&
+            session.recordState !== "error"
+        )
         .sort(compareDocumentSession)[0];
-      conflicts.push({
-        documentKey,
-        primaryDraft,
-        latestSnapshot,
-      });
-    }
+
+    conflicts.push({
+      documentKey,
+      primaryDraft,
+      retainedDraft,
+      activeDraft,
+      latestSnapshot: activeDraft?.sourceSessionId === primaryDraft.id ? activeDraft : undefined,
+    });
+  }
   return conflicts.sort((left, right) => right.primaryDraft.updatedAt - left.primaryDraft.updatedAt);
 }
 

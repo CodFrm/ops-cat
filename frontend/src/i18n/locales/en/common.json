@@ -980,6 +980,10 @@
       "conflicts": "Conflicting Files",
       "errors": "Recoverable Files",
       "remoteSnapshotReady": "remote snapshot ready",
+      "currentDraft": "Current Conflict Draft",
+      "retainedDraft": "Retained Draft",
+      "rereadDraft": "Reread Draft",
+      "rereadDraftHint": "Further edits keep using the current save/compare/conflict chain.",
       "reviewInList": "Review in list"
     },
     "actions": {
@@ -1022,7 +1026,9 @@
     "compare": {
       "title": "Read-only Diff",
       "localDraft": "Local Draft",
-      "remoteSnapshot": "Remote Snapshot"
+      "remoteSnapshot": "Remote Snapshot",
+      "readOnly": "Read-only",
+      "helper": "Remote on the left, local on the right, with line numbers and synced scrolling for inspection."
     },
     "settings": {
       "tab": "External Edit",

@@ -225,6 +225,76 @@ describe("buildExternalEditConflicts", () => {
 
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0]?.primaryDraft.id).toBe("draft");
+    expect(conflicts[0]?.retainedDraft?.id).toBe("stale");
+    expect(conflicts[0]?.activeDraft?.id).toBe("snapshot");
     expect(conflicts[0]?.latestSnapshot?.id).toBe("snapshot");
+  });
+
+  it("keeps a retained stale draft discoverable after reread creates a new active draft", () => {
+    const conflicts = buildExternalEditConflicts({
+      retained: {
+        id: "retained",
+        assetId: 101,
+        assetName: "asset-101",
+        documentKey: "101:/srv/app/demo.txt",
+        sessionId: "ssh-b",
+        remotePath: "/srv/app/demo.txt",
+        remoteRealPath: "/srv/app/demo.txt",
+        localPath: "/tmp/demo-old.txt",
+        workspaceRoot: "/tmp",
+        workspaceDir: "/tmp/demo-old",
+        editorId: "system-text",
+        editorName: "System Text Editor",
+        editorPath: "/bin/editor",
+        originalSha256: "a",
+        originalSize: 1,
+        originalModTime: 1,
+        originalEncoding: "utf-8",
+        lastLocalSha256: "b",
+        dirty: true,
+        state: "stale",
+        hidden: false,
+        expired: false,
+        supersededBySessionId: "active",
+        createdAt: 1,
+        updatedAt: 30,
+        lastLaunchedAt: 30,
+        lastSyncedAt: 1,
+      },
+      active: {
+        id: "active",
+        assetId: 101,
+        assetName: "asset-101",
+        documentKey: "101:/srv/app/demo.txt",
+        sessionId: "ssh-c",
+        remotePath: "/srv/app/demo.txt",
+        remoteRealPath: "/srv/app/demo.txt",
+        localPath: "/tmp/demo-new.txt",
+        workspaceRoot: "/tmp",
+        workspaceDir: "/tmp/demo-new",
+        editorId: "system-text",
+        editorName: "System Text Editor",
+        editorPath: "/bin/editor",
+        originalSha256: "c",
+        originalSize: 1,
+        originalModTime: 2,
+        originalEncoding: "utf-8",
+        lastLocalSha256: "d",
+        dirty: true,
+        state: "dirty",
+        hidden: false,
+        expired: false,
+        sourceSessionId: "retained",
+        createdAt: 2,
+        updatedAt: 40,
+        lastLaunchedAt: 40,
+        lastSyncedAt: 20,
+      },
+    });
+
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]?.primaryDraft.id).toBe("retained");
+    expect(conflicts[0]?.retainedDraft?.id).toBe("retained");
+    expect(conflicts[0]?.activeDraft?.id).toBe("active");
   });
 });

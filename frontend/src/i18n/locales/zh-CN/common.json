@@ -965,6 +965,10 @@
       "conflicts": "冲突文件",
       "errors": "待恢复文件",
       "remoteSnapshotReady": "已获取远端新副本",
+      "currentDraft": "当前冲突稿",
+      "retainedDraft": "保留旧稿",
+      "rereadDraft": "重读后新稿",
+      "rereadDraftHint": "继续修改后会沿当前同步链路保存或重新进入冲突区",
       "reviewInList": "到下方列表处理"
     },
     "actions": {
@@ -1007,7 +1011,9 @@
     "compare": {
       "title": "只读差异比对",
       "localDraft": "本地草稿",
-      "remoteSnapshot": "远端快照"
+      "remoteSnapshot": "远端快照",
+      "readOnly": "只读",
+      "helper": "左侧远端，右侧本地；支持行号与同步滚动，便于逐段观察差异。"
     },
     "settings": {
       "tab": "外部编辑",

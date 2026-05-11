@@ -597,6 +597,63 @@ func TestExternalEditDocumentRereadUsesAnotherTransportAfterConflict(t *testing.
 	require.Equal(t, saveStatusReread, reread.Status)
 	require.Equal(t, "ssh-c", reread.Session.SessionID)
 	require.Equal(t, session.DocumentKey, reread.Session.DocumentKey)
+	require.Equal(t, saveModeAutoLive, reread.Session.SaveMode)
+}
+
+func TestExternalEditRereadNewDraftAutoSavesAfterFurtherEdit(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b", "ssh-c"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+	markDirtyLocalCopy(t, session, []byte("hello from b\n"))
+
+	h.remote.SetError("ssh-b", "/srv/app/demo.txt", errors.New("SSH 会话不存在: ssh-b"))
+	h.remote.SetFile("ssh-c", "/srv/app/demo.txt", []byte("remote changed\n"), "/srv/app/demo.txt")
+	conflict, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, conflict.Status)
+
+	h.remote.SetFile("ssh-c", "/srv/app/demo.txt", []byte("remote newer\n"), "/srv/app/demo.txt")
+	reread, err := h.svc.Resolve(context.Background(), session.ID, resolutionReread)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusReread, reread.Status)
+
+	markDirtyLocalCopy(t, reread.Session, []byte("remote newer\nlocal follow-up\n"))
+	h.svc.reconcileLocalCopy(reread.Session.ID)
+	require.Eventually(t, func() bool {
+		return len(h.remote.writes) > 0
+	}, autoSaveDebounce+time.Second, 50*time.Millisecond)
+
+	lastWrite := h.remote.writes[len(h.remote.writes)-1]
+	assert.Equal(t, "ssh-c:/srv/app/demo.txt", lastWrite)
+
+	stored := h.refreshSession(t, reread.Session.ID)
+	require.Equal(t, recordStateCompleted, stored.RecordState)
+	require.True(t, stored.Hidden)
+}
+
+func TestExternalEditRereadNewDraftReentersConflictAfterFurtherEdit(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b", "ssh-c"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+	markDirtyLocalCopy(t, session, []byte("hello from b\n"))
+
+	h.remote.SetError("ssh-b", "/srv/app/demo.txt", errors.New("SSH 会话不存在: ssh-b"))
+	h.remote.SetFile("ssh-c", "/srv/app/demo.txt", []byte("remote changed\n"), "/srv/app/demo.txt")
+	conflict, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, conflict.Status)
+
+	h.remote.SetFile("ssh-c", "/srv/app/demo.txt", []byte("remote newer\n"), "/srv/app/demo.txt")
+	reread, err := h.svc.Resolve(context.Background(), session.ID, resolutionReread)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusReread, reread.Status)
+
+	markDirtyLocalCopy(t, reread.Session, []byte("remote newer\nlocal follow-up\n"))
+	h.remote.SetFile("ssh-c", "/srv/app/demo.txt", []byte("remote changed again\n"), "/srv/app/demo.txt")
+
+	nextConflict, err := h.svc.Save(context.Background(), reread.Session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, nextConflict.Status)
+	require.NotNil(t, nextConflict.Conflict)
+	require.Equal(t, reread.Session.ID, nextConflict.Conflict.PrimaryDraftSessionID)
 }
 
 func TestExternalEditAutoSaveOnlyAttemptsOneStableHashOnce(t *testing.T) {

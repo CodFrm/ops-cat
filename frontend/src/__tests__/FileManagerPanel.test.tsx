@@ -64,13 +64,17 @@ describe("FileManagerPanel", () => {
       savingSessionId: null,
       pendingConflict: null,
       compareResult: null,
+      selectedError: null,
       fetchSessions: vi.fn(),
       saveSession: vi.fn(),
       refreshSession: vi.fn(),
       compareSession: vi.fn(),
+      deleteSession: vi.fn(),
       resolveConflict: vi.fn(),
       dismissConflict: vi.fn(),
       dismissCompare: vi.fn(),
+      openErrorDetail: vi.fn(),
+      dismissErrorDetail: vi.fn(),
       applyEvent: vi.fn(),
     });
     vi.mocked(SFTPListDir).mockResolvedValue([]);
@@ -174,6 +178,35 @@ describe("FileManagerPanel", () => {
           lastLaunchedAt: 10,
           lastSyncedAt: 1,
         },
+        stale: {
+          id: "stale",
+          assetId: 101,
+          assetName: "asset-101",
+          documentKey: "101:/srv/app/demo.txt",
+          sessionId: "ssh-b",
+          remotePath: "/srv/app/demo.txt",
+          remoteRealPath: "/srv/app/demo.txt",
+          localPath: "/tmp/demo-old.txt",
+          workspaceRoot: "/tmp",
+          workspaceDir: "/tmp/demo-old",
+          editorId: "system-text",
+          editorName: "System Text Editor",
+          editorPath: "/bin/editor",
+          originalSha256: "a",
+          originalSize: 1,
+          originalModTime: 1,
+          originalEncoding: "utf-8",
+          lastLocalSha256: "b",
+          dirty: true,
+          state: "stale",
+          hidden: false,
+          expired: false,
+          supersededBySessionId: "snapshot",
+          createdAt: 1,
+          updatedAt: 30,
+          lastLaunchedAt: 30,
+          lastSyncedAt: 1,
+        },
         snapshot: {
           id: "snapshot",
           assetId: 101,
@@ -207,13 +240,36 @@ describe("FileManagerPanel", () => {
       savingSessionId: "draft",
     });
 
-    render(
-      <FileManagerPanel assetId={101} tabId="tab1" sessionId="s1" isOpen width={280} onWidthChange={vi.fn()} />
-    );
+    render(<FileManagerPanel assetId={101} tabId="tab1" sessionId="s1" isOpen width={280} onWidthChange={vi.fn()} />);
 
     expect(await screen.findByText("externalEdit.panel.conflicts")).toBeInTheDocument();
+    expect(screen.getByText("externalEdit.panel.retainedDraft")).toBeInTheDocument();
+    expect(screen.getAllByText("externalEdit.panel.rereadDraft").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "externalEdit.actions.compare" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "externalEdit.actions.reread" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "externalEdit.actions.overwrite" })).toBeDisabled();
+  });
+
+  it("renders the compare dialog as a large read-only dual-pane diff", async () => {
+    useExternalEditStore.setState({
+      compareResult: {
+        documentKey: "101:/srv/app/demo.txt",
+        primaryDraftSessionId: "draft",
+        latestSnapshotSessionId: "snapshot",
+        fileName: "demo.txt",
+        remotePath: "/srv/app/demo.txt",
+        remoteContent: "remote\n",
+        localContent: "local\n",
+        readOnly: true,
+      },
+    });
+
+    render(<FileManagerPanel assetId={101} tabId="tab1" sessionId="s1" isOpen width={280} onWidthChange={vi.fn()} />);
+
+    expect(await screen.findByText("externalEdit.compare.title")).toBeInTheDocument();
+    expect(screen.getAllByText("externalEdit.compare.readOnly").length).toBeGreaterThan(0);
+    expect(screen.getByText("externalEdit.compare.remoteSnapshot")).toBeInTheDocument();
+    expect(screen.getByText("externalEdit.compare.localDraft")).toBeInTheDocument();
+    expect(screen.getByText("externalEdit.compare.helper")).toBeInTheDocument();
   });
 });

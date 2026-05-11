@@ -207,40 +207,40 @@ type ErrorSnapshot struct {
 // Session 是桌面端外部编辑的单一事实记录：
 // 它同时串起远端基线、本地副本、编辑器选择、冲突状态和恢复信息，前后端都围绕这份记录推进状态。
 type Session struct {
-	ID                    string   `json:"id"`
-	AssetID               int64    `json:"assetId"`
-	AssetName             string   `json:"assetName"`
-	DocumentKey           string   `json:"documentKey"`
-	SessionID             string   `json:"sessionId"`
-	RemotePath            string   `json:"remotePath"`
-	RemoteRealPath        string   `json:"remoteRealPath"`
-	LocalPath             string   `json:"localPath"`
-	WorkspaceRoot         string   `json:"workspaceRoot"`
-	WorkspaceDir          string   `json:"workspaceDir"`
-	EditorID              string   `json:"editorId"`
-	EditorName            string   `json:"editorName"`
-	EditorPath            string   `json:"editorPath"`
-	EditorArgs            []string `json:"editorArgs,omitempty"`
-	OriginalSHA256        string   `json:"originalSha256"`
-	OriginalSize          int64    `json:"originalSize"`
-	OriginalModTime       int64    `json:"originalModTime"`
-	OriginalEncoding      string   `json:"originalEncoding"`
-	OriginalBOM           string   `json:"originalBom,omitempty"`
-	OriginalByteSample    string   `json:"originalByteSample,omitempty"`
-	LastLocalSHA256       string   `json:"lastLocalSha256"`
-	Dirty                 bool     `json:"dirty"`
-	State                 string   `json:"state"`
-	RecordState           string   `json:"recordState,omitempty"`
-	SaveMode              string   `json:"saveMode,omitempty"`
-	Hidden                bool     `json:"hidden"`
-	Expired               bool     `json:"expired"`
+	ID                    string         `json:"id"`
+	AssetID               int64          `json:"assetId"`
+	AssetName             string         `json:"assetName"`
+	DocumentKey           string         `json:"documentKey"`
+	SessionID             string         `json:"sessionId"`
+	RemotePath            string         `json:"remotePath"`
+	RemoteRealPath        string         `json:"remoteRealPath"`
+	LocalPath             string         `json:"localPath"`
+	WorkspaceRoot         string         `json:"workspaceRoot"`
+	WorkspaceDir          string         `json:"workspaceDir"`
+	EditorID              string         `json:"editorId"`
+	EditorName            string         `json:"editorName"`
+	EditorPath            string         `json:"editorPath"`
+	EditorArgs            []string       `json:"editorArgs,omitempty"`
+	OriginalSHA256        string         `json:"originalSha256"`
+	OriginalSize          int64          `json:"originalSize"`
+	OriginalModTime       int64          `json:"originalModTime"`
+	OriginalEncoding      string         `json:"originalEncoding"`
+	OriginalBOM           string         `json:"originalBom,omitempty"`
+	OriginalByteSample    string         `json:"originalByteSample,omitempty"`
+	LastLocalSHA256       string         `json:"lastLocalSha256"`
+	Dirty                 bool           `json:"dirty"`
+	State                 string         `json:"state"`
+	RecordState           string         `json:"recordState,omitempty"`
+	SaveMode              string         `json:"saveMode,omitempty"`
+	Hidden                bool           `json:"hidden"`
+	Expired               bool           `json:"expired"`
 	LastError             *ErrorSnapshot `json:"lastError,omitempty"`
-	SourceSessionID       string   `json:"sourceSessionId,omitempty"`
-	SupersededBySessionID string   `json:"supersededBySessionId,omitempty"`
-	CreatedAt             int64    `json:"createdAt"`
-	UpdatedAt             int64    `json:"updatedAt"`
-	LastLaunchedAt        int64    `json:"lastLaunchedAt"`
-	LastSyncedAt          int64    `json:"lastSyncedAt"`
+	SourceSessionID       string         `json:"sourceSessionId,omitempty"`
+	SupersededBySessionID string         `json:"supersededBySessionId,omitempty"`
+	CreatedAt             int64          `json:"createdAt"`
+	UpdatedAt             int64          `json:"updatedAt"`
+	LastLaunchedAt        int64          `json:"lastLaunchedAt"`
+	LastSyncedAt          int64          `json:"lastSyncedAt"`
 }
 
 // Conflict 描述 document 级冲突关系：
@@ -939,16 +939,16 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 					s.pauseAutoSaveForDocument(result.DocumentKey)
 					s.writeAudit(result, "external_edit_conflict_remote_missing", true, map[string]any{"resolution": resolution}, saveResult, nil)
 					s.emit(Event{Type: eventSessionConflict, Session: result, SaveResult: saveResult})
-				return saveResult, nil
+					return saveResult, nil
+				}
+				saveErr := fmt.Errorf("读取远程文件失败: %w", readErr)
+				failed := s.recordError(sessionID, "read_remote_file", saveErr)
+				if failed != nil {
+					s.emit(Event{Type: eventSessionChanged, Session: failed})
+				}
+				return nil, saveErr
 			}
-			saveErr := fmt.Errorf("读取远程文件失败: %w", readErr)
-			failed := s.recordError(sessionID, "read_remote_file", saveErr)
-			if failed != nil {
-				s.emit(Event{Type: eventSessionChanged, Session: failed})
-			}
-			return nil, saveErr
-		}
-		if remoteInfo.SHA256 != session.OriginalSHA256 {
+			if remoteInfo.SHA256 != session.OriginalSHA256 {
 				result := s.markSessionState(sessionID, sessionStateConflict, true, localHash)
 				saveResult := &SaveResult{
 					Status:    saveStatusConflict,
@@ -1858,6 +1858,7 @@ func (s *Service) rereadRemoteSession(sessionID string) (*SaveResult, error) {
 		OriginalSize:    remoteInfo.Size,
 		OriginalModTime: remoteInfo.ModTime,
 		LastLocalSHA256: remoteInfo.SHA256,
+		SaveMode:        saveModeAutoLive,
 		State:           sessionStateClean,
 		SourceSessionID: current.ID,
 		CreatedAt:       nowUnix,
@@ -1915,7 +1916,9 @@ func (s *Service) rereadRemoteSession(sessionID string) (*SaveResult, error) {
 		Session:  openedCopy,
 		Conflict: s.describeConflict(staleCopy, openedCopy.ID),
 	}
-	s.pauseAutoSaveForDocument(openedCopy.DocumentKey)
+	// reread 代表用户已经接受“以远端新版本为新的活动草稿”。
+	// 这里必须恢复 document 级自动保存机会，否则新稿后续再次修改会停留在脏态，断开 watcher/auto-save/冲突链。
+	s.resumeAutoSaveForDocument(openedCopy.DocumentKey)
 	s.writeAudit(openedCopy, "external_edit_reread", true, map[string]any{"sourceSessionId": sessionID}, saveResult, nil)
 	s.emit(Event{Type: eventSessionChanged, Session: staleCopy})
 	s.emit(Event{Type: eventSessionOpened, Session: openedCopy})
