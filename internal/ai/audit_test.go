@@ -2,7 +2,6 @@ package ai
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 
@@ -214,61 +213,5 @@ func TestTruncateString(t *testing.T) {
 	})
 }
 
-func TestAuditingExecutor(t *testing.T) {
-	convey.Convey("AuditingExecutor", t, func() {
-		mockRepo := &mockAuditRepo{}
-		origRepo := audit_repo.Audit()
-		audit_repo.RegisterAudit(mockRepo)
-		t.Cleanup(func() {
-			if origRepo != nil {
-				audit_repo.RegisterAudit(origRepo)
-			}
-		})
-
-		inner := &mockExecutor{
-			results: map[string]string{
-				"list_assets": `[{"ID":1}]`,
-			},
-		}
-		writer := NewDefaultAuditWriter()
-		executor := NewAuditingExecutor(inner, writer)
-
-		convey.Convey("代理到 inner 并记录审计日志", func() {
-			ctx := WithAuditSource(context.Background(), "ai")
-			ctx = WithConversationID(ctx, 99)
-
-			result, err := executor.Execute(ctx, "list_assets", `{"asset_type":"ssh"}`)
-			assert.NoError(t, err)
-			assert.Equal(t, `[{"ID":1}]`, result)
-
-			// inner 应被调用
-			assert.Len(t, inner.calls, 1)
-			assert.Equal(t, "list_assets", inner.calls[0].Name)
-		})
-
-		convey.Convey("inner 报错时仍记录审计日志", func() {
-			failingInner := &failingExecutor{err: errors.New("connection refused")}
-			failExec := NewAuditingExecutor(failingInner, writer)
-
-			ctx := WithAuditSource(context.Background(), "ai")
-			result, err := failExec.Execute(ctx, "run_command", `{"asset_id":1,"command":"uptime"}`)
-
-			assert.Error(t, err)
-			assert.Equal(t, "", result)
-		})
-
-		convey.Convey("Close 代理到 inner", func() {
-			err := executor.Close()
-			assert.NoError(t, err)
-		})
-	})
-}
-
-// failingExecutor 模拟执行失败的 executor
-type failingExecutor struct {
-	err error
-}
-
-func (f *failingExecutor) Execute(_ context.Context, _ string, _ string) (string, error) {
-	return "", f.err
-}
+// TestAuditingExecutor 已随 AuditingExecutor 一并下线（M6 cutover）。
+// 等价覆盖参考 cago_audit_test.go 中的 TestRawTool_* 三组用例。

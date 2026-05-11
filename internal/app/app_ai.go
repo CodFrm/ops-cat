@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -40,7 +42,8 @@ func normalizeConversationTitle(title string) string {
 	return title
 }
 
-// activateProvider 根据 Provider 配置创建 AI Agent
+// activateProvider 根据 Provider 配置准备 CagoRunner 所需的依赖。
+// 不再构造自研 *ai.Agent —— CagoRunner 在每次 Send 时按需 BuildCagoProvider + coding.New。
 func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
 	apiKey, err := ai_provider_svc.AIProvider().DecryptAPIKey(p)
 	if err != nil {
@@ -50,52 +53,45 @@ func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
 	checker := ai.NewCommandPolicyChecker(a.makeCommandConfirmFunc())
 	checker.SetGrantRequestFunc(a.makeGrantRequestFunc())
 
-	maxOutputTokens := ai.ResolveMaxOutputTokens(p.MaxOutputTokens, p.Model)
-	contextWindow := ai.ResolveContextWindow(p.ContextWindow, p.Model)
-
-	var provider ai.Provider
-	switch p.Type {
-	case "anthropic":
-		provider = ai.NewAnthropicProvider(
-			p.Name,
-			p.APIBase,
-			apiKey,
-			p.Model,
-			maxOutputTokens,
-			p.ReasoningEnabled,
-			p.ReasoningEffort,
-		)
-	default: // "openai"
-		provider = ai.NewOpenAIProvider(
-			p.Name,
-			p.APIBase,
-			apiKey,
-			p.Model,
-			maxOutputTokens,
-			p.ReasoningEnabled,
-			p.ReasoningEffort,
-		)
+	cwd, err := defaultAICwd()
+	if err != nil {
+		return fmt.Errorf("准备 AI 工作目录失败: %w", err)
 	}
 
-	config := ai.NewDefaultConfig()
-	config.ContextWindow = contextWindow
-	a.aiAgent = ai.NewAgent(provider, func() ai.ToolExecutor {
-		return ai.NewAuditingExecutor(ai.NewDefaultToolExecutor(), ai.NewDefaultAuditWriter())
-	}, checker, config)
+	a.aiRunnerCfg = &ai.CagoRunnerConfig{
+		ProviderEntity: p,
+		APIKey:         apiKey,
+		Cwd:            cwd,
+		PolicyChecker:  checker,
+		Tools:          ai.CagoTools(),
+	}
 	a.resetRunners()
 	return nil
 }
 
-// resetRunners 停止并清空所有缓存的 ConversationRunner。
-// Why: runner 在创建时会捕获当时的 aiAgent 引用，供应商切换后若不清空，
+// defaultAICwd 默认 AI 工作目录 = ~/.opskat。不存在时自动创建。
+func defaultAICwd() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	cwd := filepath.Join(home, ".opskat")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		return "", err
+	}
+	return cwd, nil
+}
+
+// resetRunners 停止并清空所有缓存的 CagoRunner。
+// Why: runner 在创建时会捕获当时的 aiRunnerCfg 引用，供应商切换后若不清空，
 // 已有会话会继续使用旧 provider，必须重启软件才生效。
-// 并发调用 Stop 避免串行累计阻塞 UI；另外设 3s 上限——Runner.Stop 会阻塞等
+// 并发调用 Stop 避免串行累计阻塞 UI；另外设 3s 上限——Stop 会阻塞等
 // goroutine 退出，若某个 Stop 被卡住（ctx 不被及时响应等），
-// 超时后放行，泄漏的 goroutine 只是持有旧 agent 引用，不会导致正确性问题。
+// 超时后放行，泄漏的 goroutine 只是持有旧 cfg 引用，不会导致正确性问题。
 func (a *App) resetRunners() {
 	var wg sync.WaitGroup
 	a.runners.Range(func(key, value any) bool {
-		if r, ok := value.(*ai.ConversationRunner); ok {
+		if r, ok := value.(*ai.CagoRunner); ok {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -142,7 +138,7 @@ type ConversationDisplayMessage struct {
 
 // CreateConversation 创建新会话
 func (a *App) CreateConversation() (*conversation_entity.Conversation, error) {
-	if a.aiAgent == nil {
+	if a.aiRunnerCfg == nil {
 		return nil, fmt.Errorf("请先配置 AI Provider")
 	}
 	ctx := a.langCtx()
@@ -245,7 +241,7 @@ func (a *App) switchToConversation(conv *conversation_entity.Conversation) {
 func (a *App) DeleteConversation(id int64) error {
 	// 先停止正在运行的生成
 	if v, ok := a.runners.Load(id); ok {
-		v.(*ai.ConversationRunner).Stop()
+		v.(*ai.CagoRunner).Stop()
 		a.runners.Delete(id)
 	}
 
@@ -262,7 +258,7 @@ func (a *App) DeleteConversation(id int64) error {
 // SendAIMessage 发送 AI 消息，通过 Wails Events 流式返回
 // convID 指定目标会话，支持多会话并发发送
 func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AIContext) error {
-	if a.aiAgent == nil {
+	if a.aiRunnerCfg == nil {
 		return fmt.Errorf("请先配置 AI Provider")
 	}
 
@@ -318,12 +314,9 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 		}
 	}
 
-	fullMessages := make([]ai.Message, 0, 1+len(messages))
-	fullMessages = append(fullMessages, ai.Message{
-		Role:    ai.RoleSystem,
-		Content: builder.Build(),
-	})
-	fullMessages = append(fullMessages, messages...)
+	// cago 路径：system prompt 走 CagoRunner.Start 第 1 个参数注入到 coding.AppendSystem，
+	// 不再以 RoleSystem 消息塞进 messages 列表。
+	systemPrompt := builder.Build()
 
 	// 注入审计上下文
 	chatCtx := ai.WithAuditSource(a.ctx, "ai")
@@ -333,18 +326,6 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 	if a.sshPool != nil {
 		chatCtx = ai.WithSSHPool(chatCtx, a.sshPool)
 	}
-
-	// 注入 Sub Agent 依赖
-	chatCtx = ai.WithSpawnAgentDeps(chatCtx, &ai.SpawnAgentDeps{
-		Provider: a.aiAgent.GetProvider(),
-		Checker:  a.aiAgent.GetPolicyChecker(),
-		OnEvent: func(event ai.StreamEvent) {
-			wailsRuntime.EventsEmit(a.ctx, eventName, event)
-		},
-		NewExecutor: func() ai.ToolExecutor {
-			return ai.NewAuditingExecutor(ai.NewDefaultToolExecutor(), ai.NewDefaultAuditWriter())
-		},
-	})
 
 	onEvent := func(event ai.StreamEvent) {
 		wailsRuntime.EventsEmit(a.ctx, eventName, event)
@@ -360,12 +341,12 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 	}
 
 	runner := a.getOrCreateRunner(convID)
-	return runner.Start(chatCtx, fullMessages, onEvent)
+	return runner.Start(chatCtx, systemPrompt, messages, onEvent)
 }
 
-func (a *App) getOrCreateRunner(convID int64) *ai.ConversationRunner {
-	v, _ := a.runners.LoadOrStore(convID, ai.NewConversationRunner(a.aiAgent))
-	return v.(*ai.ConversationRunner)
+func (a *App) getOrCreateRunner(convID int64) *ai.CagoRunner {
+	v, _ := a.runners.LoadOrStore(convID, ai.NewCagoRunner(*a.aiRunnerCfg))
+	return v.(*ai.CagoRunner)
 }
 
 // QueueAIMessage 在生成过程中追加用户消息到队列，
@@ -377,7 +358,7 @@ func (a *App) QueueAIMessage(convID int64, content string, mentions []ai.Mention
 	if !ok {
 		return fmt.Errorf("会话 %d 没有正在运行的生成", convID)
 	}
-	runner := v.(*ai.ConversationRunner)
+	runner := v.(*ai.CagoRunner)
 	body := content
 	if mentionCtx := ai.RenderMentionContext(mentions); mentionCtx != "" {
 		body = mentionCtx + "\n\n" + content
@@ -395,7 +376,7 @@ func (a *App) StopAIGeneration(convID int64) error {
 	if !ok {
 		return nil
 	}
-	runner := v.(*ai.ConversationRunner)
+	runner := v.(*ai.CagoRunner)
 	runner.Stop()
 	return nil
 }

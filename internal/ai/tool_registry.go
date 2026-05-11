@@ -10,486 +10,77 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// ToolHandlerFunc 统一工具处理函数
+// tool_registry.go 的旧自研工具抽象（ParamDef / ToOpenAITools / DefaultToolExecutor）
+// 已在 M6 cutover 删除——OpsKat 桌面端走 cago 原生 tool.Tool（见 cago_tools*.go）。
+//
+// 但 opsctl CLI 仍然直接以 (ctx, args)→(string, error) 的形式调用 handler，
+// 因此保留下面三个最小抽象：
+//   - ToolHandlerFunc：handler 通用签名；
+//   - CommandExtractorFunc：审计模块从 args 抽命令摘要的签名（audit.go 用）；
+//   - ToolDef + AllToolDefs：opsctl 的 name→handler 派发表（cmd/opsctl/command/handler.go 用）。
+//
+// 此外保留：
+//   - SSH 客户端缓存（同一次 Send 内复用 ssh.Client）；
+//   - 参数取值辅助（argString / argInt64 / argInt）。
+
+// ToolHandlerFunc 工具处理函数：从 args map 执行操作并返回纯文本结果。
 type ToolHandlerFunc func(ctx context.Context, args map[string]any) (string, error)
 
-// ParamType 参数类型
-type ParamType string
-
-const (
-	ParamString ParamType = "string"
-	ParamNumber ParamType = "number"
-)
-
-// ParamDef 参数定义
-type ParamDef struct {
-	Name        string
-	Type        ParamType
-	Description string
-	Required    bool
-}
-
-// CommandExtractorFunc 从工具参数中提取命令摘要（用于审计日志）
+// CommandExtractorFunc 从工具参数中提取命令摘要（用于审计日志）。
 type CommandExtractorFunc func(args map[string]any) string
 
-// ToolDef 统一工具定义
+// ToolDef opsctl 派发表条目。
+// 不含 Description/Params/CommandExtractor 字段——那些只用于 OpenAI function calling schema，
+// 已由 cago_tools*.go 内嵌的 makeSchema 处理。opsctl 只需要 (name, handler) 对。
 type ToolDef struct {
-	Name             string
-	Description      string
-	Params           []ParamDef
-	Handler          ToolHandlerFunc
-	CommandExtractor CommandExtractorFunc // 可选，提取审计日志中的命令摘要
+	Name    string
+	Handler ToolHandlerFunc
 }
 
-// AllToolDefs 返回所有工具定义
+// AllToolDefs 返回 opsctl CLI 派发用的工具列表（与 cago_tools.go 的 CagoTools 一一对应）。
+// spawn_agent / batch_command 已不再注册（opsctl 也没有调用它们）。
 func AllToolDefs() []ToolDef {
 	return []ToolDef{
-		{
-			Name:        "list_assets",
-			Description: "List managed remote server assets. Returns an array of assets (with ID, name, type, group, etc.). This is typically the first step to discover asset IDs for other operations. Supports filtering by type and group. Use get_asset to view asset description and connection details.",
-			Params: []ParamDef{
-				{Name: "asset_type", Type: ParamString, Description: `Filter by asset type. Supported: "ssh", "database", "redis", "mongodb", "kafka", "k8s". Omit to return all types.`},
-				{Name: "group_id", Type: ParamNumber, Description: "Filter by group ID. Omit or set to 0 to list all groups."},
-			},
-			Handler: handleListAssets,
-		},
-		{
-			Name:        "get_asset",
-			Description: "Get detailed information about a specific asset, including SSH connection fields and asset-type-specific metadata. For k8s assets, inspect namespace, context, and ssh_tunnel_id to decide whether kubectl should run through an SSH jump host.",
-			Params: []ParamDef{
-				{Name: "id", Type: ParamNumber, Description: "Asset ID. Use list_assets to find available IDs.", Required: true},
-			},
-			Handler: handleGetAsset,
-		},
-		{
-			Name:        "run_command",
-			Description: "Execute a shell command on a remote server via SSH and return the output. Credentials are resolved automatically from the app's encrypted store — do not ask the user for passwords. IMPORTANT: The command runs on the REMOTE server, not locally.",
-			Params: []ParamDef{
-				{Name: "asset_id", Type: ParamNumber, Description: "Target server asset ID. Use list_assets to find available IDs.", Required: true},
-				{Name: "command", Type: ParamString, Description: "Shell command to execute on the remote server.", Required: true},
-			},
-			Handler:          handleRunCommand,
-			CommandExtractor: func(args map[string]any) string { return argString(args, "command") },
-		},
-		{
-			Name:        "exec_k8s",
-			Description: "Execute a kubectl command against a k8s asset. The tool uses the asset's stored kubeconfig, automatically applies the asset's default context/namespace when not explicitly provided, and preserves policy checks, approval, grant matching, and audit logging. If the k8s asset has ssh_tunnel_id, the command runs on that SSH jump host; otherwise kubectl runs locally. Pass either a full kubectl command or just the kubectl subcommand. Do not pass --kubeconfig.",
-			Params: []ParamDef{
-				{Name: "asset_id", Type: ParamNumber, Description: "K8s asset ID. Use list_assets with asset_type='k8s' to find it.", Required: true},
-				{Name: "command", Type: ParamString, Description: "kubectl command or subcommand, for example 'get pods -A' or 'kubectl describe pod api-0'.", Required: true},
-			},
-			Handler:          handleExecK8s,
-			CommandExtractor: k8sAuditCommandFromArgs,
-		},
-		{
-			Name:        "add_asset",
-			Description: `Add a new asset to the inventory. Supports types: "ssh", "database", "redis", "mongodb", "kafka", "k8s". For database, specify driver ("mysql" or "postgresql"). For k8s, specify kubeconfig. For kafka, specify brokers (comma-separated) plus optional sasl_mechanism / tls. Credentials (password / private_key) are stored encrypted; never echo them back to the user.`,
-			Params: []ParamDef{
-				{Name: "name", Type: ParamString, Description: `Display name for the asset.`, Required: true},
-				{Name: "type", Type: ParamString, Description: `Asset type: "ssh" (default), "database", "redis", "mongodb", "kafka", or "k8s".`},
-				{Name: "host", Type: ParamString, Description: "Hostname or IP address. Required except for k8s and kafka (kafka uses brokers, but host+port falls back to a single broker)."},
-				{Name: "port", Type: ParamNumber, Description: "Port number (default: 22 for SSH, 3306 for MySQL, 5432 for PostgreSQL, 6379 for Redis, 27017 for MongoDB, 9092 for Kafka). Required except for k8s; for kafka, used only when brokers is omitted."},
-				{Name: "username", Type: ParamString, Description: "Login username. Required for ssh/database/redis/mongodb; optional for kafka (only when SASL is configured)."},
-				{Name: "password", Type: ParamString, Description: "Plaintext password. Stored encrypted by the app. For SSH password auth, database/redis/mongodb, or kafka SASL auth."},
-				{Name: "auth_type", Type: ParamString, Description: `SSH auth method: "password" (default if password supplied) or "key" (default if private_key supplied). Only for SSH type.`},
-				{Name: "private_key", Type: ParamString, Description: "SSH private key in PEM format. Imported into the credential store and linked to the asset. SSH only."},
-				{Name: "passphrase", Type: ParamString, Description: "Passphrase for the SSH private key, if encrypted. SSH only."},
-				{Name: "driver", Type: ParamString, Description: `Database driver: "mysql" or "postgresql". Required for database type.`},
-				{Name: "database", Type: ParamString, Description: "Default database name. For database / mongodb type."},
-				{Name: "read_only", Type: ParamString, Description: `Set to "true" to enable read-only mode. For database type.`},
-				{Name: "redis_db", Type: ParamNumber, Description: "Default Redis DB index (0-15). Redis only."},
-				{Name: "kubeconfig", Type: ParamString, Description: "Kubeconfig YAML content. Required for k8s type."},
-				{Name: "namespace", Type: ParamString, Description: "Default Kubernetes namespace. K8s only."},
-				{Name: "context", Type: ParamString, Description: "Kubeconfig context name to use. K8s only."},
-				{Name: "brokers", Type: ParamString, Description: `Kafka broker list as comma/semicolon/newline separated "host:port" pairs (e.g. "kafka-0:9092,kafka-1:9092"). Kafka only; falls back to host+port when omitted.`},
-				{Name: "client_id", Type: ParamString, Description: "Kafka client ID label. Kafka only; defaults to opskat."},
-				{Name: "sasl_mechanism", Type: ParamString, Description: `Kafka SASL mechanism: "none" (default), "plain", "scram-sha-256", "scram-sha-512". Kafka only.`},
-				{Name: "tls", Type: ParamString, Description: `Set to "true" to enable TLS. Kafka only.`},
-				{Name: "tls_insecure", Type: ParamString, Description: `Set to "true" to skip TLS certificate verification. Kafka only.`},
-				{Name: "ssh_asset_id", Type: ParamNumber, Description: "SSH asset ID for tunnel connection. For database / redis / mongodb / kafka / k8s types."},
-				{Name: "group_id", Type: ParamNumber, Description: "Group ID to assign this asset to."},
-				{Name: "description", Type: ParamString, Description: "Optional description or notes."},
-			},
-			Handler: handleAddAsset,
-		},
-		{
-			Name:        "update_asset",
-			Description: "Update an existing asset. Only provide the fields you want to change; omitted fields remain unchanged. Pass an empty string to clear description / database / icon. Use list_assets + get_asset first to confirm the current state.",
-			Params: []ParamDef{
-				{Name: "id", Type: ParamNumber, Description: "ID of the asset to update.", Required: true},
-				{Name: "name", Type: ParamString, Description: "New display name."},
-				{Name: "host", Type: ParamString, Description: "New hostname or IP."},
-				{Name: "port", Type: ParamNumber, Description: "New port."},
-				{Name: "username", Type: ParamString, Description: "New username."},
-				{Name: "password", Type: ParamString, Description: "New password (plaintext). Stored encrypted; switches the asset to inline password auth."},
-				{Name: "auth_type", Type: ParamString, Description: `SSH auth method: "password" or "key". SSH only.`},
-				{Name: "private_key", Type: ParamString, Description: "Replace SSH private key (PEM). Re-imports into credential store. SSH only."},
-				{Name: "passphrase", Type: ParamString, Description: "Passphrase for new SSH private key, if encrypted. SSH only."},
-				{Name: "driver", Type: ParamString, Description: `Database driver: "mysql" or "postgresql". Database only.`},
-				{Name: "database", Type: ParamString, Description: "New default database. Database / mongodb only. Pass empty string to clear."},
-				{Name: "read_only", Type: ParamString, Description: `Set to "true"/"false" to toggle read-only. Database only.`},
-				{Name: "redis_db", Type: ParamNumber, Description: "New default Redis DB index. Redis only."},
-				{Name: "brokers", Type: ParamString, Description: `New Kafka broker list (comma/semicolon/newline separated "host:port"). Kafka only.`},
-				{Name: "client_id", Type: ParamString, Description: "New Kafka client ID. Kafka only."},
-				{Name: "sasl_mechanism", Type: ParamString, Description: `New Kafka SASL mechanism: "none", "plain", "scram-sha-256", "scram-sha-512". Kafka only.`},
-				{Name: "tls", Type: ParamString, Description: `Set to "true"/"false" to toggle Kafka TLS. Kafka only.`},
-				{Name: "tls_insecure", Type: ParamString, Description: `Set to "true"/"false" to toggle Kafka TLS skip-verify. Kafka only.`},
-				{Name: "ssh_asset_id", Type: ParamNumber, Description: "New SSH tunnel asset ID. Pass 0 to detach. Database / redis / mongodb / kafka only."},
-				{Name: "description", Type: ParamString, Description: "New description. Pass empty string to clear."},
-				{Name: "group_id", Type: ParamNumber, Description: "New group ID (must be a positive integer from list_groups). Omit to keep current group; values <= 0 are ignored. To remove an asset from its group, ask the user to do it in the UI."},
-				{Name: "icon", Type: ParamString, Description: "New icon name."},
-			},
-			Handler: handleUpdateAsset,
-		},
-		{
-			Name:        "list_groups",
-			Description: "List all asset groups. Groups organize assets into a hierarchy via parent_id. Use get_group to view group description.",
-			Handler:     handleListGroups,
-		},
-		{
-			Name:        "get_group",
-			Description: "Get detailed information about a specific asset group, including its description.",
-			Params: []ParamDef{
-				{Name: "id", Type: ParamNumber, Description: "Group ID. Use list_groups to find available IDs.", Required: true},
-			},
-			Handler: handleGetGroup,
-		},
-		{
-			Name:        "add_group",
-			Description: "Create a new asset group. Groups can be nested via parent_id to form a hierarchy.",
-			Params: []ParamDef{
-				{Name: "name", Type: ParamString, Description: "Display name for the group.", Required: true},
-				{Name: "parent_id", Type: ParamNumber, Description: "Parent group ID for nesting. Omit or set to 0 for a top-level group."},
-				{Name: "icon", Type: ParamString, Description: "Optional icon name."},
-				{Name: "description", Type: ParamString, Description: "Optional description."},
-				{Name: "sort_order", Type: ParamNumber, Description: "Sort order within the parent group; lower comes first."},
-			},
-			Handler: handleAddGroup,
-		},
-		{
-			Name:        "update_group",
-			Description: "Update an existing asset group. Only provide the fields you want to change; omitted fields remain unchanged. Pass empty string to clear icon / description.",
-			Params: []ParamDef{
-				{Name: "id", Type: ParamNumber, Description: "ID of the group to update.", Required: true},
-				{Name: "name", Type: ParamString, Description: "New display name."},
-				{Name: "parent_id", Type: ParamNumber, Description: "New parent group ID (must be a positive integer from list_groups). Omit to keep current parent; values <= 0 are ignored. To make a group top-level, ask the user to do it in the UI."},
-				{Name: "icon", Type: ParamString, Description: "New icon name. Empty string clears."},
-				{Name: "description", Type: ParamString, Description: "New description. Empty string clears."},
-				{Name: "sort_order", Type: ParamNumber, Description: "New sort order."},
-			},
-			Handler: handleUpdateGroup,
-		},
-		{
-			Name:        "upload_file",
-			Description: "Upload a local file to a remote server via SFTP. Credentials are resolved automatically.",
-			Params: []ParamDef{
-				{Name: "asset_id", Type: ParamNumber, Description: "Target server asset ID.", Required: true},
-				{Name: "local_path", Type: ParamString, Description: "Absolute path of the local file to upload.", Required: true},
-				{Name: "remote_path", Type: ParamString, Description: "Destination path on the remote server (including filename).", Required: true},
-			},
-			Handler: handleUploadFile,
-			CommandExtractor: func(args map[string]any) string {
-				return "upload " + argString(args, "local_path") + " → " + argString(args, "remote_path")
-			},
-		},
-		{
-			Name:        "download_file",
-			Description: "Download a file from a remote server to the local machine via SFTP. Credentials are resolved automatically.",
-			Params: []ParamDef{
-				{Name: "asset_id", Type: ParamNumber, Description: "Source server asset ID.", Required: true},
-				{Name: "remote_path", Type: ParamString, Description: "Path of the file on the remote server.", Required: true},
-				{Name: "local_path", Type: ParamString, Description: "Absolute local path to save the file (including filename).", Required: true},
-			},
-			Handler: handleDownloadFile,
-			CommandExtractor: func(args map[string]any) string {
-				return "download " + argString(args, "remote_path") + " → " + argString(args, "local_path")
-			},
-		},
-		{
-			Name:        "exec_sql",
-			Description: "Execute SQL on a database asset (MySQL, PostgreSQL). Returns rows as JSON for queries (SELECT/SHOW/DESCRIBE/EXPLAIN), or affected row count for statements (INSERT/UPDATE/DELETE). Credentials are resolved automatically.",
-			Params: []ParamDef{
-				{Name: "asset_id", Type: ParamNumber, Description: "Database asset ID. Use list_assets with asset_type='database' to find.", Required: true},
-				{Name: "sql", Type: ParamString, Description: "SQL to execute.", Required: true},
-				{Name: "database", Type: ParamString, Description: "Override the default database for this execution."},
-			},
-			Handler:          handleExecSQL,
-			CommandExtractor: func(args map[string]any) string { return argString(args, "sql") },
-		},
-		{
-			Name:        "exec_redis",
-			Description: "Execute a Redis command on a Redis asset. Returns the result as JSON. Credentials are resolved automatically. IMPORTANT: Do NOT use the SELECT command to switch databases — it has no effect due to connection pooling. Use the 'db' parameter instead.",
-			Params: []ParamDef{
-				{Name: "asset_id", Type: ParamNumber, Description: "Redis asset ID. Use list_assets with asset_type='redis' to find.", Required: true},
-				{Name: "command", Type: ParamString, Description: "Redis command (e.g. 'GET mykey', 'HGETALL user:1', 'SET key value EX 3600'). Do NOT use SELECT command here, use the 'db' parameter to switch databases.", Required: true},
-				{Name: "db", Type: ParamNumber, Description: "Override the default Redis database number (0-15). Use this instead of the SELECT command."},
-			},
-			Handler:          handleExecRedis,
-			CommandExtractor: func(args map[string]any) string { return argString(args, "command") },
-		},
-		{
-			Name:        "exec_mongo",
-			Description: "Execute MongoDB operations on a MongoDB asset. Credentials are resolved automatically.",
-			Params: []ParamDef{
-				{Name: "asset_id", Type: ParamNumber, Description: "MongoDB asset ID. Use list_assets with asset_type='mongodb' to find.", Required: true},
-				{Name: "operation", Type: ParamString, Description: "Operation: find, findOne, insertOne, insertMany, updateOne, updateMany, deleteOne, deleteMany, aggregate, countDocuments", Required: true},
-				{Name: "database", Type: ParamString, Description: "Database name", Required: true},
-				{Name: "collection", Type: ParamString, Description: "Collection name", Required: true},
-				{Name: "query", Type: ParamString, Description: "JSON for filter/document/pipeline, depends on operation"},
-			},
-			Handler:          handleExecMongo,
-			CommandExtractor: func(args map[string]any) string { return argString(args, "operation") },
-		},
-		{
-			Name:        "kafka_cluster",
-			Description: "Read Kafka cluster metadata and configuration for a Kafka asset. Grouped operations: overview, brokers, get_broker_config, list_cluster_configs. Credentials are resolved automatically.",
-			Params: []ParamDef{
-				{Name: "asset_id", Type: ParamNumber, Description: "Kafka asset ID. Use list_assets with asset_type='kafka' to find.", Required: true},
-				{Name: "operation", Type: ParamString, Description: "Operation: overview, brokers, get_broker_config, list_cluster_configs. Defaults to overview."},
-				{Name: "broker_id", Type: ParamNumber, Description: "Broker node ID for operation=get_broker_config."},
-			},
-			Handler: handleKafkaCluster,
-			CommandExtractor: func(args map[string]any) string {
-				cmd, _ := kafkaClusterCommand(normalizeKafkaOperation(argString(args, "operation"), "overview"))
-				return cmd
-			},
-		},
-		{
-			Name:        "kafka_topic",
-			Description: "Read and manage Kafka topics for a Kafka asset. Grouped operations: list, get, create, delete, update_config, increase_partitions, delete_records.",
-			Params: []ParamDef{
-				{Name: "asset_id", Type: ParamNumber, Description: "Kafka asset ID. Use list_assets with asset_type='kafka' to find.", Required: true},
-				{Name: "operation", Type: ParamString, Description: "Operation: list, get, create, delete, update_config, increase_partitions, delete_records. Defaults to list."},
-				{Name: "topic", Type: ParamString, Description: "Topic name. Required except operation=list."},
-				{Name: "include_internal", Type: ParamString, Description: `Set to "true" to include internal topics when operation=list.`},
-				{Name: "search", Type: ParamString, Description: "Optional case-insensitive topic name filter for operation=list."},
-				{Name: "page", Type: ParamNumber, Description: "Page number for operation=list. Defaults to 1."},
-				{Name: "page_size", Type: ParamNumber, Description: "Page size for operation=list. Defaults to 50, max 500."},
-				{Name: "partitions", Type: ParamNumber, Description: "Partition count for operation=create."},
-				{Name: "replication_factor", Type: ParamNumber, Description: "Replication factor for operation=create."},
-				{Name: "configs", Type: ParamString, Description: `Topic configs for operation=create as JSON object, e.g. {"cleanup.policy":"compact"}. Optional.`},
-				{Name: "config_updates", Type: ParamString, Description: `Config mutations for operation=update_config as JSON array, e.g. [{"name":"retention.ms","value":"60000","op":"set"}]. op can be set, delete, append, subtract.`},
-				{Name: "partition_count", Type: ParamNumber, Description: "Final partition count for operation=increase_partitions. Must be greater than the current count."},
-				{Name: "records", Type: ParamString, Description: `Partition offsets for operation=delete_records as JSON array, e.g. [{"partition":0,"offset":123}]. Deletes records before each offset.`},
-			},
-			Handler: handleKafkaTopic,
-			CommandExtractor: func(args map[string]any) string {
-				cmd, _ := kafkaTopicCommand(normalizeKafkaOperation(argString(args, "operation"), "list"), argString(args, "topic"))
-				return cmd
-			},
-		},
-		{
-			Name:        "kafka_consumer_group",
-			Description: "Read and manage Kafka consumer groups for a Kafka asset. Grouped operations: list, get, reset_offset, delete.",
-			Params: []ParamDef{
-				{Name: "asset_id", Type: ParamNumber, Description: "Kafka asset ID. Use list_assets with asset_type='kafka' to find.", Required: true},
-				{Name: "operation", Type: ParamString, Description: "Operation: list, get, reset_offset, delete. Defaults to list."},
-				{Name: "group", Type: ParamString, Description: "Consumer group name. Required except operation=list."},
-				{Name: "topic", Type: ParamString, Description: "Topic name for operation=reset_offset."},
-				{Name: "partitions", Type: ParamString, Description: "Optional JSON array of partitions for operation=reset_offset. Omit to reset all partitions in the topic."},
-				{Name: "mode", Type: ParamString, Description: "Offset reset mode: earliest, latest, offset, timestamp. Defaults to latest."},
-				{Name: "offset", Type: ParamNumber, Description: "Offset for mode=offset."},
-				{Name: "timestamp_millis", Type: ParamNumber, Description: "Unix milliseconds for mode=timestamp."},
-			},
-			Handler: handleKafkaConsumerGroup,
-			CommandExtractor: func(args map[string]any) string {
-				cmd, _ := kafkaConsumerGroupCommand(normalizeKafkaOperation(argString(args, "operation"), "list"), argString(args, "group"))
-				return cmd
-			},
-		},
-		{
-			Name:        "kafka_acl",
-			Description: "Read and manage Kafka ACLs for a Kafka asset. Grouped operations: list, create, delete. ACL create/delete are security-admin operations and require explicit policy approval.",
-			Params: []ParamDef{
-				{Name: "asset_id", Type: ParamNumber, Description: "Kafka asset ID. Use list_assets with asset_type='kafka' to find.", Required: true},
-				{Name: "operation", Type: ParamString, Description: "Operation: list, create, delete. Defaults to list."},
-				{Name: "resource_type", Type: ParamString, Description: "ACL resource type: topic, group, cluster, transactional_id, delegation_token, or any for list only."},
-				{Name: "resource_name", Type: ParamString, Description: "ACL resource name. Required for create/delete except resource_type=cluster."},
-				{Name: "pattern_type", Type: ParamString, Description: "ACL pattern type: literal, prefixed, match, any. create/delete only allow literal or prefixed."},
-				{Name: "principal", Type: ParamString, Description: "ACL principal, e.g. User:alice. Required for create/delete."},
-				{Name: "host", Type: ParamString, Description: "ACL host, e.g. * or 192.168.1.10. Required for delete; create defaults to * when omitted."},
-				{Name: "acl_operation", Type: ParamString, Description: "Kafka ACL operation: read, write, create, delete, alter, describe, describe_configs, alter_configs, all, etc."},
-				{Name: "permission", Type: ParamString, Description: "ACL permission: allow, deny, or any for list only."},
-				{Name: "page", Type: ParamNumber, Description: "Page number for operation=list. Defaults to 1."},
-				{Name: "page_size", Type: ParamNumber, Description: "Page size for operation=list. Defaults to 50, max 500."},
-			},
-			Handler: handleKafkaACL,
-			CommandExtractor: func(args map[string]any) string {
-				cmd, _ := kafkaACLCommand(normalizeKafkaOperation(argString(args, "operation"), "list"))
-				return cmd
-			},
-		},
-		{
-			Name:        "kafka_schema",
-			Description: "Read and manage Schema Registry subjects for a Kafka asset when Schema Registry is configured. Grouped operations: list_subjects, list_versions, get, check_compatibility, register, delete.",
-			Params: []ParamDef{
-				{Name: "asset_id", Type: ParamNumber, Description: "Kafka asset ID. Use list_assets with asset_type='kafka' to find.", Required: true},
-				{Name: "operation", Type: ParamString, Description: "Operation: list_subjects, list_versions, get, check_compatibility, register, delete. Defaults to list_subjects."},
-				{Name: "subject", Type: ParamString, Description: "Schema subject. Required except operation=list_subjects."},
-				{Name: "version", Type: ParamString, Description: "Schema version number or latest. Defaults to latest for get/check_compatibility. Optional for delete; omitted deletes the subject."},
-				{Name: "schema", Type: ParamString, Description: "Schema content for register/check_compatibility."},
-				{Name: "schema_type", Type: ParamString, Description: "Schema type such as AVRO, JSON, or PROTOBUF. Optional."},
-				{Name: "references", Type: ParamString, Description: `Schema references as JSON array, e.g. [{"name":"Common","subject":"common-value","version":1}]. Optional.`},
-				{Name: "permanent", Type: ParamString, Description: `Set to "true" for permanent delete where supported.`},
-			},
-			Handler: handleKafkaSchema,
-			CommandExtractor: func(args map[string]any) string {
-				cmd, _ := kafkaSchemaCommand(normalizeKafkaOperation(argString(args, "operation"), "list_subjects"), argString(args, "subject"))
-				return cmd
-			},
-		},
-		{
-			Name:        "kafka_connect",
-			Description: "Read and manage Kafka Connect connectors for a Kafka asset when Kafka Connect is configured. Grouped operations: list_clusters, list_connectors, get_connector, create, update_config, pause, resume, restart, delete.",
-			Params: []ParamDef{
-				{Name: "asset_id", Type: ParamNumber, Description: "Kafka asset ID. Use list_assets with asset_type='kafka' to find.", Required: true},
-				{Name: "operation", Type: ParamString, Description: "Operation: list_clusters, list_connectors, get_connector, create, update_config, pause, resume, restart, delete. Defaults to list_connectors."},
-				{Name: "cluster", Type: ParamString, Description: "Kafka Connect cluster name. Optional when the asset has exactly one Connect cluster."},
-				{Name: "connector", Type: ParamString, Description: "Connector name. Required except list_clusters/list_connectors."},
-				{Name: "config", Type: ParamString, Description: "Connector config as JSON object for create/update_config."},
-				{Name: "include_tasks", Type: ParamString, Description: `Set to "true" for restart to include tasks.`},
-				{Name: "only_failed", Type: ParamString, Description: `Set to "true" for restart to restart only failed tasks.`},
-			},
-			Handler: handleKafkaConnect,
-			CommandExtractor: func(args map[string]any) string {
-				cmd, _ := kafkaConnectCommand(normalizeKafkaOperation(argString(args, "operation"), "list_connectors"), argString(args, "connector"))
-				return cmd
-			},
-		},
-		{
-			Name:        "kafka_message",
-			Description: "Browse or produce bounded Kafka messages for a Kafka asset. Grouped operations: browse, inspect, produce. Message reads and writes are policy-controlled; returned payload previews are truncated.",
-			Params: []ParamDef{
-				{Name: "asset_id", Type: ParamNumber, Description: "Kafka asset ID. Use list_assets with asset_type='kafka' to find.", Required: true},
-				{Name: "operation", Type: ParamString, Description: "Operation: browse, inspect, produce. Defaults to browse."},
-				{Name: "topic", Type: ParamString, Description: "Topic name.", Required: true},
-				{Name: "partition", Type: ParamNumber, Description: "Optional partition. Required for inspect."},
-				{Name: "start_mode", Type: ParamString, Description: "Browse start mode: newest, oldest, offset, timestamp. Defaults to newest."},
-				{Name: "offset", Type: ParamNumber, Description: "Start offset for browse start_mode=offset, or exact offset for inspect."},
-				{Name: "timestamp_millis", Type: ParamNumber, Description: "Unix milliseconds for browse start_mode=timestamp, or produce timestamp override."},
-				{Name: "limit", Type: ParamNumber, Description: "Browse record limit. Defaults to asset settings; max 1000."},
-				{Name: "max_bytes", Type: ParamNumber, Description: "Max key/value/header preview bytes per field. Defaults to asset settings."},
-				{Name: "decode_mode", Type: ParamString, Description: "Browse decode mode: text, json, hex, base64. Defaults to text; binary data is returned as base64."},
-				{Name: "max_wait_millis", Type: ParamNumber, Description: "Browse poll wait in milliseconds. Defaults to 1000; max 30000."},
-				{Name: "key", Type: ParamString, Description: "Produce key. Optional."},
-				{Name: "key_encoding", Type: ParamString, Description: "Produce key encoding: text, json, hex, base64. Defaults to text."},
-				{Name: "value", Type: ParamString, Description: "Produce value. Empty string is allowed."},
-				{Name: "value_encoding", Type: ParamString, Description: "Produce value encoding: text, json, hex, base64. Defaults to text."},
-				{Name: "headers", Type: ParamString, Description: `Produce headers as JSON array, e.g. [{"key":"trace","value":"abc","encoding":"text"}]. Optional.`},
-			},
-			Handler: handleKafkaMessage,
-			CommandExtractor: func(args map[string]any) string {
-				cmd, _ := kafkaMessageCommand(normalizeKafkaOperation(argString(args, "operation"), "browse"), argString(args, "topic"))
-				return cmd
-			},
-		},
-		{
-			Name:        "request_permission",
-			Description: "Request approval for grant of command patterns BEFORE executing them. Submit command patterns (one per line, supports '*' wildcard) for one or more target assets. The user will review and may edit the patterns before approving. Once approved, subsequent run_command/exec_sql/exec_redis/exec_mongo/exec_k8s/kafka_* calls matching any approved pattern will be auto-approved.",
-			Params: []ParamDef{
-				{Name: "items", Type: ParamString, Description: `JSON array of items. Each item: {"asset_id": <number>, "command_patterns": "<patterns separated by newline>"}. Example: [{"asset_id":1,"command_patterns":"cat /var/log/*\nsystemctl * nginx"},{"asset_id":2,"command_patterns":"SELECT * FROM users"}]`, Required: true},
-				{Name: "reason", Type: ParamString, Description: "Brief explanation of why these permissions are needed.", Required: true},
-			},
-			Handler: handleRequestGrant,
-			CommandExtractor: func(args map[string]any) string {
-				v := argString(args, "items")
-				if reason := argString(args, "reason"); reason != "" {
-					return "grant: " + v + " reason: " + reason
-				}
-				return "grant: " + v
-			},
-		},
-		{
-			Name:        "spawn_agent",
-			Description: "Spawn a sub-agent to perform a complex task independently. The sub-agent has its own conversation context and session. Use this for: multi-step exploration, parallel investigation across assets, or tasks that require many tool calls. The sub-agent will request its own permissions as needed.",
-			Params: []ParamDef{
-				{Name: "role", Type: ParamString, Description: "Role description for the sub-agent (e.g., 'Server environment explorer')", Required: true},
-				{Name: "task", Type: ParamString, Description: "Detailed task description for the sub-agent", Required: true},
-				{Name: "tools", Type: ParamString, Description: "JSON array of tool names the sub-agent can use. Omit for all tools."},
-			},
-			Handler: handleSpawnAgent,
-		},
-		{
-			Name:        "batch_command",
-			Description: "Execute commands on multiple assets in parallel. Supports exec (SSH), sql (database), and redis command types. Commands are policy-checked and require user confirmation if needed. Results are returned per-asset.",
-			Params: []ParamDef{
-				{Name: "commands", Type: ParamString, Description: `JSON array of commands. Each item: {"asset": "name-or-id", "type": "exec|sql|redis", "command": "..."}. Type defaults to "exec".`, Required: true},
-			},
-			Handler: handleBatchCommand,
-			CommandExtractor: func(args map[string]any) string {
-				if cmds, ok := args["commands"]; ok {
-					b, _ := json.Marshal(cmds)
-					return string(b)
-				}
-				return ""
-			},
-		},
-		{
-			Name:        "exec_tool",
-			Description: "Execute an extension tool. Use this to call tools provided by installed extensions.",
-			Params: []ParamDef{
-				{Name: "extension", Type: ParamString, Description: `Extension name (e.g. "oss")`, Required: true},
-				{Name: "tool", Type: ParamString, Description: `Tool name (e.g. "list_buckets")`, Required: true},
-				{Name: "args", Type: ParamString, Description: "Tool arguments as JSON object", Required: true},
-				{Name: "asset_id", Type: ParamNumber, Description: "Asset ID for policy checking", Required: false},
-			},
-			Handler: handleExecTool,
-			CommandExtractor: func(args map[string]any) string {
-				return argString(args, "extension") + "." + argString(args, "tool")
-			},
-		},
+		{"list_assets", handleListAssets},
+		{"get_asset", handleGetAsset},
+		{"add_asset", handleAddAsset},
+		{"update_asset", handleUpdateAsset},
+		{"list_groups", handleListGroups},
+		{"get_group", handleGetGroup},
+		{"add_group", handleAddGroup},
+		{"update_group", handleUpdateGroup},
+		{"run_command", handleRunCommand},
+		{"upload_file", handleUploadFile},
+		{"download_file", handleDownloadFile},
+		{"exec_sql", handleExecSQL},
+		{"exec_redis", handleExecRedis},
+		{"exec_mongo", handleExecMongo},
+		{"exec_k8s", handleExecK8s},
+		{"kafka_cluster", handleKafkaCluster},
+		{"kafka_topic", handleKafkaTopic},
+		{"kafka_consumer_group", handleKafkaConsumerGroup},
+		{"kafka_acl", handleKafkaACL},
+		{"kafka_schema", handleKafkaSchema},
+		{"kafka_connect", handleKafkaConnect},
+		{"kafka_message", handleKafkaMessage},
+		{"request_permission", handleRequestGrant},
+		{"exec_tool", handleExecTool},
 	}
 }
 
-// --- 格式转换 ---
-
-// ToOpenAITools 将工具定义转换为 OpenAI function calling 格式
-func ToOpenAITools(defs []ToolDef) []Tool {
-	tools := make([]Tool, len(defs))
-	for i, def := range defs {
-		properties := make(map[string]any)
-		var required []string
-		for _, p := range def.Params {
-			properties[p.Name] = map[string]any{
-				"type":        string(p.Type),
-				"description": p.Description,
-			}
-			if p.Required {
-				required = append(required, p.Name)
-			}
-		}
-		params := map[string]any{
-			"type":       "object",
-			"properties": properties,
-		}
-		if len(required) > 0 {
-			params["required"] = required
-		}
-		tools[i] = Tool{
-			Type: "function",
-			Function: ToolFunction{
-				Name:        def.Name,
-				Description: def.Description,
-				Parameters:  params,
-			},
-		}
-	}
-	return tools
-}
-
-// --- SSH 客户端缓存（内置 Agent 同一次 Chat 中复用连接）---
+// --- SSH 客户端缓存（cago 工具 handler 在同一次 Send 中复用连接）---
 
 type sshCacheKeyType struct{}
 
-// SSHClientCache 在同一次 AI Chat 中复用 SSH 连接
+// SSHClientCache 在同一次 AI Send 中复用 SSH 连接。
 type SSHClientCache = ConnCache[*ssh.Client]
 
-// NewSSHClientCache 创建 SSH 客户端缓存
+// NewSSHClientCache 创建 SSH 客户端缓存。
 func NewSSHClientCache() *SSHClientCache {
 	return NewConnCache[*ssh.Client]("SSH")
 }
 
-// WithSSHCache 将 SSH 缓存注入 context
+// WithSSHCache 将 SSH 缓存注入 context。
 func WithSSHCache(ctx context.Context, cache *SSHClientCache) context.Context {
 	return context.WithValue(ctx, sshCacheKeyType{}, cache)
 }

@@ -67,7 +67,7 @@ type App struct {
 	sshManager              *ssh_svc.Manager
 	sftpService             *sftp_svc.Service
 	forwardManager          *ForwardManager
-	aiAgent                 *ai.Agent
+	aiRunnerCfg             *ai.CagoRunnerConfig
 	githubAuthCancel        context.CancelFunc
 	permissionChan          chan ai.PermissionResponse // 前端权限响应 channel（CLI 工具用）
 	pendingAIApprovals      sync.Map                   // map[string]chan ai.ApprovalResponse（AI 审批用）

@@ -157,40 +157,31 @@ func TestAllToolDefsContainsGroupedKafkaTools(t *testing.T) {
 	assert.Contains(t, tools, "kafka_message")
 	assert.NotContains(t, tools, "kafka_topic_delete")
 
-	cmd := tools["kafka_message"].CommandExtractor(map[string]any{
+	// 命令摘要提取器在 M6 后改成包级静态表（commandExtractors），
+	// 不再挂在 ToolDef 字段上。这里直接走 ExtractCommandForAudit 验证语义未漂移。
+	assert.Equal(t, "message.write orders", ExtractCommandForAudit("kafka_message", map[string]any{
 		"operation": "produce",
 		"topic":     "orders",
-	})
-	assert.Equal(t, "message.write orders", cmd)
-
-	cmd = tools["kafka_topic"].CommandExtractor(map[string]any{
+	}))
+	assert.Equal(t, "topic.records.delete orders", ExtractCommandForAudit("kafka_topic", map[string]any{
 		"operation": "delete_records",
 		"topic":     "orders",
-	})
-	assert.Equal(t, "topic.records.delete orders", cmd)
-
-	cmd = tools["kafka_consumer_group"].CommandExtractor(map[string]any{
+	}))
+	assert.Equal(t, "consumer_group.offset.write billing-worker", ExtractCommandForAudit("kafka_consumer_group", map[string]any{
 		"operation": "reset_offset",
 		"group":     "billing-worker",
-	})
-	assert.Equal(t, "consumer_group.offset.write billing-worker", cmd)
-
-	cmd = tools["kafka_acl"].CommandExtractor(map[string]any{
+	}))
+	assert.Equal(t, "acl.write *", ExtractCommandForAudit("kafka_acl", map[string]any{
 		"operation": "create",
-	})
-	assert.Equal(t, "acl.write *", cmd)
-
-	cmd = tools["kafka_schema"].CommandExtractor(map[string]any{
+	}))
+	assert.Equal(t, "schema.write orders-value", ExtractCommandForAudit("kafka_schema", map[string]any{
 		"operation": "register",
 		"subject":   "orders-value",
-	})
-	assert.Equal(t, "schema.write orders-value", cmd)
-
-	cmd = tools["kafka_connect"].CommandExtractor(map[string]any{
+	}))
+	assert.Equal(t, "connect.state.write sink-orders", ExtractCommandForAudit("kafka_connect", map[string]any{
 		"operation": "restart",
 		"connector": "sink-orders",
-	})
-	assert.Equal(t, "connect.state.write sink-orders", cmd)
+	}))
 }
 
 func TestKafkaMessageArgs(t *testing.T) {

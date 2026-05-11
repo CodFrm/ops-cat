@@ -73,8 +73,10 @@ Bindings stay thin: parse → service → return. Business rules in `service/`, 
 - **Go tests:** goconvey + testify.
 - **Frontend:** Prettier (120 col, 2-space).
 
-## Fix policy — root cause, in scope, no parking
+## Fix policy — TDD, root cause, in scope, no parking
 
+- **TDD bug-fix workflow.** Reproduce the bug as a failing test first (`go test` for backend, `vitest` for frontend) before touching the implementation. The test must fail for the right reason — same error/assertion the user reported. Only then apply the fix and watch the same test go green. Skipping the failing-test step is not allowed even for "obvious" one-liners; if the bug can't be reasonably reproduced in a test, say so explicitly and explain why before patching.
+- **Don't touch unrelated files.** A bug fix touches the producer of the bug, its test, and at most an in-scope drift directly under your cursor. Resist drive-by refactors, rename sweeps, formatter passes, dead-code cleanup, or unrelated test churn in the same change — they bury the actual fix in the diff and break bisect.
 - **Fix root causes, not symptoms.** Don't guard at the call site to mask a producer that emits bad values — fix the producer. Don't re-normalize a field at multiple consumers — normalize once at the boundary. If the design is wrong, refactor the affected piece; don't route around it. A comment explaining why a workaround is needed usually means the underlying code should change.
 - **Fix in-scope drift in the same change.** Stale docstring, lying CLAUDE.md line, dead reference, obvious one-line bug under your cursor → fix it now, don't TODO it.
 - **Stay in scope.** Multi-day refactors / hot subsystems / design-discussion territory → flag and ask. Genuine out-of-scope workaround → isolate it in one place with a clear comment and surface it; don't normalize patching as the default.

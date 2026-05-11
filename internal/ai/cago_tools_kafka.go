@@ -1,0 +1,133 @@
+package ai
+
+import "github.com/cago-frame/agents/tool"
+
+// kafkaCagoTools Kafka 操作工具集（7 个，与 AllToolDefs 中的 kafka_* 一一对齐）。
+// 全部 Serial：Kafka client / Schema Registry / Connect 是按 asset_id 缓存的有状态客户端，
+// 同会话内串行执行避免请求乱序导致的偏移混乱与配置写竞争。
+func kafkaCagoTools() []tool.Tool {
+	return []tool.Tool{
+		rawTool(
+			"kafka_cluster",
+			"Read Kafka cluster metadata and configuration for a Kafka asset. Grouped operations: overview, brokers, get_broker_config, list_cluster_configs. Credentials are resolved automatically.",
+			makeSchema(
+				paramSpec{name: "asset_id", typ: "number", required: true, desc: "Kafka asset ID. Use list_assets with asset_type='kafka' to find."},
+				paramSpec{name: "operation", typ: "string", desc: "Operation: overview, brokers, get_broker_config, list_cluster_configs. Defaults to overview."},
+				paramSpec{name: "broker_id", typ: "number", desc: "Broker node ID for operation=get_broker_config."},
+			),
+			true,
+			handleKafkaCluster,
+		),
+		rawTool(
+			"kafka_topic",
+			"Read and manage Kafka topics for a Kafka asset. Grouped operations: list, get, create, delete, update_config, increase_partitions, delete_records.",
+			makeSchema(
+				paramSpec{name: "asset_id", typ: "number", required: true, desc: "Kafka asset ID. Use list_assets with asset_type='kafka' to find."},
+				paramSpec{name: "operation", typ: "string", desc: "Operation: list, get, create, delete, update_config, increase_partitions, delete_records. Defaults to list."},
+				paramSpec{name: "topic", typ: "string", desc: "Topic name. Required except operation=list."},
+				paramSpec{name: "include_internal", typ: "string", desc: `Set to "true" to include internal topics when operation=list.`},
+				paramSpec{name: "search", typ: "string", desc: "Optional case-insensitive topic name filter for operation=list."},
+				paramSpec{name: "page", typ: "number", desc: "Page number for operation=list. Defaults to 1."},
+				paramSpec{name: "page_size", typ: "number", desc: "Page size for operation=list. Defaults to 50, max 500."},
+				paramSpec{name: "partitions", typ: "number", desc: "Partition count for operation=create."},
+				paramSpec{name: "replication_factor", typ: "number", desc: "Replication factor for operation=create."},
+				paramSpec{name: "configs", typ: "string", desc: `Topic configs for operation=create as JSON object, e.g. {"cleanup.policy":"compact"}. Optional.`},
+				paramSpec{name: "config_updates", typ: "string", desc: `Config mutations for operation=update_config as JSON array, e.g. [{"name":"retention.ms","value":"60000","op":"set"}]. op can be set, delete, append, subtract.`},
+				paramSpec{name: "partition_count", typ: "number", desc: "Final partition count for operation=increase_partitions. Must be greater than the current count."},
+				paramSpec{name: "records", typ: "string", desc: `Partition offsets for operation=delete_records as JSON array, e.g. [{"partition":0,"offset":123}]. Deletes records before each offset.`},
+			),
+			true,
+			handleKafkaTopic,
+		),
+		rawTool(
+			"kafka_consumer_group",
+			"Read and manage Kafka consumer groups for a Kafka asset. Grouped operations: list, get, reset_offset, delete.",
+			makeSchema(
+				paramSpec{name: "asset_id", typ: "number", required: true, desc: "Kafka asset ID. Use list_assets with asset_type='kafka' to find."},
+				paramSpec{name: "operation", typ: "string", desc: "Operation: list, get, reset_offset, delete. Defaults to list."},
+				paramSpec{name: "group", typ: "string", desc: "Consumer group name. Required except operation=list."},
+				paramSpec{name: "topic", typ: "string", desc: "Topic name for operation=reset_offset."},
+				paramSpec{name: "partitions", typ: "string", desc: "Optional JSON array of partitions for operation=reset_offset. Omit to reset all partitions in the topic."},
+				paramSpec{name: "mode", typ: "string", desc: "Offset reset mode: earliest, latest, offset, timestamp. Defaults to latest."},
+				paramSpec{name: "offset", typ: "number", desc: "Offset for mode=offset."},
+				paramSpec{name: "timestamp_millis", typ: "number", desc: "Unix milliseconds for mode=timestamp."},
+			),
+			true,
+			handleKafkaConsumerGroup,
+		),
+		rawTool(
+			"kafka_acl",
+			"Read and manage Kafka ACLs for a Kafka asset. Grouped operations: list, create, delete. ACL create/delete are security-admin operations and require explicit policy approval.",
+			makeSchema(
+				paramSpec{name: "asset_id", typ: "number", required: true, desc: "Kafka asset ID. Use list_assets with asset_type='kafka' to find."},
+				paramSpec{name: "operation", typ: "string", desc: "Operation: list, create, delete. Defaults to list."},
+				paramSpec{name: "resource_type", typ: "string", desc: "ACL resource type: topic, group, cluster, transactional_id, delegation_token, or any for list only."},
+				paramSpec{name: "resource_name", typ: "string", desc: "ACL resource name. Required for create/delete except resource_type=cluster."},
+				paramSpec{name: "pattern_type", typ: "string", desc: "ACL pattern type: literal, prefixed, match, any. create/delete only allow literal or prefixed."},
+				paramSpec{name: "principal", typ: "string", desc: "ACL principal, e.g. User:alice. Required for create/delete."},
+				paramSpec{name: "host", typ: "string", desc: "ACL host, e.g. * or 192.168.1.10. Required for delete; create defaults to * when omitted."},
+				paramSpec{name: "acl_operation", typ: "string", desc: "Kafka ACL operation: read, write, create, delete, alter, describe, describe_configs, alter_configs, all, etc."},
+				paramSpec{name: "permission", typ: "string", desc: "ACL permission: allow, deny, or any for list only."},
+				paramSpec{name: "page", typ: "number", desc: "Page number for operation=list. Defaults to 1."},
+				paramSpec{name: "page_size", typ: "number", desc: "Page size for operation=list. Defaults to 50, max 500."},
+			),
+			true,
+			handleKafkaACL,
+		),
+		rawTool(
+			"kafka_schema",
+			"Read and manage Schema Registry subjects for a Kafka asset when Schema Registry is configured. Grouped operations: list_subjects, list_versions, get, check_compatibility, register, delete.",
+			makeSchema(
+				paramSpec{name: "asset_id", typ: "number", required: true, desc: "Kafka asset ID. Use list_assets with asset_type='kafka' to find."},
+				paramSpec{name: "operation", typ: "string", desc: "Operation: list_subjects, list_versions, get, check_compatibility, register, delete. Defaults to list_subjects."},
+				paramSpec{name: "subject", typ: "string", desc: "Schema subject. Required except operation=list_subjects."},
+				paramSpec{name: "version", typ: "string", desc: "Schema version number or latest. Defaults to latest for get/check_compatibility. Optional for delete; omitted deletes the subject."},
+				paramSpec{name: "schema", typ: "string", desc: "Schema content for register/check_compatibility."},
+				paramSpec{name: "schema_type", typ: "string", desc: "Schema type such as AVRO, JSON, or PROTOBUF. Optional."},
+				paramSpec{name: "references", typ: "string", desc: `Schema references as JSON array, e.g. [{"name":"Common","subject":"common-value","version":1}]. Optional.`},
+				paramSpec{name: "permanent", typ: "string", desc: `Set to "true" for permanent delete where supported.`},
+			),
+			true,
+			handleKafkaSchema,
+		),
+		rawTool(
+			"kafka_connect",
+			"Read and manage Kafka Connect connectors for a Kafka asset when Kafka Connect is configured. Grouped operations: list_clusters, list_connectors, get_connector, create, update_config, pause, resume, restart, delete.",
+			makeSchema(
+				paramSpec{name: "asset_id", typ: "number", required: true, desc: "Kafka asset ID. Use list_assets with asset_type='kafka' to find."},
+				paramSpec{name: "operation", typ: "string", desc: "Operation: list_clusters, list_connectors, get_connector, create, update_config, pause, resume, restart, delete. Defaults to list_connectors."},
+				paramSpec{name: "cluster", typ: "string", desc: "Kafka Connect cluster name. Optional when the asset has exactly one Connect cluster."},
+				paramSpec{name: "connector", typ: "string", desc: "Connector name. Required except list_clusters/list_connectors."},
+				paramSpec{name: "config", typ: "string", desc: "Connector config as JSON object for create/update_config."},
+				paramSpec{name: "include_tasks", typ: "string", desc: `Set to "true" for restart to include tasks.`},
+				paramSpec{name: "only_failed", typ: "string", desc: `Set to "true" for restart to restart only failed tasks.`},
+			),
+			true,
+			handleKafkaConnect,
+		),
+		rawTool(
+			"kafka_message",
+			"Browse or produce bounded Kafka messages for a Kafka asset. Grouped operations: browse, inspect, produce. Message reads and writes are policy-controlled; returned payload previews are truncated.",
+			makeSchema(
+				paramSpec{name: "asset_id", typ: "number", required: true, desc: "Kafka asset ID. Use list_assets with asset_type='kafka' to find."},
+				paramSpec{name: "operation", typ: "string", desc: "Operation: browse, inspect, produce. Defaults to browse."},
+				paramSpec{name: "topic", typ: "string", required: true, desc: "Topic name."},
+				paramSpec{name: "partition", typ: "number", desc: "Optional partition. Required for inspect."},
+				paramSpec{name: "start_mode", typ: "string", desc: "Browse start mode: newest, oldest, offset, timestamp. Defaults to newest."},
+				paramSpec{name: "offset", typ: "number", desc: "Start offset for browse start_mode=offset, or exact offset for inspect."},
+				paramSpec{name: "timestamp_millis", typ: "number", desc: "Unix milliseconds for browse start_mode=timestamp, or produce timestamp override."},
+				paramSpec{name: "limit", typ: "number", desc: "Browse record limit. Defaults to asset settings; max 1000."},
+				paramSpec{name: "max_bytes", typ: "number", desc: "Max key/value/header preview bytes per field. Defaults to asset settings."},
+				paramSpec{name: "decode_mode", typ: "string", desc: "Browse decode mode: text, json, hex, base64. Defaults to text; binary data is returned as base64."},
+				paramSpec{name: "max_wait_millis", typ: "number", desc: "Browse poll wait in milliseconds. Defaults to 1000; max 30000."},
+				paramSpec{name: "key", typ: "string", desc: "Produce key. Optional."},
+				paramSpec{name: "key_encoding", typ: "string", desc: "Produce key encoding: text, json, hex, base64. Defaults to text."},
+				paramSpec{name: "value", typ: "string", desc: "Produce value. Empty string is allowed."},
+				paramSpec{name: "value_encoding", typ: "string", desc: "Produce value encoding: text, json, hex, base64. Defaults to text."},
+				paramSpec{name: "headers", typ: "string", desc: `Produce headers as JSON array, e.g. [{"key":"trace","value":"abc","encoding":"text"}]. Optional.`},
+			),
+			true,
+			handleKafkaMessage,
+		),
+	}
+}

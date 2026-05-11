@@ -147,7 +147,7 @@ func (a *App) DeleteAIProvider(id int64) error {
 		return fmt.Errorf("provider 不存在: %w", err)
 	}
 	if p.IsActive {
-		a.aiAgent = nil
+		a.aiRunnerCfg = nil
 		a.resetRunners()
 	}
 	return ai_provider_svc.AIProvider().Delete(a.langCtx(), id)
