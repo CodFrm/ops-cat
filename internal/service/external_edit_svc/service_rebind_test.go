@@ -782,3 +782,73 @@ func TestExternalEditRestoreKeepsCompletedAndAbandonedHidden(t *testing.T) {
 	require.True(t, abandonedRestored.Hidden)
 	require.Equal(t, saveModeManualRestore, abandonedRestored.SaveMode)
 }
+
+func TestExternalEditRestoreHiddenRecordsDoNotReactivateOnLocalChange(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	completed := h.openSession(t, "ssh-b", "/srv/app/completed.txt", "/srv/app/completed.txt", []byte("hello\n"))
+	markDirtyLocalCopy(t, completed, []byte("saved\n"))
+	_, err := h.svc.Save(context.Background(), completed.ID)
+	require.NoError(t, err)
+
+	abandoned := h.openSession(t, "ssh-b", "/srv/app/abandoned.txt", "/srv/app/abandoned.txt", []byte("draft\n"))
+	_, err = h.svc.DeleteSession(abandoned.ID, false)
+	require.NoError(t, err)
+
+	require.NoError(t, h.svc.Close())
+
+	cfg := &bootstrap.AppConfig{
+		ExternalEditDefaultEditorID: "system-text",
+		ExternalEditWorkspaceRoot:   h.manifest,
+	}
+	reopened, err := NewService(Options{
+		DataDir:        h.manifest,
+		ConfigProvider: func() *bootstrap.AppConfig { return cfg },
+		ConfigSaver:    func(next *bootstrap.AppConfig) error { *cfg = *next; return nil },
+		Remote:         h.remote,
+		FindSessions:   func(int64) []string { return []string{"ssh-b"} },
+		Assets:         rebindAssetFinder{},
+		Audit:          h.audit,
+		Emit:           func(Event) {},
+		Launch:         launcherFunc(func(string, []string) error { return nil }),
+		Now:            h.svc.now,
+	})
+	require.NoError(t, err)
+	require.NoError(t, reopened.Start(context.Background()))
+	defer func() { _ = reopened.Close() }()
+
+	completedRestored := reopened.getSession(completed.ID)
+	require.NotNil(t, completedRestored)
+	markDirtyLocalCopy(t, completedRestored, []byte("changed after restore\n"))
+	reopened.reconcileLocalCopy(completed.ID)
+
+	abandonedRestored := reopened.getSession(abandoned.ID)
+	require.NotNil(t, abandonedRestored)
+	markDirtyLocalCopy(t, abandonedRestored, []byte("draft changed after restore\n"))
+	reopened.reconcileLocalCopy(abandoned.ID)
+
+	completedCurrent := reopened.getSession(completed.ID)
+	require.Equal(t, recordStateCompleted, completedCurrent.RecordState)
+	require.True(t, completedCurrent.Hidden)
+
+	abandonedCurrent := reopened.getSession(abandoned.ID)
+	require.Equal(t, recordStateAbandoned, abandonedCurrent.RecordState)
+	require.True(t, abandonedCurrent.Hidden)
+}
+
+func TestExternalEditDeleteRecordOnlyCancelsPendingAutoSave(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+
+	markDirtyLocalCopy(t, session, []byte("autosave pending\n"))
+	h.svc.reconcileLocalCopy(session.ID)
+
+	_, err := h.svc.DeleteSession(session.ID, false)
+	require.NoError(t, err)
+
+	time.Sleep(autoSaveDebounce + 200*time.Millisecond)
+	require.Empty(t, h.remote.writes)
+
+	stored := h.refreshSession(t, session.ID)
+	require.Equal(t, recordStateAbandoned, stored.RecordState)
+	require.True(t, stored.Hidden)
+}

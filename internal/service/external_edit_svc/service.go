@@ -586,6 +586,12 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (*Session, error) {
 		}
 	}
 	if reusable != nil {
+		if s.watchedDirs[reusable.WorkspaceDir] == 0 {
+			if err := s.addWatchLocked(reusable.WorkspaceDir); err != nil {
+				s.mu.Unlock()
+				return nil, err
+			}
+		}
 		reusable.SessionID = req.SessionID
 		reusable.AssetName = assetName
 		reusable.DocumentKey = documentKey
@@ -739,7 +745,7 @@ func (s *Service) DeleteSession(sessionID string, removeLocal bool) (*DeleteResu
 		return result, nil
 	}
 
-	updated := s.updateRecordLifecycle(sessionID, recordStateAbandoned, true, nil)
+	updated := s.retireSessionRecord(sessionID, recordStateAbandoned, true, nil)
 	if updated == nil {
 		return nil, fmt.Errorf("外部编辑会话不存在")
 	}
@@ -1080,6 +1086,10 @@ func (s *Service) restoreSessions() error {
 		if session.RecordState == recordStateCompleted || session.RecordState == recordStateAbandoned {
 			session.Hidden = true
 		}
+		if isSyncSuppressedRecord(session) {
+			restored = append(restored, cloneSession(session))
+			continue
+		}
 		if err := s.addWatchLocked(session.WorkspaceDir); err != nil {
 			logger.Default().Warn("restore external edit watcher", zap.String("path", session.WorkspaceDir), zap.Error(err))
 			continue
@@ -1133,6 +1143,13 @@ func (s *Service) scheduleReconcile(changedPath string) {
 		if filepath.Dir(changedPath) != session.WorkspaceDir {
 			continue
 		}
+		if isSyncSuppressedRecord(session) {
+			if timer, ok := s.reconcileTimers[id]; ok {
+				timer.Stop()
+				delete(s.reconcileTimers, id)
+			}
+			continue
+		}
 		if timer, ok := s.reconcileTimers[id]; ok {
 			timer.Stop()
 		}
@@ -1145,7 +1162,7 @@ func (s *Service) scheduleReconcile(changedPath string) {
 
 func (s *Service) reconcileLocalCopy(sessionID string) {
 	session := s.getSession(sessionID)
-	if session == nil {
+	if session == nil || isSyncSuppressedRecord(session) {
 		return
 	}
 
@@ -1168,6 +1185,11 @@ func (s *Service) reconcileLocalCopy(sessionID string) {
 	current := s.sessions[sessionID]
 	if current == nil {
 		s.mu.Unlock()
+		return
+	}
+	if isSyncSuppressedRecord(current) {
+		s.mu.Unlock()
+		s.cancelAutoSaveForDocument(session.DocumentKey)
 		return
 	}
 	if current.LastLocalSHA256 == localHash && current.Dirty == dirty && current.State == nextState {
@@ -1228,6 +1250,14 @@ func (s *Service) runAutoSave(documentKey, sessionID, attemptKey string) {
 	s.mu.Lock()
 	if current, ok := s.autoSaveTimers[documentKey]; ok && current != nil {
 		delete(s.autoSaveTimers, documentKey)
+	}
+	currentSession := s.sessions[sessionID]
+	if currentSession == nil || isSyncSuppressedRecord(currentSession) {
+		if !s.autoSavePaused[documentKey] {
+			delete(s.autoSaveTried, documentKey)
+		}
+		s.mu.Unlock()
+		return
 	}
 	if s.autoSavePaused[documentKey] || s.autoSaveTried[documentKey] == attemptKey {
 		s.mu.Unlock()
@@ -1333,6 +1363,37 @@ func (s *Service) updateRecordLifecycle(sessionID, recordState string, hidden bo
 	session.UpdatedAt = s.now().Unix()
 	if err := s.saveManifestLocked(); err != nil {
 		logger.Default().Warn("persist external edit manifest after lifecycle change", zap.Error(err))
+	}
+	return cloneSession(session)
+}
+
+func (s *Service) retireSessionRecord(sessionID, recordState string, hidden bool, lastError *ErrorSnapshot) *Session {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session := s.sessions[sessionID]
+	if session == nil {
+		return nil
+	}
+	if timer, ok := s.reconcileTimers[sessionID]; ok {
+		timer.Stop()
+		delete(s.reconcileTimers, sessionID)
+	}
+	if strings.TrimSpace(session.DocumentKey) != "" {
+		if timer, ok := s.autoSaveTimers[session.DocumentKey]; ok {
+			timer.Stop()
+			delete(s.autoSaveTimers, session.DocumentKey)
+		}
+		if !s.autoSavePaused[session.DocumentKey] {
+			delete(s.autoSaveTried, session.DocumentKey)
+		}
+	}
+	session.RecordState = recordState
+	session.Hidden = hidden
+	session.LastError = cloneErrorSnapshot(lastError)
+	session.UpdatedAt = s.now().Unix()
+	if err := s.saveManifestLocked(); err != nil {
+		logger.Default().Warn("persist external edit manifest after retiring lifecycle", zap.Error(err))
 	}
 	return cloneSession(session)
 }
@@ -1948,6 +2009,9 @@ func (s *Service) Compare(sessionID string) (*CompareResult, error) {
 func (s *Service) guardMutableSession(session *Session) error {
 	if session == nil {
 		return fmt.Errorf("外部编辑会话不存在")
+	}
+	if isSyncSuppressedRecord(session) {
+		return fmt.Errorf("当前记录已归档，不再参与同步；请重新打开该远程文件后再继续编辑")
 	}
 	switch session.State {
 	case sessionStateStale:
@@ -2667,6 +2731,16 @@ func canonicalRemotePath(info *sftp_svc.RemoteFileInfo, fallback string) string 
 
 func buildDocumentKey(assetID int64, canonicalRemoteFile string) string {
 	return fmt.Sprintf("%d:%s", assetID, strings.TrimSpace(canonicalRemoteFile))
+}
+
+func isSyncSuppressedRecord(session *Session) bool {
+	if session == nil {
+		return false
+	}
+	if session.Hidden {
+		return true
+	}
+	return session.RecordState == recordStateCompleted || session.RecordState == recordStateAbandoned
 }
 
 func isRemoteMissingError(err error) bool {
