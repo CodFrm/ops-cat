@@ -17,6 +17,16 @@ type ConvHandle struct {
 	conv   *agent.Conversation
 	runner *agent.Runner
 	closed bool
+
+	// Wired by Manager.Handle. Close() unwinds them in reverse order.
+	teardown []func()
+}
+
+// AddTeardown registers a cleanup func to be called by Close, in LIFO order.
+// Manager uses this to attach the bridge goroutine cancel, the approval
+// gateway cancel, and the recorder unbind.
+func (h *ConvHandle) AddTeardown(fn func()) {
+	h.teardown = append(h.teardown, fn)
 }
 
 // NewConvHandle constructs a ConvHandle. Manager wires the bridge / hooks /
@@ -107,12 +117,16 @@ func (h *ConvHandle) Regenerate(ctx context.Context, assistIdx int) error {
 	return h.resend(ctx)
 }
 
-// Close releases the runner. Idempotent.
+// Close releases the runner and runs all registered teardowns in LIFO order.
+// Idempotent.
 func (h *ConvHandle) Close() error {
 	if h.closed {
 		return nil
 	}
 	h.closed = true
+	for i := len(h.teardown) - 1; i >= 0; i-- {
+		h.teardown[i]()
+	}
 	return h.runner.Close()
 }
 
