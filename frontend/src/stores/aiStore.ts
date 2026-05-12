@@ -2073,7 +2073,14 @@ export const useAIStore = create<AIState>((set, get) => {
                   [conv.ID]: { sending: false, pendingQueue: [] },
                 },
             sidebarTabs: state.sidebarTabs.map((tab) =>
-              tab.id === tabId ? { ...tab, conversationId: conv.ID, title: conv.Title || tab.title } : tab
+              tab.id === tabId
+                ? {
+                    ...tab,
+                    conversationId: conv.ID,
+                    title: conv.Title || tab.title,
+                    uiState: createDefaultSidebarUiState(),
+                  }
+                : tab
             ),
           }));
         });

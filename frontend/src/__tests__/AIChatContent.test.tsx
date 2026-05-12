@@ -6,6 +6,12 @@ import i18n from "../i18n";
 import { useAIStore } from "../stores/aiStore";
 import { useTabStore } from "../stores/tabStore";
 import { AIChatContent } from "../components/ai/AIChatContent";
+import {
+  CreateConversation,
+  ListConversations,
+  SendAIMessage,
+  UpdateConversationTitle,
+} from "../../wailsjs/go/app/App";
 
 const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
   callback(0);
@@ -310,6 +316,52 @@ describe("AIChatContent", () => {
 
     await waitFor(() => expect(onSendOverride).toHaveBeenCalledWith("sidebar send"));
     expect(editAndResendConversation).not.toHaveBeenCalled();
+  });
+
+  it("side-tab first send reloads an empty draft after binding the conversation", async () => {
+    const user = userEvent.setup();
+    const sideTabId = "sidebar-901";
+    vi.mocked(CreateConversation).mockResolvedValue({
+      ID: 901,
+      Title: "新对话",
+      Updatetime: 0,
+    } as Awaited<ReturnType<typeof CreateConversation>>);
+    vi.mocked(UpdateConversationTitle).mockResolvedValue(
+      undefined as Awaited<ReturnType<typeof UpdateConversationTitle>>
+    );
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as Awaited<ReturnType<typeof SendAIMessage>>);
+    vi.mocked(ListConversations).mockResolvedValue([{ ID: 901, Title: "hello", Updatetime: 0 }] as Awaited<
+      ReturnType<typeof ListConversations>
+    >);
+    useAIStore.setState({
+      sidebarTabs: [
+        {
+          id: sideTabId,
+          conversationId: null,
+          title: "新对话",
+          createdAt: 1,
+          uiState: { inputDraft: { content: "hello" }, scrollTop: 24, editTarget: null },
+        },
+      ],
+      activeSidebarTabId: sideTabId,
+      conversationMessages: {},
+      conversationStreaming: {},
+    });
+
+    const onSendOverride = (content: string) => useAIStore.getState().sendFromSidebarTab(sideTabId, content);
+    const { rerender } = render(
+      <AIChatContent sideTabId={sideTabId} conversationId={null} onSendOverride={onSendOverride} />
+    );
+    await user.type(screen.getByRole("textbox", { name: "mock-ai-input" }), "hello");
+    mockInputSpies.loadDraft.mockClear();
+
+    await user.click(screen.getByRole("button", { name: "mock-submit" }));
+    await waitFor(() => expect(useAIStore.getState().sidebarTabs[0].conversationId).toBe(901));
+
+    rerender(<AIChatContent sideTabId={sideTabId} conversationId={901} onSendOverride={onSendOverride} />);
+
+    await waitFor(() => expect(mockInputSpies.loadDraft).toHaveBeenLastCalledWith({ content: "" }));
+    expect(screen.getByRole("textbox", { name: "mock-ai-input" })).toHaveValue("");
   });
 
   it("conversationId regenerate routes through direct mode", async () => {

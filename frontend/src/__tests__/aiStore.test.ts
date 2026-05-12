@@ -883,7 +883,16 @@ describe("sidebar state", () => {
       .mockResolvedValueOnce([{ ID: 89, Title: "sidebar first", Updatetime: 0 }] as any)
       .mockResolvedValue([{ ID: 89, Title: "sidebar first", Updatetime: 1 }] as any);
     useAIStore.setState({
-      sidebarTabs: [buildSidebarTab("sidebar-89", null)],
+      sidebarTabs: [
+        {
+          ...buildSidebarTab("sidebar-89", null),
+          uiState: {
+            inputDraft: { content: "stale draft" },
+            scrollTop: 120,
+            editTarget: null,
+          },
+        },
+      ],
       activeSidebarTabId: "sidebar-89",
     });
 
@@ -892,6 +901,11 @@ describe("sidebar state", () => {
     expect(UpdateConversationTitle).toHaveBeenCalledWith(89, "sidebar first");
     expect(useAIStore.getState().sidebarTabs[0].conversationId).toBe(89);
     expect(useAIStore.getState().sidebarTabs[0].title).toBe("sidebar first");
+    expect(useAIStore.getState().sidebarTabs[0].uiState).toEqual({
+      inputDraft: { content: "" },
+      scrollTop: 0,
+      editTarget: null,
+    });
     expect(vi.mocked(EventsOn).mock.calls.some((c) => c[0] === "ai:event:89")).toBe(true);
   });
 
