@@ -82,7 +82,9 @@ func TestPromptBuilderExtensionSkillMD(t *testing.T) {
 		})
 
 		Convey("should include SKILL.md when set", func() {
-			builder.SetExtensionSkillMD("# OSS Tools\nUse exec_tool to call OSS tools.")
+			builder.SetExtensionSkillMDs(map[string]string{
+				"oss": "# OSS Tools\nUse exec_tool to call OSS tools.",
+			})
 			prompt := builder.Build()
 			So(prompt, ShouldContainSubstring, "OSS Tools")
 			So(prompt, ShouldContainSubstring, "exec_tool")

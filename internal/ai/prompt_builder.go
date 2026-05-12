@@ -31,16 +31,6 @@ func (b *PromptBuilder) SetExtensionSkillMDs(mds map[string]string) {
 	b.extensionSkillMDs = mds
 }
 
-// SetExtensionSkillMD sets a single extension SKILL.md content.
-// Kept for backward compatibility — treats it as a single-entry map.
-func (b *PromptBuilder) SetExtensionSkillMD(md string) {
-	if md == "" {
-		b.extensionSkillMDs = nil
-		return
-	}
-	b.extensionSkillMDs = map[string]string{"extension": md}
-}
-
 // NewPromptBuilder 创建 PromptBuilder
 func NewPromptBuilder(language string, context AIContext) *PromptBuilder {
 	return &PromptBuilder{
@@ -66,13 +56,19 @@ func (b *PromptBuilder) Build() string {
 	// 3. 资产知识引导
 	parts = append(parts, b.buildKnowledgeGuidance())
 
-	// 4. 错误恢复引导
+	// 4. 多资产 / 批量操作引导
+	parts = append(parts, b.buildMultiAssetGuidance())
+
+	// 5. 凭据与敏感信息引导
+	parts = append(parts, b.buildSecretsGuidance())
+
+	// 6. 错误恢复引导
 	parts = append(parts, b.buildErrorRecoveryGuidance())
 
-	// 5. 用户拒绝操作引导
+	// 7. 用户拒绝操作引导
 	parts = append(parts, b.buildUserDenialGuidance())
 
-	// 6. Extension tools guide
+	// 8. Extension tools guide
 	if len(b.extensionSkillMDs) > 0 {
 		names := make([]string, 0, len(b.extensionSkillMDs))
 		for name := range b.extensionSkillMDs {
@@ -123,13 +119,21 @@ func (b *PromptBuilder) buildTabContext() string {
 }
 
 func (b *PromptBuilder) buildKnowledgeGuidance() string {
-	return `When you discover valuable information about an asset during operations (OS version, running services, hardware specs, database version, etc.), proactively call update_asset to append these findings to the asset's Description field. When reading asset info, check the Description for existing knowledge to avoid redundant exploration.
+	return `Discover before acting: call list_assets / get_asset first, then operate. The asset Description often contains prior findings (OS, services, DB version) — read it to avoid redundant exploration. When you learn new non-secret facts about an asset during work, append them to the asset Description via update_asset.
 
-For k8s assets, call get_asset before operating the cluster so you can inspect namespace, context, and ssh_tunnel_id. Prefer exec_k8s for kubectl work. exec_k8s will automatically use the SSH jump host when ssh_tunnel_id is set, and otherwise run kubectl locally with the asset kubeconfig. Do not use run_command or a generic local shell for kubectl when exec_k8s is available.`
+Pick the dedicated tool for each asset type: exec_sql for databases, exec_redis for Redis, exec_mongo for MongoDB, exec_k8s for kubectl (do not invoke kubectl through run_command), kafka_* for Kafka. Use run_command only for plain SSH shell commands.`
+}
+
+func (b *PromptBuilder) buildMultiAssetGuidance() string {
+	return `When the same operation targets 2 or more assets, prefer batch_command over a loop of run_command / exec_sql / exec_redis — it parallelizes execution and batches approval prompts. When you expect to issue several command patterns that will trigger approval, call request_permission upfront so the user grants them in a single review instead of one popup per call.`
+}
+
+func (b *PromptBuilder) buildSecretsGuidance() string {
+	return `Never echo passwords, private keys, kubeconfig contents, or other credentials back to the user. The app stores them encrypted; treat anything that came from a password / private_key / kubeconfig field as write-only. If a tool result includes a secret, mask it before referencing it.`
 }
 
 func (b *PromptBuilder) buildErrorRecoveryGuidance() string {
-	return `When a tool execution fails, analyze the error, and try a different approach. If repeated attempts fail, explain the issue to the user and suggest alternatives. Do not give up after a single failure.`
+	return `When a tool execution fails, analyze the error and try a different approach. If repeated attempts fail, explain the issue to the user and suggest alternatives. Do not give up after a single failure.`
 }
 
 func (b *PromptBuilder) buildUserDenialGuidance() string {

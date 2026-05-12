@@ -55,17 +55,17 @@ func dataTools() []tool.Tool {
 		},
 		&tool.RawTool{
 			NameStr: "exec_mongo",
-			DescStr: "Execute MongoDB operations on a MongoDB asset. Credentials are resolved automatically.",
+			DescStr: "Execute a MongoDB operation on a MongoDB asset. Returns query results as JSON for read operations (find/findOne/aggregate/countDocuments) or an acknowledgement summary (matched/modified/deleted count, inserted IDs) for write operations. Credentials are resolved automatically.",
 			SchemaVal: agent.Schema{
 				Type: "object",
 				Properties: map[string]*agent.Property{
 					"asset_id":   {Type: "number", Description: "MongoDB asset ID. Use list_assets with asset_type='mongodb' to find."},
-					"operation":  {Type: "string", Description: "Operation: find, findOne, insertOne, insertMany, updateOne, updateMany, deleteOne, deleteMany, aggregate, countDocuments"},
-					"database":   {Type: "string", Description: "Database name"},
-					"collection": {Type: "string", Description: "Collection name"},
-					"query":      {Type: "string", Description: "JSON for filter/document/pipeline, depends on operation"},
+					"operation":  {Type: "string", Description: "Operation: find, findOne, insertOne, insertMany, updateOne, updateMany, deleteOne, deleteMany, aggregate, countDocuments, listDatabases, listCollections."},
+					"database":   {Type: "string", Description: "Database name. Required except operation=listDatabases."},
+					"collection": {Type: "string", Description: "Collection name. Required except operation=listDatabases / listCollections."},
+					"query":      {Type: "string", Description: "JSON payload whose shape depends on operation: filter for find/findOne/count/update*/delete*, document(s) for insert*, pipeline array for aggregate."},
 				},
-				Required: []string{"asset_id", "operation", "database", "collection"},
+				Required: []string{"asset_id", "operation"},
 			},
 			IsSerial: true,
 			Handler: func(ctx context.Context, in map[string]any) (*agent.ToolResultBlock, error) {

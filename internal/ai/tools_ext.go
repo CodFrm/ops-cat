@@ -14,7 +14,7 @@ func extTools() []tool.Tool {
 	return []tool.Tool{
 		&tool.RawTool{
 			NameStr: "exec_tool",
-			DescStr: "Execute an extension tool. Use this to call tools provided by installed extensions.",
+			DescStr: "Execute a tool exposed by an installed extension (e.g. oss, k8s). The available extensions and their tools are described in any 'From extension: <name>' section of this system prompt — read that section first to learn the tool names and arguments. Pass asset_id when the extension is asset-scoped so policy checks can run against the asset's group.",
 			SchemaVal: agent.Schema{
 				Type: "object",
 				Properties: map[string]*agent.Property{
