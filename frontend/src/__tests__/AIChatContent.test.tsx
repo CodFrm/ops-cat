@@ -7,23 +7,13 @@ import { useAIStore } from "../stores/aiStore";
 import { useTabStore } from "../stores/tabStore";
 import { AIChatContent } from "../components/ai/AIChatContent";
 
-// 流式跟随滚动测试需要在 deferred markdown 异步 commit 时被通知，
-// 真实环境靠 ResizeObserver；happy-dom 没实现，这里桩一个能透出 callback 的版本。
-const resizeObserverCallbacks: ResizeObserverCallback[] = [];
-class MockResizeObserver {
-  callback: ResizeObserverCallback;
-  constructor(cb: ResizeObserverCallback) {
-    this.callback = cb;
-    resizeObserverCallbacks.push(cb);
-  }
-  observe() {}
-  unobserve() {}
-  disconnect() {
-    const idx = resizeObserverCallbacks.indexOf(this.callback);
-    if (idx >= 0) resizeObserverCallbacks.splice(idx, 1);
-  }
-}
-vi.stubGlobal("ResizeObserver", MockResizeObserver);
+const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+  callback(0);
+  return 1;
+});
+const cancelAnimationFrameMock = vi.fn();
+vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
+vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
 
 const mockInputSpies = vi.hoisted(() => ({
   loadDraft: vi.fn(),
@@ -43,6 +33,32 @@ const defaultAIActions = {
 const editButtonName = /ai\.editMessage|编辑消息|Edit message/i;
 const editingBannerName = /ai\.editingMessage|正在编辑消息|Editing message/i;
 const cancelEditName = /ai\.cancelEdit|取消编辑|Cancel edit/i;
+
+function setupScrollableElement(
+  element: HTMLElement,
+  geometry: { scrollHeight: number; clientHeight: number; scrollTop: number }
+) {
+  let scrollHeight = geometry.scrollHeight;
+  let clientHeight = geometry.clientHeight;
+  Object.defineProperty(element, "scrollHeight", { configurable: true, get: () => scrollHeight });
+  Object.defineProperty(element, "clientHeight", { configurable: true, get: () => clientHeight });
+  element.scrollTop = geometry.scrollTop;
+
+  return {
+    setScrollHeight: (next: number) => {
+      scrollHeight = next;
+    },
+    setClientHeight: (next: number) => {
+      clientHeight = next;
+    },
+  };
+}
+
+function dispatchScroll(viewport: HTMLElement) {
+  act(() => {
+    viewport.dispatchEvent(new Event("scroll"));
+  });
+}
 
 vi.mock("@/components/ai/AIChatInput", () => ({
   AIChatInput: forwardRef(function MockAIChatInput(
@@ -103,7 +119,8 @@ describe("AIChatContent", () => {
     localStorage.setItem("language", "zh-CN");
     mockInputSpies.loadDraft.mockReset();
     mockInputSpies.clear.mockReset();
-    resizeObserverCallbacks.length = 0;
+    requestAnimationFrameMock.mockClear();
+    cancelAnimationFrameMock.mockClear();
 
     useTabStore.setState({ tabs: [], activeTabId: null });
     useAIStore.setState({
@@ -319,43 +336,101 @@ describe("AIChatContent", () => {
     expect(screen.queryByText("110")).not.toBeInTheDocument();
   });
 
-  it("streaming auto-follows scroll when deferred content grows scrollHeight", () => {
-    // 复现 useDeferredValue 异步 commit 的场景：
-    // store 已经推过新内容，messages effect 跑过一次按当时 scrollHeight 滚到底；
-    // 随后 markdown 异步 commit，把 scrollHeight 撑得更高——
-    // 此时既不再触发 messages effect 也不触发 scroll 事件，
-    // 唯有 ResizeObserver 能让视口继续跟到新底部。
+  it("auto-follows the bottom inside a streaming thinking block after its internal content overflows", () => {
     useAIStore.setState({
       conversationMessages: {
-        77: [
+        81: [
           { role: "user", content: "hi", blocks: [] },
           {
             role: "assistant",
-            content: "first",
-            blocks: [{ type: "text", content: "first" }],
+            content: "thinking",
+            blocks: [{ type: "thinking", content: "step 1", status: "running" }],
             streaming: true,
           },
         ],
       },
       conversationStreaming: {
-        77: { sending: true, pendingQueue: [] },
+        81: { sending: true, pendingQueue: [] },
       },
     });
 
-    const { container } = render(<AIChatContent conversationId={77} />);
-    const viewport = container.querySelector<HTMLDivElement>("[data-radix-scroll-area-viewport]");
-    expect(viewport).toBeTruthy();
-    expect(resizeObserverCallbacks.length).toBeGreaterThan(0);
+    const { container } = render(<AIChatContent conversationId={81} />);
+    const thinkingScroll = container.querySelector<HTMLElement>("[data-thinking-scroll]");
+    expect(thinkingScroll).toBeTruthy();
+    const { setScrollHeight } = setupScrollableElement(thinkingScroll!, {
+      scrollHeight: 240,
+      clientHeight: 100,
+      scrollTop: 140,
+    });
+    dispatchScroll(thinkingScroll!);
 
-    Object.defineProperty(viewport!, "scrollHeight", { configurable: true, get: () => 1200 });
-    Object.defineProperty(viewport!, "clientHeight", { configurable: true, get: () => 300 });
-
+    setScrollHeight(500);
     act(() => {
-      for (const cb of resizeObserverCallbacks) {
-        cb([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
-      }
+      useAIStore.setState({
+        conversationMessages: {
+          81: [
+            { role: "user", content: "hi", blocks: [] },
+            {
+              role: "assistant",
+              content: "thinking",
+              blocks: [{ type: "thinking", content: "step 1\nstep 2", status: "running" }],
+              streaming: true,
+            },
+          ],
+        },
+      });
     });
 
-    expect(viewport!.scrollTop).toBe(1200);
+    expect(thinkingScroll!.scrollTop).toBe(500);
+  });
+
+  it("does not auto-follow streaming thinking growth after the user scrolls up inside the thinking block", () => {
+    useAIStore.setState({
+      conversationMessages: {
+        82: [
+          { role: "user", content: "hi", blocks: [] },
+          {
+            role: "assistant",
+            content: "thinking",
+            blocks: [{ type: "thinking", content: "step 1", status: "running" }],
+            streaming: true,
+          },
+        ],
+      },
+      conversationStreaming: {
+        82: { sending: true, pendingQueue: [] },
+      },
+    });
+
+    const { container } = render(<AIChatContent conversationId={82} />);
+    const thinkingScroll = container.querySelector<HTMLElement>("[data-thinking-scroll]");
+    expect(thinkingScroll).toBeTruthy();
+    const { setScrollHeight } = setupScrollableElement(thinkingScroll!, {
+      scrollHeight: 240,
+      clientHeight: 100,
+      scrollTop: 140,
+    });
+    dispatchScroll(thinkingScroll!);
+    thinkingScroll!.scrollTop = 60;
+    dispatchScroll(thinkingScroll!);
+
+    setScrollHeight(500);
+    act(() => {
+      useAIStore.setState({
+        conversationMessages: {
+          82: [
+            { role: "user", content: "hi", blocks: [] },
+            {
+              role: "assistant",
+              content: "thinking",
+              blocks: [{ type: "thinking", content: "step 1\nstep 2", status: "running" }],
+              streaming: true,
+            },
+          ],
+        },
+      });
+    });
+
+    expect(thinkingScroll!.scrollTop).toBe(60);
   });
 });

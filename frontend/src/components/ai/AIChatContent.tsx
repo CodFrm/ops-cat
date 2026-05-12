@@ -200,9 +200,6 @@ export function AIChatContent({
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<AIChatInputHandle>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
-  // 观察消息容器尺寸，useDeferredValue 让 markdown 异步 commit 撑高 scrollHeight 时，
-  // 这里是仅存的回调入口——没有它，messages effect 永远拿不到 deferred commit 后的真实高度。
-  const contentRef = useRef<HTMLDivElement>(null);
   // Radix ScrollArea 的 viewport 是内部 div，原先每个 effect 都 querySelector 一次；
   // 流式时 messages effect 按帧触发，querySelector 累积成本不小。这里把首次查找结果缓存，
   // 同时用 isConnected 兜底 Radix 重建子树的边角场景。
@@ -248,22 +245,6 @@ export function AIChatContent({
       bottomRef.current?.scrollIntoView({ behavior: "auto" });
     }
   }, [messages, getViewport]);
-
-  useEffect(() => {
-    // useDeferredValue 让 markdown 异步 commit：messages effect 跑完后 scrollHeight 还在增长，
-    // 没有 scroll 事件、没有下一段 chunk 来兜底——只有内容容器的 resize 回调能把视图重新拉到底。
-    const viewport = getViewport();
-    const content = contentRef.current;
-    if (!viewport || !content || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => {
-      if (!isAtBottomRef.current) return;
-      if (viewport.scrollTop !== viewport.scrollHeight) {
-        viewport.scrollTop = viewport.scrollHeight;
-      }
-    });
-    ro.observe(content);
-    return () => ro.disconnect();
-  }, [getViewport]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -460,7 +441,7 @@ export function AIChatContent({
       <div className="flex h-full flex-col" data-compact={compact}>
         {/* Messages */}
         <ScrollArea ref={scrollAreaRef} className="flex-1 min-h-0 overflow-hidden">
-          <div ref={contentRef} className="max-w-3xl mx-auto p-4 space-y-6">
+          <div className="max-w-3xl mx-auto p-4 space-y-6">
             {messages.length === 0 && (
               <p className="text-sm text-muted-foreground text-center mt-16">{t("ai.placeholder")}</p>
             )}

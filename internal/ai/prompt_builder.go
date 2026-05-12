@@ -121,7 +121,9 @@ func (b *PromptBuilder) buildTabContext() string {
 func (b *PromptBuilder) buildKnowledgeGuidance() string {
 	return `Discover before acting: call list_assets / get_asset first, then operate. The asset Description often contains prior findings (OS, services, DB version) — read it to avoid redundant exploration. When you learn new non-secret facts about an asset during work, append them to the asset Description via update_asset.
 
-Pick the dedicated tool for each asset type: exec_sql for databases, exec_redis for Redis, exec_mongo for MongoDB, exec_k8s for kubectl (do not invoke kubectl through run_command), kafka_* for Kafka. Use run_command only for plain SSH shell commands.`
+Pick the dedicated tool for each asset type: exec_sql for databases, exec_redis for Redis, exec_mongo for MongoDB, exec_k8s for kubectl (do not invoke kubectl through run_command), kafka_* for Kafka. Use run_command only for plain SSH shell commands.
+
+Local vs remote: the local tools (bash / write / edit) run on the user's own machine — never use them to act on a remote asset. When the scenario targets a specific server / database / Redis / Kafka / K8s asset (an SSH / Database / Redis / SFTP tab is open for it, or the user names the asset, or the request is clearly about that asset), use that asset's dedicated remote tool (run_command for SSH, exec_sql / exec_redis / exec_mongo / exec_k8s / kafka_* / sftp_*). Do not fall back to local bash even when the command looks identical — running ` + "`df -h`" + ` locally tells the user nothing about the server they asked about.`
 }
 
 func (b *PromptBuilder) buildMultiAssetGuidance() string {
