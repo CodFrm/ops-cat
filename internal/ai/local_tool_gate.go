@@ -115,8 +115,10 @@ func (g *LocalToolGate) remember(convID int64, tool, pattern string) {
 			return
 		}
 	}
-	entries = append(entries, allowEntry{Tool: tool, Pattern: pattern})
-	g.allowed.Store(convID, entries)
+	newEntries := make([]allowEntry, len(entries), len(entries)+1)
+	copy(newEntries, entries)
+	newEntries = append(newEntries, allowEntry{Tool: tool, Pattern: pattern})
+	g.allowed.Store(convID, newEntries)
 }
 
 func (g *LocalToolGate) allMatch(convID int64, tool string, subjects []string) bool {

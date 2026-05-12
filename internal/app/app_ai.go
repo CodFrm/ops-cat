@@ -28,9 +28,13 @@ import (
 // agent.Runner 承担实际的 Send / Steer / Cancel / Close；done channel 用于 Stop 时
 // 等待事件消费 goroutine 退出。
 type runnerEntry struct {
-	sys    *coding.System
-	runner *agent.Runner
-	done   chan struct{}
+	sys        *coding.System
+	runner     *agent.Runner
+	done       chan struct{}
+	sshCache   *ai.SSHClientCache
+	dbCache    *ai.DatabaseClientCache
+	redisCache *ai.RedisClientCache
+	mongoCache *ai.MongoDBClientCache
 }
 
 func maskAPIKey(key string) string {
@@ -138,6 +142,28 @@ func (a *App) stopEntry(e *runnerEntry) {
 		select {
 		case <-e.done:
 		case <-time.After(3 * time.Second):
+		}
+	}
+	// 先关 cache 再关 runner/sys：此时正在跑的 tool.Call 已被 Cancel 并随 e.done 退出，
+	// cache 内不会再有 in-flight 的 client 使用。ConnCache.Close 已过滤预期错误。
+	if e.sshCache != nil {
+		if err := e.sshCache.Close(); err != nil {
+			logger.Default().Warn("close SSH cache", zap.Error(err))
+		}
+	}
+	if e.dbCache != nil {
+		if err := e.dbCache.Close(); err != nil {
+			logger.Default().Warn("close database cache", zap.Error(err))
+		}
+	}
+	if e.redisCache != nil {
+		if err := e.redisCache.Close(); err != nil {
+			logger.Default().Warn("close Redis cache", zap.Error(err))
+		}
+	}
+	if e.mongoCache != nil {
+		if err := e.mongoCache.Close(); err != nil {
+			logger.Default().Warn("close MongoDB cache", zap.Error(err))
 		}
 	}
 	if e.runner != nil {
@@ -356,6 +382,21 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 		chatCtx = ai.WithSSHPool(chatCtx, a.sshPool)
 	}
 
+	// 同一次 Send 内复用连接：handler 内 getXxxCache(ctx)!=nil 时走缓存路径。
+	// Kafka 沿用应用单例 a.kafkaService（内部 KafkaClientManager 自带缓存），
+	// 不放进 runnerEntry，关闭时机归 a.sshPool.Close() 那条路径管。
+	sshCache := ai.NewSSHClientCache()
+	dbCache := ai.NewDatabaseClientCache()
+	redisCache := ai.NewRedisClientCache()
+	mongoCache := ai.NewMongoDBClientCache()
+	chatCtx = ai.WithSSHCache(chatCtx, sshCache)
+	chatCtx = ai.WithDatabaseCache(chatCtx, dbCache)
+	chatCtx = ai.WithRedisCache(chatCtx, redisCache)
+	chatCtx = ai.WithMongoDBCache(chatCtx, mongoCache)
+	if a.kafkaService != nil {
+		chatCtx = ai.WithKafkaService(chatCtx, a.kafkaService)
+	}
+
 	onEvent := func(event ai.StreamEvent) {
 		wailsRuntime.EventsEmit(a.ctx, eventName, event)
 
@@ -397,7 +438,15 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 	conv := agent.LoadConversation(fmt.Sprintf("opskat-conv-%d", convID), ai.ToAgentMessages(history))
 	runner := sys.Agent().Runner(conv)
 
-	entry := &runnerEntry{sys: sys, runner: runner, done: make(chan struct{})}
+	entry := &runnerEntry{
+		sys:        sys,
+		runner:     runner,
+		done:       make(chan struct{}),
+		sshCache:   sshCache,
+		dbCache:    dbCache,
+		redisCache: redisCache,
+		mongoCache: mongoCache,
+	}
 	a.runners.Store(convID, entry)
 
 	events, err := runner.Send(chatCtx, lastUserText)

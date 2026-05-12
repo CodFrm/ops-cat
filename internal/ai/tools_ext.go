@@ -20,7 +20,7 @@ func extTools() []tool.Tool {
 				Properties: map[string]*agent.Property{
 					"extension": {Type: "string", Description: `Extension name (e.g. "oss")`},
 					"tool":      {Type: "string", Description: `Tool name (e.g. "list_buckets")`},
-					"args":      {Type: "string", Description: "Tool arguments as JSON object"},
+					"args":      {Type: "object", Description: "Tool arguments as JSON object"},
 					"asset_id":  {Type: "number", Description: "Asset ID for policy checking"},
 				},
 				Required: []string{"extension", "tool", "args"},

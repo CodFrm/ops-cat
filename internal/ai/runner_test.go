@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/cago-frame/agents/agent"
 	"github.com/cago-frame/agents/provider"
 	"github.com/cago-frame/agents/provider/providertest"
+	"github.com/opskat/opskat/internal/model/entity/ai_provider_entity"
 	. "github.com/smartystreets/goconvey/convey"
 )
 
@@ -120,6 +122,41 @@ func TestRunner_SystemPromptHasOpsKatIntro(t *testing.T) {
 	})
 }
 
+func TestRunner_ProviderEntityReasoningConfig(t *testing.T) {
+	Convey("ProviderEntity 的 reasoning 设置会注入 cago 请求", t, func() {
+		mock := providertest.New().QueueStream(
+			provider.StreamChunk{ContentDelta: "ok"},
+			provider.StreamChunk{FinishReason: provider.FinishStop},
+		)
+
+		cfg := SystemConfig{
+			Provider: mock,
+			ProviderEntity: &ai_provider_entity.AIProvider{
+				Type:             "openai",
+				Model:            "deepseek-v4-pro",
+				ReasoningEnabled: true,
+				ReasoningEffort:  "high",
+			},
+			Cwd: t.TempDir(),
+		}
+		sys, err := BuildSystem(context.Background(), cfg)
+		So(err, ShouldBeNil)
+		t.Cleanup(func() { _ = sys.Close(context.Background()) })
+
+		runner := sys.Agent().Runner(agent.NewConversation())
+		t.Cleanup(func() { _ = runner.Close() })
+		events, err := runner.Send(context.Background(), "hi")
+		So(err, ShouldBeNil)
+		for range events {
+		}
+
+		recv := mock.Received()
+		So(len(recv), ShouldEqual, 1)
+		So(recv[0].Thinking, ShouldNotBeNil)
+		So(recv[0].Thinking.Effort, ShouldEqual, provider.ThinkingHigh)
+	})
+}
+
 func TestRunner_SimpleTextResponse(t *testing.T) {
 	Convey("纯文本回复路径：cago 流 → content + done", t, func() {
 		mock := providertest.New().QueueStream(
@@ -152,6 +189,71 @@ func TestRunner_SimpleTextResponse(t *testing.T) {
 		So(content.String(), ShouldEqual, "hello world")
 		So(hasDone, ShouldBeTrue)
 		So(hasUsg, ShouldBeTrue)
+	})
+}
+
+// 回归：subagent 调出的 general-purpose 子 agent 工具集含 bash/write/edit，
+// 旧实现只把 LocalToolGate 挂在父 agent 上，子 agent 调 bash 时绕过审批。
+// 这里通过 providertest 串起一条 parent → subagent → child bash 的端到端流，
+// 断言 LocalToolGate.confirm 一定被触发。
+func TestRunner_GPSubagentInheritsLocalToolGate(t *testing.T) {
+	Convey("subagent 调出的 general-purpose 子 agent 调 bash 时也走 LocalToolGate", t, func() {
+		var confirmCalls int32
+		var seenTool, seenCmd string
+		gate := NewLocalToolGate(func(_ context.Context, req LocalToolApprovalRequest) ApprovalResponse {
+			atomic.AddInt32(&confirmCalls, 1)
+			seenTool = req.ToolName
+			seenCmd = req.Command
+			return ApprovalResponse{Decision: "deny"}
+		})
+
+		mock := providertest.New()
+		// 1) 父 agent: subagent → general-purpose
+		mock.QueueStream(
+			provider.StreamChunk{ToolCallDelta: &provider.ToolCallDelta{Index: 0, ID: "d1", Name: "subagent"}},
+			provider.StreamChunk{ToolCallDelta: &provider.ToolCallDelta{Index: 0, ArgsDelta: `{"type":"general-purpose","prompt":"run echo"}`}},
+			provider.StreamChunk{FinishReason: provider.FinishToolCalls},
+		)
+		// 2) 子 agent: bash 调用 —— 期望被 gate 拦截
+		mock.QueueStream(
+			provider.StreamChunk{ToolCallDelta: &provider.ToolCallDelta{Index: 0, ID: "b1", Name: "bash"}},
+			provider.StreamChunk{ToolCallDelta: &provider.ToolCallDelta{Index: 0, ArgsDelta: `{"command":"echo hi"}`}},
+			provider.StreamChunk{FinishReason: provider.FinishToolCalls},
+		)
+		// 3) 子 agent: 看到 deny 后总结收尾
+		mock.QueueStream(
+			provider.StreamChunk{ContentDelta: "denied"},
+			provider.StreamChunk{FinishReason: provider.FinishStop},
+		)
+		// 4) 父 agent: 拿到 subagent result 后收尾
+		mock.QueueStream(
+			provider.StreamChunk{ContentDelta: "ok"},
+			provider.StreamChunk{FinishReason: provider.FinishStop},
+		)
+
+		cfg := SystemConfig{
+			Provider:      mock,
+			Cwd:           t.TempDir(),
+			LocalToolGate: gate,
+		}
+		sys, err := BuildSystem(context.Background(), cfg)
+		So(err, ShouldBeNil)
+		defer func() { _ = sys.Close(context.Background()) }()
+
+		conv := agent.LoadConversation("opskat-gp-gate-test", nil)
+		runner := sys.Agent().Runner(conv)
+		defer func() { _ = runner.Close() }()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		events, err := runner.Send(ctx, "dispatch please")
+		So(err, ShouldBeNil)
+		for range events { // drain
+		}
+
+		So(atomic.LoadInt32(&confirmCalls), ShouldEqual, 1)
+		So(seenTool, ShouldEqual, "bash")
+		So(seenCmd, ShouldEqual, "echo hi")
 	})
 }
 

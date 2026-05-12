@@ -10,6 +10,7 @@ import (
 	cagoAnthropics "github.com/cago-frame/agents/provider/anthropics"
 	cagoOpenAI "github.com/cago-frame/agents/provider/openai"
 	"github.com/cago-frame/agents/tool"
+	"github.com/cago-frame/agents/tool/subagent"
 	"github.com/sashabaranov/go-openai"
 
 	"github.com/opskat/opskat/internal/model/entity/ai_provider_entity"
@@ -66,13 +67,14 @@ type SystemConfig struct {
 //   - 注册 auditMiddleware（around 模式：跑前挂 *CheckResult slot，跑后落审计）；
 //   - 非空 SystemPrompt 走 coding.AppendSystem 注入；
 //   - 非空 Model 走 coding.WithModel；
+//   - ProviderEntity 开启 reasoning 时走 coding.WithThinking；
 //   - 非空 Tools 走 coding.WithExtraTools；
 //   - LocalToolGate 非 nil 时为 bash/write/edit 加审批 middleware。注册顺序：
 //     audit 在前（外层），gate 在后（内层）—— 这样 gate AbortWithDeny 后 audit
 //     的 c.Next() 返回时 c.Output 已是 deny block，照样落审计。
-//
-// 注：cago 的 dispatch_subagent 不继承父 middleware —— 子代理若调用 bash/write/edit 暂不被拦截，
-// 后续如需收紧再用 coding.WithExtraSubagents + SubagentWithAgentOpts 一并接线。
+//   - cago 的 subagent dispatch 工具不会把父 middleware 透传给 child agent。
+//     Explore/Plan 工具集只读，无 bash/write/edit 路径；GeneralPurpose 含全套
+//     coding 工具，因此显式替换默认 GP，把 audit + LocalToolGate 中间件挂上。
 func BuildSystem(ctx context.Context, cfg SystemConfig) (*coding.System, error) {
 	prov := cfg.Provider
 	if prov == nil {
@@ -96,6 +98,11 @@ func BuildSystem(ctx context.Context, cfg SystemConfig) (*coding.System, error) 
 	if cfg.Model != "" {
 		opts = append(opts, coding.WithModel(cfg.Model))
 	}
+	if cfg.ProviderEntity != nil && cfg.ProviderEntity.ReasoningEnabled && cfg.ProviderEntity.ReasoningEffort != "" {
+		opts = append(opts, coding.WithThinking(&cagoProvider.ThinkingConfig{
+			Effort: cagoProvider.ThinkingEffort(cfg.ProviderEntity.ReasoningEffort),
+		}))
+	}
 	if len(cfg.Tools) > 0 {
 		opts = append(opts, coding.WithExtraTools(cfg.Tools...))
 	}
@@ -104,5 +111,26 @@ func BuildSystem(ctx context.Context, cfg SystemConfig) (*coding.System, error) 
 			agent.Use(`^(bash|write|edit)$`, cfg.LocalToolGate.Middleware()),
 		))
 	}
+	opts = append(opts, coding.WithExtraSubagents(
+		buildGeneralPurposeEntry(prov, cfg.Cwd, cfg.LocalToolGate),
+	))
 	return coding.New(ctx, prov, cfg.Cwd, opts...)
+}
+
+// buildGeneralPurposeEntry 构造一个替换 coding 默认 GeneralPurpose 子 agent 的 Entry，
+// 把父 agent 同款 middleware 显式注入到 child：
+//   - auditMiddleware 无条件挂，保证子代理触发的 bash/write/edit 也落审计；
+//   - LocalToolGate 非 nil 时挂 bash|write|edit 审批 gate，与父保持同一份白名单
+//     （以 conversationID 索引）—— 用户在父 agent 里 allowAll 过的 pattern，
+//     子 agent 调同样命令时复用，符合直觉。
+func buildGeneralPurposeEntry(prov cagoProvider.Provider, cwd string, gate *LocalToolGate) subagent.Entry {
+	subOpts := []coding.SubagentOption{
+		coding.SubagentWithAgentOpts(agent.Use(".*", auditMiddleware)),
+	}
+	if gate != nil {
+		subOpts = append(subOpts, coding.SubagentWithAgentOpts(
+			agent.Use(`^(bash|write|edit)$`, gate.Middleware()),
+		))
+	}
+	return coding.GeneralPurpose(prov, cwd, subOpts...)
 }
