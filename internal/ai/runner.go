@@ -63,13 +63,15 @@ type SystemConfig struct {
 // BuildSystem 拼装 coding.System：
 //   - 关掉 ~/.claude 自动加载 / skills / slash commands；
 //   - 用 OpsKat 自定义 system 模板；
-//   - 注册全局 attachCheckResultHook + auditPostHook 串通权限决策与审计；
+//   - 注册 auditMiddleware（around 模式：跑前挂 *CheckResult slot，跑后落审计）；
 //   - 非空 SystemPrompt 走 coding.AppendSystem 注入；
 //   - 非空 Model 走 coding.WithModel；
 //   - 非空 Tools 走 coding.WithExtraTools；
-//   - LocalToolGate 非 nil 时为 bash/write/edit 加 PreToolUse 审批 hook。
+//   - LocalToolGate 非 nil 时为 bash/write/edit 加审批 middleware。注册顺序：
+//     audit 在前（外层），gate 在后（内层）—— 这样 gate AbortWithDeny 后 audit
+//     的 c.Next() 返回时 c.Output 已是 deny block，照样落审计。
 //
-// 注：cago 的 dispatch_subagent 不继承父 hook —— 子代理若调用 bash/write/edit 暂不被拦截，
+// 注：cago 的 dispatch_subagent 不继承父 middleware —— 子代理若调用 bash/write/edit 暂不被拦截，
 // 后续如需收紧再用 coding.WithExtraSubagents + SubagentWithAgentOpts 一并接线。
 func BuildSystem(ctx context.Context, cfg SystemConfig) (*coding.System, error) {
 	prov := cfg.Provider
@@ -86,10 +88,7 @@ func BuildSystem(ctx context.Context, cfg SystemConfig) (*coding.System, error) 
 		coding.WithoutSkills(),
 		coding.WithoutSlashCommands(),
 		coding.WithSystemTemplate(opskatSystemTemplate),
-		coding.WithAgentOpts(
-			agent.PreToolUse(".*", attachCheckResultHook),
-			agent.PostToolUse(".*", auditPostHook),
-		),
+		coding.WithAgentOpts(agent.Use(".*", auditMiddleware)),
 	}
 	if cfg.SystemPrompt != "" {
 		opts = append(opts, coding.AppendSystem(cfg.SystemPrompt))
@@ -102,7 +101,7 @@ func BuildSystem(ctx context.Context, cfg SystemConfig) (*coding.System, error) 
 	}
 	if cfg.LocalToolGate != nil {
 		opts = append(opts, coding.WithAgentOpts(
-			agent.PreToolUse(`^(bash|write|edit)$`, cfg.LocalToolGate.Hook()),
+			agent.Use(`^(bash|write|edit)$`, cfg.LocalToolGate.Middleware()),
 		))
 	}
 	return coding.New(ctx, prov, cfg.Cwd, opts...)

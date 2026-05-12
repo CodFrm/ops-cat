@@ -5,7 +5,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cago-frame/agents/agent"
 	"github.com/opskat/opskat/internal/model/entity/audit_entity"
 	"github.com/opskat/opskat/internal/repository/audit_repo"
 
@@ -99,37 +98,32 @@ func TestCheckResult_DecisionString(t *testing.T) {
 }
 
 func TestCheckResult_Context(t *testing.T) {
-	convey.Convey("CheckResult 跨 hook 共享（decisionMap）", t, func() {
-		convey.Convey("attachCheckResultHook + setCheckResult + auditPostHook 串通", func() {
-			toolUseID := "tu_test_1"
-			_, _ = attachCheckResultHook(context.Background(), &agent.PreToolUseInput{ToolUseID: toolUseID})
-
-			ctx := agent.WithToolUseID(context.Background(), toolUseID)
-			setCheckResult(ctx, CheckResult{
+	convey.Convey("CheckResult 跨 middleware 共享（ctx slot）", t, func() {
+		convey.Convey("auditMiddleware 挂的 slot 能被 RecordDecision 写入", func() {
+			slot := &CheckResult{}
+			ctx := context.WithValue(context.Background(), checkResultKey{}, slot)
+			RecordDecision(ctx, CheckResult{
 				Decision:       Allow,
 				DecisionSource: SourceGrantAllow,
 				MatchedPattern: "cat *",
 			})
-
-			v, ok := decisionMap.LoadAndDelete(toolUseID)
-			assert.True(t, ok)
-			holder := v.(*CheckResult)
-			assert.Equal(t, Allow, holder.Decision)
-			assert.Equal(t, SourceGrantAllow, holder.DecisionSource)
-			assert.Equal(t, "cat *", holder.MatchedPattern)
+			assert.Equal(t, Allow, slot.Decision)
+			assert.Equal(t, SourceGrantAllow, slot.DecisionSource)
+			assert.Equal(t, "cat *", slot.MatchedPattern)
 		})
 
-		convey.Convey("无 ToolUseID 时 setCheckResult 是 no-op", func() {
+		convey.Convey("无 slot 时 RecordDecision 是 no-op", func() {
 			ctx := context.Background()
 			assert.NotPanics(t, func() {
-				setCheckResult(ctx, CheckResult{Decision: Allow})
+				RecordDecision(ctx, CheckResult{Decision: Allow})
 			})
 		})
 
-		convey.Convey("ToolUseID 没注册时 setCheckResult 不 panic", func() {
-			ctx := agent.WithToolUseID(context.Background(), "tu_no_slot")
+		convey.Convey("slot 是 nil 指针时 RecordDecision 不 panic", func() {
+			var nilSlot *CheckResult
+			ctx := context.WithValue(context.Background(), checkResultKey{}, nilSlot)
 			assert.NotPanics(t, func() {
-				setCheckResult(ctx, CheckResult{Decision: Allow})
+				RecordDecision(ctx, CheckResult{Decision: Allow})
 			})
 		})
 	})

@@ -5,63 +5,50 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"sync"
 
 	"github.com/cago-frame/agents/agent"
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 )
 
-// decisionMap 是 PreToolUseHook、工具 handler、PostToolUseHook 三方共享的
-// per-call 状态表，key 是 agent.ToolUseID。
+// checkResultKey 是 audit middleware 在 ctx 上挂的 *CheckResult 槽的 key。
+// tool handler 通过 RecordDecision(ctx, r) 写决策；audit middleware 在 c.Next()
+// 返回后读取该槽落审计。声明为带名空结构体（按 Go 推荐做法）以避免 string key 冲突。
+type checkResultKey struct{}
+
+// auditMiddleware 是 cago tool dispatch 的"around"中间件，负责审计落库。
 //
-// 用法：
-//  1. attachCheckResultHook (PreHook) 在每次工具调用前 Store 一个 *CheckResult 占位指针；
-//  2. handler 内部调 setCheckResult，通过 ToolUseIDFromContext 拿 ID 后写入指针；
-//  3. auditPostHook (PostHook) 取出 *CheckResult 并 LoadAndDelete 清理，写入审计日志。
+// 工作流：
+//  1. 建一个 *CheckResult slot，挂到 c.ctx（通过 c.WithContext）。
+//  2. c.Next() 推链：后续 mw（如 LocalToolGate）+ 终端 tool.Call 全跑；tool
+//     内部用 RecordDecision(ctx, r) 把决策写进 slot。
+//  3. c.Next() 返回后，从 c.Output 抽出文本 / 错误，组合成 ToolCallInfo，
+//     起 goroutine 异步写入审计仓库。
 //
-// cago dispatcher 对每个 ToolUseID 只调一次 Run（见 agent/tooldispatch.go），不会
-// 重复 Store；并发安全靠 sync.Map 本身。
-var decisionMap sync.Map
+// 与旧版 attachCheckResultHook + auditPostHook 双段相比：状态完全闭包局部，
+// 无全局 sync.Map，无 ToolUseID 索引，无 LoadAndDelete 清理。
+func auditMiddleware(c *agent.ToolContext) {
+	slot := &CheckResult{}
+	c.WithContext(context.WithValue(c.Context(), checkResultKey{}, slot))
 
-// attachCheckResultHook 注册为 PreToolUseHook（matcher ".*"），为每次工具调用准备
-// 一个空的 *CheckResult 槽，供 handler 填决策、PostHook 读决策。
-func attachCheckResultHook(_ context.Context, in *agent.PreToolUseInput) (*agent.PreToolUseOutput, error) {
-	if in.ToolUseID == "" {
-		return nil, nil
-	}
-	decisionMap.Store(in.ToolUseID, &CheckResult{})
-	return nil, nil
-}
+	c.Next()
 
-// auditPostHook 注册为 PostToolUseHook（matcher ".*"），从 ToolResultBlock 抽出
-// 文本和错误，组合 decisionMap 里的决策，异步写入审计日志。
-func auditPostHook(ctx context.Context, in *agent.PostToolUseInput) (*agent.PostToolUseOutput, error) {
-	var decision *CheckResult
-	if in.ToolUseID != "" {
-		if v, ok := decisionMap.LoadAndDelete(in.ToolUseID); ok {
-			decision = v.(*CheckResult)
-		}
-	}
-
-	argsJSON, err := json.Marshal(in.Input)
+	argsJSON, err := json.Marshal(c.Input)
 	if err != nil {
-		logger.Default().Warn("audit hook marshal input", zap.Error(err))
+		logger.Default().Warn("audit middleware marshal input", zap.Error(err))
 	}
 
-	result, errVal := extractAuditResult(in.Output)
+	result, errVal := extractAuditResult(c.Output)
 
 	info := ToolCallInfo{
-		ToolName: in.ToolName,
+		ToolName: c.ToolName,
 		ArgsJSON: string(argsJSON),
 		Result:   result,
 		Error:    errVal,
-		Decision: decision,
+		Decision: slot,
 	}
-	// 复制 ctx 里的值到独立 context，避免 dispatcher ctx 被取消后审计写入失败
-	auditCtx := detachAuditContext(ctx)
+	auditCtx := detachAuditContext(c.Context())
 	go auditWriter.WriteToolCall(auditCtx, info)
-	return nil, nil
 }
 
 // extractAuditResult 把 cago 的 *ToolResultBlock 拆成审计需要的 (result, error)。

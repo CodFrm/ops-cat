@@ -62,7 +62,7 @@ func handleRequestGrant(ctx context.Context, args map[string]any) (string, error
 	}
 
 	result := checker.SubmitGrantMulti(ctx, grantItems, reason)
-	setCheckResult(ctx, result)
+	RecordDecision(ctx, result)
 	return result.Message, nil
 }
 
@@ -79,7 +79,7 @@ func handleRunCommand(ctx context.Context, args map[string]any) (string, error) 
 	// 权限检查（两条路径共用）
 	if checker := GetPolicyChecker(ctx); checker != nil {
 		result := checker.Check(ctx, assetID, command)
-		setCheckResult(ctx, result)
+		RecordDecision(ctx, result)
 		if result.Decision != Allow {
 			return result.Message, nil
 		}

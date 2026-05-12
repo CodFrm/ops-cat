@@ -46,33 +46,38 @@ func NewLocalToolGate(confirm LocalToolConfirmFunc) *LocalToolGate {
 	return &LocalToolGate{confirm: confirm}
 }
 
-// Hook 返回挂到 coding system 的 PreToolUseHook。
-func (g *LocalToolGate) Hook() agent.PreToolUseHook {
-	return func(ctx context.Context, in *agent.PreToolUseInput) (*agent.PreToolUseOutput, error) {
+// Middleware 返回挂到 coding system 的 cago tool middleware。
+//
+// 行为：subjects 缺失或全部命中已存 pattern 时直接 Next 放行；无 confirm 回调
+// 时 AbortWithDeny；用户 deny → AbortWithDeny；allowAll → 写白名单后 Next；
+// 其他（"allow" 或未知）按单次允许处理，不写白名单。
+func (g *LocalToolGate) Middleware() agent.ToolMiddleware {
+	return func(c *agent.ToolContext) {
+		ctx := c.Context()
 		convID := GetConversationID(ctx)
-		toolName := in.ToolName
+		toolName := c.ToolName
 
-		subjects := extractSubjects(toolName, in.Input)
+		subjects := extractSubjects(toolName, c.Input)
 		if len(subjects) == 0 {
 			// 输入异常（缺字段 / 空字符串），不阻塞，让工具自身处理并返回错误。
-			return &agent.PreToolUseOutput{Decision: agent.DecisionPass}, nil
+			c.Next()
+			return
 		}
 
 		if g.allMatch(convID, toolName, subjects) {
-			return &agent.PreToolUseOutput{Decision: agent.DecisionPass}, nil
+			c.Next()
+			return
 		}
 
 		if g.confirm == nil {
-			return &agent.PreToolUseOutput{
-				Decision:   agent.DecisionDeny,
-				DenyReason: fmt.Sprintf("no approval mechanism configured for local tool %s", toolName),
-			}, nil
+			c.AbortWithDeny(fmt.Sprintf("no approval mechanism configured for local tool %s", toolName))
+			return
 		}
 
 		req := LocalToolApprovalRequest{
 			ToolName:        toolName,
-			Command:         primaryCommand(toolName, in.Input),
-			Detail:          detailOf(toolName, in.Input),
+			Command:         primaryCommand(toolName, c.Input),
+			Detail:          detailOf(toolName, c.Input),
 			SubCommands:     subjects,
 			DefaultPatterns: defaultPatterns(toolName, subjects),
 		}
@@ -80,18 +85,15 @@ func (g *LocalToolGate) Hook() agent.PreToolUseHook {
 
 		switch resp.Decision {
 		case "deny":
-			return &agent.PreToolUseOutput{
-				Decision:   agent.DecisionDeny,
-				DenyReason: fmt.Sprintf("USER DENIED: user rejected local tool %s. Stop the current task.", toolName),
-			}, nil
+			c.AbortWithDeny(fmt.Sprintf("USER DENIED: user rejected local tool %s. Stop the current task.", toolName))
 		case "allowAll":
 			for _, p := range patternsFromResponse(toolName, subjects, resp.EditedItems) {
 				g.remember(convID, toolName, p)
 			}
-			return &agent.PreToolUseOutput{Decision: agent.DecisionPass}, nil
+			c.Next()
 		default:
 			// "allow" 或其他都按单次允许处理；不写白名单。
-			return &agent.PreToolUseOutput{Decision: agent.DecisionPass}, nil
+			c.Next()
 		}
 	}
 }
