@@ -181,6 +181,4 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2 // indirect
 )
 
-replace github.com/cago-frame/agents => /Users/codfrm/Code/cago/agents
-
 // replace github.com/wailsapp/wails/v2 v2.10.2 => /Users/codfrm/go/pkg/mod
