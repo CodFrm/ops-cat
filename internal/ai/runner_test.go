@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -428,6 +429,109 @@ func TestRunner_SubagentExplore_ThinkingOnlyFallback(t *testing.T) {
 		_, text := captureSubagentResult(t, mock, "tt1")
 		So(text, ShouldNotEqual, "sub-agent returned no content")
 		So(text, ShouldContainSubstring, "three configs found")
+	})
+}
+
+// TestRunner_SubagentExplore_ChildInheritsParentModel：核心猜测——
+// 用户那边 explore 子 agent 调出去看似"没产内容"，真实根因可能是 child
+// 的请求 Model 字段为空：opskat 把 cfg.Model 透给 coding.WithModel 只设了
+// **父** agent 的 model，cago 的 Explore/Plan/GP 默认 entry 在不显式
+// SubagentWithModel 时不会继承父 model → 子 agent 请求里 Model=""，
+// openai/anthropic 这类 API 直接 400 → cago 流出 chunk.Err → conv 空 →
+// runChild 默认分支返回 "sub-agent returned no content"，真实错误被吞。
+//
+// 这条 test 抓的是"child request 是否带上了 parent 的 model"，绿了说明
+// 子 agent 跑的是和父相同的模型，红了就是上面这条假设成真。
+func TestRunner_SubagentExplore_ChildInheritsParentModel(t *testing.T) {
+	Convey("子 explore agent 的请求里 Model 字段必须与父 agent 一致", t, func() {
+		mock := providertest.New()
+		queueParentDispatch(mock, "im1", "go")
+		mock.QueueStream(
+			provider.StreamChunk{ContentDelta: "child ok"},
+			provider.StreamChunk{FinishReason: provider.FinishStop},
+		)
+		queueParentClose(mock, "done")
+
+		cfg := SystemConfig{Provider: mock, Cwd: t.TempDir(), Model: "test-model"}
+		sys, err := BuildSystem(context.Background(), cfg)
+		So(err, ShouldBeNil)
+		t.Cleanup(func() { _ = sys.Close(context.Background()) })
+
+		conv := agent.LoadConversation(fmt.Sprintf("opskat-im-%d", time.Now().UnixNano()), nil)
+		runner := sys.Agent().Runner(conv)
+		t.Cleanup(func() { _ = runner.Close() })
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		events, err := runner.Send(ctx, "explore please")
+		So(err, ShouldBeNil)
+		for range events { // drain
+		}
+
+		recv := mock.Received()
+		// parent step1 (dispatch) → child step1 (text) → parent step2 (close)
+		So(len(recv), ShouldEqual, 3)
+
+		// 第二条请求是 child 的（subagent dispatch 出去后立刻发的）。
+		childReq := recv[1]
+		So(childReq.Model, ShouldEqual, "test-model")
+	})
+}
+
+// TestRunner_SubagentExplore_StreamErrorSurfacesAsToolError：用户那条
+// "no content" 的真实根因——子 agent provider stream 出错（API 403 / 限流 /
+// 网络 / 协议异常等）时，cago 的 subagent.runChild 之前会兜底成
+// "sub-agent returned no content"，把真错吞掉，父 agent 完全看不到。
+//
+// 修复后行为：tool 结果 IsError=true，文本里带原始错误，父 agent 拿到的是
+// 正常的 tool error 信号，可以判断是否重试/转人工。
+func TestRunner_SubagentExplore_StreamErrorSurfacesAsToolError(t *testing.T) {
+	Convey("child stream 错误必须冒泡成 tool error，而不是被吞成 no content", t, func() {
+		mock := providertest.New()
+		queueParentDispatch(mock, "es1", "go")
+		// 子 agent: stream 第一个 chunk 直接报错
+		mock.QueueStream(
+			provider.StreamChunk{Err: errors.New("upstream 429 rate limit")},
+		)
+		queueParentClose(mock, "done")
+
+		cfg := SystemConfig{Provider: mock, Cwd: t.TempDir(), Model: "m"}
+		sys, err := BuildSystem(context.Background(), cfg)
+		So(err, ShouldBeNil)
+		t.Cleanup(func() { _ = sys.Close(context.Background()) })
+
+		conv := agent.LoadConversation(fmt.Sprintf("opskat-es-%d", time.Now().UnixNano()), nil)
+		runner := sys.Agent().Runner(conv)
+		t.Cleanup(func() { _ = runner.Close() })
+
+		var mu sync.Mutex
+		var rb *agent.ToolResultBlock
+		unsub := runner.OnEvent(agent.OnlyKinds(agent.EventPostToolUse), func(_ context.Context, ev agent.Event) {
+			if ev.Tool == nil || ev.Tool.ToolUseID != "es1" {
+				return
+			}
+			mu.Lock()
+			rb = ev.Tool.Output
+			mu.Unlock()
+		})
+		defer unsub()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		events, err := runner.Send(ctx, "explore please")
+		So(err, ShouldBeNil)
+		for range events { // drain
+		}
+
+		mu.Lock()
+		got := rb
+		mu.Unlock()
+		So(got, ShouldNotBeNil)
+		So(got.IsError, ShouldBeTrue)
+		text := toolResultText(got)
+		So(text, ShouldContainSubstring, "sub-agent error")
+		So(text, ShouldContainSubstring, "429 rate limit")
+		So(text, ShouldNotContainSubstring, "sub-agent returned no content")
 	})
 }
 
