@@ -85,7 +85,7 @@ func handleRunCommand(ctx context.Context, args map[string]any) (string, error) 
 		}
 	}
 
-	// 如果有 SSH 缓存（内置 Agent 模式），使用缓存连接
+	// 如果 context 注入了 SSH 缓存，复用同一资产的连接
 	if cache := getSSHCache(ctx); cache != nil {
 		return runCommandWithCache(ctx, cache, assetID, command)
 	}

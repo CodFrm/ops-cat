@@ -7,7 +7,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// ConnCache 泛型连接缓存，在同一次 AI Chat 中复用连接
+// ConnCache 泛型连接缓存，在同一次 AI Send 中复用连接
 type ConnCache[C io.Closer] struct {
 	clients map[int64]C
 	closers map[int64]io.Closer

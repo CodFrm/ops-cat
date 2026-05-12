@@ -22,7 +22,7 @@ import (
 
 type mongoDBCacheKeyType struct{}
 
-// MongoDBClientCache 在同一次 AI Chat 中复用 MongoDB 连接
+// MongoDBClientCache 在同一次 AI Send 中复用 MongoDB 连接
 type MongoDBClientCache = ConnCache[*connpool.MongoClientCloser]
 
 // NewMongoDBClientCache 创建 MongoDB 连接缓存

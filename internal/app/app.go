@@ -85,7 +85,7 @@ type App struct {
 	mu                      sync.Mutex                 // 保护 connCounter
 	connCounter             int64                      // 连接ID计数器
 	currentConversationID   int64                      // 当前活跃会话ID
-	runners                 sync.Map                   // map[int64]*ai.CagoRunner
+	runners                 sync.Map                   // map[int64]*runnerEntry
 	extSvc                  *extension_svc.Service
 	flushAckCh              chan struct{} // OnBeforeClose 等待前端确认 flush 完成
 	k8sLogStreams           sync.Map      // map[string]context.CancelFunc — pod log stream cancellations

@@ -176,7 +176,7 @@ func TestCommandPolicyChecker_KafkaApprovalType(t *testing.T) {
 	mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
 
 	var approvalType string
-	checker := NewCommandPolicyChecker(func(_ context.Context, _ string, items []ApprovalItem, _ string) ApprovalResponse {
+	checker := NewCommandPolicyChecker(func(_ context.Context, _ string, items []ApprovalItem) ApprovalResponse {
 		if len(items) > 0 {
 			approvalType = items[0].Type
 		}

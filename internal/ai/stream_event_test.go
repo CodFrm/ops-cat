@@ -159,6 +159,25 @@ func TestEventTranslator_Compacted(t *testing.T) {
 	})
 }
 
+func TestEventTranslator_SteerConsumed(t *testing.T) {
+	Convey("EventSteerConsumed → queue_consumed，Content 透传 Delta", t, func() {
+		out := drain(NewStreamTranslator(), agent.Event{Kind: agent.EventSteerConsumed, Delta: "排队的内容"})
+		So(out, ShouldHaveLength, 1)
+		So(out[0].Type, ShouldEqual, "queue_consumed")
+		So(out[0].Content, ShouldEqual, "排队的内容")
+	})
+
+	Convey("仍处于 thinking 时先发 thinking_done", t, func() {
+		out := drain(NewStreamTranslator(),
+			agent.Event{Kind: agent.EventThinkingDelta, Delta: "..."},
+			agent.Event{Kind: agent.EventSteerConsumed, Delta: "x"},
+		)
+		So(out, ShouldHaveLength, 3)
+		So(out[1].Type, ShouldEqual, "thinking_done")
+		So(out[2].Type, ShouldEqual, "queue_consumed")
+	})
+}
+
 func TestEventTranslator_Done_FlushesThinking(t *testing.T) {
 	Convey("EventDone 收尾，仍处于 thinking 时先发 thinking_done", t, func() {
 		out := drain(NewStreamTranslator(),

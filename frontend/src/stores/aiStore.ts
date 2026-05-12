@@ -1161,11 +1161,22 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
     case "queue_consumed": {
       // 后端在工具调用间隙消费了一条排队消息
       // 结束当前 assistant 消息，插入 user 消息（含内联 <mention> XML），开启新 assistant 流
+      //
+      // 注意：cago 一次 drainSteer 可能批量消费多条 Steer，连续 emit N 个
+      // queue_consumed 事件——LLM 此时还没开始新一轮，前一个新开的 assistant
+      // 气泡是空壳。若直接续 streaming:false 留下，UI 会出现 N-1 个空气泡。
+      // 因此遇到"前一个 assistant 没有任何内容"时直接丢弃它再插 user + 新流。
       const curQueue = useAIStore.getState().conversationStreaming[convId]?.pendingQueue || [];
-      const nextMsgs = [...msgs];
+      let nextMsgs = [...msgs];
       const lastIdx = nextMsgs.length - 1;
       if (lastIdx >= 0 && nextMsgs[lastIdx].role === "assistant") {
-        nextMsgs[lastIdx] = { ...nextMsgs[lastIdx], streaming: false };
+        const last = nextMsgs[lastIdx];
+        const isEmpty = !last.content && (!last.blocks || last.blocks.length === 0);
+        if (isEmpty) {
+          nextMsgs = nextMsgs.slice(0, lastIdx);
+        } else {
+          nextMsgs[lastIdx] = { ...last, streaming: false };
+        }
       }
       nextMsgs.push({
         role: "user" as const,

@@ -22,7 +22,7 @@ import (
 
 type redisCacheKeyType struct{}
 
-// RedisClientCache 在同一次 AI Chat 中复用 Redis 连接
+// RedisClientCache 在同一次 AI Send 中复用 Redis 连接
 type RedisClientCache = ConnCache[*redis.Client]
 
 // NewRedisClientCache 创建 Redis 连接缓存

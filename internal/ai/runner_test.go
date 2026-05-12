@@ -50,12 +50,12 @@ func runOneTurn(t *testing.T, mock provider.Provider, systemPrompt string, messa
 	return out
 }
 
-// TestCagoRunner_ReplaysHistoryToLLM 验证回放的历史会真正进入 LLM 请求。
+// TestRunner_ReplaysHistoryToLLM 验证回放的历史会真正进入 LLM 请求。
 //
 // 回归：ToAgentMessages 早期用 &agent.TextBlock{} 之类的指针，cago 的
 // BuildRequest 用值类型 type switch（case TextBlock:），指针不匹配会被静默
 // 丢弃，导致 LLM 端看不到任何历史。
-func TestCagoRunner_ReplaysHistoryToLLM(t *testing.T) {
+func TestRunner_ReplaysHistoryToLLM(t *testing.T) {
 	Convey("history 必须出现在 LLM 请求里", t, func() {
 		mock := providertest.New().QueueStream(
 			provider.StreamChunk{ContentDelta: "ok"},
@@ -89,10 +89,10 @@ func TestCagoRunner_ReplaysHistoryToLLM(t *testing.T) {
 	})
 }
 
-// TestCagoRunner_SystemPromptHasOpsKatIntro 验证实际发出的 system message
+// TestRunner_SystemPromptHasOpsKatIntro 验证实际发出的 system message
 // 用的是 OpsKat 模板，而不是 cago 默认 "lead Cago coding agent" 那段。
 // 这是 WithSystemTemplate(opskatSystemTemplate) 接线的端到端断言。
-func TestCagoRunner_SystemPromptHasOpsKatIntro(t *testing.T) {
+func TestRunner_SystemPromptHasOpsKatIntro(t *testing.T) {
 	Convey("system prompt 开头是 OpsKat 身份，不是 cago 默认 intro", t, func() {
 		mock := providertest.New().QueueStream(
 			provider.StreamChunk{ContentDelta: "ok"},
@@ -120,7 +120,7 @@ func TestCagoRunner_SystemPromptHasOpsKatIntro(t *testing.T) {
 	})
 }
 
-func TestCagoRunner_SimpleTextResponse(t *testing.T) {
+func TestRunner_SimpleTextResponse(t *testing.T) {
 	Convey("纯文本回复路径：cago 流 → content + done", t, func() {
 		mock := providertest.New().QueueStream(
 			provider.StreamChunk{ContentDelta: "hello "},
@@ -155,7 +155,7 @@ func TestCagoRunner_SimpleTextResponse(t *testing.T) {
 	})
 }
 
-func TestCagoRunner_CancelEmitsStopped(t *testing.T) {
+func TestRunner_CancelEmitsStopped(t *testing.T) {
 	Convey("Runner.Cancel 后翻译出 stopped 事件", t, func() {
 		mock := providertest.New().QueueStreamFunc(func(ctx context.Context) <-chan provider.StreamChunk {
 			ch := make(chan provider.StreamChunk)

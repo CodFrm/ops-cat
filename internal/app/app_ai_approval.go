@@ -13,7 +13,7 @@ import (
 
 // makeCommandConfirmFunc 创建统一审批回调，向 AI 聊天流发送 approval_request 事件并阻塞等待
 func (a *App) makeCommandConfirmFunc() ai.CommandConfirmFunc {
-	return func(ctx context.Context, kind string, items []ai.ApprovalItem, agentRole string) ai.ApprovalResponse {
+	return func(ctx context.Context, kind string, items []ai.ApprovalItem) ai.ApprovalResponse {
 		convID := ai.GetConversationID(ctx)
 		if convID == 0 {
 			convID = a.currentConversationID // fallback
@@ -27,7 +27,6 @@ func (a *App) makeCommandConfirmFunc() ai.CommandConfirmFunc {
 			Kind:      kind,
 			Items:     items,
 			ConfirmID: confirmID,
-			AgentRole: agentRole,
 		})
 
 		// 阻塞等待前端响应

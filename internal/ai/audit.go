@@ -156,7 +156,7 @@ func (w *DefaultAuditWriter) WriteToolCall(ctx context.Context, info ToolCallInf
 	}
 }
 
-// AuditingExecutor 已由 cago_tools.go::rawTool 取代——cago 工具调用时同等地
+// AuditingExecutor 已由 tools.go + auditMiddleware 取代——cago 工具调用时同等地
 // 注入 *CheckResult 占位指针 + 异步 WriteToolCall。该类型已于 M6 整体下线。
 
 // --- 会话模式审计 ---
@@ -171,26 +171,6 @@ func writeGrantSubmitAudit(ctx context.Context, assetID int64, assetName string,
 			AssetName:  assetName,
 			Command:    strings.Join(patterns, ", "),
 			SessionID:  GetSessionID(ctx),
-			Decision:   "allow",
-			Success:    1,
-			Createtime: time.Now().Unix(),
-		}
-		if err := repo.Create(context.Background(), entry); err != nil {
-			logger.Default().Error("write grant submit audit", zap.Error(err))
-		}
-	}
-}
-
-// WriteGrantSubmitAudit 对外暴露的 grant 审计写入（供桌面端 approval handler 使用）
-func WriteGrantSubmitAudit(ctx context.Context, assetID int64, assetName string, patterns []string, sessionID string) {
-	if repo := audit_repo.Audit(); repo != nil {
-		entry := &audit_entity.AuditLog{
-			Source:     "opsctl",
-			ToolName:   "grant_submit",
-			AssetID:    assetID,
-			AssetName:  assetName,
-			Command:    strings.Join(patterns, ", "),
-			SessionID:  sessionID,
 			Decision:   "allow",
 			Success:    1,
 			Createtime: time.Now().Unix(),
@@ -252,13 +232,6 @@ var commandExtractors = map[string]CommandExtractorFunc{
 			return "grant: " + v + " reason: " + reason
 		}
 		return "grant: " + v
-	},
-	"batch_command": func(a map[string]any) string {
-		if cmds, ok := a["commands"]; ok {
-			b, _ := json.Marshal(cmds)
-			return string(b)
-		}
-		return ""
 	},
 	"exec_tool": func(a map[string]any) string {
 		return argString(a, "extension") + "." + argString(a, "tool")

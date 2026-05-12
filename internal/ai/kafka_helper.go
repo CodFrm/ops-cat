@@ -13,7 +13,7 @@ import (
 
 type kafkaServiceKeyType struct{}
 
-// WithKafkaService 将 Kafka 服务注入 context，让 AI handler 在同一次 Chat 内复用
+// WithKafkaService 将 Kafka 服务注入 context，让 AI handler 在同一次 AI Send 内复用
 // franz-go client（避免每次工具调用都重新 dial+ping）。
 func WithKafkaService(ctx context.Context, svc *kafka_svc.Service) context.Context {
 	if svc == nil {

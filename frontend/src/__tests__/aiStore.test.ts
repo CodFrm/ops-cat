@@ -1604,3 +1604,85 @@ describe("DeepSeek-v4 多轮 tool 调用历史展开", () => {
     expect(apiMsgs[1].tool_calls).toBeUndefined();
   });
 });
+
+describe("queue_consumed handler", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+  });
+
+  // 模拟 cago 一次 drainSteer 批量消费 N 条 Steer：连续 N 个 queue_consumed
+  // 事件在 LLM 出任何 token 前发上来。修复前每个事件都会插一个新的 streaming
+  // assistant 气泡——结果留下 N-1 个永远填不上的空气泡。
+  it("连续多条 queue_consumed 不留空 assistant 气泡", async () => {
+    const callbacks: Array<(event: any) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((_eventName: string, handler: (event: any) => void) => {
+      callbacks.push(handler);
+      return () => {};
+    }) as any);
+
+    const tabId = "ai-100";
+    useTabStore.setState({
+      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 100, title: "t" } }],
+      activeTabId: tabId,
+    });
+    useAIStore.setState({
+      tabStates: { [tabId]: createTabState() },
+      conversationMessages: { 100: [] },
+      conversationStreaming: { 100: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendToTab(tabId, "你好啊");
+    // sendToTab 已经把第一条 user + 空 streaming assistant 写进了 messages
+    // 现在伪造后端一次性 drain 3 条 Steer 的事件序列
+    callbacks[0]?.({ type: "queue_consumed", content: "哈哈哈" });
+    callbacks[0]?.({ type: "queue_consumed", content: "哈哈哈" });
+    callbacks[0]?.({ type: "queue_consumed", content: "提供给" });
+
+    const msgs = useAIStore.getState().conversationMessages[100];
+    // 期望：user 你好啊 / user 哈哈哈 / user 哈哈哈 / user 提供给 / 一个 streaming assistant
+    // —— 而不是 user / 空 / user / 空 / user / 空 / user / streaming
+    const roles = msgs.map((m) => m.role);
+    expect(roles).toEqual(["user", "user", "user", "user", "assistant"]);
+    expect(msgs.slice(0, 4).map((m) => m.content)).toEqual(["你好啊", "哈哈哈", "哈哈哈", "提供给"]);
+    expect(msgs[4].streaming).toBe(true);
+    expect(msgs[4].content).toBe("");
+    expect(msgs[4].blocks).toEqual([]);
+  });
+
+  // 反向：LLM 已经写过内容的 assistant 必须保留（设 streaming:false），
+  // 不能被新 queue_consumed 当空壳丢掉。
+  it("有内容的 assistant 会被收尾保留，不被误删", async () => {
+    const callbacks: Array<(event: any) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((_eventName: string, handler: (event: any) => void) => {
+      callbacks.push(handler);
+      return () => {};
+    }) as any);
+
+    const tabId = "ai-101";
+    useTabStore.setState({
+      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 101, title: "t" } }],
+      activeTabId: tabId,
+    });
+    useAIStore.setState({
+      tabStates: { [tabId]: createTabState() },
+      conversationMessages: { 101: [] },
+      conversationStreaming: { 101: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendToTab(tabId, "hi");
+    // 模拟第一轮 LLM 已经出了文本
+    callbacks[0]?.({ type: "content", content: "Hello world" });
+    callbacks[0]?.({ type: "queue_consumed", content: "扩展信息" });
+
+    const msgs = useAIStore.getState().conversationMessages[101];
+    expect(msgs.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    // 前一条 assistant 收尾，文本保留
+    expect(msgs[1].streaming).toBe(false);
+    // 新一轮 assistant 空 streaming
+    expect(msgs[3].streaming).toBe(true);
+    expect(msgs[3].blocks).toEqual([]);
+  });
+});

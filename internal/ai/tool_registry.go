@@ -11,7 +11,7 @@ import (
 )
 
 // tool_registry.go 的旧自研工具抽象（ParamDef / ToOpenAITools / DefaultToolExecutor）
-// 已在 M6 cutover 删除——OpsKat 桌面端走 cago 原生 tool.Tool（见 cago_tools*.go）。
+// 已在 M6 cutover 删除——OpsKat 桌面端走 cago 原生 tool.Tool（见 tools*.go）。
 //
 // 但 opsctl CLI 仍然直接以 (ctx, args)→(string, error) 的形式调用 handler，
 // 因此保留下面三个最小抽象：
@@ -31,13 +31,13 @@ type CommandExtractorFunc func(args map[string]any) string
 
 // ToolDef opsctl 派发表条目。
 // 不含 Description/Params/CommandExtractor 字段——那些只用于 OpenAI function calling schema，
-// 已由 cago_tools*.go 内嵌的 makeSchema 处理。opsctl 只需要 (name, handler) 对。
+// 已由 tools*.go 的 RawTool schema 处理。opsctl 只需要 (name, handler) 对。
 type ToolDef struct {
 	Name    string
 	Handler ToolHandlerFunc
 }
 
-// AllToolDefs 返回 opsctl CLI 派发用的工具列表（与 cago_tools.go 的 Tools 一一对应）。
+// AllToolDefs 返回 opsctl CLI 派发用的工具列表（与 tools.go 的 Tools 一一对应）。
 // spawn_agent / batch_command 已不再注册（opsctl 也没有调用它们）。
 func AllToolDefs() []ToolDef {
 	return []ToolDef{

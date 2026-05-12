@@ -343,7 +343,7 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 		}
 	}
 
-	// cago 路径：system prompt 走 CagoRunner.Start 第 1 个参数注入到 coding.AppendSystem，
+	// cago 路径：system prompt 走 BuildSystem 配置注入到 coding.AppendSystem，
 	// 不再以 RoleSystem 消息塞进 messages 列表。
 	systemPrompt := builder.Build()
 

@@ -22,7 +22,7 @@ import (
 
 type dbCacheKeyType struct{}
 
-// DatabaseClientCache 在同一次 AI Chat 中复用数据库连接
+// DatabaseClientCache 在同一次 AI Send 中复用数据库连接
 type DatabaseClientCache = ConnCache[*sql.DB]
 
 // NewDatabaseClientCache 创建数据库连接缓存

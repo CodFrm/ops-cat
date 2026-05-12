@@ -101,6 +101,14 @@ func (t *EventTranslator) Translate(ev agent.Event, emit func(StreamEvent)) {
 		// 新事件类型——前端尚未识别就当未知 type 忽略，不会破坏渲染。
 		emit(StreamEvent{Type: "compacted"})
 
+	case agent.EventSteerConsumed:
+		// cago 把一条 Steer 队列消息追加到 conv —— 翻译为前端契约里的
+		// queue_consumed：UI 据此收尾当前 assistant 气泡、插 user 气泡、开新流，
+		// 并从 pendingQueue 弹出首条。Delta 是 displayText（含 @mention 原样），
+		// 没有 display 时回落 LLM 文本，前端把它当 user 消息内容渲染。
+		t.flushThinking(emit)
+		emit(StreamEvent{Type: "queue_consumed", Content: ev.Delta})
+
 	case agent.EventDone:
 		t.flushThinking(emit)
 		emit(StreamEvent{Type: "done"})
