@@ -17,6 +17,8 @@ import {
   StopAIGeneration,
   SaveConversationMessages,
   UpdateConversationTitle,
+  RemoveQueuedAIMessage,
+  ClearQueuedAIMessages,
 } from "../../wailsjs/go/app/App";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 
@@ -401,7 +403,7 @@ describe("aiStore", () => {
           ],
         },
         conversationStreaming: {
-          3: { sending: true, pendingQueue: [{ text: "queued-1" }] },
+          3: { sending: true, pendingQueue: [{ id: "q1", text: "queued-1" }] },
         },
       });
 
@@ -412,7 +414,7 @@ describe("aiStore", () => {
       expect(useAIStore.getState().conversationMessages[3][1].content).toBe("partial");
       expect(useAIStore.getState().conversationStreaming[3]).toEqual({
         sending: true,
-        pendingQueue: [{ text: "queued-1" }],
+        pendingQueue: [{ id: "q1", text: "queued-1" }],
       });
     });
   });
@@ -502,13 +504,84 @@ describe("conversationMessages (Phase 1)", () => {
   it("getStreamingByConversationId reflects streaming state", () => {
     useAIStore.setState({
       conversationStreaming: {
-        42: { sending: true, pendingQueue: [{ text: "q1" }, { text: "q2" }] },
+        42: {
+          sending: true,
+          pendingQueue: [
+            { id: "pq1", text: "q1" },
+            { id: "pq2", text: "q2" },
+          ],
+        },
       },
     });
     expect(useAIStore.getState().getStreamingByConversationId(42)).toEqual({
       sending: true,
-      pendingQueue: [{ text: "q1" }, { text: "q2" }],
+      pendingQueue: [
+        { id: "pq1", text: "q1" },
+        { id: "pq2", text: "q2" },
+      ],
     });
+  });
+
+  it("removeFromQueue removes only backend-confirmed pending steer", async () => {
+    vi.mocked(RemoveQueuedAIMessage).mockResolvedValueOnce(true as any);
+    useAIStore.setState({
+      conversationStreaming: {
+        42: {
+          sending: true,
+          pendingQueue: [
+            { id: "q1", text: "first" },
+            { id: "q2", text: "second" },
+          ],
+        },
+      },
+    });
+
+    await useAIStore.getState().removeFromQueue(42, 1);
+
+    expect(RemoveQueuedAIMessage).toHaveBeenCalledWith(42, "q2");
+    expect(useAIStore.getState().conversationStreaming[42].pendingQueue).toEqual([{ id: "q1", text: "first" }]);
+  });
+
+  it("removeFromQueue keeps local queue when backend says the steer was already consumed", async () => {
+    vi.mocked(RemoveQueuedAIMessage).mockResolvedValueOnce(false as any);
+    useAIStore.setState({
+      conversationStreaming: {
+        42: {
+          sending: true,
+          pendingQueue: [
+            { id: "q1", text: "first" },
+            { id: "q2", text: "second" },
+          ],
+        },
+      },
+    });
+
+    await useAIStore.getState().removeFromQueue(42, 1);
+
+    expect(useAIStore.getState().conversationStreaming[42].pendingQueue).toEqual([
+      { id: "q1", text: "first" },
+      { id: "q2", text: "second" },
+    ]);
+  });
+
+  it("clearQueue removes only ids confirmed by backend", async () => {
+    vi.mocked(ClearQueuedAIMessages).mockResolvedValueOnce(["q1"] as any);
+    useAIStore.setState({
+      conversationStreaming: {
+        42: {
+          sending: true,
+          pendingQueue: [
+            { id: "q1", text: "first" },
+            { id: "q2", text: "second" },
+          ],
+        },
+      },
+    });
+
+    await useAIStore.getState().clearQueue(42);
+
+    expect(ClearQueuedAIMessages).toHaveBeenCalledWith(42);
+    expect(useAIStore.getState().conversationStreaming[42].pendingQueue).toEqual([{ id: "q2", text: "second" }]);
   });
 
   it("sendToTab writes only to conversationMessages for an existing conversation", async () => {
@@ -941,7 +1014,15 @@ describe("editAndResendConversation", () => {
 
     await useAIStore.getState().sendFromSidebarTab("sidebar-55", "original");
     useAIStore.setState({
-      conversationStreaming: { 55: { sending: true, pendingQueue: [{ text: "queued-1" }, { text: "queued-2" }] } },
+      conversationStreaming: {
+        55: {
+          sending: true,
+          pendingQueue: [
+            { id: "q1", text: "queued-1" },
+            { id: "q2", text: "queued-2" },
+          ],
+        },
+      },
     });
     vi.mocked(StopAIGeneration).mockImplementation(async () => {
       callbacks[0]?.({ type: "stopped" });
@@ -1432,7 +1513,13 @@ describe("sidebar and main tab multi-host behavior", () => {
     await useAIStore.getState().sendFromSidebarTab("sidebar-live", "first");
     useAIStore.setState({
       conversationStreaming: {
-        60: { sending: true, pendingQueue: [{ text: "queued-1" }, { text: "queued-2" }] },
+        60: {
+          sending: true,
+          pendingQueue: [
+            { id: "q1", text: "queued-1" },
+            { id: "q2", text: "queued-2" },
+          ],
+        },
       },
     });
 
@@ -1447,7 +1534,10 @@ describe("sidebar and main tab multi-host behavior", () => {
 
     expect(useAIStore.getState().conversationStreaming[60]).toEqual({
       sending: false,
-      pendingQueue: [{ text: "queued-1" }, { text: "queued-2" }],
+      pendingQueue: [
+        { id: "q1", text: "queued-1" },
+        { id: "q2", text: "queued-2" },
+      ],
     });
     expect(vi.mocked(SendAIMessage)).toHaveBeenCalledTimes(1);
   });
@@ -1603,6 +1693,109 @@ describe("DeepSeek-v4 多轮 tool 调用历史展开", () => {
   });
 });
 
+describe("stream buffer batching", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useAIStore.setState({
+      tabStates: {},
+      conversations: [],
+      conversationMessages: {},
+      conversationStreaming: {},
+    });
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function startStreamingConversation(convId: number) {
+    const callbacks: Array<(event: any) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((_eventName: string, handler: (event: any) => void) => {
+      callbacks.push(handler);
+      return () => {};
+    }) as any);
+
+    const tabId = `ai-${convId}`;
+    useTabStore.setState({
+      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: convId, title: "t" } }],
+      activeTabId: tabId,
+    });
+    useAIStore.setState({
+      tabStates: { [tabId]: createTabState() },
+      conversationMessages: { [convId]: [] },
+      conversationStreaming: { [convId]: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendToTab(tabId, "hi");
+    return callbacks;
+  }
+
+  it("content 事件在 50ms 窗口内合并成一次消息更新", async () => {
+    const callbacks = await startStreamingConversation(201);
+    let messageUpdates = 0;
+    const unsubscribe = useAIStore.subscribe((state, previous) => {
+      if (state.conversationMessages[201] !== previous.conversationMessages[201]) {
+        messageUpdates += 1;
+      }
+    });
+
+    callbacks[0]?.({ type: "content", content: "Hel" });
+    callbacks[0]?.({ type: "content", content: "lo " });
+    callbacks[0]?.({ type: "content", content: "world" });
+
+    expect(useAIStore.getState().conversationMessages[201].at(-1)?.content).toBe("");
+    expect(messageUpdates).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(49);
+    expect(useAIStore.getState().conversationMessages[201].at(-1)?.content).toBe("");
+    expect(messageUpdates).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(1);
+    unsubscribe();
+
+    const assistant = useAIStore.getState().conversationMessages[201].at(-1)!;
+    expect(assistant.content).toBe("Hello world");
+    expect(assistant.blocks).toEqual([{ type: "text", content: "Hello world" }]);
+    expect(messageUpdates).toBe(1);
+  });
+
+  it("thinking 事件同样按窗口合并到 running thinking block", async () => {
+    const callbacks = await startStreamingConversation(202);
+
+    callbacks[0]?.({ type: "thinking", content: "step 1" });
+    callbacks[0]?.({ type: "thinking", content: "\nstep 2" });
+
+    expect(useAIStore.getState().conversationMessages[202].at(-1)?.blocks).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(50);
+
+    const assistant = useAIStore.getState().conversationMessages[202].at(-1)!;
+    expect(assistant.content).toBe("");
+    expect(assistant.blocks).toEqual([{ type: "thinking", content: "step 1\nstep 2", status: "running" }]);
+  });
+
+  it("非流式事件会先 flush 缓冲并取消未触发 timer", async () => {
+    const callbacks = await startStreamingConversation(203);
+
+    callbacks[0]?.({ type: "content", content: "final text" });
+    callbacks[0]?.({ type: "done" });
+
+    let assistant = useAIStore.getState().conversationMessages[203].at(-1)!;
+    expect(assistant.content).toBe("final text");
+    expect(assistant.streaming).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    assistant = useAIStore.getState().conversationMessages[203].at(-1)!;
+    expect(assistant.content).toBe("final text");
+    expect(assistant.blocks).toEqual([{ type: "text", content: "final text" }]);
+  });
+});
+
 describe("queue_consumed handler", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1648,6 +1841,48 @@ describe("queue_consumed handler", () => {
     expect(msgs[4].streaming).toBe(true);
     expect(msgs[4].content).toBe("");
     expect(msgs[4].blocks).toEqual([]);
+  });
+
+  it("queue_consumed 带 queue_id 时按 id 移除本地 pendingQueue", async () => {
+    const callbacks: Array<(event: any) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((_eventName: string, handler: (event: any) => void) => {
+      callbacks.push(handler);
+      return () => {};
+    }) as any);
+
+    const tabId = "ai-102";
+    useTabStore.setState({
+      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 102, title: "t" } }],
+      activeTabId: tabId,
+    });
+    useAIStore.setState({
+      tabStates: { [tabId]: createTabState() },
+      conversationMessages: { 102: [] },
+      conversationStreaming: { 102: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendToTab(tabId, "hi");
+    useAIStore.setState({
+      conversationStreaming: {
+        102: {
+          sending: true,
+          pendingQueue: [
+            { id: "q1", text: "first" },
+            { id: "q2", text: "second" },
+          ],
+        },
+      },
+    });
+
+    callbacks[0]?.({ type: "queue_consumed", queue_id: "q2", content: "second" });
+
+    expect(useAIStore.getState().conversationStreaming[102].pendingQueue).toEqual([{ id: "q1", text: "first" }]);
+    const msgs = useAIStore.getState().conversationMessages[102];
+    expect(msgs.map((m) => [m.role, m.content])).toEqual([
+      ["user", "hi"],
+      ["user", "second"],
+      ["assistant", ""],
+    ]);
   });
 
   // 反向：LLM 已经写过内容的 assistant 必须保留（设 streaming:false），

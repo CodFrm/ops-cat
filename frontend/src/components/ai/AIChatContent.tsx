@@ -220,6 +220,16 @@ export function AIChatContent({
   const seenApprovalIdsRef = useRef<Set<string>>(new Set());
   const editTarget = sideTabId ? sidebarEditTarget : localEditTarget;
 
+  const enableScrollFollow = useCallback(() => {
+    isAtBottomRef.current = true;
+    const viewport = getViewport();
+    if (viewport) {
+      viewport.scrollTop = viewport.scrollHeight;
+    } else {
+      bottomRef.current?.scrollIntoView({ behavior: "auto" });
+    }
+  }, [getViewport]);
+
   useEffect(() => {
     seenApprovalIdsRef.current = new Set();
   }, [conversationId]);
@@ -365,6 +375,7 @@ export function AIChatContent({
       if (!content.trim()) return;
       if (editTarget && conversationId != null) {
         const activeTarget = editTarget;
+        enableScrollFollow();
         // 编辑模式改走 conversation 级 replay，提交成功后只在目标仍未变化时退出编辑态。
         void editAndResendConversation(conversationId, activeTarget.messageIndex, content).then(() => {
           if (sideTabId) {
@@ -389,6 +400,11 @@ export function AIChatContent({
         });
         return;
       }
+      // 普通发送在当前会话空闲时会立即开启新一轮输出，视图应重新进入底部跟随。
+      // 若 sending=true，本次提交只会进入 pending queue，保留用户当前阅读位置。
+      if (!sending) {
+        enableScrollFollow();
+      }
       if (onSendOverride) {
         void onSendOverride(content);
       } else if (tabId) {
@@ -399,10 +415,12 @@ export function AIChatContent({
       conversationId,
       editAndResendConversation,
       editTarget,
+      enableScrollFollow,
       onSendOverride,
       sendToTab,
       setSidebarTabEditTarget,
       sideTabId,
+      sending,
       tabId,
     ]
   );
@@ -447,6 +465,7 @@ export function AIChatContent({
 
   const confirmRegenerate = () => {
     if (regenerateTarget !== null) {
+      enableScrollFollow();
       if (tabId) {
         regenerate(tabId, regenerateTarget);
       } else if (conversationId != null) {

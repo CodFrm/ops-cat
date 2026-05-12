@@ -38,6 +38,10 @@ export function ClearGitHubToken() {
   return window['go']['app']['App']['ClearGitHubToken']();
 }
 
+export function ClearQueuedAIMessages(arg1) {
+  return window['go']['app']['App']['ClearQueuedAIMessages'](arg1);
+}
+
 export function ClearWebDAVConfig() {
   return window['go']['app']['App']['ClearWebDAVConfig']();
 }
@@ -674,8 +678,8 @@ export function PreviewTabbyConfig() {
   return window['go']['app']['App']['PreviewTabbyConfig']();
 }
 
-export function QueueAIMessage(arg1, arg2) {
-  return window['go']['app']['App']['QueueAIMessage'](arg1, arg2);
+export function QueueAIMessage(arg1, arg2, arg3) {
+  return window['go']['app']['App']['QueueAIMessage'](arg1, arg2, arg3);
 }
 
 export function RecordSnippetUse(arg1) {
@@ -780,6 +784,10 @@ export function RedisZSetRemove(arg1, arg2, arg3, arg4) {
 
 export function ReloadExtensions() {
   return window['go']['app']['App']['ReloadExtensions']();
+}
+
+export function RemoveQueuedAIMessage(arg1, arg2) {
+  return window['go']['app']['App']['RemoveQueuedAIMessage'](arg1, arg2);
 }
 
 export function ResizeSSH(arg1, arg2, arg3) {

@@ -4,6 +4,8 @@ import {
   SendAIMessage,
   StopAIGeneration,
   QueueAIMessage,
+  RemoveQueuedAIMessage,
+  ClearQueuedAIMessages,
   GetActiveAIProvider,
   CreateConversation,
   ListConversations,
@@ -65,12 +67,14 @@ export interface ChatMessage {
 }
 
 export interface PendingQueueItem {
+  id: string;
   text: string;
 }
 
 interface StreamEventData {
   type: string;
   content?: string;
+  queue_id?: string;
   tool_name?: string;
   tool_input?: string;
   tool_call_id?: string;
@@ -177,6 +181,12 @@ function getDefaultSidebarTitle() {
 
 function createSidebarTabId() {
   return `sidebar-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createPendingQueueId() {
+  const randomUUID = globalThis.crypto?.randomUUID?.bind(globalThis.crypto);
+  if (randomUUID) return `queue-${randomUUID()}`;
+  return `queue-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function createSidebarTab(overrides?: Partial<SidebarAITab>): SidebarAITab {
@@ -364,14 +374,16 @@ function persistNow(convId: number, includeStreaming = false) {
   persistConversationSnapshot(convId, includeStreaming);
 }
 
-// === 流式事件缓冲（性能优化：合并高频 content/thinking 事件，按帧刷新）===
+// === 流式事件缓冲（性能优化：合并高频 content/thinking 事件，降低主线程刷新压力）===
 
-const streamBuffers = new Map<number, { content: string; thinking: string; raf: number | null }>();
+const STREAM_FLUSH_INTERVAL_MS = 50;
+type StreamBuffer = { content: string; thinking: string; timer: ReturnType<typeof setTimeout> | null };
+const streamBuffers = new Map<number, StreamBuffer>();
 
 function getOrCreateStreamBuffer(convId: number) {
   let buf = streamBuffers.get(convId);
   if (!buf) {
-    buf = { content: "", thinking: "", raf: null };
+    buf = { content: "", thinking: "", timer: null };
     streamBuffers.set(convId, buf);
   }
   return buf;
@@ -380,9 +392,9 @@ function getOrCreateStreamBuffer(convId: number) {
 function flushStreamBuffer(convId: number) {
   const buf = streamBuffers.get(convId);
   if (!buf) return;
-  if (buf.raf !== null) {
-    cancelAnimationFrame(buf.raf);
-    buf.raf = null;
+  if (buf.timer !== null) {
+    clearTimeout(buf.timer);
+    buf.timer = null;
   }
   const cd = buf.content;
   const td = buf.thinking;
@@ -419,9 +431,19 @@ function flushStreamBuffer(convId: number) {
   });
 }
 
+function scheduleStreamBufferFlush(convId: number) {
+  const buf = getOrCreateStreamBuffer(convId);
+  if (buf.timer !== null) return;
+  buf.timer = setTimeout(() => {
+    const b = streamBuffers.get(convId);
+    if (b) b.timer = null;
+    flushStreamBuffer(convId);
+  }, STREAM_FLUSH_INTERVAL_MS);
+}
+
 function cleanupStreamBuffer(convId: number) {
   const buf = streamBuffers.get(convId);
-  if (buf?.raf != null) cancelAnimationFrame(buf.raf);
+  if (buf?.timer != null) clearTimeout(buf.timer);
   streamBuffers.delete(convId);
 }
 
@@ -882,7 +904,7 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
   const currentMsgs = useAIStore.getState().conversationMessages[convId] || [];
   if (!currentMsgs) return;
 
-  // 高频事件缓冲：content/thinking 通过 RAF 合并，每帧最多一次状态更新
+  // 高频事件缓冲：content/thinking 通过固定时间窗合并，避免每帧重解析 Markdown 抢占输入。
   if (event.type === "content" || event.type === "thinking") {
     const buf = getOrCreateStreamBuffer(convId);
     if (event.type === "content") {
@@ -890,13 +912,7 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
     } else {
       buf.thinking += event.content || "";
     }
-    if (buf.raf === null) {
-      buf.raf = requestAnimationFrame(() => {
-        const b = streamBuffers.get(convId);
-        if (b) b.raf = null;
-        flushStreamBuffer(convId);
-      });
-    }
+    scheduleStreamBufferFlush(convId);
     return;
   }
 
@@ -1154,7 +1170,11 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
         blocks: [],
         streaming: true,
       });
-      const newQueue = curQueue.length > 0 ? curQueue.slice(1) : [];
+      const newQueue = event.queue_id
+        ? curQueue.filter((item) => item.id !== event.queue_id)
+        : curQueue.length > 0
+          ? curQueue.slice(1)
+          : [];
       updateConversation(convId, { messages: nextMsgs, pendingQueue: newQueue });
       // 排队消息被消费（插入新 user + 开启新 assistant）属于低频关键事件，立即落盘。
       persistNow(convId, true);
@@ -1374,11 +1394,19 @@ async function _sendForConversation(convId: number, content: string) {
 
   // 生成中时排队：推送到后端 runner 队列 + 本地队列（用于 UI 显示）
   if (streaming.sending) {
-    if (content.trim()) {
+    const text = content.trim();
+    if (text) {
+      const queueID = createPendingQueueId();
       updateConversation(convId, {
-        pendingQueue: [...streaming.pendingQueue, { text: content.trim() }],
+        pendingQueue: [...streaming.pendingQueue, { id: queueID, text }],
       });
-      QueueAIMessage(convId, content.trim()).catch(() => {});
+      QueueAIMessage(convId, queueID, text).catch(() => {
+        const current = useAIStore.getState().conversationStreaming[convId];
+        if (!current?.pendingQueue.some((item) => item.id === queueID)) return;
+        updateConversation(convId, {
+          pendingQueue: current.pendingQueue.filter((item) => item.id !== queueID),
+        });
+      });
     }
     return;
   }
@@ -1496,8 +1524,8 @@ interface AIState {
   stopGeneration: (tabId: string) => Promise<void>;
   regenerate: (tabId: string, messageIndex: number) => Promise<void>;
   regenerateConversation: (convId: number, messageIndex: number) => Promise<void>;
-  removeFromQueue: (convId: number, index: number) => void;
-  clearQueue: (convId: number) => void;
+  removeFromQueue: (convId: number, index: number) => Promise<void>;
+  clearQueue: (convId: number) => Promise<void>;
 
   // Tab 管理 (delegates to tabStore)
   openConversationTab: (conversationId: number) => Promise<string>;
@@ -2118,15 +2146,37 @@ export const useAIStore = create<AIState>((set, get) => {
       await replayConversation(convId, truncated, "");
     },
 
-    removeFromQueue: (convId: number, index: number) => {
+    removeFromQueue: async (convId: number, index: number) => {
       const streaming = get().conversationStreaming[convId];
       if (!streaming) return;
-      const newQueue = streaming.pendingQueue.filter((_, i) => i !== index);
-      updateConversation(convId, { pendingQueue: newQueue });
+      const item = streaming.pendingQueue[index];
+      if (!item) return;
+      let removed: boolean;
+      try {
+        removed = await RemoveQueuedAIMessage(convId, item.id);
+      } catch {
+        return;
+      }
+      if (!removed) return;
+      const current = get().conversationStreaming[convId];
+      if (!current) return;
+      updateConversation(convId, { pendingQueue: current.pendingQueue.filter((queued) => queued.id !== item.id) });
     },
 
-    clearQueue: (convId: number) => {
-      updateConversation(convId, { pendingQueue: [] });
+    clearQueue: async (convId: number) => {
+      const streaming = get().conversationStreaming[convId];
+      if (!streaming || streaming.pendingQueue.length === 0) return;
+      let removedIDs: string[];
+      try {
+        removedIDs = (await ClearQueuedAIMessages(convId)) ?? [];
+      } catch {
+        return;
+      }
+      if (removedIDs.length === 0) return;
+      const removed = new Set(removedIDs);
+      const current = get().conversationStreaming[convId];
+      if (!current) return;
+      updateConversation(convId, { pendingQueue: current.pendingQueue.filter((item) => !removed.has(item.id)) });
     },
 
     // === 查询 ===

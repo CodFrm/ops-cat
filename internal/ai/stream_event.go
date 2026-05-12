@@ -107,7 +107,7 @@ func (t *EventTranslator) Translate(ev agent.Event, emit func(StreamEvent)) {
 		// 并从 pendingQueue 弹出首条。Delta 是 displayText（含 @mention 原样），
 		// 没有 display 时回落 LLM 文本，前端把它当 user 消息内容渲染。
 		t.flushThinking(emit)
-		emit(StreamEvent{Type: "queue_consumed", Content: ev.Delta})
+		emit(StreamEvent{Type: "queue_consumed", Content: ev.Delta, QueueID: ev.SteerID})
 
 	case agent.EventDone:
 		t.flushThinking(emit)

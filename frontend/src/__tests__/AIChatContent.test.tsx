@@ -581,4 +581,79 @@ describe("AIChatContent", () => {
 
     expect(viewport!.scrollTop).toBe(30);
   });
+
+  it("re-enables outer viewport follow when the user sends a new idle message", async () => {
+    const user = userEvent.setup();
+    const onSendOverride = vi.fn().mockResolvedValue(undefined);
+
+    useAIStore.setState({
+      conversationMessages: {
+        94: [
+          { role: "user", content: "hi", blocks: [] },
+          { role: "assistant", content: "old answer", blocks: [{ type: "text", content: "old answer" }] },
+        ],
+      },
+      conversationStreaming: {
+        94: { sending: false, pendingQueue: [] },
+      },
+    });
+
+    const { container } = render(<AIChatContent conversationId={94} onSendOverride={onSendOverride} />);
+    const viewport = container.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
+    expect(viewport).toBeTruthy();
+    setupScrollableElement(viewport!, {
+      scrollHeight: 500,
+      clientHeight: 200,
+      scrollTop: 300,
+    });
+    dispatchScroll(viewport!);
+    viewport!.scrollTop = 120;
+    dispatchScroll(viewport!);
+
+    await user.type(screen.getByRole("textbox", { name: "mock-ai-input" }), "new question");
+    await user.click(screen.getByRole("button", { name: "mock-submit" }));
+
+    await waitFor(() => expect(onSendOverride).toHaveBeenCalledWith("new question"));
+    expect(viewport!.scrollTop).toBe(500);
+  });
+
+  it("keeps the user's scroll position when sending only queues during active output", async () => {
+    const user = userEvent.setup();
+    const onSendOverride = vi.fn().mockResolvedValue(undefined);
+
+    useAIStore.setState({
+      conversationMessages: {
+        95: [
+          { role: "user", content: "hi", blocks: [] },
+          {
+            role: "assistant",
+            content: "streaming answer",
+            blocks: [{ type: "text", content: "streaming answer" }],
+            streaming: true,
+          },
+        ],
+      },
+      conversationStreaming: {
+        95: { sending: true, pendingQueue: [] },
+      },
+    });
+
+    const { container } = render(<AIChatContent conversationId={95} onSendOverride={onSendOverride} />);
+    const viewport = container.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
+    expect(viewport).toBeTruthy();
+    setupScrollableElement(viewport!, {
+      scrollHeight: 500,
+      clientHeight: 200,
+      scrollTop: 300,
+    });
+    dispatchScroll(viewport!);
+    viewport!.scrollTop = 120;
+    dispatchScroll(viewport!);
+
+    await user.type(screen.getByRole("textbox", { name: "mock-ai-input" }), "queued question");
+    await user.click(screen.getByRole("button", { name: "mock-submit" }));
+
+    await waitFor(() => expect(onSendOverride).toHaveBeenCalledWith("queued question"));
+    expect(viewport!.scrollTop).toBe(120);
+  });
 });

@@ -177,11 +177,12 @@ func TestEventTranslator_Compacted(t *testing.T) {
 }
 
 func TestEventTranslator_SteerConsumed(t *testing.T) {
-	Convey("EventSteerConsumed → queue_consumed，Content 透传 Delta", t, func() {
-		out := drain(NewStreamTranslator(), agent.Event{Kind: agent.EventSteerConsumed, Delta: "排队的内容"})
+	Convey("EventSteerConsumed → queue_consumed，Content / QueueID 透传", t, func() {
+		out := drain(NewStreamTranslator(), agent.Event{Kind: agent.EventSteerConsumed, Delta: "排队的内容", SteerID: "q1"})
 		So(out, ShouldHaveLength, 1)
 		So(out[0].Type, ShouldEqual, "queue_consumed")
 		So(out[0].Content, ShouldEqual, "排队的内容")
+		So(out[0].QueueID, ShouldEqual, "q1")
 	})
 
 	Convey("仍处于 thinking 时先发 thinking_done", t, func() {
