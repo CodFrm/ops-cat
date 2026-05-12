@@ -6,11 +6,11 @@ import (
 	"github.com/cago-frame/agents/agent"
 )
 
-// splitForReplay 把 OpsKat 的消息列表切分为「需要灌进 cago Conversation 的历史」+「本轮要发给 LLM 的最后一条用户文本」。
+// SplitForReplay 把 OpsKat 的消息列表切分为「需要灌进 cago Conversation 的历史」+「本轮要发给 LLM 的最后一条用户文本」。
 //
 // 调用约定：messages 来自 SendAIMessage 入参，包含全部历史 + 末尾的新 user message。
 // 如果末尾不是 user message（边界场景，比如纯历史回放），则全部归入 history、lastUserText = ""。
-func splitForReplay(messages []Message) (history []Message, lastUserText string) {
+func SplitForReplay(messages []Message) (history []Message, lastUserText string) {
 	if len(messages) == 0 {
 		return nil, ""
 	}
@@ -21,7 +21,7 @@ func splitForReplay(messages []Message) (history []Message, lastUserText string)
 	return messages, ""
 }
 
-// convertToCagoMessages 把 OpsKat 的 []Message 转换为 cago agent.Message 切片。
+// ToAgentMessages 把 OpsKat 的 []Message 转换为 cago agent.Message 切片。
 //
 // 转换规则：
 //   - user        → agent.Message{Role: RoleUser,    Content: [TextBlock]}
@@ -36,7 +36,7 @@ func splitForReplay(messages []Message) (history []Message, lastUserText string)
 // ReasoningContent（OpenAI/DeepSeek 风格）目前与 Thinking 合并处理——cago 的 ThinkingBlock 兼容两者。
 // ThinkingBlock.Signature 仅在 Anthropic 流式 thinking 模式必填，DB schema 当前未持久化此字段；
 // 重放时缺 Signature 可能导致 Anthropic 拒绝继续多轮 thinking——这是已知 follow-up（见 plan 风险章节）。
-func convertToCagoMessages(messages []Message) []agent.Message {
+func ToAgentMessages(messages []Message) []agent.Message {
 	out := make([]agent.Message, 0, len(messages))
 	for _, m := range messages {
 		switch m.Role {

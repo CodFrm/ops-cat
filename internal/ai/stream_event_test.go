@@ -22,7 +22,7 @@ func drain(t *EventTranslator, evs ...agent.Event) []StreamEvent {
 
 func TestEventTranslator_TextDelta(t *testing.T) {
 	Convey("EventTextDelta → content", t, func() {
-		out := drain(NewEventTranslator(), agent.Event{
+		out := drain(NewStreamTranslator(), agent.Event{
 			Kind:  agent.EventTextDelta,
 			Delta: "hi",
 		})
@@ -34,7 +34,7 @@ func TestEventTranslator_TextDelta(t *testing.T) {
 
 func TestEventTranslator_ThinkingThenContent(t *testing.T) {
 	Convey("thinking 后跟 content 时插入 thinking_done", t, func() {
-		out := drain(NewEventTranslator(),
+		out := drain(NewStreamTranslator(),
 			agent.Event{Kind: agent.EventThinkingDelta, Delta: "let me think"},
 			agent.Event{Kind: agent.EventTextDelta, Delta: "answer"},
 		)
@@ -49,7 +49,7 @@ func TestEventTranslator_ThinkingThenContent(t *testing.T) {
 
 func TestEventTranslator_ThinkingThenToolStart(t *testing.T) {
 	Convey("thinking 后直接调工具时也插入 thinking_done", t, func() {
-		out := drain(NewEventTranslator(),
+		out := drain(NewStreamTranslator(),
 			agent.Event{Kind: agent.EventThinkingDelta, Delta: "..."},
 			agent.Event{Kind: agent.EventPreToolUse, Tool: &agent.ToolEvent{
 				ToolUseID: "tu_1",
@@ -68,7 +68,7 @@ func TestEventTranslator_ThinkingThenToolStart(t *testing.T) {
 
 func TestEventTranslator_PostToolUse(t *testing.T) {
 	Convey("EventPostToolUse → tool_result（拼出 TextBlock 内容）", t, func() {
-		out := drain(NewEventTranslator(),
+		out := drain(NewStreamTranslator(),
 			agent.Event{Kind: agent.EventPostToolUse, Tool: &agent.ToolEvent{
 				ToolUseID: "tu_2",
 				Name:      "exec_sql",
@@ -90,7 +90,7 @@ func TestEventTranslator_PostToolUse(t *testing.T) {
 
 func TestEventTranslator_TurnEndUsage(t *testing.T) {
 	Convey("EventTurnEnd（带 Usage）→ usage", t, func() {
-		out := drain(NewEventTranslator(),
+		out := drain(NewStreamTranslator(),
 			agent.Event{Kind: agent.EventTurnEnd, Usage: &provider.Usage{
 				PromptTokens:        100,
 				CompletionTokens:    50,
@@ -110,14 +110,14 @@ func TestEventTranslator_TurnEndUsage(t *testing.T) {
 
 func TestEventTranslator_TurnEndNoUsage(t *testing.T) {
 	Convey("EventTurnEnd（无 Usage）静默", t, func() {
-		out := drain(NewEventTranslator(), agent.Event{Kind: agent.EventTurnEnd})
+		out := drain(NewStreamTranslator(), agent.Event{Kind: agent.EventTurnEnd})
 		So(out, ShouldBeEmpty)
 	})
 }
 
 func TestEventTranslator_Retry(t *testing.T) {
 	Convey("EventRetry → retry，错误信息透传", t, func() {
-		out := drain(NewEventTranslator(), agent.Event{
+		out := drain(NewStreamTranslator(), agent.Event{
 			Kind: agent.EventRetry,
 			Retry: &agent.RetryEvent{
 				Attempt: 1,
@@ -133,7 +133,7 @@ func TestEventTranslator_Retry(t *testing.T) {
 
 func TestEventTranslator_Canceled(t *testing.T) {
 	Convey("EventCancelled → stopped", t, func() {
-		out := drain(NewEventTranslator(), agent.Event{Kind: agent.EventCancelled})
+		out := drain(NewStreamTranslator(), agent.Event{Kind: agent.EventCancelled})
 		So(out, ShouldHaveLength, 1)
 		So(out[0].Type, ShouldEqual, "stopped")
 	})
@@ -141,7 +141,7 @@ func TestEventTranslator_Canceled(t *testing.T) {
 
 func TestEventTranslator_Error(t *testing.T) {
 	Convey("EventError → error 携带消息", t, func() {
-		out := drain(NewEventTranslator(), agent.Event{
+		out := drain(NewStreamTranslator(), agent.Event{
 			Kind:  agent.EventError,
 			Error: errors.New("boom"),
 		})
@@ -153,7 +153,7 @@ func TestEventTranslator_Error(t *testing.T) {
 
 func TestEventTranslator_Compacted(t *testing.T) {
 	Convey("EventCompacted → compacted（新 type）", t, func() {
-		out := drain(NewEventTranslator(), agent.Event{Kind: agent.EventCompacted})
+		out := drain(NewStreamTranslator(), agent.Event{Kind: agent.EventCompacted})
 		So(out, ShouldHaveLength, 1)
 		So(out[0].Type, ShouldEqual, "compacted")
 	})
@@ -161,7 +161,7 @@ func TestEventTranslator_Compacted(t *testing.T) {
 
 func TestEventTranslator_Done_FlushesThinking(t *testing.T) {
 	Convey("EventDone 收尾，仍处于 thinking 时先发 thinking_done", t, func() {
-		out := drain(NewEventTranslator(),
+		out := drain(NewStreamTranslator(),
 			agent.Event{Kind: agent.EventThinkingDelta, Delta: "..."},
 			agent.Event{Kind: agent.EventDone},
 		)
@@ -173,7 +173,7 @@ func TestEventTranslator_Done_FlushesThinking(t *testing.T) {
 
 func TestEventTranslator_IgnoredKinds(t *testing.T) {
 	Convey("EventMessageEnd / EventToolDelta 不映射", t, func() {
-		out := drain(NewEventTranslator(),
+		out := drain(NewStreamTranslator(),
 			agent.Event{Kind: agent.EventMessageEnd},
 			agent.Event{Kind: agent.EventToolDelta},
 		)

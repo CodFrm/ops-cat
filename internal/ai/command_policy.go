@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cago-frame/agents/agent"
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 
@@ -57,18 +58,25 @@ func (r CheckResult) DecisionString() string {
 	}
 }
 
-// --- CheckResult context（供 AuditingExecutor 读取决策信息）---
+// --- CheckResult 跨 hook 共享 ---
+//
+// 调用约定：在每次工具调用之前，attachCheckResultHook（注册为 PreToolUseHook）
+// 会按 ToolUseID 在 decisionMap 里 Store 一个空的 *CheckResult；handler 通过
+// setCheckResult 填充该指针；auditPostHook 在审计写入时 LoadAndDelete 取出并清理。
+// 没有 ToolUseID（如 opsctl 直调 handler 路径）时 setCheckResult 是 no-op，
+// 决策走 callHandler 入参写审计，互不影响。
 
-type checkResultKey struct{}
-
-// withCheckResult 注入 CheckResult 占位指针（由 AuditingExecutor 调用）
-func withCheckResult(ctx context.Context, r *CheckResult) context.Context {
-	return context.WithValue(ctx, checkResultKey{}, r)
-}
-
-// setCheckResult 在工具 handler 中设置决策结果
+// setCheckResult 在工具 handler 中设置决策结果，供 audit hook 读取。
 func setCheckResult(ctx context.Context, result CheckResult) {
-	if r, ok := ctx.Value(checkResultKey{}).(*CheckResult); ok && r != nil {
+	id := agent.ToolUseIDFromContext(ctx)
+	if id == "" {
+		return
+	}
+	v, ok := decisionMap.Load(id)
+	if !ok {
+		return
+	}
+	if r, ok := v.(*CheckResult); ok && r != nil {
 		*r = result
 	}
 }

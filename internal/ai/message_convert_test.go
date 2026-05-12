@@ -8,9 +8,9 @@ import (
 )
 
 func TestSplitForReplay(t *testing.T) {
-	Convey("splitForReplay", t, func() {
+	Convey("SplitForReplay", t, func() {
 		Convey("空列表 → 全空", func() {
-			h, last := splitForReplay(nil)
+			h, last := SplitForReplay(nil)
 			So(h, ShouldBeNil)
 			So(last, ShouldEqual, "")
 		})
@@ -20,7 +20,7 @@ func TestSplitForReplay(t *testing.T) {
 				{Role: RoleAssistant, Content: "hi"},
 				{Role: RoleUser, Content: "now what"},
 			}
-			h, last := splitForReplay(msgs)
+			h, last := SplitForReplay(msgs)
 			So(h, ShouldHaveLength, 2)
 			So(last, ShouldEqual, "now what")
 		})
@@ -29,17 +29,17 @@ func TestSplitForReplay(t *testing.T) {
 				{Role: RoleUser, Content: "hello"},
 				{Role: RoleAssistant, Content: "hi"},
 			}
-			h, last := splitForReplay(msgs)
+			h, last := SplitForReplay(msgs)
 			So(h, ShouldHaveLength, 2)
 			So(last, ShouldEqual, "")
 		})
 	})
 }
 
-func TestConvertToCagoMessages(t *testing.T) {
-	Convey("convertToCagoMessages", t, func() {
+func TestToAgentMessages(t *testing.T) {
+	Convey("ToAgentMessages", t, func() {
 		Convey("user 消息 → RoleUser + TextBlock", func() {
-			out := convertToCagoMessages([]Message{{Role: RoleUser, Content: "hi"}})
+			out := ToAgentMessages([]Message{{Role: RoleUser, Content: "hi"}})
 			So(out, ShouldHaveLength, 1)
 			So(out[0].Role, ShouldEqual, agent.RoleUser)
 			So(out[0].Content, ShouldHaveLength, 1)
@@ -55,7 +55,7 @@ func TestConvertToCagoMessages(t *testing.T) {
 			}
 			tc.Function.Name = "run_command"
 			tc.Function.Arguments = `{"asset_id":1,"command":"uptime"}`
-			out := convertToCagoMessages([]Message{
+			out := ToAgentMessages([]Message{
 				{
 					Role:      RoleAssistant,
 					Content:   "let me run that",
@@ -87,7 +87,7 @@ func TestConvertToCagoMessages(t *testing.T) {
 			tc := ToolCall{ID: "tu_x", Type: "function"}
 			tc.Function.Name = "run_command"
 			tc.Function.Arguments = "not-json"
-			out := convertToCagoMessages([]Message{
+			out := ToAgentMessages([]Message{
 				{Role: RoleAssistant, ToolCalls: []ToolCall{tc}},
 			})
 			So(out, ShouldHaveLength, 1)
@@ -99,7 +99,7 @@ func TestConvertToCagoMessages(t *testing.T) {
 		})
 
 		Convey("tool 消息 → RoleTool + ToolResultBlock", func() {
-			out := convertToCagoMessages([]Message{
+			out := ToAgentMessages([]Message{
 				{Role: RoleTool, ToolCallID: "tu_1", Content: "ok-result"},
 			})
 			So(out, ShouldHaveLength, 1)
@@ -113,7 +113,7 @@ func TestConvertToCagoMessages(t *testing.T) {
 		})
 
 		Convey("system 消息被跳过（cago 不放进 Conversation）", func() {
-			out := convertToCagoMessages([]Message{
+			out := ToAgentMessages([]Message{
 				{Role: RoleSystem, Content: "you are concise"},
 				{Role: RoleUser, Content: "hi"},
 			})

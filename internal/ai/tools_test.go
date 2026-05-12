@@ -1,8 +1,6 @@
 package ai
 
 import (
-	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/cago-frame/agents/agent"
@@ -10,9 +8,9 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
-func TestCagoTools_RegistryShape(t *testing.T) {
-	Convey("CagoTools 返回的工具集与既定契约一致", t, func() {
-		tools := CagoTools()
+func TestTools_RegistryShape(t *testing.T) {
+	Convey("Tools 返回的工具集与既定契约一致", t, func() {
+		tools := Tools()
 
 		// 不应包含已经删除的 spawn_agent / batch_command（由 cago dispatch_subagent 取代）
 		names := make(map[string]tool.Tool, len(tools))
@@ -61,36 +59,14 @@ func TestCagoTools_RegistryShape(t *testing.T) {
 			}
 		})
 
-		Convey("Schema 结构合法", func() {
-			for name, t := range names {
+		Convey("Schema 结构合法（type=object，必填字段存在）", func() {
+			for _, t := range names {
 				schema := t.Schema()
 				So(schema.Type, ShouldEqual, "object")
-				if len(schema.Properties) > 0 {
-					var props map[string]any
-					err := json.Unmarshal(schema.Properties, &props)
-					So(err, ShouldBeNil)
-					_ = name // 仅用于失败时的 SoMsg 上下文
+				for _, req := range schema.Required {
+					So(schema.Properties, ShouldContainKey, req)
 				}
 			}
 		})
-	})
-}
-
-func TestTextResult_PacksErrorAsIsError(t *testing.T) {
-	Convey("textResult 把 error 包成 IsError=true，把 string 包成单 TextBlock", t, func() {
-		blk, err := textResult("hello", nil)
-		So(err, ShouldBeNil)
-		So(blk.IsError, ShouldBeFalse)
-		So(blk.Content, ShouldHaveLength, 1)
-		txt, ok := blk.Content[0].(*agent.TextBlock)
-		So(ok, ShouldBeTrue)
-		So(txt.Text, ShouldEqual, "hello")
-
-		blk2, err := textResult("", errors.New("boom"))
-		So(err, ShouldBeNil)
-		So(blk2.IsError, ShouldBeTrue)
-		txt2, ok := blk2.Content[0].(*agent.TextBlock)
-		So(ok, ShouldBeTrue)
-		So(txt2.Text, ShouldEqual, "boom")
 	})
 }

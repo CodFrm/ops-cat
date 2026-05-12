@@ -16,11 +16,22 @@ import (
 	"github.com/opskat/opskat/internal/service/ai_provider_svc"
 	"github.com/opskat/opskat/internal/service/conversation_svc"
 
+	"github.com/cago-frame/agents/agent"
+	"github.com/cago-frame/agents/app/coding"
 	"github.com/cago-frame/cago/pkg/logger"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
+
+// runnerEntry 持有一个活跃会话的 cago 运行栈：coding.System 控制工具集 + 父 agent，
+// agent.Runner 承担实际的 Send / Steer / Cancel / Close；done channel 用于 Stop 时
+// 等待事件消费 goroutine 退出。
+type runnerEntry struct {
+	sys    *coding.System
+	runner *agent.Runner
+	done   chan struct{}
+}
 
 func maskAPIKey(key string) string {
 	if len(key) <= 8 {
@@ -42,8 +53,8 @@ func normalizeConversationTitle(title string) string {
 	return title
 }
 
-// activateProvider 根据 Provider 配置准备 CagoRunner 所需的依赖。
-// 不再构造自研 *ai.Agent —— CagoRunner 在每次 Send 时按需 BuildCagoProvider + coding.New。
+// activateProvider 根据 Provider 配置准备 BuildSystem 所需的依赖。
+// 每次 SendAIMessage 时按需 BuildSystem → cago.coding.New → agent.Runner。
 func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
 	apiKey, err := ai_provider_svc.AIProvider().DecryptAPIKey(p)
 	if err != nil {
@@ -52,18 +63,18 @@ func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
 
 	checker := ai.NewCommandPolicyChecker(a.makeCommandConfirmFunc())
 	checker.SetGrantRequestFunc(a.makeGrantRequestFunc())
+	a.policyChecker = checker
 
 	cwd, err := defaultAICwd()
 	if err != nil {
 		return fmt.Errorf("准备 AI 工作目录失败: %w", err)
 	}
 
-	a.aiRunnerCfg = &ai.CagoRunnerConfig{
+	a.aiSystemCfg = &ai.SystemConfig{
 		ProviderEntity: p,
 		APIKey:         apiKey,
 		Cwd:            cwd,
-		PolicyChecker:  checker,
-		Tools:          ai.CagoTools(),
+		Tools:          ai.Tools(),
 		LocalToolGate:  ai.NewLocalToolGate(a.makeLocalToolConfirmFunc()),
 	}
 	a.resetRunners()
@@ -83,20 +94,19 @@ func defaultAICwd() (string, error) {
 	return cwd, nil
 }
 
-// resetRunners 停止并清空所有缓存的 CagoRunner。
-// Why: runner 在创建时会捕获当时的 aiRunnerCfg 引用，供应商切换后若不清空，
-// 已有会话会继续使用旧 provider，必须重启软件才生效。
-// 并发调用 Stop 避免串行累计阻塞 UI；另外设 3s 上限——Stop 会阻塞等
-// goroutine 退出，若某个 Stop 被卡住（ctx 不被及时响应等），
-// 超时后放行，泄漏的 goroutine 只是持有旧 cfg 引用，不会导致正确性问题。
+// resetRunners 停止并清空所有缓存的 runnerEntry。
+// Why: runner 创建时绑定的是当时 aiSystemCfg 构造出的 *coding.System，
+// 供应商切换后若不清空，已有会话仍使用旧 provider，必须重启软件才生效。
+// 并发调用 Cancel 避免串行累计阻塞 UI；另外设 3s 上限——若某个 entry 退出被卡住，
+// 超时后放行，泄漏的 goroutine 只是持有旧 sys 引用，不会导致正确性问题。
 func (a *App) resetRunners() {
 	var wg sync.WaitGroup
 	a.runners.Range(func(key, value any) bool {
-		if r, ok := value.(*ai.CagoRunner); ok {
+		if e, ok := value.(*runnerEntry); ok {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				r.Stop()
+				a.stopEntry(e)
 			}()
 		}
 		a.runners.Delete(key)
@@ -111,7 +121,32 @@ func (a *App) resetRunners() {
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
-		logger.Default().Warn("resetRunners: 部分 runner Stop 未在 3s 内完成，放行关闭")
+		logger.Default().Warn("resetRunners: 部分 runner 退出未在 3s 内完成，放行关闭")
+	}
+}
+
+// stopEntry 取消正在跑的 turn 并等待事件消费 goroutine 退出，最后释放 Runner / System。
+// 调用方负责把 entry 从 runners map 移除。
+func (a *App) stopEntry(e *runnerEntry) {
+	if e == nil {
+		return
+	}
+	if e.runner != nil {
+		_ = e.runner.Cancel("user_stop")
+	}
+	if e.done != nil {
+		select {
+		case <-e.done:
+		case <-time.After(3 * time.Second):
+		}
+	}
+	if e.runner != nil {
+		_ = e.runner.Close()
+	}
+	if e.sys != nil {
+		if cerr := e.sys.Close(context.Background()); cerr != nil {
+			logger.Default().Warn("close coding system", zap.Error(cerr))
+		}
 	}
 }
 
@@ -138,7 +173,7 @@ type ConversationDisplayMessage struct {
 
 // CreateConversation 创建新会话
 func (a *App) CreateConversation() (*conversation_entity.Conversation, error) {
-	if a.aiRunnerCfg == nil {
+	if a.aiSystemCfg == nil {
 		return nil, fmt.Errorf("请先配置 AI Provider")
 	}
 	ctx := a.langCtx()
@@ -235,9 +270,8 @@ func (a *App) switchToConversation(conv *conversation_entity.Conversation) {
 // DeleteConversation 删除会话
 func (a *App) DeleteConversation(id int64) error {
 	// 先停止正在运行的生成
-	if v, ok := a.runners.Load(id); ok {
-		v.(*ai.CagoRunner).Stop()
-		a.runners.Delete(id)
+	if v, ok := a.runners.LoadAndDelete(id); ok {
+		a.stopEntry(v.(*runnerEntry))
 	}
 
 	err := conversation_svc.Conversation().Delete(a.langCtx(), id)
@@ -253,7 +287,7 @@ func (a *App) DeleteConversation(id int64) error {
 // SendAIMessage 发送 AI 消息，通过 Wails Events 流式返回
 // convID 指定目标会话，支持多会话并发发送
 func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AIContext) error {
-	if a.aiRunnerCfg == nil {
+	if a.aiSystemCfg == nil {
 		return fmt.Errorf("请先配置 AI Provider")
 	}
 
@@ -335,39 +369,90 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 		}
 	}
 
-	runner := a.getOrCreateRunner(convID)
-	return runner.Start(chatCtx, systemPrompt, messages, onEvent)
+	// 注入 policy checker（handler 内部走 GetPolicyChecker(ctx) → setCheckResult）
+	if a.policyChecker != nil {
+		chatCtx = ai.WithPolicyChecker(chatCtx, a.policyChecker)
+	}
+
+	// 每次发送都重建 runnerEntry：messages 是完整历史，需要回放，旧 conv 状态丢弃。
+	// 旧 entry 若存在，先取消并释放。
+	if v, ok := a.runners.LoadAndDelete(convID); ok {
+		a.stopEntry(v.(*runnerEntry))
+	}
+
+	cfg := *a.aiSystemCfg
+	cfg.SystemPrompt = systemPrompt
+	if cfg.ProviderEntity != nil {
+		cfg.Model = cfg.ProviderEntity.Model
+	}
+	sys, err := ai.BuildSystem(chatCtx, cfg)
+	if err != nil {
+		// 同时 emit error 事件 + 同步 return err：前端 catch 同步 err 清理 sending 状态，
+		// 而流式监听器也能拿到 error 事件用于 UI 渲染。两条路径冗余但故意为之。
+		onEvent(ai.StreamEvent{Type: "error", Error: fmt.Sprintf("build coding system: %s", err.Error())})
+		return fmt.Errorf("build coding system: %w", err)
+	}
+
+	history, lastUserText := ai.SplitForReplay(messages)
+	conv := agent.LoadConversation(fmt.Sprintf("opskat-conv-%d", convID), ai.ToAgentMessages(history))
+	runner := sys.Agent().Runner(conv)
+
+	entry := &runnerEntry{sys: sys, runner: runner, done: make(chan struct{})}
+	a.runners.Store(convID, entry)
+
+	events, err := runner.Send(chatCtx, lastUserText)
+	if err != nil {
+		close(entry.done)
+		a.runners.Delete(convID)
+		_ = runner.Close()
+		_ = sys.Close(context.Background())
+		if chatCtx.Err() != nil {
+			// 用户取消：emit stopped 让前端走"已停止"分支，同步返回 nil 不视为错误。
+			onEvent(ai.StreamEvent{Type: "stopped"})
+			return nil //nolint:nilerr // 取消是用户主动行为，不是错误
+		}
+		onEvent(ai.StreamEvent{Type: "error", Error: err.Error()})
+		return fmt.Errorf("send to LLM: %w", err)
+	}
+
+	go func() {
+		defer close(entry.done)
+		translator := ai.NewStreamTranslator()
+		for ev := range events {
+			translator.Translate(ev, onEvent)
+		}
+	}()
+	return nil
 }
 
-func (a *App) getOrCreateRunner(convID int64) *ai.CagoRunner {
-	v, _ := a.runners.LoadOrStore(convID, ai.NewCagoRunner(*a.aiRunnerCfg))
-	return v.(*ai.CagoRunner)
-}
-
-// QueueAIMessage 在生成过程中追加用户消息到队列，
-// 会在下一次工具调用结束后被注入到对话上下文。
+// QueueAIMessage 在生成过程中通过 cago Runner.Steer 把用户消息注入当前 turn，
+// 由 cago 在下一次 LLM 调用前把消息追加到 conversation。
 // content 已包含内联 <mention> XML（前端构造），无需再行 prepend。
 func (a *App) QueueAIMessage(convID int64, content string) error {
 	v, ok := a.runners.Load(convID)
 	if !ok {
 		return fmt.Errorf("会话 %d 没有正在运行的生成", convID)
 	}
-	runner := v.(*ai.CagoRunner)
-	runner.QueueMessage(content, ai.Message{
-		Role:    ai.RoleUser,
-		Content: content,
-	})
+	entry := v.(*runnerEntry)
+	if entry.runner == nil {
+		return fmt.Errorf("会话 %d 没有正在运行的生成", convID)
+	}
+	err := entry.runner.Steer(context.Background(), content, agent.WithSteerDisplay(content))
+	if err != nil && !errors.Is(err, agent.ErrSteerNoActiveTurn) {
+		logger.Default().Warn("cago Steer failed", zap.Error(err))
+		return err
+	}
 	return nil
 }
 
-// StopAIGeneration 停止指定会话的 AI 生成
+// StopAIGeneration 调用 cago Runner.Cancel 触发取消；事件消费 goroutine
+// 收到 EventCancelled 后退出，stopEntry 负责清理 Runner / System。
 func (a *App) StopAIGeneration(convID int64) error {
-	v, ok := a.runners.Load(convID)
+	v, ok := a.runners.LoadAndDelete(convID)
 	if !ok {
 		return nil
 	}
-	runner := v.(*ai.CagoRunner)
-	runner.Stop()
+	a.stopEntry(v.(*runnerEntry))
 	return nil
 }
 

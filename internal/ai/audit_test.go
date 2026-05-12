@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/cago-frame/agents/agent"
 	"github.com/opskat/opskat/internal/model/entity/audit_entity"
 	"github.com/opskat/opskat/internal/repository/audit_repo"
 
@@ -98,24 +99,35 @@ func TestCheckResult_DecisionString(t *testing.T) {
 }
 
 func TestCheckResult_Context(t *testing.T) {
-	convey.Convey("CheckResult context 传递", t, func() {
-		convey.Convey("setCheckResult 填充占位指针", func() {
-			holder := &CheckResult{}
-			ctx := withCheckResult(context.Background(), holder)
+	convey.Convey("CheckResult 跨 hook 共享（decisionMap）", t, func() {
+		convey.Convey("attachCheckResultHook + setCheckResult + auditPostHook 串通", func() {
+			toolUseID := "tu_test_1"
+			_, _ = attachCheckResultHook(context.Background(), &agent.PreToolUseInput{ToolUseID: toolUseID})
 
+			ctx := agent.WithToolUseID(context.Background(), toolUseID)
 			setCheckResult(ctx, CheckResult{
 				Decision:       Allow,
 				DecisionSource: SourceGrantAllow,
 				MatchedPattern: "cat *",
 			})
 
+			v, ok := decisionMap.LoadAndDelete(toolUseID)
+			assert.True(t, ok)
+			holder := v.(*CheckResult)
 			assert.Equal(t, Allow, holder.Decision)
 			assert.Equal(t, SourceGrantAllow, holder.DecisionSource)
 			assert.Equal(t, "cat *", holder.MatchedPattern)
 		})
 
-		convey.Convey("无占位指针时 setCheckResult 不 panic", func() {
+		convey.Convey("无 ToolUseID 时 setCheckResult 是 no-op", func() {
 			ctx := context.Background()
+			assert.NotPanics(t, func() {
+				setCheckResult(ctx, CheckResult{Decision: Allow})
+			})
+		})
+
+		convey.Convey("ToolUseID 没注册时 setCheckResult 不 panic", func() {
+			ctx := agent.WithToolUseID(context.Background(), "tu_no_slot")
 			assert.NotPanics(t, func() {
 				setCheckResult(ctx, CheckResult{Decision: Allow})
 			})

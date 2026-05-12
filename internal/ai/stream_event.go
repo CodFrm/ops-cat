@@ -22,8 +22,8 @@ type EventTranslator struct {
 	inThinking bool
 }
 
-// NewEventTranslator 创建一个新的事件翻译器。
-func NewEventTranslator() *EventTranslator {
+// NewStreamTranslator 创建一个新的事件翻译器。
+func NewStreamTranslator() *EventTranslator {
 	return &EventTranslator{}
 }
 

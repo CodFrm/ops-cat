@@ -37,7 +37,7 @@ type ToolDef struct {
 	Handler ToolHandlerFunc
 }
 
-// AllToolDefs 返回 opsctl CLI 派发用的工具列表（与 cago_tools.go 的 CagoTools 一一对应）。
+// AllToolDefs 返回 opsctl CLI 派发用的工具列表（与 cago_tools.go 的 Tools 一一对应）。
 // spawn_agent / batch_command 已不再注册（opsctl 也没有调用它们）。
 func AllToolDefs() []ToolDef {
 	return []ToolDef{
