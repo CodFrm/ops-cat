@@ -49,31 +49,30 @@ func NewPromptBuilder(language string, context AIContext) *PromptBuilder {
 	}
 }
 
-// Build 构建完整的 System Prompt
+// Build 构建运行时上下文 prompt，注入到 cago 模板的 {{.AppendSystem}} 位。
+// 角色身份已经搬到 internal/ai/system_template.go 的模板 intro，此处只输出
+// 每次 Send 都可能变化的动态段（语言 / Tab / 知识 / 错误恢复 / extension SKILL.md）。
 func (b *PromptBuilder) Build() string {
 	var parts []string
 
-	// 1. 基础角色描述
-	parts = append(parts, b.buildRoleDescription())
-
-	// 2. 用户语言
+	// 1. 用户语言
 	parts = append(parts, b.buildLanguageHint())
 
-	// 3. 当前 Tab 上下文
+	// 2. 当前 Tab 上下文
 	if tabContext := b.buildTabContext(); tabContext != "" {
 		parts = append(parts, tabContext)
 	}
 
-	// 4. 资产知识引导
+	// 3. 资产知识引导
 	parts = append(parts, b.buildKnowledgeGuidance())
 
-	// 5. 错误恢复引导
+	// 4. 错误恢复引导
 	parts = append(parts, b.buildErrorRecoveryGuidance())
 
-	// 6. 用户拒绝操作引导
+	// 5. 用户拒绝操作引导
 	parts = append(parts, b.buildUserDenialGuidance())
 
-	// 7. Extension tools guide
+	// 6. Extension tools guide
 	if len(b.extensionSkillMDs) > 0 {
 		names := make([]string, 0, len(b.extensionSkillMDs))
 		for name := range b.extensionSkillMDs {
@@ -86,20 +85,6 @@ func (b *PromptBuilder) Build() string {
 	}
 
 	return strings.Join(parts, "\n\n")
-}
-
-func (b *PromptBuilder) buildRoleDescription() string {
-	return `You are the OpsKat AI assistant, a powerful IT operations agent. You can:
-- List, view, add, and update remote server assets (SSH, databases, Redis, Kubernetes)
-- Execute commands on SSH servers
-- Execute SQL queries on databases (MySQL, PostgreSQL)
-- Execute Redis commands
-- Upload and download files via SFTP
-- Request command execution permissions from the user
-- Spawn sub-agents for complex multi-step tasks
-- Execute batch commands across multiple assets simultaneously
-
-You are proactive, thorough, and safety-conscious. Always verify before destructive operations.`
 }
 
 func (b *PromptBuilder) buildLanguageHint() string {

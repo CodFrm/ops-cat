@@ -11,6 +11,87 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
+// TestCagoRunner_ReplaysHistoryToLLM 验证回放的历史会真正进入 LLM 请求。
+//
+// 回归：convertToCagoMessages 早期用 &agent.TextBlock{} 之类的指针，cago 的
+// BuildRequest 用值类型 type switch（case TextBlock:），指针不匹配会被静默
+// 丢弃，导致 LLM 端看不到任何历史。
+func TestCagoRunner_ReplaysHistoryToLLM(t *testing.T) {
+	Convey("history 必须出现在 LLM 请求里", t, func() {
+		mock := providertest.New().QueueStream(
+			provider.StreamChunk{ContentDelta: "ok"},
+			provider.StreamChunk{FinishReason: provider.FinishStop},
+		)
+
+		runner := NewCagoRunner(CagoRunnerConfig{
+			Provider: mock,
+			Cwd:      t.TempDir(),
+		})
+
+		_ = collectEvents(t, runner, context.Background(), "system prompt", []Message{
+			{Role: RoleUser, Content: "first question"},
+			{Role: RoleAssistant, Content: "first answer"},
+			{Role: RoleUser, Content: "what did I just say"},
+		}, 5*time.Second)
+
+		recv := mock.Received()
+		So(len(recv), ShouldEqual, 1)
+		req := recv[0]
+
+		var nonSys []provider.Message
+		for _, m := range req.Messages {
+			if m.Role == provider.RoleSystem {
+				continue
+			}
+			nonSys = append(nonSys, m)
+		}
+		So(nonSys, ShouldHaveLength, 3)
+		So(nonSys[0].Role, ShouldEqual, provider.RoleUser)
+		So(nonSys[0].Content, ShouldEqual, "first question")
+		So(nonSys[1].Role, ShouldEqual, provider.RoleAssistant)
+		So(nonSys[1].Content, ShouldEqual, "first answer")
+		So(nonSys[2].Role, ShouldEqual, provider.RoleUser)
+		So(nonSys[2].Content, ShouldEqual, "what did I just say")
+	})
+}
+
+// TestCagoRunner_SystemPromptHasOpsKatIntro 验证 CagoRunner 实际发出的 system message
+// 用的是 OpsKat 模板，而不是 cago 默认 "lead Cago coding agent" 那段。
+// 这是 WithSystemTemplate(opskatSystemTemplate) 接线的端到端断言。
+func TestCagoRunner_SystemPromptHasOpsKatIntro(t *testing.T) {
+	Convey("system prompt 开头是 OpsKat 身份，不是 cago 默认 intro", t, func() {
+		mock := providertest.New().QueueStream(
+			provider.StreamChunk{ContentDelta: "ok"},
+			provider.StreamChunk{FinishReason: provider.FinishStop},
+		)
+
+		runner := NewCagoRunner(CagoRunnerConfig{
+			Provider: mock,
+			Cwd:      t.TempDir(),
+		})
+
+		_ = collectEvents(t, runner, context.Background(), "", []Message{
+			{Role: RoleUser, Content: "hi"},
+		}, 5*time.Second)
+
+		recv := mock.Received()
+		So(len(recv), ShouldEqual, 1)
+
+		var sys strings.Builder
+		for _, m := range recv[0].Messages {
+			if m.Role == provider.RoleSystem {
+				sys.WriteString(m.Content)
+			}
+		}
+		text := sys.String()
+		So(text, ShouldContainSubstring, "OpsKat AI assistant")
+		So(text, ShouldNotContainSubstring, "lead Cago coding agent")
+		// tools/guidelines 段必须仍然来自框架自动生成
+		So(text, ShouldContainSubstring, "## Available tools")
+		So(text, ShouldContainSubstring, "## Guidelines")
+	})
+}
+
 // collectEvents 是 CagoRunner 的事件 sink，阻塞直到收到 "done" / "error" / "stopped" 之一或超时。
 func collectEvents(t *testing.T, runner *CagoRunner, ctx context.Context, prompt string, msgs []Message, timeout time.Duration) []StreamEvent {
 	t.Helper()

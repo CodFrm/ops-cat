@@ -64,6 +64,7 @@ func (a *App) activateProvider(p *ai_provider_entity.AIProvider) error {
 		Cwd:            cwd,
 		PolicyChecker:  checker,
 		Tools:          ai.CagoTools(),
+		LocalToolGate:  ai.NewLocalToolGate(a.makeLocalToolConfirmFunc()),
 	}
 	a.resetRunners()
 	return nil

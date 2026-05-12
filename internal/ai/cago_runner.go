@@ -55,7 +55,8 @@ type CagoRunner struct {
 //   - ProviderEntity / APIKey：生产路径——传给 BuildCagoProvider 构造 cago provider；
 //   - Cwd：coding.New 必填参数（read/write/bash 等工具的工作目录），通常为 ~/.opskat；
 //   - PolicyChecker：注入到 ctx，handler 内部的 GetPolicyChecker(ctx) 仍是审批入口；
-//   - Tools：通常是 CagoTools()，附加到 coding 默认工具集之后。
+//   - Tools：通常是 CagoTools()，附加到 coding 默认工具集之后；
+//   - LocalToolGate：可选，非 nil 时挂 PreToolUseHook 拦截 bash/write/edit 走用户审批。
 type CagoRunnerConfig struct {
 	Provider       cagoProvider.Provider
 	ProviderEntity *ai_provider_entity.AIProvider
@@ -63,6 +64,7 @@ type CagoRunnerConfig struct {
 	Cwd            string
 	PolicyChecker  *CommandPolicyChecker
 	Tools          []tool.Tool
+	LocalToolGate  *LocalToolGate
 }
 
 // NewCagoRunner 创建一个新的 CagoRunner。
@@ -169,7 +171,7 @@ func (r *CagoRunner) run(ctx context.Context, systemPrompt string, messages []Me
 	if r.cfg.ProviderEntity != nil {
 		model = r.cfg.ProviderEntity.Model
 	}
-	sys, err := buildCagoSystem(ctx, prov, r.cfg.Cwd, systemPrompt, model, r.cfg.Tools)
+	sys, err := buildCagoSystem(ctx, prov, r.cfg.Cwd, systemPrompt, model, r.cfg.Tools, r.cfg.LocalToolGate)
 	if err != nil {
 		onEvent(StreamEvent{Type: "error", Error: fmt.Sprintf("build coding system: %s", err.Error())})
 		return
@@ -213,11 +215,15 @@ func (r *CagoRunner) run(ctx context.Context, systemPrompt string, messages []Me
 
 // buildCagoSystem 拼装 coding.System 构造 opts，复用 OpsKat 工具 + 提示词。
 // 单独拆出来便于测试时单独验证 opts 组装。
-func buildCagoSystem(ctx context.Context, prov cagoProvider.Provider, cwd, systemPrompt, model string, extraTools []tool.Tool) (*coding.System, error) {
+// gate 非 nil 时把审批 hook 挂到父 agent（matcher 限定 bash/write/edit）。
+// 注：cago 的 dispatch_subagent 不继承父 hook —— 子代理若调用 bash/write/edit 暂不被拦截，
+// 后续如需收紧再用 coding.WithExtraSubagents + SubagentWithAgentOpts 一并接线。
+func buildCagoSystem(ctx context.Context, prov cagoProvider.Provider, cwd, systemPrompt, model string, extraTools []tool.Tool, gate *LocalToolGate) (*coding.System, error) {
 	opts := []coding.Option{
-		coding.WithoutContextFiles(),  // 不读 ~/.claude/CLAUDE.md 与仓库 CLAUDE.md 链
-		coding.WithoutSkills(),        // 不扫 ~/.claude/skills
-		coding.WithoutSlashCommands(), // 不挂 /compact /help（OpsKat 前端有自己的 UI）
+		coding.WithoutContextFiles(),                    // 不读 ~/.claude/CLAUDE.md 与仓库 CLAUDE.md 链
+		coding.WithoutSkills(),                          // 不扫 ~/.claude/skills
+		coding.WithoutSlashCommands(),                   // 不挂 /compact /help（OpsKat 前端有自己的 UI）
+		coding.WithSystemTemplate(opskatSystemTemplate), // 把 cago 默认 intro 换成 OpsKat 身份
 	}
 	if systemPrompt != "" {
 		opts = append(opts, coding.AppendSystem(systemPrompt))
@@ -227,6 +233,11 @@ func buildCagoSystem(ctx context.Context, prov cagoProvider.Provider, cwd, syste
 	}
 	if len(extraTools) > 0 {
 		opts = append(opts, coding.WithExtraTools(extraTools...))
+	}
+	if gate != nil {
+		opts = append(opts, coding.WithAgentOpts(
+			agent.PreToolUse(`^(bash|write|edit)$`, gate.Hook()),
+		))
 	}
 	return coding.New(ctx, prov, cwd, opts...)
 }

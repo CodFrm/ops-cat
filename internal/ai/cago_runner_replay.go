@@ -29,6 +29,10 @@ func splitForReplay(messages []Message) (history []Message, lastUserText string)
 //   - 每个 ToolCall 转 ToolUseBlock（State=ToolUseReady，Input 来自 Arguments JSON）
 //   - tool        → Content = [ToolResultBlock{ToolUseID, Content:[TextBlock]}]
 //
+// 块必须使用值类型（agent.TextBlock{}），cago 的 BuildRequest 与 Conversation 内部
+// 一律用值类型 type switch（case TextBlock:）；指针块满足 ContentBlock 接口但无法
+// 匹配，会被 BuildRequest 静默丢弃，导致历史在 LLM 端完全消失。
+//
 // ReasoningContent（OpenAI/DeepSeek 风格）目前与 Thinking 合并处理——cago 的 ThinkingBlock 兼容两者。
 // ThinkingBlock.Signature 仅在 Anthropic 流式 thinking 模式必填，DB schema 当前未持久化此字段；
 // 重放时缺 Signature 可能导致 Anthropic 拒绝继续多轮 thinking——这是已知 follow-up（见 plan 风险章节）。
@@ -39,7 +43,7 @@ func convertToCagoMessages(messages []Message) []agent.Message {
 		case RoleUser:
 			out = append(out, agent.Message{
 				Role:    agent.RoleUser,
-				Content: []agent.ContentBlock{&agent.TextBlock{Text: m.Content}},
+				Content: []agent.ContentBlock{agent.TextBlock{Text: m.Content}},
 			})
 
 		case RoleAssistant:
@@ -49,17 +53,17 @@ func convertToCagoMessages(messages []Message) []agent.Message {
 				thinking = m.ReasoningContent
 			}
 			if thinking != "" {
-				blocks = append(blocks, &agent.ThinkingBlock{Text: thinking})
+				blocks = append(blocks, agent.ThinkingBlock{Text: thinking})
 			}
 			if m.Content != "" {
-				blocks = append(blocks, &agent.TextBlock{Text: m.Content})
+				blocks = append(blocks, agent.TextBlock{Text: m.Content})
 			}
 			for _, tc := range m.ToolCalls {
 				var input map[string]any
 				if tc.Function.Arguments != "" {
 					if err := json.Unmarshal([]byte(tc.Function.Arguments), &input); err != nil {
 						// 解析失败时仍记录 tool_use（State=ToolUseMalformed）让 cago 可识别
-						blocks = append(blocks, &agent.ToolUseBlock{
+						blocks = append(blocks, agent.ToolUseBlock{
 							ID:      tc.ID,
 							Name:    tc.Function.Name,
 							RawArgs: tc.Function.Arguments,
@@ -68,7 +72,7 @@ func convertToCagoMessages(messages []Message) []agent.Message {
 						continue
 					}
 				}
-				blocks = append(blocks, &agent.ToolUseBlock{
+				blocks = append(blocks, agent.ToolUseBlock{
 					ID:      tc.ID,
 					Name:    tc.Function.Name,
 					Input:   input,
@@ -84,9 +88,9 @@ func convertToCagoMessages(messages []Message) []agent.Message {
 		case RoleTool:
 			out = append(out, agent.Message{
 				Role: agent.RoleTool,
-				Content: []agent.ContentBlock{&agent.ToolResultBlock{
+				Content: []agent.ContentBlock{agent.ToolResultBlock{
 					ToolUseID: m.ToolCallID,
-					Content:   []agent.ContentBlock{&agent.TextBlock{Text: m.Content}},
+					Content:   []agent.ContentBlock{agent.TextBlock{Text: m.Content}},
 				}},
 			})
 

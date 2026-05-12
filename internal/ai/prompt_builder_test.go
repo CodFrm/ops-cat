@@ -8,10 +8,10 @@ import (
 
 func TestPromptBuilderBuild(t *testing.T) {
 	Convey("PromptBuilder.Build", t, func() {
-		Convey("无 OpenTabs 时仍包含语言提示和角色描述", func() {
+		Convey("无 OpenTabs 时输出语言提示（角色描述已搬到 system_template.go）", func() {
 			got := NewPromptBuilder("zh-cn", AIContext{}).Build()
-			So(got, ShouldContainSubstring, "OpsKat AI assistant")
 			So(got, ShouldContainSubstring, "Chinese")
+			So(got, ShouldNotContainSubstring, "OpsKat AI assistant")
 		})
 
 		Convey("OpenTabs 渲染包含每个 tab 名和 ID", func() {

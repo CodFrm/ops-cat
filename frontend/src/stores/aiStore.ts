@@ -32,7 +32,7 @@ export interface ContentBlock {
   agentTask?: string;
   childBlocks?: ContentBlock[];
   // approval 块专用
-  approvalKind?: "single" | "batch" | "grant";
+  approvalKind?: "single" | "batch" | "grant" | "local_tool";
   approvalItems?: Array<{
     type: string;
     asset_id: number;
@@ -44,6 +44,8 @@ export interface ContentBlock {
   }>;
   approvalDescription?: string;
   approvalSessionId?: string;
+  approvalToolName?: string; // local_tool: "bash" | "write" | "edit"
+  approvalPatterns?: string[]; // local_tool: 默认 pattern 列表，本次会话允许时预填可编辑
 }
 
 // Assistant 消息累计 token 使用量；单次用户 turn 可能跨多轮 LLM 调用，前端按 usage 事件累加。
@@ -77,7 +79,7 @@ interface StreamEventData {
   agent_role?: string;
   agent_task?: string;
   // approval_request 专用
-  kind?: "single" | "batch" | "grant";
+  kind?: "single" | "batch" | "grant" | "local_tool";
   items?: Array<{
     type: string;
     asset_id: number;
@@ -89,6 +91,7 @@ interface StreamEventData {
   }>;
   description?: string;
   session_id?: string;
+  patterns?: string[]; // local_tool: 默认 pattern 列表，前端在"本次会话允许"时预填到可编辑文本框
   // usage 事件：后端下发每轮 LLM 调用的 token 使用量
   usage?: {
     input_tokens?: number;
@@ -1102,6 +1105,8 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
           approvalItems: event.items,
           approvalDescription: event.description,
           approvalSessionId: event.session_id,
+          approvalToolName: event.tool_name,
+          approvalPatterns: event.patterns,
         });
         return { ...msg, blocks: newBlocks };
       });

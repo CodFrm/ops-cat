@@ -182,3 +182,6 @@ require (
 )
 
 // replace github.com/wailsapp/wails/v2 v2.10.2 => /Users/codfrm/go/pkg/mod
+
+// 本地开发期临时把 agents 指向工作树，验证 WithSystemTemplate 改动。发版后改回真实版本。
+replace github.com/cago-frame/agents => /Users/codfrm/Code/cago/agents
