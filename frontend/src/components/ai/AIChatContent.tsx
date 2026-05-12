@@ -38,7 +38,6 @@ import {
   type ChatMessage,
   type ContentBlock,
   type PendingQueueItem,
-  type MentionRef,
   type TokenUsage,
 } from "@/stores/aiStore";
 import { AIChatInput, type AIChatInputDraft, type AIChatInputHandle } from "@/components/ai/AIChatInput";
@@ -68,7 +67,7 @@ interface AIChatContentProps {
   conversationId?: number | null;
   compact?: boolean;
   /** Optional: if provided, replaces the default sendToTab-based send path. */
-  onSendOverride?: (content: string, mentions?: MentionRef[]) => Promise<void>;
+  onSendOverride?: (content: string) => Promise<void>;
   /** Optional: if provided, replaces the default stopGeneration-based stop path. */
   onStopOverride?: () => Promise<void>;
 }
@@ -77,26 +76,6 @@ interface EditTarget {
   conversationId: number;
   messageIndex: number;
   draft: AIChatInputDraft;
-}
-
-// 编辑态需要比较 mentions 是否还是同一条消息，避免 messageIndex 没变但消息内容已被刷新时误复用草稿。
-function normalizeMentions(mentions: MentionRef[] | undefined): MentionRef[] {
-  return mentions ?? [];
-}
-
-function areMentionsEqual(left: MentionRef[] | undefined, right: MentionRef[] | undefined) {
-  const normalizedLeft = normalizeMentions(left);
-  const normalizedRight = normalizeMentions(right);
-  if (normalizedLeft.length !== normalizedRight.length) return false;
-  return normalizedLeft.every((mention, index) => {
-    const other = normalizedRight[index];
-    return (
-      mention.assetId === other.assetId &&
-      mention.name === other.name &&
-      mention.start === other.start &&
-      mention.end === other.end
-    );
-  });
 }
 
 /** Split blocks into segments: consecutive non-approval blocks form a 'bubble' segment,
@@ -201,7 +180,7 @@ export function AIChatContent({
     // 侧边助手：切换 side tab 或刚绑定到新 conversation 时，恢复各自保存的 draft。
     // 通过 getState() 一次性读取，不订阅 inputDraft —— 否则每次按键都会重跑该 effect。
     const uiState = useAIStore.getState().sidebarTabs.find((tab) => tab.id === sideTabId)?.uiState;
-    inputRef.current?.loadDraft(uiState?.inputDraft ?? { content: "", mentions: [] });
+    inputRef.current?.loadDraft(uiState?.inputDraft ?? { content: "" });
   }, [conversationId, sideTabId]);
 
   // 编辑态依赖 conversationId 和消息索引，切换会话时要显式清掉草稿，避免把旧草稿带到新会话。
@@ -218,7 +197,7 @@ export function AIChatContent({
       if (hadEditTarget && options?.clearDraft) {
         inputRef.current?.clear();
         if (sideTabId) {
-          setSidebarTabInputDraft(sideTabId, { content: "", mentions: [] });
+          setSidebarTabInputDraft(sideTabId, { content: "" });
         }
       }
     },
@@ -242,12 +221,7 @@ export function AIChatContent({
       return;
     }
     const targetMessage = messages[editTarget.messageIndex];
-    if (
-      !targetMessage ||
-      targetMessage.role !== "user" ||
-      targetMessage.content !== editTarget.draft.content ||
-      !areMentionsEqual(targetMessage.mentions, editTarget.draft.mentions)
-    ) {
+    if (!targetMessage || targetMessage.role !== "user" || targetMessage.content !== editTarget.draft.content) {
       resetEditMode({ clearDraft: true });
     }
   }, [conversationId, editTarget, messages, resetEditMode]);
@@ -266,14 +240,12 @@ export function AIChatContent({
   }, [conversationId, setSidebarTabScrollTop, sideTabId]);
 
   const handleSend = useCallback(
-    (text: string, mentions: MentionRef[]) => {
-      const trimmed = text.trim();
-      if (!trimmed && mentions.length === 0) return;
-      const nextMentions = mentions.length > 0 ? mentions : undefined;
+    (content: string) => {
+      if (!content.trim()) return;
       if (editTarget && conversationId != null) {
         const activeTarget = editTarget;
         // 编辑模式改走 conversation 级 replay，提交成功后只在目标仍未变化时退出编辑态。
-        void editAndResendConversation(conversationId, activeTarget.messageIndex, text, nextMentions).then(() => {
+        void editAndResendConversation(conversationId, activeTarget.messageIndex, content).then(() => {
           if (sideTabId) {
             const currentEditTarget = useAIStore.getState().sidebarTabs.find((tab) => tab.id === sideTabId)
               ?.uiState.editTarget;
@@ -297,9 +269,9 @@ export function AIChatContent({
         return;
       }
       if (onSendOverride) {
-        void onSendOverride(text, nextMentions);
+        void onSendOverride(content);
       } else if (tabId) {
-        sendToTab(tabId, text, nextMentions);
+        sendToTab(tabId, content);
       }
     },
     [
@@ -329,10 +301,7 @@ export function AIChatContent({
   const handleEditMessage = useCallback(
     (index: number, msg: ChatMessage) => {
       if (conversationId == null || msg.role !== "user") return;
-      const draft: AIChatInputDraft = {
-        content: msg.content,
-        mentions: msg.mentions,
-      };
+      const draft: AIChatInputDraft = { content: msg.content };
       // 进入编辑态时直接把原消息回填到输入框，保证 mention 和多段文本都按原样重发。
       inputRef.current?.loadDraft(draft);
       if (sideTabId) {

@@ -22,7 +22,7 @@ import (
 
 type mongoDBCacheKeyType struct{}
 
-// MongoDBClientCache 在同一次 AI Chat 中复用 MongoDB 连接
+// MongoDBClientCache 在同一次 AI Send 中复用 MongoDB 连接
 type MongoDBClientCache = ConnCache[*connpool.MongoClientCloser]
 
 // NewMongoDBClientCache 创建 MongoDB 连接缓存
@@ -57,7 +57,7 @@ func handleExecMongo(ctx context.Context, args map[string]any) (string, error) {
 	// 权限检查
 	if checker := GetPolicyChecker(ctx); checker != nil {
 		result := checker.CheckForAsset(ctx, assetID, asset_entity.AssetTypeMongoDB, operation)
-		setCheckResult(ctx, result)
+		RecordDecision(ctx, result)
 		if result.Decision != Allow {
 			return result.Message, nil
 		}

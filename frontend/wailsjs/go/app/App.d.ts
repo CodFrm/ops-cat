@@ -20,8 +20,8 @@ import {status} from '../models';
 import {import_svc} from '../models';
 import {kafka_svc} from '../models';
 import {audit_repo} from '../models';
-import {ai} from '../models';
 import {redis_svc} from '../models';
+import {ai} from '../models';
 import {sftp_svc} from '../models';
 import {context} from '../models';
 
@@ -361,7 +361,7 @@ export function PreviewSSHConfig():Promise<import_svc.PreviewResult>;
 
 export function PreviewTabbyConfig():Promise<import_svc.PreviewResult>;
 
-export function QueueAIMessage(arg1:number,arg2:string,arg3:Array<ai.MentionedAsset>):Promise<void>;
+export function QueueAIMessage(arg1:number,arg2:string):Promise<void>;
 
 export function RecordSnippetUse(arg1:number):Promise<void>;
 

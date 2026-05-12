@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"strings"
 	"time"
 
@@ -157,45 +156,8 @@ func (w *DefaultAuditWriter) WriteToolCall(ctx context.Context, info ToolCallInf
 	}
 }
 
-// --- AuditingExecutor ---
-
-// AuditingExecutor 包装 ToolExecutor，自动记录审计日志
-type AuditingExecutor struct {
-	inner  ToolExecutor
-	writer AuditWriter
-}
-
-// NewAuditingExecutor 创建审计执行器
-func NewAuditingExecutor(inner ToolExecutor, writer AuditWriter) *AuditingExecutor {
-	return &AuditingExecutor{inner: inner, writer: writer}
-}
-
-func (a *AuditingExecutor) Execute(ctx context.Context, name string, argsJSON string) (string, error) {
-	// 注入 CheckResult 占位指针，handler 在权限检查后通过 setCheckResult 填充
-	decision := &CheckResult{}
-	callCtx := withCheckResult(ctx, decision)
-
-	result, err := a.inner.Execute(callCtx, name, argsJSON)
-
-	// 写审计日志（fire-and-forget），携带原始 ctx（含 session/conversation 信息）
-	go a.writer.WriteToolCall(ctx, ToolCallInfo{
-		ToolName: name,
-		ArgsJSON: argsJSON,
-		Result:   result,
-		Error:    err,
-		Decision: decision,
-	})
-
-	return result, err
-}
-
-// Close 代理到 inner
-func (a *AuditingExecutor) Close() error {
-	if closer, ok := a.inner.(io.Closer); ok {
-		return closer.Close()
-	}
-	return nil
-}
+// AuditingExecutor 已由 tools.go + auditMiddleware 取代——cago 工具调用时同等地
+// 注入 *CheckResult 占位指针 + 异步 WriteToolCall。该类型已于 M6 整体下线。
 
 // --- 会话模式审计 ---
 
@@ -219,53 +181,70 @@ func writeGrantSubmitAudit(ctx context.Context, assetID int64, assetName string,
 	}
 }
 
-// WriteGrantSubmitAudit 对外暴露的 grant 审计写入（供桌面端 approval handler 使用）
-func WriteGrantSubmitAudit(ctx context.Context, assetID int64, assetName string, patterns []string, sessionID string) {
-	if repo := audit_repo.Audit(); repo != nil {
-		entry := &audit_entity.AuditLog{
-			Source:     "opsctl",
-			ToolName:   "grant_submit",
-			AssetID:    assetID,
-			AssetName:  assetName,
-			Command:    strings.Join(patterns, ", "),
-			SessionID:  sessionID,
-			Decision:   "allow",
-			Success:    1,
-			Createtime: time.Now().Unix(),
-		}
-		if err := repo.Create(context.Background(), entry); err != nil {
-			logger.Default().Error("write grant submit audit", zap.Error(err))
-		}
-	}
-}
-
 // --- 命令提取 ---
 
-// commandExtractors 从 AllToolDefs 构建的命令提取器映射（延迟初始化）
-var commandExtractors map[string]CommandExtractorFunc
-
-// getCommandExtractors 获取命令提取器映射（线程安全，AllToolDefs 返回固定值）
-func getCommandExtractors() map[string]CommandExtractorFunc {
-	if commandExtractors == nil {
-		m := make(map[string]CommandExtractorFunc)
-		for _, def := range AllToolDefs() {
-			if def.CommandExtractor != nil {
-				m[def.Name] = def.CommandExtractor
-			}
+// commandExtractors 工具名 → 命令摘要提取器。
+// 之前从 AllToolDefs().CommandExtractor 字段惰性构建；现在解耦成包级静态 map，
+// 使审计逻辑不再依赖 AllToolDefs（M6 清理旧 ToolDef 时不会破坏 audit）。
+var commandExtractors = map[string]CommandExtractorFunc{
+	"run_command": func(a map[string]any) string { return argString(a, "command") },
+	"upload_file": func(a map[string]any) string {
+		return "upload " + argString(a, "local_path") + " → " + argString(a, "remote_path")
+	},
+	"download_file": func(a map[string]any) string {
+		return "download " + argString(a, "remote_path") + " → " + argString(a, "local_path")
+	},
+	"exec_sql":   func(a map[string]any) string { return argString(a, "sql") },
+	"exec_redis": func(a map[string]any) string { return argString(a, "command") },
+	"exec_mongo": func(a map[string]any) string { return argString(a, "operation") },
+	"exec_k8s":   k8sAuditCommandFromArgs,
+	"kafka_cluster": func(a map[string]any) string {
+		cmd, _ := kafkaClusterCommand(normalizeKafkaOperation(argString(a, "operation"), "overview"))
+		return cmd
+	},
+	"kafka_topic": func(a map[string]any) string {
+		cmd, _ := kafkaTopicCommand(normalizeKafkaOperation(argString(a, "operation"), "list"), argString(a, "topic"))
+		return cmd
+	},
+	"kafka_consumer_group": func(a map[string]any) string {
+		cmd, _ := kafkaConsumerGroupCommand(normalizeKafkaOperation(argString(a, "operation"), "list"), argString(a, "group"))
+		return cmd
+	},
+	"kafka_acl": func(a map[string]any) string {
+		cmd, _ := kafkaACLCommand(normalizeKafkaOperation(argString(a, "operation"), "list"))
+		return cmd
+	},
+	"kafka_schema": func(a map[string]any) string {
+		cmd, _ := kafkaSchemaCommand(normalizeKafkaOperation(argString(a, "operation"), "list_subjects"), argString(a, "subject"))
+		return cmd
+	},
+	"kafka_connect": func(a map[string]any) string {
+		cmd, _ := kafkaConnectCommand(normalizeKafkaOperation(argString(a, "operation"), "list_connectors"), argString(a, "connector"))
+		return cmd
+	},
+	"kafka_message": func(a map[string]any) string {
+		cmd, _ := kafkaMessageCommand(normalizeKafkaOperation(argString(a, "operation"), "browse"), argString(a, "topic"))
+		return cmd
+	},
+	"request_permission": func(a map[string]any) string {
+		v := argString(a, "items")
+		if reason := argString(a, "reason"); reason != "" {
+			return "grant: " + v + " reason: " + reason
 		}
-		commandExtractors = m
-	}
-	return commandExtractors
+		return "grant: " + v
+	},
+	"exec_tool": func(a map[string]any) string {
+		return argString(a, "extension") + "." + argString(a, "tool")
+	},
 }
 
 // ExtractCommandForAudit 从工具参数中提取命令信息
 func ExtractCommandForAudit(toolName string, args map[string]any) string {
-	extractors := getCommandExtractors()
 	// 支持 opsctl 使用 "exec" 作为 tool name
 	if toolName == "exec" {
 		toolName = "run_command"
 	}
-	if fn, ok := extractors[toolName]; ok {
+	if fn, ok := commandExtractors[toolName]; ok {
 		return fn(args)
 	}
 	return ""

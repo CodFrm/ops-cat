@@ -138,25 +138,3 @@ const (
 	// FallbackContextWindow 未知模型的默认上下文窗口
 	FallbackContextWindow = 128000
 )
-
-// ResolveMaxOutputTokens 解析最大输出 token：用户配置 > 模型预设 > 默认值
-func ResolveMaxOutputTokens(configured int, model string) int {
-	if configured > 0 {
-		return configured
-	}
-	if d := GetModelDefaults(model); d != nil {
-		return d.MaxOutputTokens
-	}
-	return FallbackMaxOutputTokens
-}
-
-// ResolveContextWindow 解析上下文窗口：用户配置 > 模型预设 > 默认值
-func ResolveContextWindow(configured int, model string) int {
-	if configured > 0 {
-		return configured
-	}
-	if d := GetModelDefaults(model); d != nil {
-		return d.ContextWindow
-	}
-	return FallbackContextWindow
-}

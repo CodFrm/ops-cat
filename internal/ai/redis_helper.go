@@ -22,7 +22,7 @@ import (
 
 type redisCacheKeyType struct{}
 
-// RedisClientCache 在同一次 AI Chat 中复用 Redis 连接
+// RedisClientCache 在同一次 AI Send 中复用 Redis 连接
 type RedisClientCache = ConnCache[*redis.Client]
 
 // NewRedisClientCache 创建 Redis 连接缓存
@@ -54,7 +54,7 @@ func handleExecRedis(ctx context.Context, args map[string]any) (string, error) {
 	// 权限检查
 	if checker := GetPolicyChecker(ctx); checker != nil {
 		result := checker.CheckForAsset(ctx, assetID, asset_entity.AssetTypeRedis, command)
-		setCheckResult(ctx, result)
+		RecordDecision(ctx, result)
 		if result.Decision != Allow {
 			return result.Message, nil
 		}

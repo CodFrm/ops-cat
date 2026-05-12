@@ -14,14 +14,15 @@ import {
   type SnippetSuggestionItem,
   type SnippetSuggestionListRef,
 } from "./SnippetSuggestionList";
-import type { MentionRef } from "@/stores/aiStore";
+import { useAssetStore } from "@/stores/assetStore";
 import { useSnippetStore } from "@/stores/snippetStore";
+import { buildGroupPathMap } from "@/lib/groupPath";
+import { buildMentionXml, escapeXmlText, parseMentionContent } from "@/lib/mentionXml";
 import { ListSnippets } from "../../../wailsjs/go/app/App";
 import { snippet_svc } from "../../../wailsjs/go/models";
 
 export interface AIChatInputDraft {
   content: string;
-  mentions?: MentionRef[];
 }
 
 export interface AIChatInputHandle {
@@ -33,7 +34,7 @@ export interface AIChatInputHandle {
 }
 
 export interface AIChatInputProps {
-  onSubmit: (text: string, mentions: MentionRef[]) => void;
+  onSubmit: (content: string) => void;
   onEmptyChange?: (empty: boolean) => void;
   onDraftChange?: (draft: AIChatInputDraft) => void;
   sendOnEnter: boolean;
@@ -85,38 +86,50 @@ interface InputHistoryNavigationOptions {
   canContinueHistory: boolean;
 }
 
-/** 从 TipTap doc 提取纯文本 + mention 引用。 */
-function extractTextAndMentions(doc: ProseMirrorLikeNode): {
-  text: string;
-  mentions: MentionRef[];
-} {
-  let text = "";
-  const mentions: MentionRef[] = [];
+// 从 TipTap doc 直接抽出"含内联 <mention> 标签"的 content。
+// mention 节点会通过 assetStore 反查 type/host/groupPath，未命中（资产已删除）的降级为只带 asset-id + name。
+function extractContentXml(doc: ProseMirrorLikeNode): string {
+  const assetStore = useAssetStore.getState();
+  const groupPathMap = buildGroupPathMap(assetStore.groups);
+  const lookupAsset = (id: number) => assetStore.assets.find((a) => a.ID === id);
+  const hostFromConfig = (cfg: string | undefined) => {
+    if (!cfg) return undefined;
+    try {
+      const parsed = JSON.parse(cfg) as { host?: string };
+      return parsed.host || undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  let out = "";
   doc.descendants((node) => {
     if (node.type.name === "text") {
-      text += node.text ?? "";
+      out += escapeXmlText(node.text ?? "");
     } else if (node.type.name === "mention") {
       const id = Number(node.attrs.id);
       const label = String(node.attrs.label ?? "");
-      const start = text.length;
-      text += `@${label}`;
-      mentions.push({ assetId: id, name: label, start, end: text.length });
-    } else if (node.type.name === "paragraph" && text.length > 0) {
-      text += "\n";
+      const asset = Number.isFinite(id) ? lookupAsset(id) : undefined;
+      out += buildMentionXml({
+        assetId: id,
+        name: label,
+        type: asset?.Type,
+        host: asset ? hostFromConfig(asset.Config) : undefined,
+        groupPath: asset?.GroupID ? groupPathMap.get(asset.GroupID) : undefined,
+      });
+    } else if (node.type.name === "paragraph" && out.length > 0) {
+      out += "\n";
     }
     return true;
   });
-  return { text: text.replace(/\n+$/g, ""), mentions };
+  return out.replace(/\n+$/g, "");
 }
 
 function normalizeDraftMessage(draft: string | AIChatInputDraft): AIChatInputDraft {
   if (typeof draft === "string") {
-    return { content: draft, mentions: [] };
+    return { content: draft };
   }
-  return {
-    content: draft.content ?? "",
-    mentions: draft.mentions ?? [],
-  };
+  return { content: draft.content ?? "" };
 }
 
 function appendTextToParagraphs(
@@ -142,52 +155,26 @@ function appendTextToParagraphs(
   return currentParagraphContent;
 }
 
-// 统一把持久化 user message（content + mentions）重建为 TipTap 文档，
+// 把持久化 user message（含内联 <mention> XML 的 content）重建为 TipTap 文档，
 // 供历史浏览与外部 draft 预填共用，避免两套回填逻辑出现偏差。
 function buildEditorDocFromMessage(message: string | AIChatInputDraft): TipTapDocNode {
-  const draft = normalizeDraftMessage(message);
-  const content = draft.content ?? "";
-  const mentions = [...(draft.mentions ?? [])].sort((a, b) => a.start - b.start);
+  const { content } = normalizeDraftMessage(message);
+  const segments = parseMentionContent(content);
   const paragraphs: TipTapParagraphNode[] = [];
   let currentParagraphContent: Array<TipTapTextNode | TipTapMentionNode> = [];
-  let cursor = 0;
 
-  for (const mention of mentions) {
-    const start = Math.max(0, Math.min(mention.start, content.length));
-    const end = Math.max(start, Math.min(mention.end, content.length));
-    if (start < cursor || end <= start) {
-      continue;
+  for (const seg of segments) {
+    if (seg.type === "text") {
+      currentParagraphContent = appendTextToParagraphs(paragraphs, seg.text, currentParagraphContent);
+    } else {
+      currentParagraphContent.push({
+        type: "mention",
+        attrs: {
+          id: String(seg.attrs.assetId),
+          label: seg.attrs.name,
+        },
+      });
     }
-
-    if (start > cursor) {
-      currentParagraphContent = appendTextToParagraphs(
-        paragraphs,
-        content.slice(cursor, start),
-        currentParagraphContent
-      );
-    }
-
-    const mentionSlice = content.slice(start, end);
-    if (mentionSlice.length === 0 || mentionSlice.includes("\n")) {
-      currentParagraphContent = appendTextToParagraphs(paragraphs, mentionSlice, currentParagraphContent);
-      cursor = end;
-      continue;
-    }
-
-    const labelFromContent = mentionSlice.startsWith("@") ? mentionSlice.slice(1) : mentionSlice;
-    const label = labelFromContent || mention.name;
-    currentParagraphContent.push({
-      type: "mention",
-      attrs: {
-        id: String(mention.assetId),
-        label,
-      },
-    });
-    cursor = end;
-  }
-
-  if (cursor < content.length) {
-    currentParagraphContent = appendTextToParagraphs(paragraphs, content.slice(cursor), currentParagraphContent);
   }
 
   paragraphs.push(
@@ -525,10 +512,10 @@ export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(funct
           !event.metaKey &&
           !event.shiftKey
         ) {
-          const { text: currentText } = extractTextAndMentions(editor.state.doc as unknown as ProseMirrorLikeNode);
+          const currentContent = extractContentXml(editor.state.doc as unknown as ProseMirrorLikeNode);
           const nextHistoryState = getInputHistoryNavigationState({
             direction: event.key === "ArrowUp" ? "up" : "down",
-            currentText,
+            currentText: currentContent,
             historyIndex: historyIndexRef.current,
             userMessageHistory: historyRef.current,
             canStartHistory: shouldStartInputHistory(editor),
@@ -569,8 +556,8 @@ export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(funct
         historyIndexRef.current = -1;
       }
       onEmptyChangeRef.current?.(ed.isEmpty);
-      const { text, mentions } = extractTextAndMentions(ed.state.doc as unknown as ProseMirrorLikeNode);
-      onDraftChangeRef.current?.({ content: text, mentions });
+      const content = extractContentXml(ed.state.doc as unknown as ProseMirrorLikeNode);
+      onDraftChangeRef.current?.({ content });
     },
     editable: !disabled,
   });
@@ -588,10 +575,10 @@ export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(funct
     triggerSubmitRef.current = () => {
       if (!editor) return;
       if (editor.isEmpty) return;
-      const { text, mentions } = extractTextAndMentions(editor.state.doc as unknown as ProseMirrorLikeNode);
-      if (!text.trim() && mentions.length === 0) return;
+      const content = extractContentXml(editor.state.doc as unknown as ProseMirrorLikeNode);
+      if (!content.trim()) return;
       historyIndexRef.current = -1;
-      submitRef.current(text, mentions);
+      submitRef.current(content);
       // emitUpdate=true：默认 false 时 onUpdate 不会触发，外部 inputDraft 仍保留旧内容；
       // 侧边助手随后创建会话、conversationId 变化时会按草稿把刚发送的消息回填到输入框。
       editor.commands.clearContent(true);
