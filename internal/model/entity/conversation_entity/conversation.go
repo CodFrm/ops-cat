@@ -71,7 +71,6 @@ type Message struct {
 	ToolCalls      string `gorm:"column:tool_calls;type:text"`
 	ToolCallID     string `gorm:"column:tool_call_id;type:varchar(100)"`
 	Blocks         string `gorm:"column:blocks;type:text"`
-	Mentions       string `gorm:"column:mentions;type:text"`
 	TokenUsage     string `gorm:"column:token_usage;type:text"` // JSON: TokenUsage，仅 assistant 消息可能有
 	SortOrder      int    `gorm:"column:sort_order;default:0"`
 	Createtime     int64  `gorm:"column:createtime"`
@@ -149,39 +148,5 @@ func (m *Message) SetTokenUsage(u *TokenUsage) error {
 		return err
 	}
 	m.TokenUsage = string(data)
-	return nil
-}
-
-// MentionRef 用户消息中引用的资产（@ 提及）
-type MentionRef struct {
-	AssetID int64  `json:"assetId"`
-	Name    string `json:"name"`  // 发送时刻的资产名快照
-	Start   int    `json:"start"` // content 中字符起始索引（含 @ 符号）
-	End     int    `json:"end"`   // 结束索引（不含）
-}
-
-// GetMentions 反序列化 mentions 字段
-func (m *Message) GetMentions() ([]MentionRef, error) {
-	if m.Mentions == "" {
-		return nil, nil
-	}
-	var refs []MentionRef
-	if err := json.Unmarshal([]byte(m.Mentions), &refs); err != nil {
-		return nil, err
-	}
-	return refs, nil
-}
-
-// SetMentions 序列化 mentions 字段
-func (m *Message) SetMentions(refs []MentionRef) error {
-	if len(refs) == 0 {
-		m.Mentions = ""
-		return nil
-	}
-	data, err := json.Marshal(refs)
-	if err != nil {
-		return err
-	}
-	m.Mentions = string(data)
 	return nil
 }

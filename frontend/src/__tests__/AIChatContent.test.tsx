@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import i18n from "../i18n";
-import { useAIStore, type MentionRef } from "../stores/aiStore";
+import { useAIStore } from "../stores/aiStore";
 import { useTabStore } from "../stores/tabStore";
 import { AIChatContent } from "../components/ai/AIChatContent";
 
@@ -33,19 +33,18 @@ vi.mock("@/components/ai/AIChatInput", () => ({
       onEmptyChange,
       onDraftChange,
     }: {
-      onSubmit: (text: string, mentions: MentionRef[]) => void;
+      onSubmit: (content: string) => void;
       onEmptyChange?: (empty: boolean) => void;
-      onDraftChange?: (draft: { content: string; mentions?: MentionRef[] }) => void;
+      onDraftChange?: (draft: { content: string }) => void;
     },
     ref
   ) {
     const [value, setValue] = useState("");
-    const [mentions, setMentions] = useState<MentionRef[]>([]);
 
     useEffect(() => {
-      onEmptyChange?.(value.trim().length === 0 && mentions.length === 0);
-      onDraftChange?.({ content: value, mentions });
-    }, [mentions, onDraftChange, onEmptyChange, value]);
+      onEmptyChange?.(value.trim().length === 0);
+      onDraftChange?.({ content: value });
+    }, [onDraftChange, onEmptyChange, value]);
 
     useImperativeHandle(
       ref,
@@ -54,28 +53,25 @@ vi.mock("@/components/ai/AIChatInput", () => ({
         clear: () => {
           mockInputSpies.clear();
           setValue("");
-          setMentions([]);
         },
-        isEmpty: () => value.trim().length === 0 && mentions.length === 0,
-        submit: () => onSubmit(value, mentions),
-        loadDraft: (draft: string | { content: string; mentions?: MentionRef[] }) => {
+        isEmpty: () => value.trim().length === 0,
+        submit: () => onSubmit(value),
+        loadDraft: (draft: string | { content: string }) => {
           mockInputSpies.loadDraft(draft);
           if (typeof draft === "string") {
             setValue(draft);
-            setMentions([]);
             return;
           }
           setValue(draft.content);
-          setMentions(draft.mentions ?? []);
         },
       }),
-      [mentions, onSubmit, value]
+      [onSubmit, value]
     );
 
     return (
       <div>
         <input aria-label="mock-ai-input" value={value} onChange={(event) => setValue(event.target.value)} />
-        <button type="button" onClick={() => onSubmit(value, mentions)}>
+        <button type="button" onClick={() => onSubmit(value)}>
           mock-submit
         </button>
       </div>
@@ -120,7 +116,7 @@ describe("AIChatContent", () => {
       conversationStreaming: {
         5: { sending: false, pendingQueue: [] },
       },
-      tabStates: { [tabId]: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null } },
+      tabStates: { [tabId]: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null } },
     });
 
     render(<AIChatContent tabId={tabId} />);
@@ -151,7 +147,8 @@ describe("AIChatContent", () => {
     const user = userEvent.setup();
     const sendToTab = vi.fn();
     const editAndResendConversation = vi.fn().mockResolvedValue(undefined);
-    const mentions: MentionRef[] = [{ assetId: 42, name: "prod-db", start: 6, end: 14 }];
+    // content 已经携带内联 <mention> XML，编辑链路只传 content，不再有 mentions 数组。
+    const content = 'check <mention asset-id="42" type="mysql">@prod-db</mention>';
     const tabId = "ai-5";
 
     useTabStore.setState({
@@ -159,9 +156,9 @@ describe("AIChatContent", () => {
       activeTabId: tabId,
     });
     useAIStore.setState({
-      tabStates: { [tabId]: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null } },
+      tabStates: { [tabId]: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null } },
       conversationMessages: {
-        5: [{ role: "user", content: "check @prod-db", mentions, blocks: [] }],
+        5: [{ role: "user", content, blocks: [] }],
       },
       conversationStreaming: {
         5: { sending: false, pendingQueue: [] },
@@ -174,12 +171,12 @@ describe("AIChatContent", () => {
 
     await user.click(screen.getByRole("button", { name: editButtonName }));
 
-    expect(mockInputSpies.loadDraft).toHaveBeenCalledWith({ content: "check @prod-db", mentions });
+    expect(mockInputSpies.loadDraft).toHaveBeenCalledWith({ content });
     expect(screen.getByText(editingBannerName)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "mock-submit" }));
 
-    await waitFor(() => expect(editAndResendConversation).toHaveBeenCalledWith(5, 0, "check @prod-db", mentions));
+    await waitFor(() => expect(editAndResendConversation).toHaveBeenCalledWith(5, 0, content));
     expect(sendToTab).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByText(editingBannerName)).not.toBeInTheDocument());
   });
@@ -248,7 +245,7 @@ describe("AIChatContent", () => {
     await user.type(screen.getByRole("textbox", { name: "mock-ai-input" }), "sidebar send");
     await user.click(screen.getByRole("button", { name: "mock-submit" }));
 
-    await waitFor(() => expect(onSendOverride).toHaveBeenCalledWith("sidebar send", undefined));
+    await waitFor(() => expect(onSendOverride).toHaveBeenCalledWith("sidebar send"));
     expect(editAndResendConversation).not.toHaveBeenCalled();
   });
 

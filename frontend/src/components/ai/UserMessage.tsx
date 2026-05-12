@@ -3,34 +3,13 @@ import { Copy, Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@opskat/ui";
-import type { ChatMessage, MentionRef } from "@/stores/aiStore";
+import type { ChatMessage } from "@/stores/aiStore";
 import { useCompact } from "@/components/ai/AIChatContentContext";
 import { openAssetInfoTab } from "@/lib/openAssetInfoTab";
-
-interface Segment {
-  type: "text" | "mention";
-  text: string;
-  mention?: MentionRef;
-}
+import { parseMentionContent } from "@/lib/mentionXml";
 
 // 单独控制用户消息选中态，保证主色气泡里也能明确看到选区范围。
 const userMessageSelectionClass = "select-text selection:bg-white/35 selection:text-primary-foreground";
-
-function buildSegments(content: string, mentions: MentionRef[] | undefined): Segment[] {
-  if (!mentions || mentions.length === 0) {
-    return [{ type: "text", text: content }];
-  }
-  const sorted = [...mentions].sort((a, b) => a.start - b.start);
-  const segs: Segment[] = [];
-  let cursor = 0;
-  for (const m of sorted) {
-    if (m.start > cursor) segs.push({ type: "text", text: content.slice(cursor, m.start) });
-    segs.push({ type: "mention", text: content.slice(m.start, m.end), mention: m });
-    cursor = m.end;
-  }
-  if (cursor < content.length) segs.push({ type: "text", text: content.slice(cursor) });
-  return segs;
-}
 
 // 统一复制提示，保证按钮复制和右键复制的反馈一致；剪贴板不可用时给出错误提示，避免 unhandled rejection。
 async function copyUserMessageText(text: string, copiedText: string, failedText: string) {
@@ -51,7 +30,7 @@ interface UserMessageProps {
 export const UserMessage = memo(function UserMessage({ msg, onEdit }: UserMessageProps) {
   const compact = useCompact();
   const maxWidthClass = compact ? "max-w-[95%]" : "max-w-[85%]";
-  const segments = buildSegments(msg.content, msg.mentions);
+  const segments = parseMentionContent(msg.content);
   const { t } = useTranslation();
 
   // 用户消息复制默认取整条内容，减少额外转换带来的偏差。
@@ -85,7 +64,7 @@ export const UserMessage = memo(function UserMessage({ msg, onEdit }: UserMessag
                 <button
                   key={i}
                   type="button"
-                  onClick={() => openAssetInfoTab(s.mention!.assetId)}
+                  onClick={() => openAssetInfoTab(s.attrs.assetId)}
                   className="inline-flex items-center rounded bg-primary-foreground/20 px-1 py-0.5 text-xs font-medium hover:bg-primary-foreground/30 hover:underline cursor-pointer"
                 >
                   {s.text}

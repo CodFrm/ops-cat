@@ -1,6 +1,6 @@
 import { lazy, Suspense, useRef, useState, useEffect } from "react";
 import { cn, useResizeHandle } from "@opskat/ui";
-import { useAIStore, type MentionRef } from "@/stores/aiStore";
+import { useAIStore } from "@/stores/aiStore";
 import { useFullscreen } from "@/hooks/useFullscreen";
 import { SideAssistantHeader } from "./SideAssistantHeader";
 import { SideAssistantContextBar } from "./SideAssistantContextBar";
@@ -130,11 +130,11 @@ export function SideAssistantPanel({ collapsed, onToggle }: SideAssistantPanelPr
     setHistoryOpen(false);
   };
 
-  const handleSendOverride = async (text: string, mentions?: MentionRef[]) => {
+  const handleSendOverride = async (content: string) => {
     if (!activeSidebarTabId) {
       return;
     }
-    await sendFromSidebarTab(activeSidebarTabId, text, mentions);
+    await sendFromSidebarTab(activeSidebarTabId, content);
   };
 
   const handleStopOverride = async () => {

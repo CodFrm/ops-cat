@@ -13,19 +13,9 @@ type TabInfo struct {
 	AssetName string `json:"assetName"`
 }
 
-// MentionedAsset 用户本次消息引用的资产（对应前端 @ 提及）
-type MentionedAsset struct {
-	AssetID   int64  `json:"assetId"`
-	Name      string `json:"name"`
-	Type      string `json:"type"` // ssh/mysql/redis/mongo/...
-	Host      string `json:"host"`
-	GroupPath string `json:"groupPath"` // 完整路径 "生产/数据库"，无分组时为空
-}
-
 // AIContext 前端传入的上下文信息
 type AIContext struct {
-	OpenTabs        []TabInfo        `json:"openTabs"`
-	MentionedAssets []MentionedAsset `json:"mentionedAssets"`
+	OpenTabs []TabInfo `json:"openTabs"`
 }
 
 // PromptBuilder 动态构建 System Prompt
@@ -72,11 +62,6 @@ func (b *PromptBuilder) Build() string {
 	// 3. 当前 Tab 上下文
 	if tabContext := b.buildTabContext(); tabContext != "" {
 		parts = append(parts, tabContext)
-	}
-
-	// 3.5. 本次消息引用的资产
-	if mentionContext := b.buildMentionContext(); mentionContext != "" {
-		parts = append(parts, mentionContext)
 	}
 
 	// 4. 资产知识引导
@@ -164,32 +149,4 @@ func (b *PromptBuilder) buildErrorRecoveryGuidance() string {
 
 func (b *PromptBuilder) buildUserDenialGuidance() string {
 	return `IMPORTANT: When the user denies a command execution or permission request, you MUST immediately stop the current task. Do not attempt alternative commands, workarounds, or different approaches to achieve the same goal. Simply acknowledge the user's decision and ask if they need anything else. The user's denial is final and must be respected.`
-}
-
-func (b *PromptBuilder) buildMentionContext() string {
-	return RenderMentionContext(b.context.MentionedAssets)
-}
-
-// RenderMentionContext 渲染一组被 @ 提及的资产为 prompt 片段。
-// 供 PromptBuilder 与 QueueAIMessage（生成过程中追加消息）复用。
-func RenderMentionContext(mentions []MentionedAsset) string {
-	if len(mentions) == 0 {
-		return ""
-	}
-	var lines []string
-	lines = append(lines, "# Assets referenced in the user's message")
-	for _, a := range mentions {
-		segs := []string{
-			fmt.Sprintf("ID=%d", a.AssetID),
-			fmt.Sprintf("type=%s", a.Type),
-			fmt.Sprintf("host=%s", a.Host),
-		}
-		if a.GroupPath != "" {
-			segs = append(segs, fmt.Sprintf("group=%s", a.GroupPath))
-		}
-		lines = append(lines, fmt.Sprintf("- @%s (%s)", a.Name, strings.Join(segs, ", ")))
-	}
-	lines = append(lines, "")
-	lines = append(lines, "When the user refers to an asset by @name, use the information above — do not guess by name alone.")
-	return strings.Join(lines, "\n")
 }

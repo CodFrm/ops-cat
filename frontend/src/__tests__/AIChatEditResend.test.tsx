@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AIChatContent } from "@/components/ai/AIChatContent";
-import { useAIStore, type ChatMessage, type MentionRef } from "@/stores/aiStore";
+import { useAIStore, type ChatMessage } from "@/stores/aiStore";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTabStore } from "@/stores/tabStore";
 import { SendAIMessage, StopAIGeneration, SaveConversationMessages } from "../../wailsjs/go/app/App";
@@ -20,17 +20,16 @@ vi.mock("@/components/ai/AIChatInput", () => ({
       onSubmit,
       onEmptyChange,
     }: {
-      onSubmit: (text: string, mentions: MentionRef[]) => void;
+      onSubmit: (content: string) => void;
       onEmptyChange?: (empty: boolean) => void;
     },
     ref
   ) {
     const [value, setValue] = useState("");
-    const [mentions, setMentions] = useState<MentionRef[]>([]);
 
     useEffect(() => {
-      onEmptyChange?.(value.trim().length === 0 && mentions.length === 0);
-    }, [mentions, onEmptyChange, value]);
+      onEmptyChange?.(value.trim().length === 0);
+    }, [onEmptyChange, value]);
 
     useImperativeHandle(
       ref,
@@ -39,33 +38,25 @@ vi.mock("@/components/ai/AIChatInput", () => ({
         clear: () => {
           mockInputSpies.clear();
           setValue("");
-          setMentions([]);
         },
-        isEmpty: () => value.trim().length === 0 && mentions.length === 0,
-        submit: () => onSubmit(value, mentions),
-        loadDraft: (draft: string | { content: string; mentions?: MentionRef[] }) => {
+        isEmpty: () => value.trim().length === 0,
+        submit: () => onSubmit(value),
+        loadDraft: (draft: string | { content: string }) => {
           mockInputSpies.loadDraft(draft);
           if (typeof draft === "string") {
             setValue(draft);
-            setMentions([]);
             return;
           }
           setValue(draft.content);
-          setMentions(draft.mentions ?? []);
         },
       }),
-      [mentions, onSubmit, value]
+      [onSubmit, value]
     );
 
     return (
       <div>
         <input aria-label="mock-ai-input" value={value} onChange={(event) => setValue(event.target.value)} />
-        <div>
-          {mentions.map((mention) => (
-            <span key={`${mention.assetId}-${mention.start}-${mention.end}`}>{`mention:${mention.name}`}</span>
-          ))}
-        </div>
-        <button type="button" onClick={() => onSubmit(value, mentions)}>
+        <button type="button" onClick={() => onSubmit(value)}>
           mock-submit
         </button>
       </div>
@@ -96,12 +87,12 @@ function setupConversationFixture({
   conversationId: number;
   messages: ChatMessage[];
   sending?: boolean;
-  pendingQueue?: Array<{ text: string; mentions?: MentionRef[] }>;
+  pendingQueue?: Array<{ text: string }>;
   tabId?: string;
 }) {
   useAIStore.setState({
     configured: true,
-    tabStates: tabId ? { [tabId]: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null } } : {},
+    tabStates: tabId ? { [tabId]: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null } } : {},
     conversationMessages: { [conversationId]: messages },
     conversationStreaming: { [conversationId]: { sending, pendingQueue } },
     conversations: [],
@@ -156,17 +147,18 @@ describe("AIChat edit-and-resend regression", () => {
     vi.mocked(EventsOn).mockImplementation((() => vi.fn()) as never);
   });
 
-  it("preloads mention drafts in tab mode and truncates/resends through the real store path", async () => {
+  it("preloads inline-XML mention drafts in tab mode and truncates/resends through the real store path", async () => {
     const user = userEvent.setup();
     const conversationId = 201;
     const tabId = "ai-201";
-    const mentions: MentionRef[] = [{ assetId: 42, name: "prod-db", start: 6, end: 14 }];
+    // 历史 content 已是内联 <mention> XML 形式（迁移后所有用户消息都长这样）。
+    const originalContent = 'check <mention asset-id="42" type="mysql">@prod-db</mention>';
 
     setupConversationFixture({
       conversationId,
       tabId,
       messages: [
-        buildMessage("user", "check @prod-db", { mentions }),
+        buildMessage("user", originalContent),
         buildMessage("assistant", "old answer"),
         buildMessage("user", "stale follow-up"),
         buildMessage("assistant", "stale answer"),
@@ -178,9 +170,8 @@ describe("AIChat edit-and-resend regression", () => {
     await user.click(screen.getAllByRole("button", { name: editButtonName })[0]);
 
     expect(screen.getByText(editingBannerName)).toBeInTheDocument();
-    expect(mockInputSpies.loadDraft).toHaveBeenCalledWith({ content: "check @prod-db", mentions });
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "mock-ai-input" })).toHaveValue("check @prod-db"));
-    expect(screen.getByText("mention:prod-db")).toBeInTheDocument();
+    expect(mockInputSpies.loadDraft).toHaveBeenCalledWith({ content: originalContent });
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "mock-ai-input" })).toHaveValue(originalContent));
 
     await user.type(screen.getByRole("textbox", { name: "mock-ai-input" }), " now");
     await user.click(screen.getByRole("button", { name: "mock-submit" }));
@@ -189,18 +180,18 @@ describe("AIChat edit-and-resend regression", () => {
     expect(vi.mocked(SendAIMessage).mock.calls[0]?.[0]).toBe(conversationId);
 
     const sentMessages = vi.mocked(SendAIMessage).mock.calls[0]?.[1] as Array<{ role: string; content: string }>;
-    expect(sentMessages.map((message) => [message.role, message.content])).toEqual([["user", "check @prod-db now"]]);
+    expect(sentMessages.map((message) => [message.role, message.content])).toEqual([
+      ["user", `${originalContent} now`],
+    ]);
 
     await waitFor(() => {
       expect(
         useAIStore.getState().conversationMessages[conversationId].map((message) => [message.role, message.content])
       ).toEqual([
-        ["user", "check @prod-db now"],
+        ["user", `${originalContent} now`],
         ["assistant", ""],
       ]);
     });
-    expect(useAIStore.getState().conversationMessages[conversationId][0].mentions).toEqual(mentions);
-    expect(screen.getByRole("button", { name: /prod-db/ })).toBeInTheDocument();
     expect(screen.queryByText("stale follow-up")).not.toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText(editingBannerName)).not.toBeInTheDocument());
   });

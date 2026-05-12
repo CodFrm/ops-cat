@@ -21,16 +21,15 @@ describe("UserMessage", () => {
     useTabStore.setState({ tabs: [], activeTabId: null } as any);
   });
 
-  it("无 mentions 时渲染纯文本", () => {
+  it("无 mention 标签时渲染纯文本", () => {
     render(<UserMessage msg={{ role: "user", content: "hello", blocks: [] } as any} />);
     expect(screen.getByText("hello")).toBeInTheDocument();
   });
 
-  it("有 mentions 时按 start/end 切片渲染 chip", () => {
+  it("内联 <mention> XML 解析为可点击 chip", () => {
     const msg = {
       role: "user",
-      content: "check @prod-db disk",
-      mentions: [{ assetId: 42, name: "prod-db", start: 6, end: 14 }],
+      content: 'check <mention asset-id="42" type="mysql">@prod-db</mention> disk',
       blocks: [],
     } as any;
     render(<UserMessage msg={msg} />);
@@ -43,8 +42,7 @@ describe("UserMessage", () => {
   it("点击 chip 打开 info tab", async () => {
     const msg = {
       role: "user",
-      content: "@prod-db",
-      mentions: [{ assetId: 42, name: "prod-db", start: 0, end: 8 }],
+      content: '<mention asset-id="42">@prod-db</mention>',
       blocks: [],
     } as any;
     render(<UserMessage msg={msg} />);

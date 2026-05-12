@@ -32,7 +32,7 @@ async function waitForStoreCondition(predicate: () => boolean, timeoutMs = 1000)
 
 function createTabState() {
   return {
-    inputDraft: { content: "", mentions: [] },
+    inputDraft: { content: "" },
     scrollTop: 0,
     editTarget: null,
   };
@@ -162,7 +162,7 @@ describe("aiStore", () => {
             conversationId: 1,
             title: "Chat 1",
             createdAt: 1,
-            uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+            uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
           },
         ],
         activeSidebarTabId: "sidebar-1",
@@ -202,7 +202,7 @@ describe("aiStore", () => {
             conversationId: 9,
             title: "旧标题",
             createdAt: 1,
-            uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+            uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
           },
         ],
         activeSidebarTabId: "sidebar-9",
@@ -233,7 +233,7 @@ describe("aiStore", () => {
             conversationId: 3,
             title: "旧标题",
             createdAt: 1,
-            uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+            uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
           },
         ],
       });
@@ -263,7 +263,7 @@ describe("aiStore", () => {
             conversationId: 5,
             title: "旧标题",
             createdAt: 1,
-            uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+            uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
           },
         ],
       });
@@ -332,7 +332,7 @@ describe("aiStore", () => {
             conversationId: 7,
             title: "旧标题",
             createdAt: 1,
-            uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+            uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
           },
         ],
       });
@@ -687,7 +687,7 @@ describe("sidebar state", () => {
     title,
     createdAt: 1,
     uiState: {
-      inputDraft: { content: "", mentions: [] },
+      inputDraft: { content: "" },
       scrollTop: 0,
       editTarget: null,
     },
@@ -860,7 +860,8 @@ describe("sidebar state", () => {
     expect(StopAIGeneration).toHaveBeenCalledWith(123);
   });
 
-  it("sidebar persistence strips mentions before writing to localStorage", () => {
+  it("sidebar persistence strips inline <mention> XML before writing to localStorage", () => {
+    const tagged = '<mention asset-id="42" type="ssh">@prod-db</mention>';
     useAIStore.setState({
       sidebarTabs: [
         {
@@ -869,18 +870,12 @@ describe("sidebar state", () => {
           title: "Secure",
           createdAt: 1,
           uiState: {
-            inputDraft: {
-              content: "@prod-db",
-              mentions: [{ assetId: 42, name: "prod-db", start: 0, end: 8 }],
-            },
+            inputDraft: { content: `before ${tagged} after` },
             scrollTop: 12,
             editTarget: {
               conversationId: 1,
               messageIndex: 0,
-              draft: {
-                content: "@prod-db again",
-                mentions: [{ assetId: 42, name: "prod-db", start: 0, end: 8 }],
-              },
+              draft: { content: `edit ${tagged} again` },
             },
           },
         },
@@ -889,8 +884,9 @@ describe("sidebar state", () => {
     });
 
     const persisted = JSON.parse(localStorage.getItem("ai_sidebar_tabs") || "[]");
-    expect(persisted[0]?.uiState?.inputDraft?.mentions).toEqual([]);
-    expect(persisted[0]?.uiState?.editTarget?.draft?.mentions).toEqual([]);
+    expect(persisted[0]?.uiState?.inputDraft?.content).toBe("before @prod-db after");
+    expect(persisted[0]?.uiState?.editTarget?.draft?.content).toBe("edit @prod-db again");
+    expect(persisted[0]?.uiState?.inputDraft?.content).not.toContain("<mention");
   });
 });
 
@@ -935,7 +931,7 @@ describe("editAndResendConversation", () => {
           conversationId: 55,
           title: "t",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
         },
       ],
       activeSidebarTabId: "sidebar-55",
@@ -980,7 +976,7 @@ describe("editAndResendConversation", () => {
           conversationId: 88,
           title: "t",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
         },
       ],
       activeSidebarTabId: "sidebar-88",
@@ -1122,7 +1118,7 @@ describe("editAndResendConversation", () => {
           conversationId: 94,
           title: "custom title",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
         },
       ],
       activeSidebarTabId: "sidebar-94",
@@ -1328,7 +1324,7 @@ describe("sidebar and main tab multi-host behavior", () => {
           conversationId: 50,
           title: "t",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
         },
       ],
       activeSidebarTabId: "sidebar-50",
@@ -1373,21 +1369,21 @@ describe("sidebar and main tab multi-host behavior", () => {
           conversationId: 51,
           title: "left",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
         },
         {
           id: "sidebar-middle",
           conversationId: 52,
           title: "middle",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
         },
         {
           id: "sidebar-right",
           conversationId: 53,
           title: "right",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
         },
       ],
       activeSidebarTabId: "sidebar-middle",
@@ -1427,7 +1423,7 @@ describe("sidebar and main tab multi-host behavior", () => {
           conversationId: 60,
           title: "Live",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
         },
       ],
       activeSidebarTabId: "sidebar-live",
@@ -1489,7 +1485,7 @@ describe("DeepSeek-v4 多轮 tool 调用历史展开", () => {
     title: "新对话",
     createdAt: 1,
     uiState: {
-      inputDraft: { content: "", mentions: [] },
+      inputDraft: { content: "" },
       scrollTop: 0,
       editTarget: null,
     },
