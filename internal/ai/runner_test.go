@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -301,5 +302,157 @@ func TestRunner_CancelEmitsStopped(t *testing.T) {
 			})
 		}
 		So(seenStopped, ShouldBeTrue)
+	})
+}
+
+// queueParentDispatch 把"父 agent 调 subagent(type=explore, prompt=...)"
+// 那一步流压进 mock 队列。providertest 是 FIFO 共享队列，调用方需自己按
+// 父→子→...→子→父 的顺序把各步压进去（不能用 defer 把父收尾流后置，
+// 否则 child 会拉到 "ok" 那条）。
+func queueParentDispatch(mock *providertest.Mock, toolUseID, prompt string) {
+	mock.QueueStream(
+		provider.StreamChunk{ToolCallDelta: &provider.ToolCallDelta{Index: 0, ID: toolUseID, Name: "subagent"}},
+		provider.StreamChunk{ToolCallDelta: &provider.ToolCallDelta{Index: 0, ArgsDelta: `{"type":"explore","prompt":` + fmt.Sprintf("%q", prompt) + `}`}},
+		provider.StreamChunk{FinishReason: provider.FinishToolCalls},
+	)
+}
+
+// queueParentClose 父 agent 拿到 subagent tool 结果后的收尾流（一段 text + FinishStop）。
+func queueParentClose(mock *providertest.Mock, text string) {
+	mock.QueueStream(
+		provider.StreamChunk{ContentDelta: text},
+		provider.StreamChunk{FinishReason: provider.FinishStop},
+	)
+}
+
+// captureSubagentResult 跑一遍 parent.Runner，抓 subagent 那个 tool call 的 *ToolResultBlock。
+// 同时返回从中提取的 text，方便断言。
+func captureSubagentResult(t *testing.T, mock provider.Provider, toolUseID string) (*agent.ToolResultBlock, string) {
+	t.Helper()
+	cfg := SystemConfig{Provider: mock, Cwd: t.TempDir()}
+	sys, err := BuildSystem(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("BuildSystem: %v", err)
+	}
+	t.Cleanup(func() { _ = sys.Close(context.Background()) })
+
+	conv := agent.LoadConversation(fmt.Sprintf("opskat-subagent-test-%d", time.Now().UnixNano()), nil)
+	runner := sys.Agent().Runner(conv)
+	t.Cleanup(func() { _ = runner.Close() })
+
+	var mu sync.Mutex
+	var captured *agent.ToolResultBlock
+	unsub := runner.OnEvent(agent.OnlyKinds(agent.EventPostToolUse), func(_ context.Context, ev agent.Event) {
+		if ev.Tool == nil || ev.Tool.ToolUseID != toolUseID {
+			return
+		}
+		mu.Lock()
+		captured = ev.Tool.Output
+		mu.Unlock()
+	})
+	defer unsub()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	events, err := runner.Send(ctx, "explore please")
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	for range events { // drain
+	}
+
+	mu.Lock()
+	rb := captured
+	mu.Unlock()
+	return rb, toolResultText(rb)
+}
+
+// toolResultText 抽出 *ToolResultBlock 里的 TextBlock 文本。
+func toolResultText(rb *agent.ToolResultBlock) string {
+	if rb == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, c := range rb.Content {
+		switch v := c.(type) {
+		case agent.TextBlock:
+			b.WriteString(v.Text)
+		case *agent.TextBlock:
+			if v != nil {
+				b.WriteString(v.Text)
+			}
+		}
+	}
+	return b.String()
+}
+
+// TestRunner_SubagentExplore_TextPath：sanity——子 agent 正常出文本时，
+// 父侧 subagent tool 结果就是子 assistant 的文本。
+// 防 opskat audit middleware / GP 替换之类的接线把正常路径搞坏。
+func TestRunner_SubagentExplore_TextPath(t *testing.T) {
+	Convey("explore 子 agent 出文本时，父 tool 结果原文回传", t, func() {
+		mock := providertest.New()
+		// 父 step 1: dispatch
+		queueParentDispatch(mock, "tx1", "go")
+		// 子: 直接产文本收尾
+		mock.QueueStream(
+			provider.StreamChunk{ContentDelta: "found three config files"},
+			provider.StreamChunk{FinishReason: provider.FinishStop},
+		)
+		// 父 step 2: close
+		queueParentClose(mock, "ok")
+
+		_, text := captureSubagentResult(t, mock, "tx1")
+		So(text, ShouldEqual, "found three config files")
+	})
+}
+
+// TestRunner_SubagentExplore_ThinkingOnlyFallback：端到端验证 cago 那侧的
+// thinking 回退 fix 通过 opskat BuildSystem（含 audit middleware、GP 替换、
+// LocalToolGate 中间件链）依然生效。
+//
+// 如果再看到 "sub-agent returned no content"，说明：
+//   - cago 改没生效（旧二进制 / replace 没指对）→ 这条 test 会红
+//   - 或 opskat 加的中间件吃了 thinking 块
+func TestRunner_SubagentExplore_ThinkingOnlyFallback(t *testing.T) {
+	Convey("explore 子 agent 只产 thinking 时，父 tool 结果落到 thinking 文本", t, func() {
+		mock := providertest.New()
+		queueParentDispatch(mock, "tt1", "go")
+		// 子: 全程 thinking，无 ContentDelta
+		mock.QueueStream(
+			provider.StreamChunk{ThinkingDelta: &provider.ThinkingDelta{Text: "looked at ~/.opskat — three configs found"}},
+			provider.StreamChunk{FinishReason: provider.FinishStop},
+		)
+		queueParentClose(mock, "ok")
+
+		_, text := captureSubagentResult(t, mock, "tt1")
+		So(text, ShouldNotEqual, "sub-agent returned no content")
+		So(text, ShouldContainSubstring, "three configs found")
+	})
+}
+
+// TestRunner_SubagentExplore_NoContentRegression：场景 A 兜底——子 agent
+// 从头到尾只调工具不出任何文本/思考时，按之前讨论保留 "sub-agent returned
+// no content" 的行为，作为回归保护。改 fallback 语义时这条会红，强制重新
+// 评估。
+func TestRunner_SubagentExplore_NoContentRegression(t *testing.T) {
+	Convey("explore 子 agent 全程无文本无思考时，保留 'no content' 兜底", t, func() {
+		mock := providertest.New()
+		queueParentDispatch(mock, "ta1", "go")
+		// 子 step 1: 出一个 ls 工具调用（ReadOnly 工具集里有 ls，cwd=tempdir，
+		// 默认 path="." 会列出空目录——不会报错）
+		mock.QueueStream(
+			provider.StreamChunk{ToolCallDelta: &provider.ToolCallDelta{Index: 0, ID: "ls1", Name: "ls"}},
+			provider.StreamChunk{ToolCallDelta: &provider.ToolCallDelta{Index: 0, ArgsDelta: `{}`}},
+			provider.StreamChunk{FinishReason: provider.FinishToolCalls},
+		)
+		// 子 step 2: 啥也不产，直接 FinishStop
+		mock.QueueStream(
+			provider.StreamChunk{FinishReason: provider.FinishStop},
+		)
+		queueParentClose(mock, "ok")
+
+		_, text := captureSubagentResult(t, mock, "ta1")
+		So(text, ShouldEqual, "sub-agent returned no content")
 	})
 }

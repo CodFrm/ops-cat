@@ -98,6 +98,11 @@ func NewCommandPolicyChecker(confirmFunc CommandConfirmFunc) *CommandPolicyCheck
 	}
 }
 
+// ConfirmFunc 返回确认回调，供 batch_command 聚合多条审批项一次性调用。
+func (c *CommandPolicyChecker) ConfirmFunc() CommandConfirmFunc {
+	return c.confirmFunc
+}
+
 // SetGrantRequestFunc 设置 Grant 审批回调
 func (c *CommandPolicyChecker) SetGrantRequestFunc(fn GrantRequestFunc) {
 	c.grantRequestFunc = fn

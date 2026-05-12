@@ -12,15 +12,14 @@ func TestTools_RegistryShape(t *testing.T) {
 	Convey("Tools 返回的工具集与既定契约一致", t, func() {
 		tools := Tools()
 
-		// 不应包含已经删除的 spawn_agent / batch_command（由 cago dispatch_subagent 取代）
+		// spawn_agent 由 cago dispatch_subagent 取代，保持已删；batch_command 恢复，对齐 main 上的并行批量能力。
 		names := make(map[string]tool.Tool, len(tools))
 		for _, t := range tools {
 			names[t.Name()] = t
 		}
 
-		Convey("已删工具不再出现", func() {
+		Convey("spawn_agent 不再出现（cago dispatch_subagent 已取代）", func() {
 			So(names, ShouldNotContainKey, "spawn_agent")
-			So(names, ShouldNotContainKey, "batch_command")
 		})
 
 		expected := []string{
@@ -28,7 +27,7 @@ func TestTools_RegistryShape(t *testing.T) {
 			"list_assets", "get_asset", "add_asset", "update_asset",
 			"list_groups", "get_group", "add_group", "update_group",
 			// exec
-			"run_command", "upload_file", "download_file", "request_permission",
+			"run_command", "upload_file", "download_file", "request_permission", "batch_command",
 			// data
 			"exec_sql", "exec_redis", "exec_mongo", "exec_k8s",
 			// kafka

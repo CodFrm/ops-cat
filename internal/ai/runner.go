@@ -10,6 +10,9 @@ import (
 	cagoAnthropics "github.com/cago-frame/agents/provider/anthropics"
 	cagoOpenAI "github.com/cago-frame/agents/provider/openai"
 	"github.com/cago-frame/agents/tool"
+	"github.com/cago-frame/agents/tool/find"
+	"github.com/cago-frame/agents/tool/grep"
+	"github.com/cago-frame/agents/tool/ls"
 	"github.com/cago-frame/agents/tool/subagent"
 	"github.com/sashabaranov/go-openai"
 
@@ -117,14 +120,31 @@ func BuildSystem(ctx context.Context, cfg SystemConfig) (*coding.System, error) 
 	return coding.New(ctx, prov, cfg.Cwd, opts...)
 }
 
-// buildGeneralPurposeEntry 构造一个替换 coding 默认 GeneralPurpose 子 agent 的 Entry，
-// 把父 agent 同款 middleware 显式注入到 child：
+// buildGeneralPurposeEntry 构造一个替换 coding 默认 GeneralPurpose 子 agent 的 Entry。
+// 工具集 = cago GP 默认（read/write/edit/bash 三件套 + grep/find/ls）+ opskat 全部业务工具
+// （SSH/SQL/Redis/Mongo/K8s/Kafka/资产管理/审批 等，见 Tools()）。
+// 替代 main 的 spawn_agent：子 agent 同样能远程执行命令、查询数据库、操作资产。
+//
+// middleware 把父 agent 同款 middleware 显式注入到 child：
 //   - auditMiddleware 无条件挂，保证子代理触发的 bash/write/edit 也落审计；
 //   - LocalToolGate 非 nil 时挂 bash|write|edit 审批 gate，与父保持同一份白名单
 //     （以 conversationID 索引）—— 用户在父 agent 里 allowAll 过的 pattern，
 //     子 agent 调同样命令时复用，符合直觉。
+//
+// 注：SubagentWithTools 是"完全替换"（cago 文档明示），所以这里要手工复刻
+// generalPurposeTools 默认集（Session.Coding + grep/find/ls）再追加业务工具。
 func buildGeneralPurposeEntry(prov cagoProvider.Provider, cwd string, gate *LocalToolGate) subagent.Entry {
+	sess := coding.NewSession(cwd)
+	gpTools := append([]tool.Tool{}, sess.Coding()...)
+	gpTools = append(gpTools,
+		grep.New(grep.Cwd(cwd)),
+		find.New(find.Cwd(cwd)),
+		ls.New(ls.Cwd(cwd)),
+	)
+	gpTools = append(gpTools, Tools()...)
+
 	subOpts := []coding.SubagentOption{
+		coding.SubagentWithTools(gpTools...),
 		coding.SubagentWithAgentOpts(agent.Use(".*", auditMiddleware)),
 	}
 	if gate != nil {

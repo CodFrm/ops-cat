@@ -76,6 +76,26 @@ func execTools() []tool.Tool {
 			},
 		},
 		&tool.RawTool{
+			NameStr: "batch_command",
+			DescStr: "Execute commands on multiple assets in parallel. Supports exec (SSH), sql (database), and redis command types. Each command is policy-checked; items needing user confirmation are batched into a single approval prompt. Results are returned per-asset (success or error). Prefer this over looping run_command/exec_sql/exec_redis when targeting >1 asset.",
+			SchemaVal: agent.Schema{
+				Type: "object",
+				Properties: map[string]*agent.Property{
+					"commands": {Type: "string", Description: `JSON array of commands. Each item: {"asset": "name-or-id", "type": "exec|sql|redis", "command": "..."}. Type defaults to "exec". Example: [{"asset":"web-1","type":"exec","command":"uptime"},{"asset":"42","type":"sql","command":"SELECT VERSION()"}]`},
+				},
+				Required: []string{"commands"},
+			},
+			// batch 内部自己做并发控制（max 10），父级 dispatcher 不需要再串行。
+			IsSerial: false,
+			Handler: func(ctx context.Context, in map[string]any) (*agent.ToolResultBlock, error) {
+				out, err := handleBatchCommand(ctx, in)
+				if err != nil {
+					return nil, err
+				}
+				return &agent.ToolResultBlock{Content: []agent.ContentBlock{agent.TextBlock{Text: out}}}, nil
+			},
+		},
+		&tool.RawTool{
 			NameStr: "request_permission",
 			DescStr: "Request approval for grant of command patterns BEFORE executing them. Submit command patterns (one per line, supports '*' wildcard) for one or more target assets. The user will review and may edit the patterns before approving. Once approved, subsequent run_command/exec_sql/exec_redis/exec_mongo/exec_k8s/kafka_* calls matching any approved pattern will be auto-approved.",
 			SchemaVal: agent.Schema{
