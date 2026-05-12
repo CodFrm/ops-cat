@@ -15,6 +15,32 @@ const cancelAnimationFrameMock = vi.fn();
 vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
 vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
 
+// happy-dom 不会因为状态变化自然触发 ResizeObserver，测试需要手动调用回调来模拟
+// "deferred markdown commit 撑高内容容器"这一拍，从而验证 AIChatContent 的滚动跟随行为。
+const resizeObservers: Array<{ cb: ResizeObserverCallback }> = [];
+class MockResizeObserver {
+  private entry: { cb: ResizeObserverCallback };
+  constructor(cb: ResizeObserverCallback) {
+    this.entry = { cb };
+    resizeObservers.push(this.entry);
+  }
+  observe() {}
+  unobserve() {}
+  disconnect() {
+    const idx = resizeObservers.indexOf(this.entry);
+    if (idx >= 0) resizeObservers.splice(idx, 1);
+  }
+}
+vi.stubGlobal("ResizeObserver", MockResizeObserver);
+
+function triggerResizeObservers() {
+  // 快照防止 callback 触发 disconnect 后迭代失效
+  const snapshot = [...resizeObservers];
+  for (const entry of snapshot) {
+    entry.cb([], {} as ResizeObserver);
+  }
+}
+
 const mockInputSpies = vi.hoisted(() => ({
   loadDraft: vi.fn(),
   clear: vi.fn(),
@@ -121,6 +147,7 @@ describe("AIChatContent", () => {
     mockInputSpies.clear.mockReset();
     requestAnimationFrameMock.mockClear();
     cancelAnimationFrameMock.mockClear();
+    resizeObservers.length = 0;
 
     useTabStore.setState({ tabs: [], activeTabId: null });
     useAIStore.setState({
@@ -432,5 +459,126 @@ describe("AIChatContent", () => {
     });
 
     expect(thinkingScroll!.scrollTop).toBe(60);
+  });
+
+  it("auto-follows the outer viewport when the messages container grows after a deferred markdown commit", () => {
+    useAIStore.setState({
+      conversationMessages: {
+        91: [
+          { role: "user", content: "hi", blocks: [] },
+          {
+            role: "assistant",
+            content: "first chunk",
+            blocks: [{ type: "text", content: "first chunk" }],
+            streaming: true,
+          },
+        ],
+      },
+      conversationStreaming: {
+        91: { sending: true, pendingQueue: [] },
+      },
+    });
+
+    const { container } = render(<AIChatContent conversationId={91} />);
+    const viewport = container.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
+    expect(viewport).toBeTruthy();
+    const { setScrollHeight } = setupScrollableElement(viewport!, {
+      scrollHeight: 300,
+      clientHeight: 200,
+      scrollTop: 100,
+    });
+    // 初始在底部：scrollHeight - scrollTop - clientHeight === 0
+    dispatchScroll(viewport!);
+
+    // 模拟 deferred markdown commit 撑高容器，由 ResizeObserver 把 viewport 拉到新底部
+    setScrollHeight(500);
+    act(() => {
+      triggerResizeObservers();
+    });
+
+    expect(viewport!.scrollTop).toBe(500);
+  });
+
+  it("does not drop follow when content shrinks (e.g. ThinkingBlock collapses) and the browser clamps scrollTop", () => {
+    useAIStore.setState({
+      conversationMessages: {
+        93: [
+          { role: "user", content: "hi", blocks: [] },
+          {
+            role: "assistant",
+            content: "x",
+            blocks: [{ type: "text", content: "x" }],
+            streaming: true,
+          },
+        ],
+      },
+      conversationStreaming: {
+        93: { sending: true, pendingQueue: [] },
+      },
+    });
+
+    const { container } = render(<AIChatContent conversationId={93} />);
+    const viewport = container.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
+    expect(viewport).toBeTruthy();
+    const { setScrollHeight } = setupScrollableElement(viewport!, {
+      scrollHeight: 600,
+      clientHeight: 200,
+      scrollTop: 400,
+    });
+    // 初始在底部，distance = 0
+    dispatchScroll(viewport!);
+
+    // 内容缩水（典型：ThinkingBlock 完成自动 collapse 把 max-h-64 展开内容收掉），
+    // 浏览器把 scrollTop 钳到新 max（这里手动模拟那一拍）
+    setScrollHeight(400);
+    viewport!.scrollTop = 200;
+    dispatchScroll(viewport!);
+
+    // 跟随不应该被关掉：scrollTop 减小是钳位结果，scrollHeight 同时缩了，不是用户上滑
+    setScrollHeight(700);
+    act(() => {
+      triggerResizeObservers();
+    });
+    expect(viewport!.scrollTop).toBe(700);
+  });
+
+  it("does not pull the outer viewport back to bottom after the user scrolled up", () => {
+    useAIStore.setState({
+      conversationMessages: {
+        92: [
+          { role: "user", content: "hi", blocks: [] },
+          {
+            role: "assistant",
+            content: "first chunk",
+            blocks: [{ type: "text", content: "first chunk" }],
+            streaming: true,
+          },
+        ],
+      },
+      conversationStreaming: {
+        92: { sending: true, pendingQueue: [] },
+      },
+    });
+
+    const { container } = render(<AIChatContent conversationId={92} />);
+    const viewport = container.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
+    expect(viewport).toBeTruthy();
+    const { setScrollHeight } = setupScrollableElement(viewport!, {
+      scrollHeight: 300,
+      clientHeight: 200,
+      scrollTop: 100,
+    });
+    // 初始进入 isAtBottom = true
+    dispatchScroll(viewport!);
+    // 用户上滑：scrollTop 减小触发 handler 把 isAtBottomRef 设为 false
+    viewport!.scrollTop = 30;
+    dispatchScroll(viewport!);
+
+    setScrollHeight(500);
+    act(() => {
+      triggerResizeObservers();
+    });
+
+    expect(viewport!.scrollTop).toBe(30);
   });
 });

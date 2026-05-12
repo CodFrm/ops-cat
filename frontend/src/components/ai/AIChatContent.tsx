@@ -200,6 +200,8 @@ export function AIChatContent({
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<AIChatInputHandle>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  // 内层 messages 容器：ResizeObserver 挂在这里，捕获 useDeferredValue commit 撑高的那一帧。
+  const contentRef = useRef<HTMLDivElement>(null);
   // Radix ScrollArea 的 viewport 是内部 div，原先每个 effect 都 querySelector 一次；
   // 流式时 messages effect 按帧触发，querySelector 累积成本不小。这里把首次查找结果缓存，
   // 同时用 isConnected 兜底 Radix 重建子树的边角场景。
@@ -238,13 +240,35 @@ export function AIChatContent({
     if (!hasNewApproval && !isAtBottomRef.current) return;
     const viewport = getViewport();
     if (viewport) {
-      // 流式过程中用 instant 滚动避免和持续增长的 scrollHeight 互相追赶导致跟随判定抖动。
+      // 这里读到的 scrollHeight 可能还是 useDeferredValue commit 之前的旧值（MarkdownContent
+      // 内部把 markdown 渲染挂到了低优先级 transition），所以这次滚到底只对齐到"旧底部"；
+      // 下面那条 ResizeObserver effect 会在内容容器真正撑高的那一帧再把视图二次对齐到新底部。
       viewport.scrollTop = viewport.scrollHeight;
       isAtBottomRef.current = true;
     } else {
       bottomRef.current?.scrollIntoView({ behavior: "auto" });
     }
   }, [messages, getViewport]);
+
+  useEffect(() => {
+    // MarkdownContent 用 useDeferredValue 让长 markdown 走低优先级 commit，
+    // 上面那条 messages effect 跑的时候 deferred 还没 commit、scrollHeight 是旧值；
+    // 而 deferred 真正 commit 时既没有 scroll 事件、也不会改变 messages 引用，
+    // 没有任何同步信号能把视图重新拉到底——只剩内容容器尺寸变化这个回调入口。
+    // ResizeObserver 在内层 messages 容器尺寸变化时（包括每次 deferred commit 撑高）
+    // 触发一次，加上 isAtBottomRef 闸门，保证用户上滑后跟随会被关掉，不与 scroll 处理器抢镜。
+    const viewport = getViewport();
+    const content = contentRef.current;
+    if (!viewport || !content || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (!isAtBottomRef.current) return;
+      if (viewport.scrollTop !== viewport.scrollHeight) {
+        viewport.scrollTop = viewport.scrollHeight;
+      }
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [getViewport]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -310,20 +334,24 @@ export function AIChatContent({
         useAIStore.getState().sidebarTabs.find((tab) => tab.id === sideTabId)?.uiState.scrollTop ?? 0;
     }
     let lastScrollTop = viewport.scrollTop;
+    let lastScrollHeight = viewport.scrollHeight;
     // 初始按几何判定一次：短内容/刚加载都视为在底部、开启跟随。
     isAtBottomRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 50;
     const handleScroll = () => {
       const currentTop = viewport.scrollTop;
-      // 关键：只有 scrollTop "向上"移动才视为用户主动离开底部、关掉跟随。
-      // 向下方向（程序 scrollTop = scrollHeight、或用户滑回底部）只用来恢复跟随，永不主动关。
-      // 这样 useDeferredValue 让 markdown 异步撑高 scrollHeight 时，
-      // 后到的 scroll 事件即便看到"几何上不在底部"，也不会把跟随误关。50px 余量容忍 sub-pixel/边距差异。
-      if (currentTop < lastScrollTop) {
+      const currentScrollHeight = viewport.scrollHeight;
+      // 真正的"用户上滑"必须同时满足：scrollTop 减小 AND scrollHeight 没缩。
+      // 内容收缩场景（典型：ThinkingBlock 从 running 完成时自动 collapse，max-h-64 展开内容消失）
+      // 浏览器会把 scrollTop 钳到新 max → 看起来 scrollTop 减小但用户没动，
+      // 误判会把跟随关掉、整段后续流式都无法回到底。
+      const userScrolledUp = currentTop < lastScrollTop && currentScrollHeight >= lastScrollHeight;
+      if (userScrolledUp) {
         isAtBottomRef.current = false;
-      } else if (viewport.scrollHeight - currentTop - viewport.clientHeight <= 50) {
+      } else if (currentScrollHeight - currentTop - viewport.clientHeight <= 50) {
         isAtBottomRef.current = true;
       }
       lastScrollTop = currentTop;
+      lastScrollHeight = currentScrollHeight;
       if (sideTabId) {
         setSidebarTabScrollTop(sideTabId, currentTop);
       }
@@ -441,7 +469,7 @@ export function AIChatContent({
       <div className="flex h-full flex-col" data-compact={compact}>
         {/* Messages */}
         <ScrollArea ref={scrollAreaRef} className="flex-1 min-h-0 overflow-hidden">
-          <div className="max-w-3xl mx-auto p-4 space-y-6">
+          <div ref={contentRef} className="max-w-3xl mx-auto p-4 space-y-6">
             {messages.length === 0 && (
               <p className="text-sm text-muted-foreground text-center mt-16">{t("ai.placeholder")}</p>
             )}

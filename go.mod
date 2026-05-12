@@ -3,7 +3,7 @@ module github.com/opskat/opskat
 go 1.26.0
 
 require (
-	github.com/cago-frame/agents v0.0.0-20260512092641-ad5c470b126f
+	github.com/cago-frame/agents v0.0.0-20260512141207-8061fa2142f6
 	github.com/cago-frame/cago v0.0.0-20260307042250-c4ff92923947
 	github.com/coder/websocket v1.8.14
 	github.com/fsnotify/fsnotify v1.10.0
