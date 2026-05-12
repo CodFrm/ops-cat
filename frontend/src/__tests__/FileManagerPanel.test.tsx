@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FileManagerPanel } from "../components/terminal/FileManagerPanel";
 import { useTerminalStore, type TerminalDirectorySyncState } from "../stores/terminalStore";
-import { useSFTPStore } from "../stores/sftpStore";
+import { useSFTPStore, type SFTPTransfer } from "../stores/sftpStore";
 import { ChangeSSHDirectory, SFTPListDir } from "../../wailsjs/go/app/App";
 
 const { toastError } = vi.hoisted(() => ({
@@ -33,6 +33,22 @@ function makeSyncState(partial: Partial<TerminalDirectorySyncState> = {}): Termi
   };
 }
 
+function makeTransfer(
+  partial: Partial<SFTPTransfer> & Pick<SFTPTransfer, "transferId" | "tabId" | "sessionId">
+): SFTPTransfer {
+  return {
+    direction: "upload",
+    currentFile: "test.txt",
+    filesCompleted: 0,
+    filesTotal: 1,
+    bytesDone: 100,
+    bytesTotal: 100,
+    speed: 0,
+    status: "active",
+    ...partial,
+  };
+}
+
 describe("FileManagerPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -44,17 +60,24 @@ describe("FileManagerPanel", () => {
           panes: { s1: { sessionId: "s1", connected: true, connectedAt: Date.now() } },
           directoryFollowMode: "off",
         },
+        tab2: {
+          splitTree: { type: "terminal", sessionId: "s2" },
+          activePaneId: "s2",
+          panes: { s2: { sessionId: "s2", connected: true, connectedAt: Date.now() } },
+          directoryFollowMode: "off",
+        },
       },
       sessionSync: {
         s1: makeSyncState(),
+        s2: makeSyncState({ sessionId: "s2", cwd: "/srv/www" }),
       },
       connections: {},
       connectingAssetIds: new Set(),
     });
     useSFTPStore.setState({
       transfers: {},
-      fileManagerOpenTabs: { tab1: true },
-      fileManagerPaths: { tab1: "/srv/app" },
+      fileManagerOpenTabs: { tab1: true, tab2: true },
+      fileManagerPaths: { tab1: "/srv/app", tab2: "/srv/www" },
       fileManagerWidth: 280,
     });
     vi.mocked(SFTPListDir).mockResolvedValue([]);
@@ -125,5 +148,54 @@ describe("FileManagerPanel", () => {
 
     expect(toastError).toHaveBeenCalledWith("sftp.sync.busy");
     expect(useTerminalStore.getState().tabData.tab1.directoryFollowMode).toBe("off");
+  });
+
+  it("renders only transfers owned by the current tab", async () => {
+    useSFTPStore.setState({
+      transfers: {
+        t1: makeTransfer({ transferId: "t1", tabId: "tab1", sessionId: "s1", currentFile: "file-one.txt" }),
+        t2: makeTransfer({ transferId: "t2", tabId: "tab2", sessionId: "s2", currentFile: "file-two.txt" }),
+      },
+    });
+
+    render(<FileManagerPanel tabId="tab2" sessionId="s2" isOpen width={280} onWidthChange={vi.fn()} />);
+
+    expect(screen.queryByText("file-one.txt")).not.toBeInTheDocument();
+    expect(screen.getByText("file-two.txt")).toBeInTheDocument();
+  });
+
+  it("refreshes only when an upload owned by the current tab completes", async () => {
+    render(<FileManagerPanel tabId="tab1" sessionId="s1" isOpen width={280} onWidthChange={vi.fn()} />);
+
+    await waitFor(() => expect(SFTPListDir).toHaveBeenCalledWith("s1", "/srv/app"));
+    vi.clearAllMocks();
+
+    useSFTPStore.setState({
+      transfers: {
+        t2: makeTransfer({
+          transferId: "t2",
+          tabId: "tab2",
+          sessionId: "s2",
+          currentFile: "other-tab.txt",
+          status: "done",
+        }),
+      },
+    });
+    await Promise.resolve();
+    expect(SFTPListDir).not.toHaveBeenCalled();
+
+    useSFTPStore.setState({
+      transfers: {
+        t1: makeTransfer({
+          transferId: "t1",
+          tabId: "tab1",
+          sessionId: "s1",
+          currentFile: "current-tab.txt",
+          status: "done",
+        }),
+      },
+    });
+
+    await waitFor(() => expect(SFTPListDir).toHaveBeenCalledWith("s1", "/srv/app"));
   });
 });
