@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useMemo, memo, useCallback } from "react";
+import { useState, useRef, useEffect, useMemo, memo, useCallback, useDeferredValue } from "react";
+import { useShallow } from "zustand/shallow";
 import {
   Loader2,
   CornerDownLeft,
@@ -54,6 +55,21 @@ import { CompactContext, useCompact } from "@/components/ai/AIChatContentContext
 // 常量化 Markdown 插件数组，避免每次渲染创建新引用导致 Markdown 重解析
 const mdRemarkPlugins = [remarkGfm];
 const mdRehypePlugins = [rehypeSanitize];
+
+// 流式输出时整段 markdown 会按 RAF 频率重新塞进 <Markdown>。
+// react-markdown 是同步主线程解析，长文本下会直接卡住键盘 IME。
+// 这里加两层保护：
+//   1. memo 让"内容没变"的历史 block 一次也不重渲染（参数 content 是稳定字符串引用）。
+//   2. useDeferredValue 让正在增长的最后一个 block 在主线程有更高优先级任务（按键）时
+//      自动让位，等空闲帧再渲染——React 19 并发渲染会自然兜住延迟。
+const MarkdownContent = memo(function MarkdownContent({ content }: { content: string }) {
+  const deferred = useDeferredValue(content);
+  return (
+    <Markdown remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}>
+      {deferred}
+    </Markdown>
+  );
+});
 // 统一助手消息选中态样式，避免不同气泡的选区反馈不一致。
 const messageSelectionClass = "select-text selection:bg-primary/25 selection:text-foreground";
 
@@ -113,8 +129,11 @@ export function AIChatContent({
   onStopOverride,
 }: AIChatContentProps) {
   const { t } = useTranslation();
+  // 只订阅必要的标量字段：之前 `useAIStore()` 整体解构会让本组件订阅整张 store，
+  // 任何其它会话的流式 chunk、conversation list 增删、sidebar tab 抖动都会触发重渲染。
+  const configured = useAIStore((s) => s.configured);
+  // Actions 在 store 初始化后引用稳定；useShallow 让对象级浅比较恒为 true，永不触发重渲染。
   const {
-    configured,
     sendToTab,
     stopGeneration,
     regenerate,
@@ -125,7 +144,20 @@ export function AIChatContent({
     setSidebarTabInputDraft,
     setSidebarTabEditTarget,
     setSidebarTabScrollTop,
-  } = useAIStore();
+  } = useAIStore(
+    useShallow((s) => ({
+      sendToTab: s.sendToTab,
+      stopGeneration: s.stopGeneration,
+      regenerate: s.regenerate,
+      regenerateConversation: s.regenerateConversation,
+      removeFromQueue: s.removeFromQueue,
+      clearQueue: s.clearQueue,
+      editAndResendConversation: s.editAndResendConversation,
+      setSidebarTabInputDraft: s.setSidebarTabInputDraft,
+      setSidebarTabEditTarget: s.setSidebarTabEditTarget,
+      setSidebarTabScrollTop: s.setSidebarTabScrollTop,
+    }))
+  );
   const derivedConvId = useTabStore((s) => {
     if (!tabId) return null;
     const tab = s.tabs.find((x) => x.id === tabId);
@@ -146,17 +178,21 @@ export function AIChatContent({
     conversationId != null ? s.conversationStreaming[conversationId] || DEFAULT_STREAMING : DEFAULT_STREAMING
   );
   const { sending, pendingQueue } = streaming;
-  // 从最新到最旧收集非空用户消息，用 useMemo 避免无关渲染也构造新数组。
-  const userMessageHistory = useMemo(() => {
-    const history: string[] = [];
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (msg.role === "user" && msg.content.trim()) {
-        history.push(msg.content);
+  // 直接走 zustand 选择器 + 浅比较：流式只改最后一条 assistant 消息时，
+  // 用户消息序列保持引用稳定，AIChatInput 不会因为父组件每帧重渲染而被波及。
+  const userMessageHistory = useAIStore(
+    useShallow((s) => {
+      const msgs = conversationId != null ? s.conversationMessages[conversationId] || EMPTY_MESSAGES : EMPTY_MESSAGES;
+      const history: string[] = [];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const msg = msgs[i];
+        if (msg.role === "user" && msg.content.trim()) {
+          history.push(msg.content);
+        }
       }
-    }
-    return history;
-  }, [messages]);
+      return history;
+    })
+  );
 
   const [regenerateTarget, setRegenerateTarget] = useState<number | null>(null);
   const [localEditTarget, setLocalEditTarget] = useState<EditTarget | null>(null);
@@ -164,12 +200,70 @@ export function AIChatContent({
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<AIChatInputHandle>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  // 观察消息容器尺寸，useDeferredValue 让 markdown 异步 commit 撑高 scrollHeight 时，
+  // 这里是仅存的回调入口——没有它，messages effect 永远拿不到 deferred commit 后的真实高度。
+  const contentRef = useRef<HTMLDivElement>(null);
+  // Radix ScrollArea 的 viewport 是内部 div，原先每个 effect 都 querySelector 一次；
+  // 流式时 messages effect 按帧触发，querySelector 累积成本不小。这里把首次查找结果缓存，
+  // 同时用 isConnected 兜底 Radix 重建子树的边角场景。
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const getViewport = useCallback((): HTMLDivElement | null => {
+    if (viewportRef.current?.isConnected) return viewportRef.current;
+    const v = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]") as HTMLDivElement | null;
+    viewportRef.current = v;
+    return v;
+  }, []);
   const previousConversationIdRef = useRef<number | null | undefined>(conversationId);
+  // 跟随滚动开关:用户在(接近)底部时为 true,流式追加内容会自动滚到底;
+  // 用户主动向上滚动后变为 false,后续消息不再打断阅读位置。重新滚到底部即恢复跟随。
+  const isAtBottomRef = useRef(true);
+  // 已经因为出现而自动滚动过的 approval confirmId 集合,避免对同一个审批反复抢回视图。
+  const seenApprovalIdsRef = useRef<Set<string>>(new Set());
   const editTarget = sideTabId ? sidebarEditTarget : localEditTarget;
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    seenApprovalIdsRef.current = new Set();
+  }, [conversationId]);
+
+  useEffect(() => {
+    // 新出现待确认的审批一定要把视图拉回底部,审批是阻塞动作,用户必须看到。
+    let hasNewApproval = false;
+    for (const msg of messages) {
+      if (!msg.blocks) continue;
+      for (const block of msg.blocks) {
+        if (block.type !== "approval" || block.status !== "pending_confirm" || !block.confirmId) continue;
+        if (!seenApprovalIdsRef.current.has(block.confirmId)) {
+          seenApprovalIdsRef.current.add(block.confirmId);
+          hasNewApproval = true;
+        }
+      }
+    }
+    if (!hasNewApproval && !isAtBottomRef.current) return;
+    const viewport = getViewport();
+    if (viewport) {
+      // 流式过程中用 instant 滚动避免和持续增长的 scrollHeight 互相追赶导致跟随判定抖动。
+      viewport.scrollTop = viewport.scrollHeight;
+      isAtBottomRef.current = true;
+    } else {
+      bottomRef.current?.scrollIntoView({ behavior: "auto" });
+    }
+  }, [messages, getViewport]);
+
+  useEffect(() => {
+    // useDeferredValue 让 markdown 异步 commit：messages effect 跑完后 scrollHeight 还在增长，
+    // 没有 scroll 事件、没有下一段 chunk 来兜底——只有内容容器的 resize 回调能把视图重新拉到底。
+    const viewport = getViewport();
+    const content = contentRef.current;
+    if (!viewport || !content || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (!isAtBottomRef.current) return;
+      if (viewport.scrollTop !== viewport.scrollHeight) {
+        viewport.scrollTop = viewport.scrollHeight;
+      }
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [getViewport]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -227,17 +321,35 @@ export function AIChatContent({
   }, [conversationId, editTarget, messages, resetEditMode]);
 
   useEffect(() => {
-    if (!sideTabId) return;
-    const viewport = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]") as HTMLDivElement | null;
+    const viewport = getViewport();
     if (!viewport) return;
-    const handleScroll = () => {
-      setSidebarTabScrollTop(sideTabId, viewport.scrollTop);
-    };
     // 滚动位置同样按宿主维度恢复，保证多个侧边 tab 来回切换时各自停在原来的阅读位置。
-    viewport.scrollTop = useAIStore.getState().sidebarTabs.find((tab) => tab.id === sideTabId)?.uiState.scrollTop ?? 0;
+    if (sideTabId) {
+      viewport.scrollTop =
+        useAIStore.getState().sidebarTabs.find((tab) => tab.id === sideTabId)?.uiState.scrollTop ?? 0;
+    }
+    let lastScrollTop = viewport.scrollTop;
+    // 初始按几何判定一次：短内容/刚加载都视为在底部、开启跟随。
+    isAtBottomRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 50;
+    const handleScroll = () => {
+      const currentTop = viewport.scrollTop;
+      // 关键：只有 scrollTop "向上"移动才视为用户主动离开底部、关掉跟随。
+      // 向下方向（程序 scrollTop = scrollHeight、或用户滑回底部）只用来恢复跟随，永不主动关。
+      // 这样 useDeferredValue 让 markdown 异步撑高 scrollHeight 时，
+      // 后到的 scroll 事件即便看到"几何上不在底部"，也不会把跟随误关。50px 余量容忍 sub-pixel/边距差异。
+      if (currentTop < lastScrollTop) {
+        isAtBottomRef.current = false;
+      } else if (viewport.scrollHeight - currentTop - viewport.clientHeight <= 50) {
+        isAtBottomRef.current = true;
+      }
+      lastScrollTop = currentTop;
+      if (sideTabId) {
+        setSidebarTabScrollTop(sideTabId, currentTop);
+      }
+    };
     viewport.addEventListener("scroll", handleScroll, { passive: true });
     return () => viewport.removeEventListener("scroll", handleScroll);
-  }, [conversationId, setSidebarTabScrollTop, sideTabId]);
+  }, [conversationId, getViewport, setSidebarTabScrollTop, sideTabId]);
 
   const handleSend = useCallback(
     (content: string) => {
@@ -313,6 +425,17 @@ export function AIChatContent({
     [conversationId, setSidebarTabEditTarget, sideTabId]
   );
 
+  // 草稿写回侧边态。useCallback 提供稳定引用，否则 AIChatInput memo 失效，
+  // 父组件每次流式重渲染都会让输入框跟着重渲染。
+  const handleDraftChange = useCallback(
+    (draft: AIChatInputDraft) => {
+      if (sideTabId) {
+        setSidebarTabInputDraft(sideTabId, draft);
+      }
+    },
+    [setSidebarTabInputDraft, sideTabId]
+  );
+
   const confirmRegenerate = () => {
     if (regenerateTarget !== null) {
       if (tabId) {
@@ -337,7 +460,7 @@ export function AIChatContent({
       <div className="flex h-full flex-col" data-compact={compact}>
         {/* Messages */}
         <ScrollArea ref={scrollAreaRef} className="flex-1 min-h-0 overflow-hidden">
-          <div className="max-w-3xl mx-auto p-4 space-y-6">
+          <div ref={contentRef} className="max-w-3xl mx-auto p-4 space-y-6">
             {messages.length === 0 && (
               <p className="text-sm text-muted-foreground text-center mt-16">{t("ai.placeholder")}</p>
             )}
@@ -350,7 +473,7 @@ export function AIChatContent({
               return (
                 <div key={i} className="text-sm" style={cvStyle}>
                   {msg.role === "user" ? (
-                    <UserMessage msg={msg} onEdit={() => handleEditMessage(i, msg)} />
+                    <UserMessage msg={msg} index={i} onEdit={handleEditMessage} />
                   ) : (
                     <AssistantMessage msg={msg} index={i} sending={sending} onRegenerate={handleRegenerate} />
                   )}
@@ -429,11 +552,7 @@ export function AIChatContent({
                 ref={inputRef}
                 onSubmit={handleSend}
                 onEmptyChange={setEmpty}
-                onDraftChange={(draft) => {
-                  if (sideTabId) {
-                    setSidebarTabInputDraft(sideTabId, draft);
-                  }
-                }}
+                onDraftChange={handleDraftChange}
                 sendOnEnter={sendOnEnter}
                 userMessageHistory={userMessageHistory}
                 placeholder={t("ai.sendPlaceholder")}
@@ -515,9 +634,7 @@ const TokenUsageBadge = memo(function TokenUsageBadge({ usage }: { usage: TokenU
   const output = usage.outputTokens || 0;
   const cacheWrite = usage.cacheCreationTokens || 0;
   const cacheRead = usage.cacheReadTokens || 0;
-  // 合计输入包含 cache write / read，让使用者一眼看到本轮实际消耗的 prompt 规模
-  const totalInput = input + cacheWrite + cacheRead;
-  if (totalInput === 0 && output === 0) return null;
+  if (input === 0 && output === 0 && cacheWrite === 0 && cacheRead === 0) return null;
   const hasCache = cacheRead > 0 || cacheWrite > 0;
 
   return (
@@ -527,7 +644,7 @@ const TokenUsageBadge = memo(function TokenUsageBadge({ usage }: { usage: TokenU
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70 tabular-nums select-none cursor-default">
             <span className="inline-flex items-center gap-0.5">
               <ArrowUp className="h-3 w-3" />
-              {formatTokenCount(totalInput)}
+              {formatTokenCount(input)}
             </span>
             <span className="inline-flex items-center gap-0.5">
               <ArrowDown className="h-3 w-3" />
@@ -578,7 +695,9 @@ const AssistantToolbar = memo(function AssistantToolbar({
 }) {
   const { t } = useTranslation();
   const showActions = !sending && !msg.streaming;
-  const copyText = extractAssistantText(msg);
+  // 复制按钮即使不显示也会读 msg；流式时上层 toolbar 会因为 showActions=false 提前 return，
+  // 不真正用到这里的结果。useMemo 让 toolbar 重渲染时不重做拼接，msg.blocks 引用稳定就直接命中。
+  const copyText = useMemo(() => extractAssistantText(msg), [msg]);
 
   const handleCopy = useCallback(async () => {
     if (!copyText) return;
@@ -648,6 +767,10 @@ const AssistantMessage = memo(function AssistantMessage({
 }) {
   const hasBlocks = msg.blocks && msg.blocks.length > 0;
   const isEmpty = !hasBlocks && msg.content === "";
+  // Hooks 规则要求在条件分支之前调用：用空数组占位，下方按 hasBlocks 决定要不要取用。
+  // 流式时 msg.blocks 引用每帧改变会重算，但 splitBlocksByApproval 本身是 O(blocks.length) 的纯遍历，
+  // useMemo 至少避免 toolbar / 其他渲染触发的二次执行。
+  const segments = useMemo(() => splitBlocksByApproval(msg.blocks ?? []), [msg.blocks]);
 
   if (msg.streaming && isEmpty) {
     return (
@@ -674,7 +797,6 @@ const AssistantMessage = memo(function AssistantMessage({
   }
 
   if (hasBlocks) {
-    const segments = splitBlocksByApproval(msg.blocks);
     return (
       <div className="flex flex-col items-start gap-1.5 group/assistant">
         <span className="text-xs font-semibold text-primary tracking-wide">Assistant</span>
@@ -698,9 +820,7 @@ const AssistantMessage = memo(function AssistantMessage({
       <div
         className={`rounded-xl rounded-bl-sm bg-muted px-3.5 py-2.5 max-w-[95%] min-w-0 overflow-hidden break-words prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-pre:my-1 prose-pre:overflow-x-auto shadow-sm ${messageSelectionClass}`}
       >
-        <Markdown remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}>
-          {msg.content}
-        </Markdown>
+        <MarkdownContent content={msg.content} />
         {msg.streaming && <Loader2 className="h-3 w-3 animate-spin inline-block ml-1" />}
       </div>
       <AssistantToolbar msg={msg} index={index} sending={sending} onRegenerate={onRegenerate} />
@@ -727,9 +847,7 @@ const BubbleSegment = memo(function BubbleSegment({
             key={idx}
             className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-pre:my-1 overflow-x-auto break-words"
           >
-            <Markdown remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}>
-              {block.content}
-            </Markdown>
+            <MarkdownContent content={block.content} />
           </div>
         ) : block.type === "thinking" ? (
           <ThinkingBlock key={idx} block={block} />

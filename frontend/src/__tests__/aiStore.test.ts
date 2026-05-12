@@ -1175,7 +1175,7 @@ describe("editAndResendConversation", () => {
   });
 });
 
-describe("persistence debounce & streaming snapshot", () => {
+describe("AI conversation persistence", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
@@ -1196,7 +1196,7 @@ describe("persistence debounce & streaming snapshot", () => {
     vi.useRealTimers();
   });
 
-  it("persists user message immediately and debounces follow-up streaming snapshot", async () => {
+  it("persists user message immediately without scheduling an assistant placeholder snapshot", async () => {
     const tabId = "ai-100";
     useTabStore.setState({
       tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 100, title: "t" } }],
@@ -1204,14 +1204,14 @@ describe("persistence debounce & streaming snapshot", () => {
     });
     useAIStore.setState({ tabStates: { [tabId]: createTabState() } });
 
-    // sendToTab 新行为：用户消息立即落盘一次（避免防抖窗口内崩溃丢失用户输入），
-    // 紧接着的 assistant placeholder 更新走 300ms 防抖。
+    // 用户消息立即落盘一次，紧接着的 assistant placeholder 只更新内存，
+    // 等后续关键事件或终态再落盘。
     await useAIStore.getState().sendToTab(tabId, "hi");
     expect(SaveConversationMessages).toHaveBeenCalledTimes(1);
     expect(vi.mocked(SaveConversationMessages).mock.calls[0][0]).toBe(100);
 
     await vi.advanceTimersByTimeAsync(300);
-    expect(SaveConversationMessages).toHaveBeenCalledTimes(2);
+    expect(SaveConversationMessages).toHaveBeenCalledTimes(1);
   });
 
   it("normalizes running/pending_confirm blocks when persisting a streaming snapshot", async () => {
@@ -1241,7 +1241,6 @@ describe("persistence debounce & streaming snapshot", () => {
     });
 
     await useAIStore.getState().sendToTab(tabId, "next");
-    await vi.advanceTimersByTimeAsync(300);
 
     expect(SaveConversationMessages).toHaveBeenCalled();
     const [, displayMsgs] = vi.mocked(SaveConversationMessages).mock.calls[0];
@@ -1250,7 +1249,7 @@ describe("persistence debounce & streaming snapshot", () => {
     expect(assistant.blocks.map((b: any) => b.status)).toEqual(["cancelled", "cancelled", "completed"]);
   });
 
-  it("clears pending persist timer when closing the AI tab", async () => {
+  it("flushes a final snapshot when closing the AI tab", async () => {
     const tabId = "ai-102";
     useTabStore.setState({
       tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 102, title: "t" } }],
@@ -1258,15 +1257,14 @@ describe("persistence debounce & streaming snapshot", () => {
     });
     useAIStore.setState({ tabStates: { [tabId]: createTabState() } });
 
-    // sendToTab 会立即落盘一次（用户消息），后续 assistant placeholder 走 300ms 防抖。
     await useAIStore.getState().sendToTab(tabId, "hi");
     expect(SaveConversationMessages).toHaveBeenCalledTimes(1);
 
-    // 关闭标签要取消待定的防抖定时器，并同步 flush 一次最终快照。
+    // 关闭标签同步 flush 一次最终快照。
     useTabStore.getState().closeTab(tabId);
     expect(SaveConversationMessages).toHaveBeenCalledTimes(2);
 
-    // 定时器已被清理，300ms 后不应再产生额外保存。
+    // 没有会话消息定时落盘，300ms 后不应再产生额外保存。
     await vi.advanceTimersByTimeAsync(300);
     expect(SaveConversationMessages).toHaveBeenCalledTimes(2);
   });

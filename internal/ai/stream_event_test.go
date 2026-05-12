@@ -96,6 +96,7 @@ func TestEventTranslator_TurnEndUsage(t *testing.T) {
 				CompletionTokens:    50,
 				CachedTokens:        20,
 				CacheCreationTokens: 10,
+				TotalTokens:         180,
 			}},
 		)
 		So(out, ShouldHaveLength, 1)
@@ -105,6 +106,22 @@ func TestEventTranslator_TurnEndUsage(t *testing.T) {
 		So(out[0].Usage.OutputTokens, ShouldEqual, 50)
 		So(out[0].Usage.CacheReadTokens, ShouldEqual, 20)
 		So(out[0].Usage.CacheCreationTokens, ShouldEqual, 10)
+	})
+
+	Convey("OpenAI 风格 usage：prompt_tokens 已包含 cached_tokens 时归一化为非缓存输入", t, func() {
+		out := drain(NewStreamTranslator(),
+			agent.Event{Kind: agent.EventTurnEnd, Usage: &provider.Usage{
+				PromptTokens:     100,
+				CompletionTokens: 50,
+				CachedTokens:     20,
+				TotalTokens:      150,
+			}},
+		)
+		So(out, ShouldHaveLength, 1)
+		So(out[0].Usage, ShouldNotBeNil)
+		So(out[0].Usage.InputTokens, ShouldEqual, 80)
+		So(out[0].Usage.OutputTokens, ShouldEqual, 50)
+		So(out[0].Usage.CacheReadTokens, ShouldEqual, 20)
 	})
 }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { memo, useState, useEffect } from "react";
 import { Brain, ChevronRight, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ContentBlock } from "@/stores/aiStore";
@@ -7,7 +7,7 @@ interface ThinkingBlockProps {
   block: ContentBlock;
 }
 
-export function ThinkingBlock({ block }: ThinkingBlockProps) {
+export const ThinkingBlock = memo(function ThinkingBlock({ block }: ThinkingBlockProps) {
   const { t } = useTranslation();
   const isRunning = block.status === "running";
   const [expanded, setExpanded] = useState(isRunning);
@@ -52,4 +52,4 @@ export function ThinkingBlock({ block }: ThinkingBlockProps) {
       )}
     </div>
   );
-}
+});

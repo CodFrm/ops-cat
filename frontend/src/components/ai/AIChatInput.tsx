@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useImperativeHandle, forwardRef, type MutableRefObject } from "react";
+import { memo, useEffect, useMemo, useRef, useImperativeHandle, forwardRef, type MutableRefObject } from "react";
 import { EditorContent, useEditor, ReactRenderer, type Editor } from "@tiptap/react";
 import { Extension } from "@tiptap/core";
 import Document from "@tiptap/extension-document";
@@ -389,7 +389,11 @@ function applyInputHistoryMessage(editor: Editor, nextMessage: string | AIChatIn
   editor.commands.focus("end");
 }
 
-export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(function AIChatInput(
+// onDraftChange 节流间隔：输入是高频事件，每键击都写 store/localStorage 会让流式期间叠加卡顿；
+// 100ms 节流足够保证草稿在 tab 切换/崩溃时不丢失，又不会阻塞键盘事件。
+const DRAFT_CHANGE_THROTTLE_MS = 120;
+
+const AIChatInputComponent = forwardRef<AIChatInputHandle, AIChatInputProps>(function AIChatInput(
   { onSubmit, onEmptyChange, onDraftChange, sendOnEnter, userMessageHistory = [], placeholder, disabled, editorRef },
   ref
 ) {
@@ -400,6 +404,11 @@ export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(funct
   const historyRef = useRef(userMessageHistory);
   const historyIndexRef = useRef(-1);
   const applyingHistoryRef = useRef(false);
+  // onDraftChange 节流状态：尾随触发，确保用户停下后最终值一定写入 store。
+  const draftPendingRef = useRef<string | null>(null);
+  const draftFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftLastSentRef = useRef<string>("");
+  const lastIsEmptyRef = useRef<boolean | null>(null);
 
   useEffect(() => {
     submitRef.current = onSubmit;
@@ -555,9 +564,27 @@ export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(funct
       } else {
         historyIndexRef.current = -1;
       }
-      onEmptyChangeRef.current?.(ed.isEmpty);
-      const content = extractContentXml(ed.state.doc as unknown as ProseMirrorLikeNode);
-      onDraftChangeRef.current?.({ content });
+      // 仅在 empty 状态翻转时通知，避免每个按键都触发父组件 setState 引发的级联重渲染。
+      const isEmpty = ed.isEmpty;
+      if (lastIsEmptyRef.current !== isEmpty) {
+        lastIsEmptyRef.current = isEmpty;
+        onEmptyChangeRef.current?.(isEmpty);
+      }
+      // 草稿抽取走节流通道：节流期内仅记录"有待处理"标志，下次 timer 到点时直接从 editor 读最新 doc。
+      // 这避免了流式输出 + 用户输入时，每个按键都触发 extractContentXml + zustand 写入。
+      if (!onDraftChangeRef.current) return;
+      draftPendingRef.current = "PENDING";
+      if (draftFlushTimerRef.current != null) return;
+      const flushDraft = () => {
+        draftFlushTimerRef.current = null;
+        if (draftPendingRef.current == null) return;
+        draftPendingRef.current = null;
+        const content = extractContentXml(ed.state.doc as unknown as ProseMirrorLikeNode);
+        if (content === draftLastSentRef.current) return;
+        draftLastSentRef.current = content;
+        onDraftChangeRef.current?.({ content });
+      };
+      draftFlushTimerRef.current = setTimeout(flushDraft, DRAFT_CHANGE_THROTTLE_MS);
     },
     editable: !disabled,
   });
@@ -578,12 +605,29 @@ export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(funct
       const content = extractContentXml(editor.state.doc as unknown as ProseMirrorLikeNode);
       if (!content.trim()) return;
       historyIndexRef.current = -1;
+      // 抢在 clearContent 之前把节流中的草稿吞掉，避免提交后还有一次"旧 doc → 写空草稿"的尾随回调。
+      if (draftFlushTimerRef.current != null) {
+        clearTimeout(draftFlushTimerRef.current);
+        draftFlushTimerRef.current = null;
+      }
+      draftPendingRef.current = null;
       submitRef.current(content);
       // emitUpdate=true：默认 false 时 onUpdate 不会触发，外部 inputDraft 仍保留旧内容；
       // 侧边助手随后创建会话、conversationId 变化时会按草稿把刚发送的消息回填到输入框。
       editor.commands.clearContent(true);
+      draftLastSentRef.current = "";
     };
   }, [editor]);
+
+  // 卸载时清掉未触发的草稿节流定时器，避免在已销毁的 editor 上回调。
+  useEffect(() => {
+    return () => {
+      if (draftFlushTimerRef.current != null) {
+        clearTimeout(draftFlushTimerRef.current);
+        draftFlushTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     editor?.setEditable(!disabled);
@@ -610,3 +654,8 @@ export const AIChatInput = forwardRef<AIChatInputHandle, AIChatInputProps>(funct
 
   return <EditorContent editor={editor} />;
 });
+
+// 父组件（AIChatContent）在流式输出期间会被 store 每帧重渲染。
+// 通过 memo 把 AIChatInput 的输入流和外部消息流解耦——只要传入 props 引用没变，
+// 输入框的 React 子树就跳过整段重渲染，按键和 IME 组合不再被流式打断。
+export const AIChatInput = memo(AIChatInputComponent) as typeof AIChatInputComponent;

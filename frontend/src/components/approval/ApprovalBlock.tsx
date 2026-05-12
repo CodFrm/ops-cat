@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ShieldAlert, Terminal, Database, Server, Globe, FolderOpen, FileEdit, FilePlus } from "lucide-react";
 import { Button, Input, Textarea } from "@opskat/ui";
@@ -10,7 +10,7 @@ interface ApprovalBlockProps {
   block: ContentBlock;
 }
 
-export function ApprovalBlock({ block }: ApprovalBlockProps) {
+export const ApprovalBlock = memo(function ApprovalBlock({ block }: ApprovalBlockProps) {
   const { t } = useTranslation();
   const isPending = block.status === "pending_confirm";
   const items = block.approvalItems || [];
@@ -261,7 +261,7 @@ export function ApprovalBlock({ block }: ApprovalBlockProps) {
       </div>
     </div>
   );
-}
+});
 
 function TypeBadge({ type, compact }: { type: string; compact?: boolean }) {
   const icons: Record<string, typeof Terminal> = {

@@ -1,11 +1,29 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import i18n from "../i18n";
 import { useAIStore } from "../stores/aiStore";
 import { useTabStore } from "../stores/tabStore";
 import { AIChatContent } from "../components/ai/AIChatContent";
+
+// 流式跟随滚动测试需要在 deferred markdown 异步 commit 时被通知，
+// 真实环境靠 ResizeObserver；happy-dom 没实现，这里桩一个能透出 callback 的版本。
+const resizeObserverCallbacks: ResizeObserverCallback[] = [];
+class MockResizeObserver {
+  callback: ResizeObserverCallback;
+  constructor(cb: ResizeObserverCallback) {
+    this.callback = cb;
+    resizeObserverCallbacks.push(cb);
+  }
+  observe() {}
+  unobserve() {}
+  disconnect() {
+    const idx = resizeObserverCallbacks.indexOf(this.callback);
+    if (idx >= 0) resizeObserverCallbacks.splice(idx, 1);
+  }
+}
+vi.stubGlobal("ResizeObserver", MockResizeObserver);
 
 const mockInputSpies = vi.hoisted(() => ({
   loadDraft: vi.fn(),
@@ -85,6 +103,7 @@ describe("AIChatContent", () => {
     localStorage.setItem("language", "zh-CN");
     mockInputSpies.loadDraft.mockReset();
     mockInputSpies.clear.mockReset();
+    resizeObserverCallbacks.length = 0;
 
     useTabStore.setState({ tabs: [], activeTabId: null });
     useAIStore.setState({
@@ -269,5 +288,74 @@ describe("AIChatContent", () => {
     await user.click(await screen.findByRole("button", { name: /common\.confirm|确定|Confirm/i }));
 
     await waitFor(() => expect(regenerateConversation).toHaveBeenCalledWith(31, 0));
+  });
+
+  it("assistant usage badge shows uncached input rather than input plus cache", () => {
+    useAIStore.setState({
+      conversationMessages: {
+        41: [
+          {
+            role: "assistant",
+            content: "usage ready",
+            blocks: [],
+            tokenUsage: {
+              inputTokens: 80,
+              outputTokens: 5,
+              cacheCreationTokens: 10,
+              cacheReadTokens: 20,
+            },
+          },
+        ],
+      },
+      conversationStreaming: {
+        41: { sending: false, pendingQueue: [] },
+      },
+    });
+
+    render(<AIChatContent conversationId={41} />);
+
+    expect(screen.getByText("80")).toBeInTheDocument();
+    expect(screen.getByText("5")).toBeInTheDocument();
+    expect(screen.queryByText("110")).not.toBeInTheDocument();
+  });
+
+  it("streaming auto-follows scroll when deferred content grows scrollHeight", () => {
+    // 复现 useDeferredValue 异步 commit 的场景：
+    // store 已经推过新内容，messages effect 跑过一次按当时 scrollHeight 滚到底；
+    // 随后 markdown 异步 commit，把 scrollHeight 撑得更高——
+    // 此时既不再触发 messages effect 也不触发 scroll 事件，
+    // 唯有 ResizeObserver 能让视口继续跟到新底部。
+    useAIStore.setState({
+      conversationMessages: {
+        77: [
+          { role: "user", content: "hi", blocks: [] },
+          {
+            role: "assistant",
+            content: "first",
+            blocks: [{ type: "text", content: "first" }],
+            streaming: true,
+          },
+        ],
+      },
+      conversationStreaming: {
+        77: { sending: true, pendingQueue: [] },
+      },
+    });
+
+    const { container } = render(<AIChatContent conversationId={77} />);
+    const viewport = container.querySelector<HTMLDivElement>("[data-radix-scroll-area-viewport]");
+    expect(viewport).toBeTruthy();
+    expect(resizeObserverCallbacks.length).toBeGreaterThan(0);
+
+    Object.defineProperty(viewport!, "scrollHeight", { configurable: true, get: () => 1200 });
+    Object.defineProperty(viewport!, "clientHeight", { configurable: true, get: () => 300 });
+
+    act(() => {
+      for (const cb of resizeObserverCallbacks) {
+        cb([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+      }
+    });
+
+    expect(viewport!.scrollTop).toBe(1200);
   });
 });

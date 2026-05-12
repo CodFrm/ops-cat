@@ -151,7 +151,7 @@ func extractToolResultText(blk *agent.ToolResultBlock) string {
 // convertUsage 把 cago provider.Usage 折算成 OpsKat Usage。
 //
 // 映射规则：
-//   - InputTokens         ← PromptTokens
+//   - InputTokens         ← normalized PromptTokens (uncached input)
 //   - OutputTokens        ← CompletionTokens（ReasoningTokens 已合并进 CompletionTokens 由 provider 上送）
 //   - CacheCreationTokens ← CacheCreationTokens
 //   - CacheReadTokens     ← CachedTokens
@@ -160,9 +160,27 @@ func convertUsage(u *provider.Usage) *Usage {
 		return nil
 	}
 	return &Usage{
-		InputTokens:         u.PromptTokens,
+		InputTokens:         normalizeInputTokens(u),
 		OutputTokens:        u.CompletionTokens,
 		CacheCreationTokens: u.CacheCreationTokens,
 		CacheReadTokens:     u.CachedTokens,
 	}
+}
+
+func normalizeInputTokens(u *provider.Usage) int {
+	input := u.PromptTokens
+	// OpenAI reports prompt_tokens with cached_tokens included, while Anthropic reports
+	// fresh input separately from cache read/write. Use TotalTokens to detect the former
+	// and keep OpsKat's InputTokens meaning consistent: uncached prompt input only.
+	if u.CachedTokens > 0 && u.TotalTokens > 0 {
+		cacheIncludedTotal := u.PromptTokens + u.CompletionTokens
+		cacheSeparatedTotal := u.PromptTokens + u.CacheCreationTokens + u.CachedTokens + u.CompletionTokens
+		if u.TotalTokens == cacheIncludedTotal && cacheSeparatedTotal != cacheIncludedTotal {
+			input -= u.CachedTokens
+		}
+	}
+	if input < 0 {
+		return 0
+	}
+	return input
 }
