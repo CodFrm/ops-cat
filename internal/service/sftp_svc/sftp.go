@@ -127,6 +127,7 @@ type FileEntry struct {
 	Size    int64  `json:"size"`
 	IsDir   bool   `json:"isDir"`
 	ModTime int64  `json:"modTime"` // Unix timestamp
+	Mode    uint32 `json:"mode"`    // os.FileMode 低位（rwx + 类型）
 }
 
 // ListDir 列出远程目录内容
@@ -149,6 +150,7 @@ func (s *Service) ListDir(sessionID, dirPath string) ([]FileEntry, error) {
 			Size:    info.Size(),
 			IsDir:   info.IsDir(),
 			ModTime: info.ModTime().Unix(),
+			Mode:    uint32(info.Mode()),
 		}
 		if info.IsDir() {
 			dirs = append(dirs, entry)
@@ -588,6 +590,116 @@ func (s *Service) removeDirRecursive(client *sftp.Client, path string) error {
 		}
 	}
 	return client.RemoveDirectory(path)
+}
+
+// Stat 获取远程文件/目录的最新属性
+func (s *Service) Stat(sessionID, path string) (FileEntry, error) {
+	sftpClient, err := s.getSFTPClient(sessionID)
+	if err != nil {
+		return FileEntry{}, err
+	}
+	info, err := sftpClient.Stat(path)
+	if err != nil {
+		return FileEntry{}, fmt.Errorf("获取属性失败: %w", err)
+	}
+	return FileEntry{
+		Name:    info.Name(),
+		Size:    info.Size(),
+		IsDir:   info.IsDir(),
+		ModTime: info.ModTime().Unix(),
+		Mode:    uint32(info.Mode()),
+	}, nil
+}
+
+// Chmod 修改远程文件/目录权限。recursive=true 时递归到子项。
+func (s *Service) Chmod(sessionID, path string, mode uint32, recursive bool) error {
+	sftpClient, err := s.getSFTPClient(sessionID)
+	if err != nil {
+		return err
+	}
+	fileMode := os.FileMode(mode) & os.ModePerm
+	if err := sftpClient.Chmod(path, fileMode); err != nil {
+		return fmt.Errorf("修改权限失败: %w", err)
+	}
+	if !recursive {
+		return nil
+	}
+	return s.chmodRecursive(sftpClient, path, fileMode)
+}
+
+func (s *Service) chmodRecursive(client *sftp.Client, path string, mode os.FileMode) error {
+	info, err := client.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return nil
+	}
+	entries, err := client.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		fullPath := path + "/" + entry.Name()
+		if err := client.Chmod(fullPath, mode); err != nil {
+			return fmt.Errorf("修改 %s 权限失败: %w", fullPath, err)
+		}
+		if entry.IsDir() {
+			if err := s.chmodRecursive(client, fullPath, mode); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// Rename 重命名远程文件/目录。若目标已存在返回带「已存在」前缀的错误。
+func (s *Service) Rename(sessionID, oldPath, newPath string) error {
+	sftpClient, err := s.getSFTPClient(sessionID)
+	if err != nil {
+		return err
+	}
+	if _, err := sftpClient.Stat(newPath); err == nil {
+		return fmt.Errorf("已存在: %s", newPath)
+	}
+	if err := sftpClient.Rename(oldPath, newPath); err != nil {
+		return fmt.Errorf("重命名失败: %w", err)
+	}
+	return nil
+}
+
+// Mkdir 创建单层远程目录。父目录必须存在；目标已存在返回带「已存在」前缀的错误。
+func (s *Service) Mkdir(sessionID, path string) error {
+	sftpClient, err := s.getSFTPClient(sessionID)
+	if err != nil {
+		return err
+	}
+	if _, err := sftpClient.Stat(path); err == nil {
+		return fmt.Errorf("已存在: %s", path)
+	}
+	if err := sftpClient.Mkdir(path); err != nil {
+		return fmt.Errorf("创建目录失败: %w", err)
+	}
+	return nil
+}
+
+// CreateFile 创建空远程文件。目标已存在返回带「已存在」前缀的错误。
+func (s *Service) CreateFile(sessionID, path string) error {
+	sftpClient, err := s.getSFTPClient(sessionID)
+	if err != nil {
+		return err
+	}
+	if _, err := sftpClient.Stat(path); err == nil {
+		return fmt.Errorf("已存在: %s", path)
+	}
+	f, err := sftpClient.Create(path)
+	if err != nil {
+		return fmt.Errorf("创建文件失败: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		logger.Default().Warn("close new file", zap.String("path", path), zap.Error(err))
+	}
+	return nil
 }
 
 // copyWithProgress 带进度的文件拷贝

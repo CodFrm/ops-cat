@@ -231,6 +231,31 @@ func (a *App) SFTPDelete(sessionID, remotePath string, isDir bool) error {
 	return a.sftpService.Remove(sessionID, remotePath)
 }
 
+// SFTPStat 获取远程文件/目录的最新属性
+func (a *App) SFTPStat(sessionID, remotePath string) (sftp_svc.FileEntry, error) {
+	return a.sftpService.Stat(sessionID, remotePath)
+}
+
+// SFTPChmod 修改远程文件/目录权限
+func (a *App) SFTPChmod(sessionID, remotePath string, mode uint32, recursive bool) error {
+	return a.sftpService.Chmod(sessionID, remotePath, mode, recursive)
+}
+
+// SFTPRename 重命名远程文件/目录
+func (a *App) SFTPRename(sessionID, oldPath, newPath string) error {
+	return a.sftpService.Rename(sessionID, oldPath, newPath)
+}
+
+// SFTPMkdir 在远程创建单层目录
+func (a *App) SFTPMkdir(sessionID, remotePath string) error {
+	return a.sftpService.Mkdir(sessionID, remotePath)
+}
+
+// SFTPCreateFile 在远程创建空文件
+func (a *App) SFTPCreateFile(sessionID, remotePath string) error {
+	return a.sftpService.CreateFile(sessionID, remotePath)
+}
+
 // --- 本地 SSH 密钥发现 ---
 
 // LocalSSHKeyInfo 本地 SSH 密钥信息

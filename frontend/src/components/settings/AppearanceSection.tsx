@@ -176,7 +176,10 @@ export function TerminalSection() {
                   <span className="min-w-0 flex-1 truncate">
                     {t("terminal.defaultFont")}
                     {defaultResolvedName && (
-                      <span className="text-muted-foreground ml-2" style={{ fontFamily: quoteFamilyName(defaultResolvedName) }}>
+                      <span
+                        className="text-muted-foreground ml-2"
+                        style={{ fontFamily: quoteFamilyName(defaultResolvedName) }}
+                      >
                         ({defaultResolvedName})
                       </span>
                     )}

@@ -11,3 +11,12 @@ export interface DeleteTarget {
   name: string;
   isDir: boolean;
 }
+
+export type EditingState = { mode: "create-file" | "create-dir" } | { mode: "rename"; targetName: string };
+
+export interface PermissionTarget {
+  path: string;
+  name: string;
+  mode: number;
+  isDir: boolean;
+}

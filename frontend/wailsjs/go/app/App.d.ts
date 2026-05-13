@@ -435,6 +435,10 @@ export function RespondPermission(arg1:string,arg2:string):Promise<void>;
 
 export function SFTPCancelTransfer(arg1:string):Promise<void>;
 
+export function SFTPChmod(arg1:string,arg2:string,arg3:number,arg4:boolean):Promise<void>;
+
+export function SFTPCreateFile(arg1:string,arg2:string):Promise<void>;
+
 export function SFTPDelete(arg1:string,arg2:string,arg3:boolean):Promise<void>;
 
 export function SFTPDownload(arg1:string,arg2:string):Promise<string>;
@@ -444,6 +448,12 @@ export function SFTPDownloadDir(arg1:string,arg2:string):Promise<string>;
 export function SFTPGetwd(arg1:string):Promise<string>;
 
 export function SFTPListDir(arg1:string,arg2:string):Promise<Array<sftp_svc.FileEntry>>;
+
+export function SFTPMkdir(arg1:string,arg2:string):Promise<void>;
+
+export function SFTPRename(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function SFTPStat(arg1:string,arg2:string):Promise<sftp_svc.FileEntry>;
 
 export function SFTPUpload(arg1:string,arg2:string):Promise<string>;
 

@@ -1778,7 +1778,6 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                 {t("asset.testConnection")}
               </Button>
             ))}
-
         </div>
         <DialogFooter>
           <Button

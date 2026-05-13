@@ -2,19 +2,28 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { useTranslation } from "react-i18next";
 import { Upload } from "lucide-react";
 import { cn, ConfirmDialog } from "@opskat/ui";
-import { SFTPDelete, SFTPGetwd } from "../../../wailsjs/go/app/App";
+import {
+  SFTPChmod,
+  SFTPCreateFile,
+  SFTPDelete,
+  SFTPGetwd,
+  SFTPMkdir,
+  SFTPRename,
+  SFTPStat,
+} from "../../../wailsjs/go/app/App";
 import { sftp_svc } from "../../../wailsjs/go/models";
 import { useSFTPStore } from "@/stores/sftpStore";
 import { FileList } from "./file-manager/FileList";
 import { FloatingMenu } from "./file-manager/FloatingMenu";
 import { PathToolbar } from "./file-manager/PathToolbar";
+import { PermissionDialog } from "./file-manager/PermissionDialog";
 import { TransferSection } from "./file-manager/TransferSection";
-import { type DeleteTarget, type CtxMenuState } from "./file-manager/types";
+import { type CtxMenuState, type DeleteTarget, type EditingState, type PermissionTarget } from "./file-manager/types";
 import { useFileManagerDirectory } from "./file-manager/useFileManagerDirectory";
 import { useNativeFileDrop } from "./file-manager/useNativeFileDrop";
 import { useResizeHandle } from "./file-manager/useResizeHandle";
 import { useTerminalDirectorySync } from "./file-manager/useTerminalDirectorySync";
-import { getEntryPath, getParentPath, HANDLE_PX } from "./file-manager/utils";
+import { getEntryPath, getParentPath, HANDLE_PX, joinRemotePath, validateEntryName } from "./file-manager/utils";
 
 interface FileManagerPanelProps {
   tabId: string;
@@ -58,6 +67,12 @@ export function FileManagerPanel({ tabId, sessionId, isOpen, width, onWidthChang
 
   const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [editingState, setEditingState] = useState<EditingState | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [permTarget, setPermTarget] = useState<PermissionTarget | null>(null);
+  const [permError, setPermError] = useState<string | null>(null);
+  const [permSubmitting, setPermSubmitting] = useState(false);
   const loadedRef = useRef(false);
   const lastSessionRef = useRef<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -150,6 +165,107 @@ export function FileManagerPanel({ tabId, sessionId, isOpen, width, onWidthChang
     }
   }, [currentPathRef, deleteTarget, loadDir, sessionId, setError]);
 
+  const beginNewFile = useCallback(() => {
+    setEditError(null);
+    setEditingState({ mode: "create-file" });
+  }, []);
+  const beginNewFolder = useCallback(() => {
+    setEditError(null);
+    setEditingState({ mode: "create-dir" });
+  }, []);
+  const beginRename = useCallback((entry: sftp_svc.FileEntry) => {
+    setEditError(null);
+    setEditingState({ mode: "rename", targetName: entry.name });
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditingState(null);
+    setEditError(null);
+    setEditSubmitting(false);
+  }, []);
+
+  const commitEdit = useCallback(
+    async (rawName: string) => {
+      if (!editingState) return;
+      const name = rawName.trim();
+      const validationKey = validateEntryName(name);
+      if (validationKey) {
+        setEditError(t("sftp." + validationKey));
+        return;
+      }
+      const base = currentPathRef.current || "/";
+      const newPath = joinRemotePath(base, name);
+
+      setEditSubmitting(true);
+      setEditError(null);
+      try {
+        if (editingState.mode === "rename") {
+          if (name === editingState.targetName) {
+            // 无变化，关闭编辑
+            cancelEdit();
+            return;
+          }
+          const oldPath = joinRemotePath(base, editingState.targetName);
+          await SFTPRename(sessionId, oldPath, newPath);
+        } else if (editingState.mode === "create-dir") {
+          await SFTPMkdir(sessionId, newPath);
+        } else {
+          await SFTPCreateFile(sessionId, newPath);
+        }
+        await loadDir(currentPathRef.current);
+        setSelected(newPath);
+        setEditingState(null);
+      } catch (e) {
+        const msg = String(e);
+        if (msg.includes("已存在")) {
+          setEditError(t("sftp.errExists"));
+        } else {
+          setEditError(msg);
+        }
+      } finally {
+        setEditSubmitting(false);
+      }
+    },
+    [cancelEdit, currentPathRef, editingState, loadDir, sessionId, setSelected, t]
+  );
+
+  const openPermissions = useCallback(
+    async (entry: sftp_svc.FileEntry) => {
+      const fullPath = getFullPath(entry);
+      try {
+        const latest = await SFTPStat(sessionId, fullPath);
+        setPermError(null);
+        setPermTarget({
+          path: fullPath,
+          name: entry.name,
+          mode: latest.mode,
+          isDir: latest.isDir,
+        });
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [getFullPath, sessionId, setError]
+  );
+
+  const handlePermConfirm = useCallback(
+    async (mode: number, recursive: boolean) => {
+      if (!permTarget) return;
+      setPermSubmitting(true);
+      setPermError(null);
+      try {
+        await SFTPChmod(sessionId, permTarget.path, mode, recursive);
+        await loadDir(currentPathRef.current);
+        setPermTarget(null);
+      } catch (e) {
+        setPermError(String(e));
+      } finally {
+        setPermSubmitting(false);
+      }
+    },
+    [currentPathRef, loadDir, permTarget, sessionId]
+  );
+
   const handleCtxAction = useCallback(
     (action: string) => {
       if (!ctxMenu) return;
@@ -181,18 +297,38 @@ export function FileManagerPanel({ tabId, sessionId, isOpen, width, onWidthChang
             });
           }
           break;
+        case "rename":
+          if (entry) beginRename(entry);
+          break;
+        case "chmod":
+          if (entry) void openPermissions(entry);
+          break;
+        case "newFile":
+          beginNewFile();
+          break;
+        case "newDir":
+          beginNewFolder();
+          break;
+        case "goUp":
+          goUp();
+          break;
         case "refresh":
           void loadDir(currentPathRef.current);
           break;
       }
     },
     [
+      beginNewFile,
+      beginNewFolder,
+      beginRename,
       ctxMenu,
       currentPath,
       currentPathRef,
       getFullPath,
+      goUp,
       loadDir,
       navigateToPath,
+      openPermissions,
       sessionId,
       startDownload,
       startDownloadDir,
@@ -247,6 +383,8 @@ export function FileManagerPanel({ tabId, sessionId, isOpen, width, onWidthChang
               onFollowToggle={() => void toggleFollowMode()}
               onGoHome={goHome}
               onGoUp={goUp}
+              onNewFile={beginNewFile}
+              onNewFolder={beginNewFolder}
               onPathInputChange={setPathInput}
               onPathSubmit={(nextPath) => void navigateToPath(nextPath)}
               onRefresh={() => void loadDir(currentPathRef.current)}
@@ -267,6 +405,11 @@ export function FileManagerPanel({ tabId, sessionId, isOpen, width, onWidthChang
               onRetry={() => void loadDir(currentPathRef.current)}
               selected={selected}
               setSelected={setSelected}
+              editingState={editingState}
+              editError={editError}
+              editSubmitting={editSubmitting}
+              onEditCommit={(name) => void commitEdit(name)}
+              onEditCancel={cancelEdit}
             />
 
             <TransferSection sessionId={sessionId} transfers={sessionTransfers} />
@@ -274,7 +417,14 @@ export function FileManagerPanel({ tabId, sessionId, isOpen, width, onWidthChang
         </div>
       </div>
 
-      {ctxMenu && <FloatingMenu ctx={ctxMenu} onAction={handleCtxAction} onClose={() => setCtxMenu(null)} />}
+      {ctxMenu && (
+        <FloatingMenu
+          ctx={ctxMenu}
+          canGoUp={currentPath !== "/"}
+          onAction={handleCtxAction}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
 
       <ConfirmDialog
         open={!!deleteTarget}
@@ -286,6 +436,17 @@ export function FileManagerPanel({ tabId, sessionId, isOpen, width, onWidthChang
         cancelText={t("action.cancel")}
         confirmText={t("action.delete")}
         onConfirm={handleDelete}
+      />
+
+      <PermissionDialog
+        target={permTarget}
+        submitting={permSubmitting}
+        error={permError}
+        onClose={() => {
+          setPermTarget(null);
+          setPermError(null);
+        }}
+        onConfirm={(mode, recursive) => void handlePermConfirm(mode, recursive)}
       />
     </>
   );

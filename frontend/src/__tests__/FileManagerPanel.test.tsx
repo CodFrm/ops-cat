@@ -96,6 +96,7 @@ describe("FileManagerPanel", () => {
           isDir: true,
           size: 0,
           modTime: 0,
+          mode: 0,
         },
       ])
       .mockResolvedValueOnce([]);

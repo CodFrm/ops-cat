@@ -822,6 +822,14 @@ export function SFTPCancelTransfer(arg1) {
   return window['go']['app']['App']['SFTPCancelTransfer'](arg1);
 }
 
+export function SFTPChmod(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['SFTPChmod'](arg1, arg2, arg3, arg4);
+}
+
+export function SFTPCreateFile(arg1, arg2) {
+  return window['go']['app']['App']['SFTPCreateFile'](arg1, arg2);
+}
+
 export function SFTPDelete(arg1, arg2, arg3) {
   return window['go']['app']['App']['SFTPDelete'](arg1, arg2, arg3);
 }
@@ -840,6 +848,18 @@ export function SFTPGetwd(arg1) {
 
 export function SFTPListDir(arg1, arg2) {
   return window['go']['app']['App']['SFTPListDir'](arg1, arg2);
+}
+
+export function SFTPMkdir(arg1, arg2) {
+  return window['go']['app']['App']['SFTPMkdir'](arg1, arg2);
+}
+
+export function SFTPRename(arg1, arg2, arg3) {
+  return window['go']['app']['App']['SFTPRename'](arg1, arg2, arg3);
+}
+
+export function SFTPStat(arg1, arg2) {
+  return window['go']['app']['App']['SFTPStat'](arg1, arg2);
 }
 
 export function SFTPUpload(arg1, arg2) {

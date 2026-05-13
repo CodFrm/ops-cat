@@ -1,17 +1,30 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { Download, FolderDown, FolderOpen, RefreshCw, Trash2, Upload } from "lucide-react";
+import {
+  ArrowUp,
+  Download,
+  FilePlus,
+  FolderDown,
+  FolderOpen,
+  FolderPlus,
+  KeyRound,
+  Pencil,
+  RefreshCw,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { cn } from "@opskat/ui";
 import { type CtxMenuState } from "./types";
 
 interface FloatingMenuProps {
   ctx: CtxMenuState;
+  canGoUp: boolean;
   onAction: (action: string) => void;
   onClose: () => void;
 }
 
-export function FloatingMenu({ ctx, onAction, onClose }: FloatingMenuProps) {
+export function FloatingMenu({ ctx, canGoUp, onAction, onClose }: FloatingMenuProps) {
   const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -94,20 +107,40 @@ export function FloatingMenu({ ctx, onAction, onClose }: FloatingMenuProps) {
             {item("open", <FolderOpen />, t("sftp.openFolder"))}
             {item("downloadDir", <FolderDown />, t("sftp.downloadDir"))}
             <div className="-mx-1 my-1 h-px bg-border" />
+            {item("rename", <Pencil />, t("sftp.rename"))}
+            {item("chmod", <KeyRound />, t("sftp.permissions"))}
+            <div className="-mx-1 my-1 h-px bg-border" />
             {item("delete", <Trash2 />, t("action.delete"), "destructive")}
+            <div className="-mx-1 my-1 h-px bg-border" />
+            {item("newFile", <FilePlus />, t("sftp.newFile"))}
+            {item("newDir", <FolderPlus />, t("sftp.newFolder"))}
+            {canGoUp && item("goUp", <ArrowUp />, t("sftp.parentDir"))}
+            {item("refresh", <RefreshCw />, t("sftp.refresh"))}
           </>
         ) : (
           <>
             {item("download", <Download />, t("sftp.download"))}
             <div className="-mx-1 my-1 h-px bg-border" />
+            {item("rename", <Pencil />, t("sftp.rename"))}
+            {item("chmod", <KeyRound />, t("sftp.permissions"))}
+            <div className="-mx-1 my-1 h-px bg-border" />
             {item("delete", <Trash2 />, t("action.delete"), "destructive")}
+            <div className="-mx-1 my-1 h-px bg-border" />
+            {item("newFile", <FilePlus />, t("sftp.newFile"))}
+            {item("newDir", <FolderPlus />, t("sftp.newFolder"))}
+            {canGoUp && item("goUp", <ArrowUp />, t("sftp.parentDir"))}
+            {item("refresh", <RefreshCw />, t("sftp.refresh"))}
           </>
         )
       ) : (
         <>
+          {item("newFile", <FilePlus />, t("sftp.newFile"))}
+          {item("newDir", <FolderPlus />, t("sftp.newFolder"))}
+          <div className="-mx-1 my-1 h-px bg-border" />
           {item("upload", <Upload />, t("sftp.upload"))}
           {item("uploadDir", <Upload />, t("sftp.uploadDir"))}
           <div className="-mx-1 my-1 h-px bg-border" />
+          {canGoUp && item("goUp", <ArrowUp />, t("sftp.parentDir"))}
           {item("refresh", <RefreshCw />, t("sftp.refresh"))}
         </>
       )}

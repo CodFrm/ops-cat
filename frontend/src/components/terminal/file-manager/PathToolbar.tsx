@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { ArrowUp, Home, RefreshCw } from "lucide-react";
+import { ArrowUp, FilePlus, FolderPlus, Home, RefreshCw } from "lucide-react";
 import { Button, Input } from "@opskat/ui";
 import { type TerminalDirectoryFollowMode } from "@/stores/terminalStore";
 
@@ -9,6 +9,8 @@ interface PathToolbarProps {
   onFollowToggle: () => void;
   onGoHome: () => void;
   onGoUp: () => void;
+  onNewFile: () => void;
+  onNewFolder: () => void;
   onPathInputChange: (path: string) => void;
   onPathSubmit: (path: string) => void;
   onRefresh: () => void;
@@ -24,6 +26,8 @@ export function PathToolbar({
   onFollowToggle,
   onGoHome,
   onGoUp,
+  onNewFile,
+  onNewFolder,
   onPathInputChange,
   onPathSubmit,
   onRefresh,
@@ -80,6 +84,12 @@ export function PathToolbar({
       </Button>
       <Button variant="ghost" size="icon-xs" onClick={onGoHome} title={t("sftp.home")}>
         <Home className="h-3.5 w-3.5" />
+      </Button>
+      <Button variant="ghost" size="icon-xs" onClick={onNewFile} title={t("sftp.newFile")}>
+        <FilePlus className="h-3.5 w-3.5" />
+      </Button>
+      <Button variant="ghost" size="icon-xs" onClick={onNewFolder} title={t("sftp.newFolder")}>
+        <FolderPlus className="h-3.5 w-3.5" />
       </Button>
       <Input
         className="h-6 text-xs flex-1 min-w-0"
