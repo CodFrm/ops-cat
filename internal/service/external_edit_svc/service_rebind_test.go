@@ -31,6 +31,7 @@ type rebindRemoteStub struct {
 	files       map[string]map[string]rebindRemoteFile
 	missing     map[string]map[string]error
 	writeErrors map[string]map[string]error
+	infoHashes  map[string]map[string]string
 	writes      []string
 }
 
@@ -39,6 +40,7 @@ func newRebindRemoteStub() *rebindRemoteStub {
 		files:       make(map[string]map[string]rebindRemoteFile),
 		missing:     make(map[string]map[string]error),
 		writeErrors: make(map[string]map[string]error),
+		infoHashes:  make(map[string]map[string]string),
 	}
 }
 
@@ -78,6 +80,16 @@ func (r *rebindRemoteStub) SetWriteError(sessionID, remotePath string, err error
 	r.writeErrors[sessionID][remotePath] = err
 }
 
+func (r *rebindRemoteStub) SetInfoHash(sessionID, remotePath string, hash string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.infoHashes[sessionID] == nil {
+		r.infoHashes[sessionID] = make(map[string]string)
+	}
+	r.infoHashes[sessionID][remotePath] = hash
+}
+
 func (r *rebindRemoteStub) ClearError(sessionID, remotePath string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -98,6 +110,12 @@ func (r *rebindRemoteStub) Stat(sessionID, remotePath string) (*sftp_svc.RemoteF
 	if !ok {
 		return nil, os.ErrNotExist
 	}
+	sha := hashBytes(file.data)
+	if byPath := r.infoHashes[sessionID]; byPath != nil {
+		if override := strings.TrimSpace(byPath[remotePath]); override != "" {
+			sha = override
+		}
+	}
 	return &sftp_svc.RemoteFileInfo{
 		Path:     remotePath,
 		Size:     int64(len(file.data)),
@@ -105,7 +123,7 @@ func (r *rebindRemoteStub) Stat(sessionID, remotePath string) (*sftp_svc.RemoteF
 		ModTime:  1700000000,
 		Regular:  true,
 		RealPath: file.realPath,
-		SHA256:   hashBytes(file.data),
+		SHA256:   sha,
 	}, nil
 }
 
@@ -213,6 +231,7 @@ type rebindHarness struct {
 	svc      *Service
 	remote   *rebindRemoteStub
 	audit    *rebindAuditRepo
+	cfg      *bootstrap.AppConfig
 	manifest string
 	now      time.Time
 	events   []Event
@@ -261,6 +280,7 @@ func newRebindHarness(t *testing.T, finder func(int64) []string) *rebindHarness 
 	h.svc = svc
 	h.remote = remote
 	h.audit = audit
+	h.cfg = cfg
 	h.manifest = dataDir
 	h.now = currentTime
 	return h
@@ -304,6 +324,33 @@ func (h *rebindHarness) advanceNow(delta time.Duration) {
 func markDirtyLocalCopy(t *testing.T, session *Session, data []byte) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(session.LocalPath, data, 0o600))
+}
+
+func readBakeupFiles(t *testing.T, workspaceDir string) [][]byte {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(workspaceDir, "bakeup"))
+	require.NoError(t, err)
+	files := make([][]byte, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		data, readErr := os.ReadFile(filepath.Join(workspaceDir, "bakeup", entry.Name()))
+		require.NoError(t, readErr)
+		files = append(files, data)
+	}
+	return files
+}
+
+func bakeupEntryPaths(t *testing.T, workspaceDir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(workspaceDir, "bakeup"))
+	require.NoError(t, err)
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		paths = append(paths, filepath.Join(workspaceDir, "bakeup", entry.Name()))
+	}
+	return paths
 }
 
 func TestExternalEditSaveRebindsToUniqueCandidateAndPersistsSessionID(t *testing.T) {
@@ -410,6 +457,33 @@ func TestExternalEditSaveStillEntersConflictAfterRebind(t *testing.T) {
 	require.Equal(t, saveStatusConflict, result.Status)
 	require.Equal(t, "ssh-new", result.Session.SessionID)
 	assert.Equal(t, "external_edit_conflict_remote_changed", h.audit.lastTool())
+}
+
+func TestExternalEditSaveDetectsRemoteChangeFromReadBytesWhenInfoHashIsStale(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	base := []byte("CASE68-C-BASE\n")
+	session := h.openSession(t, "ssh-b", "/srv/app/case-c.txt", "/srv/app/case-c.txt", base)
+	markDirtyLocalCopy(t, session, []byte("CASE68-C-LOCAL-EDIT-1\n"))
+
+	h.remote.SetFile("ssh-b", "/srv/app/case-c.txt", []byte("CASE68-C-REMOTE-EDIT-1\n"), "/srv/app/case-c.txt")
+	h.remote.SetInfoHash("ssh-b", "/srv/app/case-c.txt", sessionBaseHash(session))
+
+	result, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, result.Status)
+	require.NotNil(t, result.Conflict)
+	require.Equal(t, session.ID, result.Conflict.PrimaryDraftSessionID)
+	require.Equal(t, sessionStateConflict, result.Session.State)
+	require.Equal(t, recordStateConflict, result.Session.RecordState)
+	require.False(t, result.Session.Hidden)
+	require.True(t, result.Session.Dirty)
+	require.Empty(t, h.remote.writes)
+
+	stored := h.refreshSession(t, session.ID)
+	require.Equal(t, sessionStateConflict, stored.State)
+	require.Equal(t, recordStateConflict, stored.RecordState)
+	require.True(t, stored.Dirty)
+	require.False(t, stored.Hidden)
 }
 
 func TestExternalEditSaveStillSupportsRecreateAfterRebind(t *testing.T) {
@@ -721,8 +795,11 @@ func TestExternalEditRereadNewDraftAutoSavesAfterFurtherEdit(t *testing.T) {
 	assert.Equal(t, "ssh-c:/srv/app/demo.txt", lastWrite)
 
 	stored := h.refreshSession(t, reread.Session.ID)
-	require.Equal(t, recordStateCompleted, stored.RecordState)
-	require.True(t, stored.Hidden)
+	require.Equal(t, recordStateActive, stored.RecordState)
+	require.False(t, stored.Hidden)
+	require.Equal(t, sessionStateClean, stored.State)
+	require.Equal(t, hashBytes([]byte("remote newer\nlocal follow-up\n")), sessionBaseHash(stored))
+	require.Equal(t, hashBytes([]byte("remote newer\nlocal follow-up\n")), sessionLocalHash(stored))
 }
 
 func TestExternalEditRereadNewDraftReentersConflictAfterFurtherEdit(t *testing.T) {
@@ -749,6 +826,173 @@ func TestExternalEditRereadNewDraftReentersConflictAfterFurtherEdit(t *testing.T
 	require.Equal(t, saveStatusConflict, nextConflict.Status)
 	require.NotNil(t, nextConflict.Conflict)
 	require.Equal(t, reread.Session.ID, nextConflict.Conflict.PrimaryDraftSessionID)
+}
+
+func TestExternalEditRereadNewDraftDetectsRemoteChangeWithoutLocalDirty(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b", "ssh-c"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/ee68_c_conflict.txt", "/srv/app/ee68_c_conflict.txt", []byte("CASE68-C-BASE\n"))
+	markDirtyLocalCopy(t, session, []byte("CASE68-C-LOCAL-EDIT-1\n"))
+
+	h.remote.SetError("ssh-b", "/srv/app/ee68_c_conflict.txt", errors.New("SSH 会话不存在: ssh-b"))
+	h.remote.SetFile("ssh-c", "/srv/app/ee68_c_conflict.txt", []byte("CASE68-C-REMOTE-EDIT-1\n"), "/srv/app/ee68_c_conflict.txt")
+	conflict, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, conflict.Status)
+
+	h.remote.SetInfoHash("ssh-c", "/srv/app/ee68_c_conflict.txt", sessionBaseHash(session))
+	reread, err := h.svc.Resolve(context.Background(), session.ID, resolutionReread)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusReread, reread.Status)
+	require.False(t, reread.Session.Dirty)
+	require.Equal(t, sessionStateClean, reread.Session.State)
+	require.Equal(t, hashBytes([]byte("CASE68-C-REMOTE-EDIT-1\n")), sessionBaseHash(reread.Session))
+
+	h.remote.SetFile("ssh-c", "/srv/app/ee68_c_conflict.txt", []byte("CASE68-C-REMOTE-EDIT-2\n"), "/srv/app/ee68_c_conflict.txt")
+	nextConflict, err := h.svc.Save(context.Background(), reread.Session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, nextConflict.Status)
+	require.NotNil(t, nextConflict.Conflict)
+	require.Equal(t, reread.Session.ID, nextConflict.Conflict.PrimaryDraftSessionID)
+	require.Equal(t, sessionStateConflict, nextConflict.Session.State)
+	require.Equal(t, recordStateConflict, nextConflict.Session.RecordState)
+	require.False(t, nextConflict.Session.Hidden)
+	require.True(t, nextConflict.Session.Dirty)
+	require.Empty(t, h.remote.writes)
+
+	stored := h.refreshSession(t, reread.Session.ID)
+	require.Equal(t, sessionStateConflict, stored.State)
+	require.Equal(t, recordStateConflict, stored.RecordState)
+	require.False(t, stored.Hidden)
+}
+
+func TestExternalEditRefreshRereadNewDraftDetectsRemoteChangeWithoutLocalDirty(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b", "ssh-c"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/ee68_c_conflict.txt", "/srv/app/ee68_c_conflict.txt", []byte("CASE68-C-BASE\n"))
+	markDirtyLocalCopy(t, session, []byte("CASE68-C-LOCAL-EDIT-1\n"))
+
+	h.remote.SetError("ssh-b", "/srv/app/ee68_c_conflict.txt", errors.New("SSH 会话不存在: ssh-b"))
+	h.remote.SetFile("ssh-c", "/srv/app/ee68_c_conflict.txt", []byte("CASE68-C-REMOTE-EDIT-1\n"), "/srv/app/ee68_c_conflict.txt")
+	conflict, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, conflict.Status)
+
+	reread, err := h.svc.Resolve(context.Background(), session.ID, resolutionReread)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusReread, reread.Status)
+	require.False(t, reread.Session.Dirty)
+	require.Equal(t, sessionStateClean, reread.Session.State)
+
+	h.remote.SetFile("ssh-c", "/srv/app/ee68_c_conflict.txt", []byte("X"), "/srv/app/ee68_c_conflict.txt")
+	h.remote.SetInfoHash("ssh-c", "/srv/app/ee68_c_conflict.txt", sessionBaseHash(reread.Session))
+	refreshed, err := h.svc.Refresh(reread.Session.ID)
+	require.NoError(t, err)
+	require.Equal(t, sessionStateConflict, refreshed.State)
+	require.Equal(t, recordStateConflict, refreshed.RecordState)
+	require.False(t, refreshed.Hidden)
+	require.True(t, refreshed.Dirty)
+	require.Equal(t, hashBytes([]byte("CASE68-C-REMOTE-EDIT-1\n")), sessionLocalHash(refreshed))
+	require.Empty(t, h.remote.writes)
+
+	stored := h.refreshSession(t, reread.Session.ID)
+	require.Equal(t, sessionStateConflict, stored.State)
+	require.Equal(t, recordStateConflict, stored.RecordState)
+	require.False(t, stored.Hidden)
+	require.True(t, stored.Dirty)
+
+	events := h.snapshotEvents()
+	require.NotEmpty(t, events)
+	last := events[len(events)-1]
+	require.Equal(t, eventSessionConflict, last.Type)
+	require.NotNil(t, last.SaveResult)
+	require.Equal(t, saveStatusConflict, last.SaveResult.Status)
+	require.Equal(t, refreshed.ID, last.SaveResult.Conflict.PrimaryDraftSessionID)
+}
+
+func TestExternalEditRefreshConflictSurvivesLocalReconcile(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b", "ssh-c"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/ee68_c_conflict.txt", "/srv/app/ee68_c_conflict.txt", []byte("CASE68-C-BASE\n"))
+	markDirtyLocalCopy(t, session, []byte("CASE68-C-LOCAL-EDIT-1\n"))
+
+	h.remote.SetError("ssh-b", "/srv/app/ee68_c_conflict.txt", errors.New("SSH 会话不存在: ssh-b"))
+	h.remote.SetFile("ssh-c", "/srv/app/ee68_c_conflict.txt", []byte("CASE68-C-REMOTE-EDIT-1\n"), "/srv/app/ee68_c_conflict.txt")
+	conflict, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, conflict.Status)
+
+	reread, err := h.svc.Resolve(context.Background(), session.ID, resolutionReread)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusReread, reread.Status)
+	require.False(t, reread.Session.Dirty)
+	require.Equal(t, sessionStateClean, reread.Session.State)
+
+	h.remote.SetFile("ssh-c", "/srv/app/ee68_c_conflict.txt", []byte("X"), "/srv/app/ee68_c_conflict.txt")
+	refreshed, err := h.svc.Refresh(reread.Session.ID)
+	require.NoError(t, err)
+	require.Equal(t, sessionStateConflict, refreshed.State)
+	require.Equal(t, recordStateConflict, refreshed.RecordState)
+	require.True(t, refreshed.Dirty)
+
+	h.svc.reconcileLocalCopy(reread.Session.ID)
+	stored := h.refreshSession(t, reread.Session.ID)
+	require.Equal(t, sessionStateConflict, stored.State)
+	require.Equal(t, recordStateConflict, stored.RecordState)
+	require.True(t, stored.Dirty)
+	require.False(t, stored.Hidden)
+	require.Empty(t, h.remote.writes)
+}
+
+func TestExternalEditReconnectRefreshRereadNewDraftDetectsRemoteChangeWithoutLocalDirty(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b", "ssh-c"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/ee68_c_conflict.txt", "/srv/app/ee68_c_conflict.txt", []byte("CASE68-C-BASE\n"))
+	markDirtyLocalCopy(t, session, []byte("CASE68-C-LOCAL-EDIT-1\n"))
+
+	h.remote.SetError("ssh-b", "/srv/app/ee68_c_conflict.txt", errors.New("SSH 会话不存在: ssh-b"))
+	h.remote.SetFile("ssh-c", "/srv/app/ee68_c_conflict.txt", []byte("CASE68-C-REMOTE-EDIT-1\n"), "/srv/app/ee68_c_conflict.txt")
+	conflict, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, conflict.Status)
+
+	h.remote.SetInfoHash("ssh-c", "/srv/app/ee68_c_conflict.txt", sessionBaseHash(session))
+	reread, err := h.svc.Resolve(context.Background(), session.ID, resolutionReread)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusReread, reread.Status)
+	require.Equal(t, hashBytes([]byte("CASE68-C-REMOTE-EDIT-1\n")), sessionBaseHash(reread.Session))
+	require.NoError(t, h.svc.Close())
+
+	cfg := &bootstrap.AppConfig{
+		ExternalEditDefaultEditorID: "system-text",
+		ExternalEditWorkspaceRoot:   h.manifest,
+	}
+	reopened, err := NewService(Options{
+		DataDir:        h.manifest,
+		ConfigProvider: func() *bootstrap.AppConfig { return cfg },
+		ConfigSaver:    func(next *bootstrap.AppConfig) error { *cfg = *next; return nil },
+		Remote:         h.remote,
+		FindSessions:   func(int64) []string { return []string{"ssh-b", "ssh-c"} },
+		Assets:         rebindAssetFinder{},
+		Audit:          h.audit,
+		Emit:           func(Event) {},
+		Launch:         launcherFunc(func(string, []string) error { return nil }),
+		Now:            h.svc.now,
+	})
+	require.NoError(t, err)
+	require.NoError(t, reopened.Start(context.Background()))
+	defer func() { _ = reopened.Close() }()
+
+	restored := reopened.getSession(reread.Session.ID)
+	require.NotNil(t, restored)
+	require.Equal(t, sessionStateClean, restored.State)
+	require.Equal(t, hashBytes([]byte("CASE68-C-REMOTE-EDIT-1\n")), sessionBaseHash(restored))
+
+	h.remote.SetFile("ssh-c", "/srv/app/ee68_c_conflict.txt", []byte("X"), "/srv/app/ee68_c_conflict.txt")
+	h.remote.SetInfoHash("ssh-c", "/srv/app/ee68_c_conflict.txt", sessionBaseHash(restored))
+	refreshed, err := reopened.Refresh(reread.Session.ID)
+	require.NoError(t, err)
+	require.Equal(t, sessionStateConflict, refreshed.State)
+	require.Equal(t, recordStateConflict, refreshed.RecordState)
+	require.False(t, refreshed.Hidden)
+	require.True(t, refreshed.Dirty)
+	require.Empty(t, h.remote.writes)
 }
 
 func TestExternalEditAutoSaveOnlyAttemptsOneStableHashOnce(t *testing.T) {
@@ -841,16 +1085,151 @@ func TestExternalEditRereadKeepsPrimaryDraftAndTracksLatestSnapshot(t *testing.T
 	reread, err := h.svc.Resolve(context.Background(), session.ID, resolutionReread)
 	require.NoError(t, err)
 	require.Equal(t, saveStatusReread, reread.Status)
-	require.NotNil(t, reread.Conflict)
-	require.Equal(t, session.ID, reread.Conflict.PrimaryDraftSessionID)
-	require.Equal(t, reread.Session.ID, reread.Conflict.LatestSnapshotSessionID)
+	require.Nil(t, reread.Conflict)
+	require.Equal(t, session.ID, reread.Session.ID)
+	require.Equal(t, sessionStateClean, reread.Session.State)
+	require.Equal(t, recordStateActive, reread.Session.RecordState)
+	require.False(t, reread.Session.Hidden)
+	require.Equal(t, hashBytes([]byte("remote newer\n")), sessionBaseHash(reread.Session))
+	require.Equal(t, hashBytes([]byte("remote newer\n")), sessionLocalHash(reread.Session))
 
-	original := h.refreshSession(t, session.ID)
-	require.Equal(t, sessionStateStale, original.State)
-	require.Equal(t, reread.Session.ID, original.SupersededBySessionID)
+	currentData, readErr := os.ReadFile(reread.Session.LocalPath)
+	require.NoError(t, readErr)
+	require.Equal(t, []byte("remote newer\n"), currentData)
+	bakeupFiles := readBakeupFiles(t, reread.Session.WorkspaceDir)
+	require.Len(t, bakeupFiles, 1)
+	require.Equal(t, []byte("local draft\n"), bakeupFiles[0])
 }
 
-func TestExternalEditCompletedRecordBecomesHiddenAfterSave(t *testing.T) {
+func TestExternalEditReopenAfterCloseRebuildsFromRemoteAndMovesPriorBaseToBakeup(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b", "ssh-c"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+	markDirtyLocalCopy(t, session, []byte("local draft\n"))
+
+	h.remote.SetError("ssh-b", "/srv/app/demo.txt", errors.New("SSH 会话不存在: ssh-b"))
+	h.remote.SetFile("ssh-c", "/srv/app/demo.txt", []byte("remote changed\n"), "/srv/app/demo.txt")
+
+	conflict, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, conflict.Status)
+
+	reread, err := h.svc.Resolve(context.Background(), session.ID, resolutionReread)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusReread, reread.Status)
+	require.Equal(t, session.ID, reread.Session.ID)
+
+	closed, err := h.svc.DeleteSession(reread.Session.ID, false)
+	require.NoError(t, err)
+	require.Equal(t, "deleted_record_only", closed.Status)
+	require.Equal(t, reread.Session.ID, closed.Session.ID)
+
+	main := h.refreshSession(t, reread.Session.ID)
+	require.Equal(t, recordStateAbandoned, main.RecordState)
+	require.True(t, main.Hidden)
+	require.True(t, isReusableClosedMainSession(main))
+
+	h.remote.ClearError("ssh-b", "/srv/app/demo.txt")
+	h.remote.SetFile("ssh-c", "/srv/app/demo.txt", []byte("remote latest\n"), "/srv/app/demo.txt")
+	reopened, err := h.svc.Open(context.Background(), OpenRequest{
+		AssetID:    101,
+		SessionID:  "ssh-c",
+		RemotePath: "/srv/app/demo.txt",
+		EditorID:   "system-text",
+	})
+	require.NoError(t, err)
+	require.Equal(t, reread.Session.ID, reopened.ID)
+	require.Equal(t, recordStateActive, reopened.RecordState)
+	require.False(t, reopened.Hidden)
+	require.Equal(t, hashBytes([]byte("remote latest\n")), sessionBaseHash(reopened))
+	require.Equal(t, hashBytes([]byte("remote latest\n")), sessionLocalHash(reopened))
+
+	currentData, readErr := os.ReadFile(reopened.LocalPath)
+	require.NoError(t, readErr)
+	require.Equal(t, []byte("remote latest\n"), currentData)
+	bakeupFiles := readBakeupFiles(t, reopened.WorkspaceDir)
+	require.Len(t, bakeupFiles, 2)
+}
+
+func TestExternalEditRetentionCleanupRemovesExpiredBakeupEntries(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b", "ssh-c"} })
+	h.cfg.ExternalEditCleanupRetentionDays = 1
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+	markDirtyLocalCopy(t, session, []byte("local draft\n"))
+
+	h.remote.SetError("ssh-b", "/srv/app/demo.txt", errors.New("SSH 会话不存在: ssh-b"))
+	h.remote.SetFile("ssh-c", "/srv/app/demo.txt", []byte("remote changed\n"), "/srv/app/demo.txt")
+	conflict, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, conflict.Status)
+
+	h.remote.SetFile("ssh-c", "/srv/app/demo.txt", []byte("remote newer\n"), "/srv/app/demo.txt")
+	reread, err := h.svc.Resolve(context.Background(), session.ID, resolutionReread)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusReread, reread.Status)
+
+	paths := bakeupEntryPaths(t, reread.Session.WorkspaceDir)
+	require.Len(t, paths, 1)
+	oldTime := h.now.Add(-48 * time.Hour)
+	require.NoError(t, os.Chtimes(paths[0], oldTime, oldTime))
+
+	h.svc.runRetentionCleanup()
+
+	entries, err := os.ReadDir(filepath.Join(reread.Session.WorkspaceDir, "bakeup"))
+	require.NoError(t, err)
+	require.Len(t, entries, 0)
+}
+
+func TestExternalEditRestoreCleanupRemovesExpiredBakeupEntries(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b", "ssh-c"} })
+	h.cfg.ExternalEditCleanupRetentionDays = 1
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+	markDirtyLocalCopy(t, session, []byte("local draft\n"))
+
+	h.remote.SetError("ssh-b", "/srv/app/demo.txt", errors.New("SSH 会话不存在: ssh-b"))
+	h.remote.SetFile("ssh-c", "/srv/app/demo.txt", []byte("remote changed\n"), "/srv/app/demo.txt")
+	conflict, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, conflict.Status)
+
+	h.remote.SetFile("ssh-c", "/srv/app/demo.txt", []byte("remote newer\n"), "/srv/app/demo.txt")
+	reread, err := h.svc.Resolve(context.Background(), session.ID, resolutionReread)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusReread, reread.Status)
+
+	paths := bakeupEntryPaths(t, reread.Session.WorkspaceDir)
+	require.Len(t, paths, 1)
+	oldTime := h.now.Add(-48 * time.Hour)
+	require.NoError(t, os.Chtimes(paths[0], oldTime, oldTime))
+
+	require.NoError(t, h.svc.Close())
+
+	cfg := &bootstrap.AppConfig{
+		ExternalEditDefaultEditorID:     "system-text",
+		ExternalEditWorkspaceRoot:       h.manifest,
+		ExternalEditCleanupRetentionDays: 1,
+	}
+	reopened, err := NewService(Options{
+		DataDir:        h.manifest,
+		ConfigProvider: func() *bootstrap.AppConfig { return cfg },
+		ConfigSaver:    func(next *bootstrap.AppConfig) error { *cfg = *next; return nil },
+		Remote:         h.remote,
+		FindSessions:   func(int64) []string { return []string{"ssh-b", "ssh-c"} },
+		Assets:         rebindAssetFinder{},
+		Audit:          h.audit,
+		Emit:           func(Event) {},
+		Launch:         launcherFunc(func(string, []string) error { return nil }),
+		Now:            h.svc.now,
+	})
+	require.NoError(t, err)
+	require.NoError(t, reopened.Start(context.Background()))
+	defer func() { _ = reopened.Close() }()
+
+	entries, err := os.ReadDir(filepath.Join(reread.Session.WorkspaceDir, "bakeup"))
+	require.NoError(t, err)
+	require.Len(t, entries, 0)
+}
+
+func TestExternalEditSavedRecordStaysActiveAfterSave(t *testing.T) {
 	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
 	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
 	markDirtyLocalCopy(t, session, []byte("hello saved\n"))
@@ -859,8 +1238,9 @@ func TestExternalEditCompletedRecordBecomesHiddenAfterSave(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, saveStatusSaved, result.Status)
 	require.NotNil(t, result.Session)
-	require.Equal(t, recordStateCompleted, result.Session.RecordState)
-	require.True(t, result.Session.Hidden)
+	require.Equal(t, recordStateActive, result.Session.RecordState)
+	require.False(t, result.Session.Hidden)
+	require.Equal(t, sessionStateClean, result.Session.State)
 }
 
 func TestExternalEditManualRestoredDraftDoesNotAutoSave(t *testing.T) {
@@ -879,7 +1259,8 @@ func TestExternalEditManualRestoredDraftDoesNotAutoSave(t *testing.T) {
 	manual, err := h.svc.Save(context.Background(), session.ID)
 	require.NoError(t, err)
 	require.Equal(t, saveStatusSaved, manual.Status)
-	require.Equal(t, recordStateCompleted, manual.Session.RecordState)
+	require.Equal(t, recordStateActive, manual.Session.RecordState)
+	require.False(t, manual.Session.Hidden)
 }
 
 func TestExternalEditDeleteRecordOnlyMarksAbandonedAndHidden(t *testing.T) {
@@ -919,13 +1300,13 @@ func TestExternalEditDeleteWithLocalFailureFallsBackToError(t *testing.T) {
 	require.Equal(t, "delete_local_copy", stored.LastError.Step)
 }
 
-func TestExternalEditRestoreKeepsCompletedAndAbandonedHidden(t *testing.T) {
+func TestExternalEditRestoreKeepsSavedDraftVisibleAndAbandonedHidden(t *testing.T) {
 	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
 	completed := h.openSession(t, "ssh-b", "/srv/app/completed.txt", "/srv/app/completed.txt", []byte("hello\n"))
 	markDirtyLocalCopy(t, completed, []byte("saved\n"))
 	saved, err := h.svc.Save(context.Background(), completed.ID)
 	require.NoError(t, err)
-	require.True(t, saved.Session.Hidden)
+	require.False(t, saved.Session.Hidden)
 
 	abandoned := h.openSession(t, "ssh-b", "/srv/app/abandoned.txt", "/srv/app/abandoned.txt", []byte("draft\n"))
 	_, err = h.svc.DeleteSession(abandoned.ID, false)
@@ -955,9 +1336,10 @@ func TestExternalEditRestoreKeepsCompletedAndAbandonedHidden(t *testing.T) {
 
 	completedRestored := reopened.getSession(completed.ID)
 	require.NotNil(t, completedRestored)
-	require.Equal(t, recordStateCompleted, completedRestored.RecordState)
-	require.True(t, completedRestored.Hidden)
+	require.Equal(t, recordStateActive, completedRestored.RecordState)
+	require.False(t, completedRestored.Hidden)
 	require.Equal(t, saveModeManualRestore, completedRestored.SaveMode)
+	require.True(t, completedRestored.ResumeRequired)
 
 	abandonedRestored := reopened.getSession(abandoned.ID)
 	require.NotNil(t, abandonedRestored)
@@ -966,15 +1348,10 @@ func TestExternalEditRestoreKeepsCompletedAndAbandonedHidden(t *testing.T) {
 	require.Equal(t, saveModeManualRestore, abandonedRestored.SaveMode)
 }
 
-func TestExternalEditRestoreHiddenRecordsDoNotReactivateOnLocalChange(t *testing.T) {
+func TestExternalEditRestoreAbandonedRecordDoesNotReactivateOnLocalChange(t *testing.T) {
 	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
-	completed := h.openSession(t, "ssh-b", "/srv/app/completed.txt", "/srv/app/completed.txt", []byte("hello\n"))
-	markDirtyLocalCopy(t, completed, []byte("saved\n"))
-	_, err := h.svc.Save(context.Background(), completed.ID)
-	require.NoError(t, err)
-
 	abandoned := h.openSession(t, "ssh-b", "/srv/app/abandoned.txt", "/srv/app/abandoned.txt", []byte("draft\n"))
-	_, err = h.svc.DeleteSession(abandoned.ID, false)
+	_, err := h.svc.DeleteSession(abandoned.ID, false)
 	require.NoError(t, err)
 
 	require.NoError(t, h.svc.Close())
@@ -999,19 +1376,10 @@ func TestExternalEditRestoreHiddenRecordsDoNotReactivateOnLocalChange(t *testing
 	require.NoError(t, reopened.Start(context.Background()))
 	defer func() { _ = reopened.Close() }()
 
-	completedRestored := reopened.getSession(completed.ID)
-	require.NotNil(t, completedRestored)
-	markDirtyLocalCopy(t, completedRestored, []byte("changed after restore\n"))
-	reopened.reconcileLocalCopy(completed.ID)
-
 	abandonedRestored := reopened.getSession(abandoned.ID)
 	require.NotNil(t, abandonedRestored)
 	markDirtyLocalCopy(t, abandonedRestored, []byte("draft changed after restore\n"))
 	reopened.reconcileLocalCopy(abandoned.ID)
-
-	completedCurrent := reopened.getSession(completed.ID)
-	require.Equal(t, recordStateCompleted, completedCurrent.RecordState)
-	require.True(t, completedCurrent.Hidden)
 
 	abandonedCurrent := reopened.getSession(abandoned.ID)
 	require.Equal(t, recordStateAbandoned, abandonedCurrent.RecordState)
@@ -1088,4 +1456,198 @@ func TestExternalEditAutoSaveStillEntersConflictAfterRemoteCompare(t *testing.T)
 	}
 	require.True(t, foundConflict)
 	require.Empty(t, h.remote.writes)
+}
+
+func TestExternalEditMergeApplySavesFinalDraftAndAdvancesHashes(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("base\n"))
+	markDirtyLocalCopy(t, session, []byte("local draft\n"))
+	h.remote.SetFile("ssh-b", "/srv/app/demo.txt", []byte("remote draft\n"), "/srv/app/demo.txt")
+
+	conflict, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, conflict.Status)
+
+	prepare, err := h.svc.PrepareMerge(session.ID)
+	require.NoError(t, err)
+	require.Equal(t, "local draft\n", prepare.LocalContent)
+	require.Equal(t, "remote draft\n", prepare.RemoteContent)
+	require.Equal(t, hashBytes([]byte("remote draft\n")), prepare.RemoteHash)
+	h.remote.SetInfoHash("ssh-b", "/srv/app/demo.txt", hashBytes([]byte("remote draft\n")))
+
+	finalData := []byte("merged final\n")
+	applied, err := h.svc.ApplyMerge(context.Background(), MergeApplyRequest{
+		SessionID:    session.ID,
+		FinalContent: string(finalData),
+		RemoteHash:   prepare.RemoteHash,
+	})
+	require.NoError(t, err)
+	require.Equal(t, saveStatusSaved, applied.Status)
+	require.Equal(t, hashBytes(finalData), sessionBaseHash(applied.Session))
+	require.Equal(t, hashBytes(finalData), sessionLocalHash(applied.Session))
+	require.False(t, applied.Session.Hidden)
+	require.Equal(t, recordStateActive, applied.Session.RecordState)
+	require.Empty(t, applied.Session.MergeRemoteSHA256)
+	assert.Equal(t, "external_edit_merge_apply", h.audit.lastTool())
+}
+
+func TestExternalEditMergeApplyBlocksStaleRemoteSnapshot(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("base\n"))
+	markDirtyLocalCopy(t, session, []byte("local draft\n"))
+	h.remote.SetFile("ssh-b", "/srv/app/demo.txt", []byte("remote draft\n"), "/srv/app/demo.txt")
+
+	conflict, err := h.svc.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, conflict.Status)
+
+	prepare, err := h.svc.PrepareMerge(session.ID)
+	require.NoError(t, err)
+	h.remote.SetFile("ssh-b", "/srv/app/demo.txt", []byte("remote changed again\n"), "/srv/app/demo.txt")
+	h.remote.SetInfoHash("ssh-b", "/srv/app/demo.txt", prepare.RemoteHash)
+
+	applied, err := h.svc.ApplyMerge(context.Background(), MergeApplyRequest{
+		SessionID:    session.ID,
+		FinalContent: "merged final\n",
+		RemoteHash:   prepare.RemoteHash,
+	})
+	require.NoError(t, err)
+	require.Equal(t, saveStatusConflict, applied.Status)
+	require.Contains(t, applied.Message, "合并期间再次变化")
+	require.NotNil(t, applied.Conflict)
+	require.Empty(t, h.remote.writes)
+}
+
+func TestExternalEditRestartRecoveryMarksResumeRequiredWithoutAutoUpload(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("base\n"))
+	markDirtyLocalCopy(t, session, []byte("local after crash\n"))
+	h.svc.reconcileLocalCopy(session.ID)
+	require.NoError(t, h.svc.Close())
+
+	cfg := &bootstrap.AppConfig{
+		ExternalEditDefaultEditorID: "system-text",
+		ExternalEditWorkspaceRoot:   h.manifest,
+	}
+	reopened, err := NewService(Options{
+		DataDir:        h.manifest,
+		ConfigProvider: func() *bootstrap.AppConfig { return cfg },
+		ConfigSaver:    func(next *bootstrap.AppConfig) error { *cfg = *next; return nil },
+		Remote:         h.remote,
+		FindSessions:   func(int64) []string { return []string{"ssh-b"} },
+		Assets:         rebindAssetFinder{},
+		Audit:          h.audit,
+		Emit:           func(Event) {},
+		Launch:         launcherFunc(func(string, []string) error { return nil }),
+		Now:            h.svc.now,
+	})
+	require.NoError(t, err)
+	require.NoError(t, reopened.Start(context.Background()))
+	defer func() { _ = reopened.Close() }()
+
+	restored := reopened.getSession(session.ID)
+	require.NotNil(t, restored)
+	require.True(t, restored.ResumeRequired)
+	require.Equal(t, saveModeManualRestore, restored.SaveMode)
+
+	reopened.reconcileLocalCopy(session.ID)
+	time.Sleep(autoSaveDebounce + 200*time.Millisecond)
+	require.Empty(t, h.remote.writes)
+
+	saved, err := reopened.Save(context.Background(), session.ID)
+	require.NoError(t, err)
+	require.Equal(t, saveStatusSaved, saved.Status)
+	require.False(t, saved.Session.ResumeRequired)
+}
+
+func TestExternalEditClipboardResidueIsFilteredFromManifestRestoreAndList(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	valid := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("base\n"))
+	residue := h.openSession(
+		t,
+		"ssh-b",
+		"/srv/app/folder/clipboard-d29e2e94d3cae23119571647cf236bee83860f702e384e36d17305631c609c88.png",
+		"/srv/app/folder/clipboard-d29e2e94d3cae23119571647cf236bee83860f702e384e36d17305631c609c88.png",
+		[]byte("clipboard residue\n"),
+	)
+	h.svc.mu.Lock()
+	h.svc.sessions[residue.ID].LocalPath = filepath.Join(
+		h.manifest,
+		"clipboard-images",
+		"clipboard-6607ba08467079f385199f18c460e71b33008a531841e07a90f9b4b613629f88.png",
+	)
+	h.svc.sessions[residue.ID].WorkspaceDir = filepath.Join(h.manifest, "clipboard-images")
+	require.NoError(t, os.MkdirAll(h.svc.sessions[residue.ID].WorkspaceDir, 0o700))
+	require.NoError(t, os.WriteFile(h.svc.sessions[residue.ID].LocalPath, []byte("clipboard residue\n"), 0o600))
+	require.NoError(t, h.svc.saveManifestLocked())
+	h.svc.mu.Unlock()
+	require.NoError(t, h.svc.Close())
+
+	cfg := &bootstrap.AppConfig{
+		ExternalEditDefaultEditorID: "system-text",
+		ExternalEditWorkspaceRoot:   h.manifest,
+	}
+	reopened, err := NewService(Options{
+		DataDir:        h.manifest,
+		ConfigProvider: func() *bootstrap.AppConfig { return cfg },
+		ConfigSaver:    func(next *bootstrap.AppConfig) error { *cfg = *next; return nil },
+		Remote:         h.remote,
+		FindSessions:   func(int64) []string { return []string{"ssh-b"} },
+		Assets:         rebindAssetFinder{},
+		Audit:          h.audit,
+		Emit:           func(Event) {},
+		Launch:         launcherFunc(func(string, []string) error { return nil }),
+		Now:            h.svc.now,
+	})
+	require.NoError(t, err)
+	require.NoError(t, reopened.Start(context.Background()))
+	defer func() { _ = reopened.Close() }()
+
+	require.NotNil(t, reopened.getSession(valid.ID))
+	require.Nil(t, reopened.getSession(residue.ID))
+	require.Empty(t, reopened.documentRunners)
+	for _, session := range reopened.ListSessions() {
+		require.NotContains(t, session.RemotePath, "folder/clipboard")
+		require.NotContains(t, session.LocalPath, "clipboard-images")
+	}
+
+	manifest, err := os.ReadFile(filepath.Join(h.manifest, "storage", "manifest.json"))
+	require.NoError(t, err)
+	require.NotContains(t, string(manifest), "folder/clipboard")
+	require.NotContains(t, string(manifest), "clipboard-images")
+}
+
+func TestExternalEditClipboardResidueRuntimeEntryPointsCleanWithoutRunner(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	residue := h.openSession(
+		t,
+		"ssh-b",
+		"/srv/app/folder/clipboard-d29e2e94d3cae23119571647cf236bee83860f702e384e36d17305631c609c88.png",
+		"/srv/app/folder/clipboard-d29e2e94d3cae23119571647cf236bee83860f702e384e36d17305631c609c88.png",
+		[]byte("clipboard residue\n"),
+	)
+	h.svc.mu.Lock()
+	h.svc.sessions[residue.ID].LocalPath = filepath.Join(
+		h.manifest,
+		"clipboard-images",
+		"clipboard-6607ba08467079f385199f18c460e71b33008a531841e07a90f9b4b613629f88.png",
+	)
+	h.svc.sessions[residue.ID].WorkspaceDir = filepath.Join(h.manifest, "clipboard-images")
+	require.NoError(t, os.MkdirAll(h.svc.sessions[residue.ID].WorkspaceDir, 0o700))
+	require.NoError(t, os.WriteFile(h.svc.sessions[residue.ID].LocalPath, []byte("clipboard residue\n"), 0o600))
+	require.NoError(t, h.svc.saveManifestLocked())
+	h.svc.mu.Unlock()
+
+	_, err := h.svc.Save(context.Background(), residue.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "外部编辑会话不存在")
+	require.Nil(t, h.svc.getSession(residue.ID))
+	require.Empty(t, h.svc.ListSessions())
+	require.Empty(t, h.svc.documentRunners)
+	require.Empty(t, h.remote.writes)
+
+	manifest, err := os.ReadFile(filepath.Join(h.manifest, "storage", "manifest.json"))
+	require.NoError(t, err)
+	require.NotContains(t, string(manifest), "folder/clipboard")
+	require.NotContains(t, string(manifest), "clipboard-images")
 }

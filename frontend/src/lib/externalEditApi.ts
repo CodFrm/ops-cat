@@ -20,6 +20,7 @@ export interface ExternalEditEditor {
 export interface ExternalEditSettings {
   defaultEditorId: string;
   workspaceRoot: string;
+  cleanupRetentionDays: number;
   editors: ExternalEditEditor[];
   customEditors: ExternalEditEditorConfig[];
 }
@@ -27,6 +28,7 @@ export interface ExternalEditSettings {
 export interface ExternalEditSettingsInput {
   defaultEditorId: string;
   workspaceRoot: string;
+  cleanupRetentionDays: number;
   customEditors: ExternalEditEditorConfig[];
 }
 
@@ -73,6 +75,8 @@ export interface ExternalEditSession {
     suggestion: string;
     at: number;
   };
+  resumeRequired?: boolean;
+  mergeRemoteSha256?: string;
   sourceSessionId?: string;
   supersededBySessionId?: string;
   createdAt: number;
@@ -129,6 +133,24 @@ export interface ExternalEditCompareResult {
   };
 }
 
+export interface ExternalEditMergePrepareResult {
+  documentKey: string;
+  primaryDraftSessionId: string;
+  fileName: string;
+  remotePath: string;
+  localContent: string;
+  remoteContent: string;
+  finalContent: string;
+  remoteHash: string;
+  session?: ExternalEditSession;
+}
+
+export interface ExternalEditMergeApplyRequest {
+  sessionId: string;
+  finalContent: string;
+  remoteHash: string;
+}
+
 declare global {
   interface Window {
     go?: {
@@ -144,6 +166,9 @@ declare global {
           RefreshExternalEditSession?: (sessionId: string) => MaybePromise<ExternalEditSession>;
           ResolveExternalEditConflict?: (sessionId: string, resolution: string) => MaybePromise<ExternalEditSaveResult>;
           CompareExternalEditSession?: (sessionId: string) => MaybePromise<ExternalEditCompareResult>;
+          PrepareExternalEditMerge?: (sessionId: string) => MaybePromise<ExternalEditMergePrepareResult>;
+          ApplyExternalEditMerge?: (req: ExternalEditMergeApplyRequest) => MaybePromise<ExternalEditSaveResult>;
+          RecoverExternalEditSession?: (sessionId: string) => MaybePromise<ExternalEditSession>;
           DeleteExternalEditSession?: (
             sessionId: string,
             removeLocal: boolean
@@ -202,6 +227,18 @@ export function resolveExternalEditConflict(sessionId: string, resolution: strin
 
 export function compareExternalEditSession(sessionId: string) {
   return appBindings().CompareExternalEditSession!(sessionId);
+}
+
+export function prepareExternalEditMerge(sessionId: string) {
+  return appBindings().PrepareExternalEditMerge!(sessionId);
+}
+
+export function applyExternalEditMerge(req: ExternalEditMergeApplyRequest) {
+  return appBindings().ApplyExternalEditMerge!(req);
+}
+
+export function recoverExternalEditSession(sessionId: string) {
+  return appBindings().RecoverExternalEditSession!(sessionId);
 }
 
 export function deleteExternalEditSession(sessionId: string, removeLocal: boolean) {

@@ -177,6 +177,118 @@
 }
 
 @layer components {
+  .external-edit-compare-line-insert,
+  .external-edit-diff-line-insert {
+    background-color: color-mix(in oklab, oklch(0.82 0.18 150) 48%, transparent);
+    box-shadow: inset 5px 0 0 oklch(0.46 0.19 150);
+  }
+
+  .external-edit-compare-line-delete,
+  .external-edit-diff-line-delete {
+    background-color: color-mix(in oklab, oklch(0.76 0.2 25) 48%, transparent);
+    box-shadow: inset 5px 0 0 oklch(0.48 0.22 25);
+  }
+
+  .external-edit-compare-line-modify {
+    background-color: color-mix(in oklab, oklch(0.86 0.16 82) 54%, transparent);
+    box-shadow: inset 5px 0 0 oklch(0.58 0.18 82);
+  }
+
+  .external-edit-compare-line-current,
+  .external-edit-diff-line-current {
+    background-color: color-mix(in oklab, oklch(0.86 0.18 82) 68%, transparent);
+    box-shadow:
+      inset 6px 0 0 oklch(0.55 0.18 82),
+      inset 0 0 0 2px color-mix(in oklab, oklch(0.52 0.18 82) 70%, transparent);
+  }
+
+  .external-edit-compare-gutter-insert,
+  .external-edit-diff-gutter-insert {
+    background-color: oklch(0.46 0.19 150);
+  }
+
+  .external-edit-compare-gutter-delete,
+  .external-edit-diff-gutter-delete {
+    background-color: oklch(0.48 0.22 25);
+  }
+
+  .external-edit-compare-gutter-modify,
+  .external-edit-diff-gutter-modify {
+    background-color: oklch(0.58 0.18 82);
+  }
+
+  .external-edit-compare-gutter-current,
+  .external-edit-diff-gutter-current {
+    background-color: oklch(0.52 0.18 82);
+    box-shadow: 0 0 0 2px oklch(0.98 0.02 82);
+  }
+
+  .external-edit-merge-line-local-change {
+    background-color: color-mix(in oklab, oklch(0.82 0.18 150) 46%, transparent);
+    box-shadow: inset 5px 0 0 oklch(0.46 0.19 150);
+  }
+
+  .external-edit-merge-line-remote-change {
+    background-color: color-mix(in oklab, oklch(0.78 0.18 245) 46%, transparent);
+    box-shadow: inset -5px 0 0 oklch(0.46 0.16 245);
+  }
+
+  .external-edit-merge-line-final-local {
+    background-color: color-mix(in oklab, oklch(0.82 0.18 150) 38%, transparent);
+    box-shadow: inset 5px 0 0 oklch(0.46 0.19 150);
+  }
+
+  .external-edit-merge-line-final-remote {
+    background-color: color-mix(in oklab, oklch(0.78 0.18 245) 38%, transparent);
+    box-shadow: inset -5px 0 0 oklch(0.46 0.16 245);
+  }
+
+  .external-edit-merge-line-final-combined {
+    background-image:
+      linear-gradient(90deg, color-mix(in oklab, oklch(0.82 0.18 150) 42%, transparent), transparent 48%),
+      linear-gradient(270deg, color-mix(in oklab, oklch(0.78 0.18 245) 42%, transparent), transparent 48%);
+    box-shadow:
+      inset 5px 0 0 oklch(0.46 0.19 150),
+      inset -5px 0 0 oklch(0.46 0.16 245);
+  }
+
+  .external-edit-merge-line-current {
+    background-color: color-mix(in oklab, oklch(0.86 0.18 82) 68%, transparent);
+    box-shadow:
+      inset 5px 0 0 oklch(0.46 0.19 150),
+      inset -5px 0 0 oklch(0.46 0.16 245),
+      inset 0 0 0 2px oklch(0.52 0.18 82);
+  }
+
+  .external-edit-merge-gutter-local {
+    background-color: oklch(0.46 0.19 150);
+  }
+
+  .external-edit-merge-gutter-remote {
+    background-color: oklch(0.46 0.16 245);
+  }
+
+  .external-edit-merge-gutter-combined {
+    background: linear-gradient(90deg, oklch(0.46 0.19 150) 0 50%, oklch(0.46 0.16 245) 50% 100%);
+  }
+
+  .external-edit-merge-gutter-current {
+    background-color: oklch(0.52 0.18 82);
+    box-shadow: 0 0 0 2px oklch(0.98 0.02 82);
+  }
+
+  .dark .external-edit-diff-line-insert {
+    background-color: color-mix(in oklab, oklch(0.58 0.19 150) 38%, transparent);
+  }
+
+  .dark .external-edit-diff-line-delete {
+    background-color: color-mix(in oklab, oklch(0.58 0.22 25) 38%, transparent);
+  }
+
+  .dark .external-edit-diff-line-current {
+    background-color: color-mix(in oklab, oklch(0.70 0.18 82) 40%, transparent);
+  }
+
   .query-table-frozen-header-selected {
     background-color: var(--muted);
     background-image: linear-gradient(

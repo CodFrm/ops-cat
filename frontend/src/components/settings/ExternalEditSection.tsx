@@ -105,6 +105,7 @@ export function ExternalEditSection() {
   const [settings, setSettings] = useState<ExternalEditSettings | null>(null);
   const [defaultEditorId, setDefaultEditorId] = useState("");
   const [workspaceRoot, setWorkspaceRoot] = useState("");
+  const [cleanupRetentionDays, setCleanupRetentionDays] = useState("7");
   const [customEditors, setCustomEditors] = useState<ExternalEditEditorConfig[]>([]);
   const [editorDialog, setEditorDialog] = useState<EditorDialogState>(null);
   const [saving, setSaving] = useState(false);
@@ -115,6 +116,7 @@ export function ExternalEditSection() {
         setSettings(data);
         setDefaultEditorId(data.defaultEditorId);
         setWorkspaceRoot(data.workspaceRoot);
+        setCleanupRetentionDays(String(data.cleanupRetentionDays || 7));
         setCustomEditors(normalizeEditors(data.customEditors || []));
       })
       .catch((error) => toast.error(String(error)));
@@ -154,11 +156,13 @@ export function ExternalEditSection() {
       const next = await saveExternalEditSettings({
         defaultEditorId,
         workspaceRoot,
+        cleanupRetentionDays: Number.parseInt(cleanupRetentionDays, 10) || 7,
         customEditors: normalizeEditors(customEditors),
       });
       setSettings(next);
       setDefaultEditorId(next.defaultEditorId);
       setWorkspaceRoot(next.workspaceRoot);
+      setCleanupRetentionDays(String(next.cleanupRetentionDays || 7));
       setCustomEditors(normalizeEditors(next.customEditors || []));
       toast.success(t("externalEdit.settings.saved"));
     } catch (error) {
@@ -258,6 +262,21 @@ export function ExternalEditSection() {
                 {t("action.browse")}
               </Button>
             </div>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="external-edit-cleanup-retention-days">
+              {t("externalEdit.settings.cleanupRetentionDays")}
+            </Label>
+            <Input
+              id="external-edit-cleanup-retention-days"
+              type="number"
+              min={1}
+              max={365}
+              value={cleanupRetentionDays}
+              onChange={(event) => setCleanupRetentionDays(event.target.value)}
+            />
+            <div className="text-xs text-muted-foreground">{t("externalEdit.settings.cleanupRetentionDaysHint")}</div>
           </div>
 
           <div className="space-y-3">

@@ -32,6 +32,7 @@ type AppConfig struct {
 	ExternalEditDefaultEditorID string                 `json:"external_edit_default_editor_id,omitempty"`
 	ExternalEditWorkspaceRoot   string                 `json:"external_edit_workspace_root,omitempty"`
 	ExternalEditCustomEditors   []ExternalEditorConfig `json:"external_edit_custom_editors,omitempty"`
+	ExternalEditCleanupRetentionDays int               `json:"external_edit_cleanup_retention_days,omitempty"`
 }
 
 // ExternalEditorConfig 是用户自定义外部编辑器配置。

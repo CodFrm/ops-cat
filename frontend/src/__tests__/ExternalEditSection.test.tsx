@@ -42,6 +42,7 @@ function makeSettings(overrides: Partial<Awaited<ReturnType<typeof getExternalEd
   return {
     defaultEditorId: "system-text",
     workspaceRoot: "/tmp",
+    cleanupRetentionDays: 7,
     editors: [builtInEditor],
     customEditors: [],
     ...overrides,
@@ -56,6 +57,7 @@ describe("ExternalEditSection", () => {
       makeSettings({
         defaultEditorId: input.defaultEditorId,
         workspaceRoot: input.workspaceRoot,
+        cleanupRetentionDays: input.cleanupRetentionDays,
         editors: [
           { ...builtInEditor, default: input.defaultEditorId === builtInEditor.id },
           ...(input.customEditors || []).map((editor) => ({
@@ -126,6 +128,7 @@ describe("ExternalEditSection", () => {
     await waitFor(() => {
       expect(saveExternalEditSettings).toHaveBeenCalledWith(
         expect.objectContaining({
+          cleanupRetentionDays: 7,
           customEditors: [
             expect.objectContaining({
               name: "Custom Vim",
@@ -169,7 +172,26 @@ describe("ExternalEditSection", () => {
       expect(saveExternalEditSettings).toHaveBeenCalledWith(
         expect.objectContaining({
           defaultEditorId: "system-text",
+          cleanupRetentionDays: 7,
           customEditors: [],
+        })
+      );
+    });
+  });
+
+  it("saves cleanup retention days with the settings snapshot", async () => {
+    const user = userEvent.setup();
+    render(<ExternalEditSection />);
+
+    const retentionInput = await screen.findByLabelText("externalEdit.settings.cleanupRetentionDays");
+    await user.clear(retentionInput);
+    await user.type(retentionInput, "14");
+    await user.click(screen.getByRole("button", { name: "action.save" }));
+
+    await waitFor(() => {
+      expect(saveExternalEditSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cleanupRetentionDays: 14,
         })
       );
     });

@@ -979,6 +979,8 @@
       "title": "External Edit",
       "conflicts": "Conflicting Files",
       "errors": "Recoverable Files",
+      "recoveries": "Recovery Entries",
+      "attentionCount": "{{count}} pending",
       "remoteSnapshotReady": "remote snapshot ready",
       "currentDraft": "Current Conflict Draft",
       "retainedDraft": "Retained Draft",
@@ -987,7 +989,6 @@
       "rereadBaselineHint": "After reading the remote version, edits will use that remote version as the baseline.",
       "autoSavePending": "auto-save pending",
       "autoSaveRunning": "auto-save running",
-      "reviewInList": "Review in list",
       "recreateReadyHint": "The current active draft can recreate the missing remote file.",
       "recreateUnavailableState": "Only available when the current active draft is in the Remote Missing state.",
       "recreateUnavailableBusy": "Finish the current save first before recreating the remote file.",
@@ -998,12 +999,23 @@
       "sync": "Save to Remote",
       "refresh": "Refresh Remote State",
       "compare": "Compare",
+      "acceptRemote": "Accept Remote",
       "reread": "Read Remote Version",
       "overwrite": "Overwrite Remote",
       "saveAgain": "Recreate Remote File",
       "viewError": "View Error",
-      "hideRecord": "Delete Record Only",
+      "viewRecovery": "View Recovery",
+      "reopenLocal": "Reopen Local Draft",
+      "merge": "Three-way Merge",
+      "saveMerge": "Save Merged Draft",
+      "hideRecord": "Close Record (Keep Local Draft)",
       "deleteLocal": "Delete Record and Local Draft"
+    },
+    "pending": {
+      "entry": "External Edit Pending",
+      "title": "External Edit Pending Files",
+      "description": "Conflicts, errors, and recovery files are handled here. Closing this dialog does not drop records.",
+      "empty": "No pending external edit files."
     },
     "state": {
       "clean": "Synced",
@@ -1028,13 +1040,41 @@
       "title": "Sync Failure Details",
       "summaryLabel": "Summary",
       "stepLabel": "Failed Step",
-      "suggestionLabel": "Suggested Action"
+      "suggestionLabel": "Suggested Action",
+      "safeActionFailed": "External edit action failed. Review the pending entry and retry."
+    },
+    "recovery": {
+      "title": "Recover External Edit",
+      "summary": "A local draft from the previous app session is available for recovery.",
+      "description": "Recovery only reopens the local draft and never uploads automatically. Save manually after checking the content."
+    },
+    "merge": {
+      "title": "Three-way Merge",
+      "localDraft": "Local Draft (read-only)",
+      "finalDraft": "Final Draft (editable)",
+      "remoteDraft": "Remote Version (read-only)",
+      "helper": "Local on the left, final draft in the middle, remote on the right. Remote freshness is checked again before saving.",
+      "changelist": "Conflict Files",
+      "readOnlySide": "Read-only",
+      "editableCenter": "Editable",
+      "status": "Three-way merge workbench",
+      "localCenterRemote": "Left local / center final / right remote",
+      "previous": "Previous conflict",
+      "next": "Next conflict",
+      "closeDirtyTitle": "Discard unsaved merge draft?",
+      "closeDirtyDesc": "Closing keeps the conflict record, but the unsaved final draft edits in this dialog will be lost.",
+      "closeDirtyConfirm": "Discard and Close"
     },
     "compare": {
       "title": "Read-only Diff",
       "localDraft": "Local Draft",
       "remoteSnapshot": "Remote Snapshot",
       "readOnly": "Read-only",
+      "projectView": "Conflict Files",
+      "status": "Read-only diff workbench",
+      "remoteLeftLocalRight": "Left remote / right local",
+      "previous": "Previous difference",
+      "next": "Next difference",
       "helper": "Remote on the left, local on the right, with line numbers and synced scrolling for inspection."
     },
     "settings": {
@@ -1043,6 +1083,8 @@
       "desc": "Configure the default editor, local workspace, and custom editor entries.",
       "defaultEditor": "Default Editor",
       "workspaceRoot": "Workspace Root",
+      "cleanupRetentionDays": "Cleanup Retention Days",
+      "cleanupRetentionDaysHint": "Defaults to 7 days, range 1-365. Used to clean up non-active drafts and bakeup history copies.",
       "customEditors": "Custom Editors",
       "addEditor": "Add Custom Editor",
       "addEditorTitle": "Add Custom Editor",

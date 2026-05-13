@@ -5,17 +5,12 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, ArrowRightLeft, RefreshCw, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, GitMerge, RotateCcw, Trash2, Upload, X } from "lucide-react";
+import type * as MonacoNS from "monaco-editor";
 import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
   Button,
   cn,
   ConfirmDialog,
@@ -28,11 +23,13 @@ import {
 import { SFTPDelete, SFTPGetwd } from "../../../wailsjs/go/app/App";
 import { sftp_svc } from "../../../wailsjs/go/models";
 import { CodeDiffViewer } from "@/components/CodeDiffViewer";
-import { openExternalEdit, type ExternalEditSession } from "@/lib/externalEditApi";
+import { CodeEditor } from "@/components/CodeEditor";
+import { openExternalEdit, type ExternalEditMergePrepareResult, type ExternalEditSession } from "@/lib/externalEditApi";
+import { buildTextDiffBlocks, type TextDiffBlock } from "@/lib/textDiffBlocks";
 import {
-  buildExternalEditErrors,
-  buildExternalEditConflicts,
-  buildExternalEditDocuments,
+  buildExternalEditAttentionItems,
+  type ExternalEditAttentionItem,
+  isExternalEditClipboardResidueSession,
   useExternalEditStore,
 } from "@/stores/externalEditStore";
 import { useSFTPStore } from "@/stores/sftpStore";
@@ -56,47 +53,210 @@ interface FileManagerPanelProps {
   onWidthChange: (width: number) => void;
 }
 
-type CompareResizeEdge = "top" | "right" | "bottom" | "left" | "top-left" | "top-right" | "bottom-right" | "bottom-left";
+const EXTERNAL_EDIT_SAFE_ERROR_KEY = "externalEdit.error.safeActionFailed";
+const EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS =
+  "!h-auto max-w-full justify-start !whitespace-normal break-words px-2 py-1.5 text-left leading-4";
 
-const COMPARE_DIALOG_MIN_WIDTH = 900;
-const COMPARE_DIALOG_MIN_HEIGHT = 620;
-const COMPARE_DIALOG_INITIAL_WIDTH = 1680;
-const COMPARE_DIALOG_INITIAL_HEIGHT = 920;
+type ExternalEditPendingItem = ExternalEditAttentionItem | { id: string; type: "conflict"; session: ExternalEditSession };
 
-const COMPARE_RESIZE_HANDLES: Array<{ edge: CompareResizeEdge; className: string; cursorClass: string }> = [
-  { edge: "top", className: "left-4 right-4 top-0 h-2 -translate-y-1/2", cursorClass: "cursor-ns-resize" },
-  { edge: "right", className: "right-0 top-4 bottom-4 w-2 translate-x-1/2", cursorClass: "cursor-ew-resize" },
-  { edge: "bottom", className: "left-4 right-4 bottom-0 h-2 translate-y-1/2", cursorClass: "cursor-ns-resize" },
-  { edge: "left", className: "left-0 top-4 bottom-4 w-2 -translate-x-1/2", cursorClass: "cursor-ew-resize" },
-  {
-    edge: "top-left",
-    className: "left-0 top-0 h-4 w-4 -translate-x-1/2 -translate-y-1/2",
-    cursorClass: "cursor-nwse-resize",
-  },
-  {
-    edge: "top-right",
-    className: "right-0 top-0 h-4 w-4 translate-x-1/2 -translate-y-1/2",
-    cursorClass: "cursor-nesw-resize",
-  },
-  {
-    edge: "bottom-right",
-    className: "right-0 bottom-0 h-4 w-4 translate-x-1/2 translate-y-1/2",
-    cursorClass: "cursor-nwse-resize",
-  },
-  {
-    edge: "bottom-left",
-    className: "left-0 bottom-0 h-4 w-4 -translate-x-1/2 translate-y-1/2",
-    cursorClass: "cursor-nesw-resize",
-  },
-];
+type MergePaneRole = "local" | "final" | "remote";
+type MergeEditorRefs = Record<
+  MergePaneRole,
+  { editor: MonacoNS.editor.IStandaloneCodeEditor | null; monaco: typeof MonacoNS | null }
+>;
+type MergeDecorationRefs = Record<MergePaneRole, MonacoNS.editor.IEditorDecorationsCollection | null>;
 
-function clampCompareDialogSize(width: number, height: number) {
-  const maxWidth = Math.max(COMPARE_DIALOG_MIN_WIDTH, Math.floor(window.innerWidth * 0.98));
-  const maxHeight = Math.max(COMPARE_DIALOG_MIN_HEIGHT, Math.floor(window.innerHeight * 0.96));
-  return {
-    width: Math.min(Math.max(width, COMPARE_DIALOG_MIN_WIDTH), maxWidth),
-    height: Math.min(Math.max(height, COMPARE_DIALOG_MIN_HEIGHT), maxHeight),
-  };
+function blockLineRange(block: TextDiffBlock, pane: MergePaneRole) {
+  const startLine = pane === "remote" ? block.originalStartLine : block.modifiedStartLine;
+  const endLine = pane === "remote" ? block.originalEndLine : block.modifiedEndLine;
+  return { startLine, endLine };
+}
+
+function mergePaneLineClass(block: TextDiffBlock, pane: MergePaneRole, active: boolean) {
+  if (active) return "external-edit-merge-line-current";
+  if (pane === "remote") {
+    return block.kind === "insert" ? "" : "external-edit-merge-line-remote-change";
+  }
+  if (pane === "local") {
+    return block.kind === "delete" ? "" : "external-edit-merge-line-local-change";
+  }
+  if (block.kind === "delete") return "external-edit-merge-line-final-local";
+  if (block.kind === "insert") return "external-edit-merge-line-final-remote";
+  return "external-edit-merge-line-final-combined";
+}
+
+function mergePaneGutterClass(block: TextDiffBlock, pane: MergePaneRole, active: boolean) {
+  if (active) return "external-edit-merge-gutter-current";
+  if (pane === "remote") {
+    return block.kind === "insert" ? "" : "external-edit-merge-gutter-remote";
+  }
+  if (pane === "local") {
+    return block.kind === "delete" ? "" : "external-edit-merge-gutter-local";
+  }
+  if (block.kind === "insert") return "external-edit-merge-gutter-remote";
+  if (block.kind === "delete") return "external-edit-merge-gutter-local";
+  return "external-edit-merge-gutter-combined";
+}
+
+function buildMergePaneDecorations(
+  monaco: typeof MonacoNS,
+  blocks: TextDiffBlock[],
+  activeIndex: number,
+  pane: MergePaneRole
+): MonacoNS.editor.IModelDeltaDecoration[] {
+  return blocks.flatMap((block, index) => {
+    const { startLine, endLine } = blockLineRange(block, pane);
+    if (endLine < startLine || startLine < 1) return [];
+    const active = index === activeIndex;
+    const className = mergePaneLineClass(block, pane, active);
+    const glyphMarginClassName = mergePaneGutterClass(block, pane, active);
+    if (!className && !glyphMarginClassName) return [];
+    return [
+      {
+        range: new monaco.Range(startLine, 1, endLine, 1),
+        options: {
+          isWholeLine: true,
+          className,
+          glyphMarginClassName,
+          overviewRuler: {
+            color:
+              block.kind === "insert"
+                ? "#16a34a"
+                : block.kind === "delete"
+                  ? "#dc2626"
+                  : "#d97706",
+            position: monaco.editor.OverviewRulerLane.Full,
+          },
+        },
+      },
+    ];
+  });
+}
+
+interface ExternalEditIdeaFrameProps {
+  actions?: ReactNode;
+  children: ReactNode;
+  fileName: string;
+  helper: string;
+  layoutLabel: string;
+  mode: "compare" | "merge";
+  remotePath: string;
+  sidebarLabel: string;
+  status: string;
+  subtitle?: string;
+  testId: string;
+  title: string;
+}
+
+function ExternalEditIdeaFrame({
+  actions,
+  children,
+  fileName,
+  helper,
+  layoutLabel,
+  mode,
+  remotePath,
+  sidebarLabel,
+  status,
+  subtitle,
+  testId,
+  title,
+}: ExternalEditIdeaFrameProps) {
+  return (
+    <div
+      className={cn(
+        "fixed z-50 flex overflow-hidden rounded-xl border border-slate-700 bg-[#1f2329] text-slate-100 shadow-2xl",
+        mode === "compare" ? "inset-4" : "inset-3"
+      )}
+      data-idea-workbench={mode}
+      data-testid={testId}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+    >
+      <div className="flex w-56 shrink-0 flex-col border-r border-slate-700 bg-[#252a31]">
+        <div className="border-b border-slate-700 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+          {sidebarLabel}
+        </div>
+        <div className="flex-1 px-3 py-4">
+          <div
+            className={cn(
+              "rounded-md px-3 py-2 text-sm font-medium",
+              mode === "merge"
+                ? "border border-amber-500/40 bg-amber-500/10 text-amber-100"
+                : "bg-[#343b45] text-slate-100"
+            )}
+            data-testid={`external-edit-${mode}-idea-file`}
+          >
+            {fileName}
+          </div>
+          <div className="mt-3 break-all text-xs leading-5 text-slate-400">{remotePath}</div>
+        </div>
+        <div className="border-t border-slate-700 px-3 py-3 text-[11px] text-slate-400">{helper}</div>
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex h-12 items-center justify-between border-b border-slate-700 bg-[#2b3038] px-4">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold">{title}</div>
+            <div className="truncate text-[11px] text-slate-400">{subtitle || remotePath}</div>
+          </div>
+          {actions}
+        </div>
+        {children}
+        <div className="flex h-8 items-center justify-between border-t border-slate-700 bg-[#252a31] px-4 text-[11px] text-slate-400">
+          <span>{status}</span>
+          <span>{layoutLabel}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ExternalEditIdeaEditorPaneProps {
+  badge: string;
+  children: ReactNode;
+  tone: "local" | "final" | "remote";
+  title: string;
+}
+
+function ExternalEditIdeaEditorPane({ badge, children, tone, title }: ExternalEditIdeaEditorPaneProps) {
+  return (
+    <div
+      className={cn(
+        "flex min-h-0 flex-col bg-[#1f2329]",
+        tone === "final" && "ring-1 ring-amber-400/40"
+      )}
+      data-idea-pane={tone}
+      data-testid={`external-edit-idea-pane-${tone}`}
+    >
+      <div
+        className={cn(
+          "flex h-9 items-center justify-between border-b px-3 text-xs",
+          tone === "final" ? "border-amber-400/30 bg-[#3a3324]" : "border-slate-700 bg-[#303640]"
+        )}
+      >
+        <span
+          className={cn(
+            "font-semibold",
+            tone === "local" && "text-emerald-200",
+            tone === "remote" && "text-sky-200",
+            tone === "final" && "text-amber-100"
+          )}
+        >
+          {title}
+        </span>
+        <span
+          className={cn(
+            "rounded px-2 py-0.5 text-[10px] uppercase tracking-wide",
+            tone === "final" ? "bg-amber-400/20 text-amber-100" : "bg-slate-800 text-slate-300"
+          )}
+        >
+          {badge}
+        </span>
+      </div>
+      {children}
+    </div>
+  );
 }
 
 export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onWidthChange }: FileManagerPanelProps) {
@@ -136,11 +296,23 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
   const loadedRef = useRef(false);
   const lastSessionRef = useRef<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const compareDialogRef = useRef<HTMLDivElement>(null);
-  const [compareDialogSize, setCompareDialogSize] = useState(() => ({
-    width: COMPARE_DIALOG_INITIAL_WIDTH,
-    height: COMPARE_DIALOG_INITIAL_HEIGHT,
-  }));
+  const [mergeFinalContent, setMergeFinalContent] = useState("");
+  const [mergeDirty, setMergeDirty] = useState(false);
+  const [confirmCloseMerge, setConfirmCloseMerge] = useState(false);
+  const [mergePrepareErrors, setMergePrepareErrors] = useState<Record<string, string>>({});
+  const [preparedMergeResult, setPreparedMergeResult] = useState<ExternalEditMergePrepareResult | null>(null);
+  const [pendingDialogOpen, setPendingDialogOpen] = useState(false);
+  const [compareActiveBlockIndex, setCompareActiveBlockIndex] = useState(0);
+  const [compareNavigationToken, setCompareNavigationToken] = useState(0);
+  const [compareDiffTotal, setCompareDiffTotal] = useState(0);
+  const [mergeActiveBlockIndex, setMergeActiveBlockIndex] = useState(0);
+  const [mergeNavigationToken, setMergeNavigationToken] = useState(0);
+  const mergeEditorRefs = useRef<MergeEditorRefs>({
+    local: { editor: null, monaco: null },
+    final: { editor: null, monaco: null },
+    remote: { editor: null, monaco: null },
+  });
+  const mergeDecorationRefs = useRef<MergeDecorationRefs>({ local: null, final: null, remote: null });
 
   const startUpload = useSFTPStore((s) => s.startUpload);
   const startUploadDir = useSFTPStore((s) => s.startUploadDir);
@@ -150,53 +322,63 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
   const allTransfers = useSFTPStore((s) => s.transfers);
   const allExternalSessions = useExternalEditStore((s) => s.sessions);
   const pendingConflict = useExternalEditStore((s) => s.pendingConflict);
-  const dismissConflict = useExternalEditStore((s) => s.dismissConflict);
   const dismissCompare = useExternalEditStore((s) => s.dismissCompare);
+  const dismissMerge = useExternalEditStore((s) => s.dismissMerge);
   const deleteSession = useExternalEditStore((s) => s.deleteSession);
   const dismissErrorDetail = useExternalEditStore((s) => s.dismissErrorDetail);
+  const dismissRecoveryDetail = useExternalEditStore((s) => s.dismissRecoveryDetail);
   const compareResult = useExternalEditStore((s) => s.compareResult);
-  const compareSession = useExternalEditStore((s) => s.compareSession);
-  const autoSavePhases = useExternalEditStore((s) => s.autoSavePhases);
+  const mergeResult = useExternalEditStore((s) => s.mergeResult);
   const selectedError = useExternalEditStore((s) => s.selectedError);
+  const selectedRecovery = useExternalEditStore((s) => s.selectedRecovery);
   const openErrorDetail = useExternalEditStore((s) => s.openErrorDetail);
-  const refreshSession = useExternalEditStore((s) => s.refreshSession);
+  const openRecoveryDetail = useExternalEditStore((s) => s.openRecoveryDetail);
+  const prepareMerge = useExternalEditStore((s) => s.prepareMerge);
+  const applyMerge = useExternalEditStore((s) => s.applyMerge);
+  const recoverSession = useExternalEditStore((s) => s.recoverSession);
   const resolveConflict = useExternalEditStore((s) => s.resolveConflict);
   const savingSessionId = useExternalEditStore((s) => s.savingSessionId);
-  const remoteChangedConflict = pendingConflict?.status === "conflict_remote_changed" ? pendingConflict : null;
-  const remoteMissingConflict = pendingConflict?.status === "remote_missing" ? pendingConflict : null;
+  const safePendingConflict = isExternalEditClipboardResidueSession(pendingConflict?.session) ? null : pendingConflict;
+  const safeCompareResult = isExternalEditClipboardResidueSession(compareResult?.session) ? null : compareResult;
+  const safeStoreMergeResult = isExternalEditClipboardResidueSession(mergeResult?.session) ? null : mergeResult;
+  const safePreparedMergeResult = isExternalEditClipboardResidueSession(preparedMergeResult?.session)
+    ? null
+    : preparedMergeResult;
+  const safeMergeResult = safeStoreMergeResult || safePreparedMergeResult;
+  const safeSelectedError = isExternalEditClipboardResidueSession(selectedError) ? null : selectedError;
+  const safeSelectedRecovery = isExternalEditClipboardResidueSession(selectedRecovery) ? null : selectedRecovery;
 
   const sessionTransfers = useMemo(
     () => Object.values(allTransfers).filter((transfer) => transfer.sessionId === sessionId),
     [allTransfers, sessionId]
   );
-  const externalSessions = useMemo(
+  const attentionItems = useMemo(
+    () => buildExternalEditAttentionItems(allExternalSessions).filter((entry) => entry.session.assetId === assetId),
+    [allExternalSessions, assetId]
+  );
+  const pendingItems = useMemo(() => {
+    const items: ExternalEditPendingItem[] = [...attentionItems];
+    const pendingSession = safePendingConflict?.session;
+    if (pendingSession && pendingSession.assetId === assetId) {
+      const exists = items.some((item) => item.session.id === pendingSession.id && item.type === "conflict");
+      if (!exists) {
+        items.unshift({
+          id: `conflict:${pendingSession.id}`,
+          type: "conflict",
+          session: pendingSession,
+        });
+      }
+    }
+    return items.filter((item) => !isExternalEditClipboardResidueSession(item.session));
+  }, [assetId, attentionItems, safePendingConflict?.session]);
+  const mergeConflictBlocks = useMemo(
     () =>
-      buildExternalEditDocuments(allExternalSessions)
-        .map((entry) => entry.session)
-        .filter((session) => session.assetId === assetId),
-    [allExternalSessions, assetId]
+      safeMergeResult
+        ? buildTextDiffBlocks(safeMergeResult.remoteContent || "", safeMergeResult.localContent || "")
+        : [],
+    [safeMergeResult?.localContent, safeMergeResult?.remoteContent]
   );
-  const retainedDraftsByActiveSessionId = useMemo(() => {
-    const result = new Map<string, ExternalEditSession[]>();
-    for (const session of Object.values(allExternalSessions)) {
-      if (session.hidden || session.state !== "stale" || !session.supersededBySessionId) continue;
-      const retainedDrafts = result.get(session.supersededBySessionId) || [];
-      retainedDrafts.push(session);
-      result.set(session.supersededBySessionId, retainedDrafts);
-    }
-    for (const retainedDrafts of result.values()) {
-      retainedDrafts.sort((left, right) => right.updatedAt - left.updatedAt);
-    }
-    return result;
-  }, [allExternalSessions]);
-  const conflictDocuments = useMemo(
-    () => buildExternalEditConflicts(allExternalSessions).filter((entry) => entry.primaryDraft.assetId === assetId),
-    [allExternalSessions, assetId]
-  );
-  const errorDocuments = useMemo(
-    () => buildExternalEditErrors(allExternalSessions).filter((entry) => entry.session.assetId === assetId),
-    [allExternalSessions, assetId]
-  );
+  const mergeConflictTotal = mergeConflictBlocks.length;
 
   const isDragOver = useNativeFileDrop({
     currentPathRef,
@@ -206,46 +388,6 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
     startUploadFile,
   });
   const { handleResizeStart, isResizing, outerRef } = useResizeHandle({ onWidthChange, panelRef, width });
-
-  const handleCompareResizeStart = useCallback((edge: CompareResizeEdge, event: ReactPointerEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    const rect = compareDialogRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const startWidth = rect.width;
-    const startHeight = rect.height;
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-
-    document.body.style.cursor = edge.includes("left") || edge.includes("right") ? "ew-resize" : "ns-resize";
-    if (edge.includes("top") && edge.includes("right")) document.body.style.cursor = "nesw-resize";
-    if (edge.includes("bottom") && edge.includes("left")) document.body.style.cursor = "nesw-resize";
-    if (edge.includes("top") && edge.includes("left")) document.body.style.cursor = "nwse-resize";
-    if (edge.includes("bottom") && edge.includes("right")) document.body.style.cursor = "nwse-resize";
-    document.body.style.userSelect = "none";
-
-    const onPointerMove = (moveEvent: PointerEvent) => {
-      const widthDelta =
-        edge.includes("left") ? startX - moveEvent.clientX : edge.includes("right") ? moveEvent.clientX - startX : 0;
-      const heightDelta =
-        edge.includes("top") ? startY - moveEvent.clientY : edge.includes("bottom") ? moveEvent.clientY - startY : 0;
-      setCompareDialogSize(clampCompareDialogSize(startWidth + widthDelta, startHeight + heightDelta));
-    };
-
-    const onPointerUp = () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-      document.removeEventListener("pointermove", onPointerMove);
-      document.removeEventListener("pointerup", onPointerUp);
-    };
-
-    document.addEventListener("pointermove", onPointerMove);
-    document.addEventListener("pointerup", onPointerUp);
-  }, []);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -276,6 +418,35 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
     if (sessionSync.cwd === currentPath) return;
     void loadDir(sessionSync.cwd);
   }, [currentPath, directoryFollowMode, isOpen, loadDir, sessionSync?.cwd, sessionSync?.cwdKnown]);
+
+  useEffect(() => {
+    if (!safeMergeResult) {
+      setMergeFinalContent("");
+      setMergeDirty(false);
+      setMergeActiveBlockIndex(0);
+      return;
+    }
+    setMergeFinalContent(safeMergeResult.finalContent);
+    setMergeDirty(false);
+    setMergeActiveBlockIndex(0);
+    setMergeNavigationToken((token) => token + 1);
+  }, [safeMergeResult]);
+
+  useEffect(() => {
+    if (!safeCompareResult) {
+      setCompareActiveBlockIndex(0);
+      setCompareDiffTotal(0);
+      return;
+    }
+    setCompareActiveBlockIndex(0);
+    setCompareNavigationToken((token) => token + 1);
+  }, [safeCompareResult]);
+
+  useEffect(() => {
+    if (safePendingConflict) {
+      setPendingDialogOpen(true);
+    }
+  }, [safePendingConflict]);
 
   const doneUploadCount = sessionTransfers.filter((transfer) => {
     return transfer.status === "done" && transfer.direction === "upload";
@@ -336,37 +507,152 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
     [assetId, sessionId, setError]
   );
 
-  const handleSaveExternalEdit = useCallback(
+  const handlePrepareMerge = useCallback(
     async (session: ExternalEditSession) => {
+      setMergePrepareErrors((current) => {
+        const { [session.id]: _ignored, ...rest } = current;
+        return rest;
+      });
       try {
-        await useExternalEditStore.getState().saveSession(session.id);
+        const result = await prepareMerge(session.id);
+        const acceptedResult = useExternalEditStore.getState().mergeResult;
+        setPreparedMergeResult(
+          acceptedResult?.primaryDraftSessionId === result.primaryDraftSessionId ? acceptedResult : null
+        );
+        return true;
       } catch (error) {
-        setError(String(error));
+        const safeMessage = t(EXTERNAL_EDIT_SAFE_ERROR_KEY);
+        setError(safeMessage);
+        setMergePrepareErrors((current) => ({ ...current, [session.id]: safeMessage }));
+        return false;
       }
     },
-    [setError]
+    [prepareMerge, setError, t]
   );
 
-  const handleRefreshExternalEdit = useCallback(
+  const handlePendingMerge = useCallback(
     async (session: ExternalEditSession) => {
-      try {
-        await refreshSession(session.id);
-      } catch (error) {
-        setError(String(error));
+      const opened = await handlePrepareMerge(session);
+      if (opened) {
+        setPendingDialogOpen(false);
       }
     },
-    [refreshSession, setError]
+    [handlePrepareMerge]
   );
 
-  const handleCompareExternalEdit = useCallback(
+  const handlePendingAcceptRemote = useCallback(
     async (session: ExternalEditSession) => {
       try {
-        await compareSession(session.id);
+        await resolveConflict(session.id, "reread");
       } catch (error) {
-        setError(String(error));
+        setError(t(EXTERNAL_EDIT_SAFE_ERROR_KEY));
       }
     },
-    [compareSession, setError]
+    [resolveConflict, setError, t]
+  );
+
+  const handlePendingOverwrite = useCallback(
+    async (session: ExternalEditSession) => {
+      try {
+        await resolveConflict(session.id, session.state === "remote_missing" ? "recreate" : "overwrite");
+      } catch (error) {
+        setError(t(EXTERNAL_EDIT_SAFE_ERROR_KEY));
+      }
+    },
+    [resolveConflict, setError, t]
+  );
+
+  const handleApplyMerge = useCallback(async () => {
+    if (!safeMergeResult) return;
+    try {
+      await applyMerge(safeMergeResult.primaryDraftSessionId, mergeFinalContent, safeMergeResult.remoteHash);
+      setMergeDirty(false);
+      setPreparedMergeResult(null);
+    } catch (error) {
+      setError(t(EXTERNAL_EDIT_SAFE_ERROR_KEY));
+    }
+  }, [applyMerge, mergeFinalContent, safeMergeResult, setError, t]);
+
+  const handleMergeOpenChange = useCallback(
+    (open: boolean) => {
+      if (open) return;
+      if (mergeDirty) {
+        setConfirmCloseMerge(true);
+        return;
+      }
+      setPreparedMergeResult(null);
+      dismissMerge();
+    },
+    [dismissMerge, mergeDirty]
+  );
+
+  const navigateCompareBlock = useCallback(
+    (direction: -1 | 1) => {
+      if (compareDiffTotal === 0) return;
+      setCompareActiveBlockIndex((current) => {
+        const next = Math.min(Math.max(current + direction, 0), compareDiffTotal - 1);
+        if (next !== current) {
+          setCompareNavigationToken((token) => token + 1);
+        }
+        return next;
+      });
+    },
+    [compareDiffTotal]
+  );
+
+  const navigateMergeBlock = useCallback(
+    (direction: -1 | 1) => {
+      if (mergeConflictTotal === 0) return;
+      setMergeActiveBlockIndex((current) => {
+        const next = Math.min(Math.max(current + direction, 0), mergeConflictTotal - 1);
+        if (next !== current) {
+          setMergeNavigationToken((token) => token + 1);
+        }
+        return next;
+      });
+    },
+    [mergeConflictTotal]
+  );
+
+  const handleMergeEditorMount = useCallback(
+    (pane: MergePaneRole) => (editor: MonacoNS.editor.IStandaloneCodeEditor, monaco: typeof MonacoNS) => {
+      mergeEditorRefs.current[pane] = { editor, monaco };
+    },
+    []
+  );
+
+  useEffect(() => {
+    (["local", "final", "remote"] as MergePaneRole[]).forEach((pane) => {
+      const { editor, monaco } = mergeEditorRefs.current[pane];
+      if (!editor || !monaco) return;
+      const decorations = buildMergePaneDecorations(monaco, mergeConflictBlocks, mergeActiveBlockIndex, pane);
+      mergeDecorationRefs.current[pane]?.clear();
+      mergeDecorationRefs.current[pane] = editor.createDecorationsCollection(decorations);
+    });
+  }, [mergeActiveBlockIndex, mergeConflictBlocks, mergeFinalContent]);
+
+  useEffect(() => {
+    if (mergeConflictBlocks.length === 0) return;
+    const block = mergeConflictBlocks[Math.min(Math.max(mergeActiveBlockIndex, 0), mergeConflictBlocks.length - 1)];
+    (["local", "final", "remote"] as MergePaneRole[]).forEach((pane) => {
+      const editor = mergeEditorRefs.current[pane].editor;
+      if (!editor) return;
+      const { startLine } = blockLineRange(block, pane);
+      const lineNumber = Math.max(1, startLine);
+      editor.revealLineInCenter(lineNumber);
+      editor.setPosition({ lineNumber, column: 1 });
+    });
+  }, [mergeActiveBlockIndex, mergeConflictBlocks, mergeNavigationToken]);
+
+  const handleRecoverExternalEdit = useCallback(
+    async (session: ExternalEditSession) => {
+      try {
+        await recoverSession(session.id);
+      } catch (error) {
+        setError(t(EXTERNAL_EDIT_SAFE_ERROR_KEY));
+      }
+    },
+    [recoverSession, setError, t]
   );
 
   const handleDeleteExternalEdit = useCallback(
@@ -492,6 +778,26 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
               pathInput={pathInput}
             />
 
+            {pendingItems.length > 0 && (
+              <div className="border-b bg-amber-500/5 px-3 py-2">
+                <Button
+                  className="w-full justify-between"
+                  data-testid="external-edit-pending-entry"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setPendingDialogOpen(true)}
+                >
+                  <span className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    {t("externalEdit.pending.entry")}
+                  </span>
+                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
+                    {pendingItems.length}
+                  </span>
+                </Button>
+              </div>
+            )}
+
             <FileList
               canExternalEdit={canExternalEdit}
               currentPath={currentPath}
@@ -509,334 +815,6 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
               setSelected={setSelected}
             />
 
-            {(externalSessions.length > 0 || conflictDocuments.length > 0 || errorDocuments.length > 0) && (
-              <div className="border-t px-2 py-2 space-y-2">
-                <div className="text-[11px] font-medium text-muted-foreground">{t("externalEdit.panel.title")}</div>
-                {conflictDocuments.length > 0 && (
-                  <div className="space-y-1">
-                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground/80">
-                      {t("externalEdit.panel.conflicts")}
-                    </div>
-                    {conflictDocuments.map(
-                      ({ documentKey, primaryDraft, retainedDraft, activeDraft, latestSnapshot, showRetainedDrafts }) => {
-                        const fileName =
-                          primaryDraft.remotePath.split("/").filter(Boolean).pop() || primaryDraft.remotePath;
-                        const sameNameCount = Object.values(allExternalSessions).filter((session) => {
-                          const candidate = session.remotePath.split("/").filter(Boolean).pop() || session.remotePath;
-                          return candidate === fileName;
-                        }).length;
-                        const showPath = sameNameCount > 1;
-                        const compareDisabled =
-                          savingSessionId === primaryDraft.id ||
-                          (primaryDraft.state !== "conflict" && primaryDraft.state !== "stale");
-                        const rereadDisabled = savingSessionId === primaryDraft.id || primaryDraft.state !== "conflict";
-                        const overwriteDisabled =
-                          savingSessionId === primaryDraft.id || primaryDraft.state !== "conflict";
-                        const mainDraft = activeDraft || primaryDraft;
-                        const secondaryDrafts = showRetainedDrafts
-                          ? ([primaryDraft, retainedDraft].filter(
-                          (session, index, sessions) =>
-                            !!session &&
-                            session.id !== mainDraft.id &&
-                            sessions.findIndex((candidate) => candidate?.id === session.id) === index
-                            ) as ExternalEditSession[])
-                          : [];
-                        const recreateReason =
-                          primaryDraft.state !== "remote_missing"
-                            ? t("externalEdit.panel.recreateUnavailableState")
-                            : savingSessionId === primaryDraft.id
-                              ? t("externalEdit.panel.recreateUnavailableBusy")
-                              : activeDraft && activeDraft.id !== primaryDraft.id
-                                ? t("externalEdit.panel.recreateUnavailableActiveDraft")
-                                : "";
-                        const recreateDisabled = recreateReason.length > 0;
-                        return (
-                          <div
-                            key={documentKey}
-                            className="rounded border border-amber-400/30 bg-amber-500/5 px-2 py-2 text-[11px]"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <div className="truncate font-medium">{fileName}</div>
-                                {showPath && (
-                                  <div className="truncate text-muted-foreground">{primaryDraft.remotePath}</div>
-                                )}
-                                <div className="truncate text-muted-foreground">
-                                  {t(`externalEdit.state.${mainDraft.state}`)}
-                                  {activeDraft || latestSnapshot
-                                    ? ` · ${t("externalEdit.panel.remoteSnapshotReady")}`
-                                    : ""}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="mt-2 space-y-2">
-                              <div
-                                className="rounded border bg-background/80 px-2 py-2"
-                                data-testid="external-edit-main-draft"
-                              >
-                                <div className="text-[10px] uppercase tracking-wide text-muted-foreground/80">
-                                  {activeDraft ? t("externalEdit.panel.rereadDraft") : t("externalEdit.panel.currentDraft")}
-                                </div>
-                                <div className="mt-1 truncate font-medium">{fileName}</div>
-                                {showPath && (
-                                  <div className="truncate text-muted-foreground">{mainDraft.remotePath}</div>
-                                )}
-                                <div className="truncate text-muted-foreground">
-                                  {t(`externalEdit.state.${mainDraft.state}`)}
-                                  {activeDraft ? ` · ${t("externalEdit.panel.rereadDraftHint")}` : ""}
-                                </div>
-                              </div>
-                              {secondaryDrafts.length > 0 && (
-                                <details
-                                  className="rounded border border-dashed bg-background/50 px-2 py-1.5"
-                                  data-testid="external-edit-retained-drafts"
-                                >
-                                  <summary className="cursor-pointer text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
-                                    {t("externalEdit.panel.retainedDraft")}
-                                  </summary>
-                                  <div className="mt-1 space-y-1">
-                                    {secondaryDrafts.map((draft) => (
-                                      <div key={draft.id} className="min-w-0 rounded bg-muted/30 px-2 py-1">
-                                        <div className="truncate font-medium">{fileName}</div>
-                                        {showPath && (
-                                          <div className="truncate text-muted-foreground">{draft.remotePath}</div>
-                                        )}
-                                        <div className="truncate text-muted-foreground">
-                                          {t(`externalEdit.state.${draft.state}`)}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </details>
-                              )}
-                            </div>
-                            {primaryDraft.state === "remote_missing" ? (
-                              <div className="mt-2 flex flex-wrap gap-1">
-                                {!recreateDisabled && (
-                                  <Button
-                                    size="xs"
-                                    variant="outline"
-                                    onClick={async () => {
-                                      try {
-                                        await resolveConflict(primaryDraft.id, "recreate");
-                                        dismissConflict();
-                                      } catch (error) {
-                                        setError(String(error));
-                                      }
-                                    }}
-                                  >
-                                    {t("externalEdit.actions.saveAgain")}
-                                  </Button>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="mt-2 flex flex-wrap gap-1">
-                                <Button
-                                  size="xs"
-                                  variant="outline"
-                                  disabled={compareDisabled}
-                                  onClick={() => void handleCompareExternalEdit(primaryDraft)}
-                                >
-                                  <ArrowRightLeft className="mr-1 h-3 w-3" />
-                                  {t("externalEdit.actions.compare")}
-                                </Button>
-                                <Button
-                                  size="xs"
-                                  variant="outline"
-                                  disabled={rereadDisabled}
-                                  onClick={async () => {
-                                    try {
-                                      await resolveConflict(primaryDraft.id, "reread");
-                                      dismissConflict();
-                                    } catch (error) {
-                                      setError(String(error));
-                                    }
-                                  }}
-                                >
-                                  {t("externalEdit.actions.reread")}
-                                </Button>
-                                <Button
-                                  size="xs"
-                                  variant="destructive"
-                                  disabled={overwriteDisabled}
-                                  onClick={async () => {
-                                    try {
-                                      await resolveConflict(primaryDraft.id, "overwrite");
-                                      dismissConflict();
-                                    } catch (error) {
-                                      setError(String(error));
-                                    }
-                                  }}
-                                >
-                                  {t("externalEdit.actions.overwrite")}
-                                </Button>
-                              </div>
-                            )}
-                            {primaryDraft.state === "conflict" && (
-                              <div className="mt-1 text-[10px] text-muted-foreground">
-                                {t("externalEdit.panel.rereadBaselineHint")}
-                              </div>
-                            )}
-                            {primaryDraft.state === "remote_missing" && (
-                              <div className="mt-1 text-[10px] text-muted-foreground">
-                                {recreateReason || t("externalEdit.panel.recreateReadyHint")}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      }
-                    )}
-                  </div>
-                )}
-                {errorDocuments.length > 0 && (
-                  <div className="space-y-1">
-                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground/80">
-                      {t("externalEdit.panel.errors")}
-                    </div>
-                    {errorDocuments.map(({ session }) => {
-                      const fileName = session.remotePath.split("/").filter(Boolean).pop() || session.remotePath;
-                      return (
-                        <div
-                          key={session.id}
-                          className="rounded border border-rose-400/30 bg-rose-500/5 px-2 py-2 text-[11px] flex items-start justify-between gap-2"
-                        >
-                          <div className="min-w-0">
-                            <div className="truncate font-medium">{fileName}</div>
-                            <div className="truncate text-muted-foreground">{session.lastError?.summary}</div>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Button size="xs" variant="outline" onClick={() => openErrorDetail(session.id)}>
-                              <AlertTriangle className="mr-1 h-3 w-3" />
-                              {t("externalEdit.actions.viewError")}
-                            </Button>
-                            <Button
-                              size="xs"
-                              variant="outline"
-                              onClick={() => void handleDeleteExternalEdit(session, false)}
-                            >
-                              {t("externalEdit.actions.hideRecord")}
-                            </Button>
-                            <Button
-                              size="xs"
-                              variant="destructive"
-                              onClick={() => void handleDeleteExternalEdit(session, true)}
-                            >
-                              <Trash2 className="mr-1 h-3 w-3" />
-                              {t("externalEdit.actions.deleteLocal")}
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                <div className="space-y-1">
-                  {externalSessions.map((session) => {
-                    const fileName = session.remotePath.split("/").filter(Boolean).pop() || session.remotePath;
-                    const isRereadDraft = !!session.sourceSessionId;
-                    const retainedDrafts = retainedDraftsByActiveSessionId.get(session.id) || [];
-                    // stale 副本只用于保留冲突现场，不允许继续从面板直接覆盖回远端；
-                    // 其余状态只有在本地确实有待处理变更时才展示可操作入口，避免误触发空保存。
-                    const actionable =
-                      session.state !== "stale" &&
-                      (session.dirty || session.state === "conflict" || session.state === "remote_missing");
-                    const autoSavePhase = autoSavePhases[session.documentKey];
-                    const isAutoSaving = autoSavePhase === "pending" || autoSavePhase === "running";
-                    return (
-                      <div
-                        key={session.id}
-                        className={cn(
-                          "rounded border bg-muted/20 px-2 py-1.5 text-[11px] flex items-center justify-between gap-2",
-                          isAutoSaving && "border-primary/40 bg-primary/5"
-                        )}
-                      >
-                        <div className="min-w-0">
-                          {isRereadDraft && (
-                            <div className="mb-1 rounded border border-primary/20 bg-primary/5 px-2 py-1 text-[10px] text-primary">
-                              {t("externalEdit.panel.rereadBaselineHint")}
-                            </div>
-                          )}
-                          <div className="flex items-center gap-1.5">
-                            <div className="truncate font-medium">{fileName}</div>
-                            {isRereadDraft && (
-                              <span
-                                className="rounded-full border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
-                                data-testid="external-edit-active-reread-draft"
-                              >
-                                {t("externalEdit.panel.rereadDraft")}
-                              </span>
-                            )}
-                          </div>
-                          <div className="truncate text-muted-foreground">
-                            {t(`externalEdit.state.${session.state}`)}
-                            {isRereadDraft ? ` · ${t("externalEdit.panel.rereadDraftHint")}` : ""}
-                            {autoSavePhase === "pending" ? ` · ${t("externalEdit.panel.autoSavePending")}` : ""}
-                            {autoSavePhase === "running" ? ` · ${t("externalEdit.panel.autoSaveRunning")}` : ""}
-                          </div>
-                          {retainedDrafts.length > 0 && (
-                            <details
-                              className="mt-1 rounded border border-dashed bg-background/50 px-2 py-1"
-                              data-testid="external-edit-retained-drafts"
-                            >
-                              <summary className="cursor-pointer text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">
-                                {t("externalEdit.panel.retainedDraft")}
-                              </summary>
-                              <div className="mt-1 space-y-1">
-                                {retainedDrafts.map((draft) => (
-                                  <div key={draft.id} className="min-w-0 rounded bg-muted/30 px-2 py-1">
-                                    <div className="truncate font-medium">{fileName}</div>
-                                    <div className="truncate text-muted-foreground">{draft.remotePath}</div>
-                                    <div className="truncate text-muted-foreground">{t(`externalEdit.state.${draft.state}`)}</div>
-                                  </div>
-                                ))}
-                              </div>
-                            </details>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1">
-                          {isAutoSaving && (
-                            <div
-                              className="mr-1 rounded-full border border-primary/30 bg-background px-2 py-1 text-[10px] font-medium text-primary"
-                              data-testid="external-edit-autosave-phase"
-                            >
-                              {t(
-                                autoSavePhase === "running"
-                                  ? "externalEdit.panel.autoSaveRunning"
-                                  : "externalEdit.panel.autoSavePending"
-                              )}
-                            </div>
-                          )}
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            disabled={savingSessionId === session.id}
-                            onClick={() => void handleRefreshExternalEdit(session)}
-                          >
-                            <RefreshCw className="mr-1 h-3 w-3" />
-                            {t("externalEdit.actions.refresh")}
-                          </Button>
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            disabled={!actionable || savingSessionId === session.id || autoSavePhase === "running"}
-                            onClick={() => void handleSaveExternalEdit(session)}
-                          >
-                            {savingSessionId === session.id ? t("action.saving") : t("externalEdit.actions.sync")}
-                          </Button>
-                          <Button
-                            size="xs"
-                            variant="ghost"
-                            onClick={() => void handleDeleteExternalEdit(session, false)}
-                          >
-                            {t("externalEdit.actions.hideRecord")}
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
 
             <TransferSection sessionId={sessionId} transfers={sessionTransfers} />
           </div>
@@ -845,123 +823,515 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
 
       {ctxMenu && <FloatingMenu ctx={ctxMenu} onAction={handleCtxAction} onClose={() => setCtxMenu(null)} />}
 
-      <AlertDialog
-        open={!!remoteChangedConflict}
-        onOpenChange={(open) => {
-          if (!open) dismissConflict();
-        }}
-      >
-        <AlertDialogContent onOverlayClick={dismissConflict}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("externalEdit.conflict.remoteChangedTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>{remoteChangedConflict?.message || ""}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <Button variant="outline" onClick={dismissConflict}>
-              {t("action.cancel")}
+      <Dialog open={pendingDialogOpen} onOpenChange={setPendingDialogOpen}>
+        <DialogContent
+          className="max-h-[82vh] max-w-3xl grid-rows-[auto,minmax(0,1fr),auto] gap-0 overflow-hidden p-0"
+          data-testid="external-edit-pending-dialog"
+        >
+          <DialogHeader className="shrink-0 border-b px-6 py-4" data-testid="external-edit-pending-dialog-header">
+            <DialogTitle>{t("externalEdit.pending.title")}</DialogTitle>
+            <DialogDescription>{t("externalEdit.pending.description")}</DialogDescription>
+          </DialogHeader>
+          <div
+            className="min-h-0 space-y-3 overflow-y-auto px-6 py-4"
+            data-testid="external-edit-pending-dialog-body"
+          >
+            {pendingItems.length === 0 ? (
+              <div className="rounded border bg-muted/20 px-3 py-4 text-sm text-muted-foreground">
+                {t("externalEdit.pending.empty")}
+              </div>
+            ) : (
+              pendingItems.map((item) => {
+                const session = item.session;
+                const fileName = session.remotePath.split("/").filter(Boolean).pop() || session.remotePath;
+                const isConflict = item.type === "conflict";
+                const isError = item.type === "error";
+                const isRecovery = item.type === "recovery";
+                const isRemoteMissing = session.state === "remote_missing";
+                return (
+                  <div
+                    key={item.id}
+                    className={cn(
+                      "rounded border px-4 py-4 text-sm",
+                      isConflict && "border-amber-400/30 bg-amber-500/5",
+                      isError && "border-rose-400/30 bg-rose-500/5",
+                      isRecovery && "border-sky-400/30 bg-sky-500/5"
+                    )}
+                    data-testid={`external-edit-pending-${item.type}`}
+                  >
+                    <div className="flex flex-col gap-3">
+                      <div className="min-w-0 space-y-1.5" data-testid={`external-edit-pending-content-${session.id}`}>
+                        <div
+                          className="break-words font-medium text-foreground"
+                          data-testid={`external-edit-pending-file-${session.id}`}
+                        >
+                          {fileName}
+                        </div>
+                        <div
+                          className="break-all whitespace-normal text-xs text-muted-foreground"
+                          data-testid={`external-edit-pending-path-${session.id}`}
+                        >
+                          {session.remotePath}
+                        </div>
+                        <div
+                          className="break-words whitespace-normal text-xs leading-5 text-muted-foreground"
+                          data-testid={`external-edit-pending-summary-${session.id}`}
+                        >
+                          {isConflict && t(isRemoteMissing ? "externalEdit.conflict.remoteMissingTitle" : "externalEdit.conflict.remoteChangedTitle")}
+                          {isError && (session.lastError?.summary || t("externalEdit.error.title"))}
+                          {isRecovery && t("externalEdit.recovery.summary")}
+                        </div>
+                      </div>
+                      <div
+                        className="flex w-full flex-wrap items-start gap-2"
+                        data-testid={`external-edit-pending-actions-${session.id}`}
+                      >
+                        {isConflict && !isRemoteMissing && (
+                          <>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
+                              disabled={savingSessionId === session.id || session.state !== "conflict"}
+                              onClick={() => void handlePendingMerge(session)}
+                            >
+                              <GitMerge className="mr-1 h-3 w-3" />
+                              {t("externalEdit.actions.merge")}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
+                              disabled={savingSessionId === session.id || session.state !== "conflict"}
+                              onClick={() => void handlePendingAcceptRemote(session)}
+                            >
+                              {t("externalEdit.actions.acceptRemote")}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="destructive"
+                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
+                              disabled={savingSessionId === session.id || session.state !== "conflict"}
+                              onClick={() => void handlePendingOverwrite(session)}
+                            >
+                              {t("externalEdit.actions.overwrite")}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
+                              onClick={() => void handleDeleteExternalEdit(session, false)}
+                            >
+                              {t("externalEdit.actions.hideRecord")}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="destructive"
+                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
+                              onClick={() => void handleDeleteExternalEdit(session, true)}
+                            >
+                              <Trash2 className="mr-1 h-3 w-3" />
+                              {t("externalEdit.actions.deleteLocal")}
+                            </Button>
+                          </>
+                        )}
+                        {isConflict && isRemoteMissing && (
+                          <>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
+                              disabled={savingSessionId === session.id}
+                              onClick={() => void handlePendingOverwrite(session)}
+                            >
+                              {t("externalEdit.actions.saveAgain")}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
+                              onClick={() => void handleDeleteExternalEdit(session, false)}
+                            >
+                              {t("externalEdit.actions.hideRecord")}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="destructive"
+                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
+                              onClick={() => void handleDeleteExternalEdit(session, true)}
+                            >
+                              <Trash2 className="mr-1 h-3 w-3" />
+                              {t("externalEdit.actions.deleteLocal")}
+                            </Button>
+                          </>
+                        )}
+                        {isError && (
+                          <>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
+                              onClick={() => openErrorDetail(session.id)}
+                            >
+                              <AlertTriangle className="mr-1 h-3 w-3" />
+                              {t("externalEdit.actions.viewError")}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
+                              onClick={() => void handleDeleteExternalEdit(session, false)}
+                            >
+                              {t("externalEdit.actions.hideRecord")}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="destructive"
+                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
+                              onClick={() => void handleDeleteExternalEdit(session, true)}
+                            >
+                              <Trash2 className="mr-1 h-3 w-3" />
+                              {t("externalEdit.actions.deleteLocal")}
+                            </Button>
+                          </>
+                        )}
+                        {isRecovery && (
+                          <>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
+                              onClick={() => openRecoveryDetail(session.id)}
+                            >
+                              <RotateCcw className="mr-1 h-3 w-3" />
+                              {t("externalEdit.actions.viewRecovery")}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
+                              disabled={savingSessionId === session.id}
+                              onClick={() => void handleRecoverExternalEdit(session)}
+                            >
+                              {t("externalEdit.actions.reopenLocal")}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
+                              onClick={() => void handleDeleteExternalEdit(session, false)}
+                            >
+                              {t("externalEdit.actions.hideRecord")}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="destructive"
+                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
+                              onClick={() => void handleDeleteExternalEdit(session, true)}
+                            >
+                              <Trash2 className="mr-1 h-3 w-3" />
+                              {t("externalEdit.actions.deleteLocal")}
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    {mergePrepareErrors[session.id] && (
+                      <div className="mt-2 rounded border border-destructive/30 bg-destructive/5 px-2 py-1 text-xs text-destructive">
+                        {mergePrepareErrors[session.id]}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <div
+            className="flex shrink-0 justify-end border-t px-6 py-3"
+            data-testid="external-edit-pending-dialog-footer"
+          >
+            <Button
+              variant="outline"
+              onClick={() => {
+                setPendingDialogOpen(false);
+              }}
+            >
+              {t("action.close")}
             </Button>
-            <Button variant="outline" onClick={dismissConflict}>
-              {t("externalEdit.panel.reviewInList")}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {safeCompareResult && (
+          <ExternalEditIdeaFrame
+            fileName={safeCompareResult.fileName}
+          helper={t("externalEdit.compare.helper")}
+          layoutLabel={t("externalEdit.compare.remoteLeftLocalRight")}
+          mode="compare"
+          remotePath={safeCompareResult.remotePath}
+          sidebarLabel={t("externalEdit.compare.projectView")}
+          status={t("externalEdit.compare.status")}
+          testId="external-edit-compare-workbench"
+          title={t("externalEdit.compare.title")}
+          actions={
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="xs"
+                className="border-slate-600 bg-transparent text-slate-200 hover:bg-slate-700 hover:text-white"
+                disabled={compareDiffTotal === 0 || compareActiveBlockIndex === 0}
+                onClick={() => navigateCompareBlock(-1)}
+              >
+                {t("externalEdit.compare.previous")}
+              </Button>
+              <div
+                className="min-w-14 rounded border border-slate-600 bg-slate-800 px-2 py-1 text-center text-xs text-slate-200"
+                data-testid="external-edit-compare-diff-count"
+              >
+                {compareDiffTotal === 0 ? "0 / 0" : `${compareActiveBlockIndex + 1} / ${compareDiffTotal}`}
+              </div>
+              <Button
+                variant="outline"
+                size="xs"
+                className="border-slate-600 bg-transparent text-slate-200 hover:bg-slate-700 hover:text-white"
+                disabled={compareDiffTotal === 0 || compareActiveBlockIndex >= compareDiffTotal - 1}
+                onClick={() => navigateCompareBlock(1)}
+              >
+                {t("externalEdit.compare.next")}
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="text-slate-300 hover:bg-slate-700 hover:text-white"
+                onClick={dismissCompare}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          }
+        >
+          <div
+            className="min-h-0 flex-1 bg-[#1f2329] p-2"
+            data-idea-layout="read-only-diff"
+            data-testid="external-edit-compare-idea-layout"
+          >
+            <CodeDiffViewer
+              activeBlockIndex={compareActiveBlockIndex}
+              badge={t("externalEdit.compare.readOnly")}
+              className="border-slate-700 bg-[#f8fafc] text-slate-950 dark:bg-[#1f2329] dark:text-slate-100"
+              height="100%"
+              language="plaintext"
+              modified={safeCompareResult.localContent || ""}
+              modifiedTitle={t("externalEdit.compare.localDraft")}
+              navigationToken={compareNavigationToken}
+              original={safeCompareResult.remoteContent || ""}
+              originalTitle={t("externalEdit.compare.remoteSnapshot")}
+              testId="external-edit-compare-diff-editor"
+              onDiffStatsChange={({ total }) => {
+                setCompareDiffTotal(total);
+                setCompareActiveBlockIndex((current) => Math.min(current, Math.max(total - 1, 0)));
+              }}
+            />
+          </div>
+        </ExternalEditIdeaFrame>
+      )}
+
+      {safeMergeResult && (
+        <ExternalEditIdeaFrame
+          fileName={safeMergeResult.fileName}
+          helper={t("externalEdit.merge.helper")}
+          layoutLabel={t("externalEdit.merge.localCenterRemote")}
+          mode="merge"
+          remotePath={safeMergeResult.remotePath}
+          sidebarLabel={t("externalEdit.merge.changelist")}
+          status={t("externalEdit.merge.status")}
+          testId="external-edit-merge-workbench"
+          title={t("externalEdit.merge.title")}
+          actions={
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="xs"
+                className="border-slate-600 bg-transparent text-slate-200 hover:bg-slate-700 hover:text-white"
+                disabled={mergeConflictTotal === 0 || mergeActiveBlockIndex === 0}
+                onClick={() => navigateMergeBlock(-1)}
+              >
+                {t("externalEdit.merge.previous")}
+              </Button>
+              <div
+                className="min-w-14 rounded border border-slate-600 bg-slate-800 px-2 py-1 text-center text-xs text-slate-200"
+                data-testid="external-edit-merge-conflict-count"
+              >
+                {mergeConflictTotal === 0 ? "0 / 0" : `${mergeActiveBlockIndex + 1} / ${mergeConflictTotal}`}
+              </div>
+              <Button
+                variant="outline"
+                size="xs"
+                className="border-slate-600 bg-transparent text-slate-200 hover:bg-slate-700 hover:text-white"
+                disabled={mergeConflictTotal === 0 || mergeActiveBlockIndex >= mergeConflictTotal - 1}
+                onClick={() => navigateMergeBlock(1)}
+              >
+                {t("externalEdit.merge.next")}
+              </Button>
+              <Button
+                variant="outline"
+                className="border-slate-600 bg-transparent text-slate-200 hover:bg-slate-700 hover:text-white"
+                onClick={() => handleMergeOpenChange(false)}
+              >
+                {t("action.cancel")}
+              </Button>
+              <Button
+                disabled={!safeMergeResult || savingSessionId === safeMergeResult.primaryDraftSessionId}
+                onClick={() => void handleApplyMerge()}
+              >
+                {savingSessionId === safeMergeResult?.primaryDraftSessionId
+                  ? t("action.saving")
+                  : t("externalEdit.actions.saveMerge")}
+              </Button>
+            </div>
+          }
+        >
+          <div
+            className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_minmax(0,1fr)] gap-px bg-slate-700"
+            data-idea-layout="three-way-merge"
+            data-testid="external-edit-merge-idea-layout"
+          >
+            <ExternalEditIdeaEditorPane
+              badge={t("externalEdit.merge.readOnlySide")}
+              title={t("externalEdit.merge.localDraft")}
+              tone="local"
+            >
+                <CodeEditor
+                  className="min-h-0 flex-1 overflow-hidden"
+                  fontSize={12}
+                  height="100%"
+                  language="plaintext"
+                  options={{
+                    lineNumbers: "on",
+                    contextmenu: true,
+                    glyphMargin: true,
+                    minimap: { enabled: false },
+                    overviewRulerLanes: 3,
+                    readOnly: true,
+                  }}
+                  readOnly
+                  testId="external-edit-merge-local"
+                  value={safeMergeResult.localContent || ""}
+                  onMount={handleMergeEditorMount("local")}
+                />
+            </ExternalEditIdeaEditorPane>
+            <ExternalEditIdeaEditorPane
+              badge={t("externalEdit.merge.editableCenter")}
+              title={t("externalEdit.merge.finalDraft")}
+              tone="final"
+            >
+                <CodeEditor
+                  className="min-h-0 flex-1 overflow-hidden"
+                  fontSize={12}
+                  height="100%"
+                  language="plaintext"
+                  options={{
+                    lineNumbers: "on",
+                    contextmenu: true,
+                    glyphMargin: true,
+                    minimap: { enabled: false },
+                    overviewRulerLanes: 3,
+                  }}
+                  testId="external-edit-merge-final"
+                  value={mergeFinalContent}
+                  onChange={(value) => {
+                    setMergeFinalContent(value);
+                    setMergeDirty(true);
+                  }}
+                  onMount={handleMergeEditorMount("final")}
+                />
+            </ExternalEditIdeaEditorPane>
+            <ExternalEditIdeaEditorPane
+              badge={t("externalEdit.merge.readOnlySide")}
+              title={t("externalEdit.merge.remoteDraft")}
+              tone="remote"
+            >
+                <CodeEditor
+                  className="min-h-0 flex-1 overflow-hidden"
+                  fontSize={12}
+                  height="100%"
+                  language="plaintext"
+                  options={{
+                    lineNumbers: "on",
+                    contextmenu: true,
+                    glyphMargin: true,
+                    minimap: { enabled: false },
+                    overviewRulerLanes: 3,
+                    readOnly: true,
+                  }}
+                  readOnly
+                  testId="external-edit-merge-remote"
+                  value={safeMergeResult.remoteContent || ""}
+                  onMount={handleMergeEditorMount("remote")}
+                />
+            </ExternalEditIdeaEditorPane>
+          </div>
+        </ExternalEditIdeaFrame>
+      )}
 
       <ConfirmDialog
-        open={!!remoteMissingConflict}
+        open={confirmCloseMerge}
         onOpenChange={(open) => {
-          if (!open) dismissConflict();
+          if (!open) setConfirmCloseMerge(false);
         }}
-        title={t("externalEdit.conflict.remoteMissingTitle")}
-        description={remoteMissingConflict?.message || ""}
+        title={t("externalEdit.merge.closeDirtyTitle")}
+        description={t("externalEdit.merge.closeDirtyDesc")}
         cancelText={t("action.cancel")}
-        confirmText={t("externalEdit.panel.reviewInList")}
-        onConfirm={dismissConflict}
+        confirmText={t("externalEdit.merge.closeDirtyConfirm")}
+        onConfirm={() => {
+          setConfirmCloseMerge(false);
+          setMergeDirty(false);
+          setPreparedMergeResult(null);
+          dismissMerge();
+        }}
       />
 
-      <Dialog open={!!compareResult} onOpenChange={(open) => !open && dismissCompare()}>
-        <DialogContent
-          ref={compareDialogRef}
-          className="flex max-h-[96vh] max-w-[98vw] overflow-hidden p-0"
-          data-testid="external-edit-compare-dialog"
-          style={{
-            width: `min(98vw, ${compareDialogSize.width}px)`,
-            height: `min(96vh, ${compareDialogSize.height}px)`,
-            minWidth: `min(92vw, ${COMPARE_DIALOG_MIN_WIDTH}px)`,
-            minHeight: `min(86vh, ${COMPARE_DIALOG_MIN_HEIGHT}px)`,
-          }}
-        >
-          {COMPARE_RESIZE_HANDLES.map((handle) => (
-            <div
-              key={handle.edge}
-              aria-label={`resize ${handle.edge}`}
-              className={cn(
-                "absolute z-10 rounded-sm bg-transparent transition-colors hover:bg-primary/25",
-                handle.className,
-                handle.cursorClass
-              )}
-              data-testid={`external-edit-compare-resize-${handle.edge}`}
-              role="separator"
-              onPointerDown={(event) => handleCompareResizeStart(handle.edge, event)}
-            />
-          ))}
-          <DialogHeader className="border-b px-6 py-4">
-            <DialogTitle>{t("externalEdit.compare.title")}</DialogTitle>
-            <DialogDescription>
-              {compareResult ? `${compareResult.fileName} · ${compareResult.remotePath}` : ""}
-            </DialogDescription>
+      <Dialog open={!!safeSelectedError} onOpenChange={(open) => !open && dismissErrorDetail()}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{t("externalEdit.error.title")}</DialogTitle>
+            <DialogDescription>{safeSelectedError ? `${safeSelectedError.remotePath}` : ""}</DialogDescription>
           </DialogHeader>
-          <div className="flex min-h-0 flex-1 flex-col px-6 py-4">
-            <div className="mb-3 rounded border bg-muted/20 px-3 py-2">
-              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                <div>{t("externalEdit.compare.helper")}</div>
-                <div className="rounded-full border border-border bg-background px-2 py-1 font-medium">
-                  {t("externalEdit.compare.readOnly")}
-                </div>
-              </div>
-              <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 text-[11px] text-muted-foreground">
-                <div className="truncate rounded bg-background px-2 py-1 font-medium">
-                  {t("externalEdit.compare.remoteSnapshot")}
-                </div>
-                <ArrowRightLeft className="h-3.5 w-3.5" />
-                <div className="truncate rounded bg-background px-2 py-1 text-right font-medium">
-                  {t("externalEdit.compare.localDraft")}
-                </div>
-              </div>
+          <div className="space-y-3 text-sm">
+            <div>
+              <div className="text-xs text-muted-foreground">{t("externalEdit.error.summaryLabel")}</div>
+              <div>{safeSelectedError?.lastError?.summary || ""}</div>
             </div>
-            <div className="min-h-0 flex-1">
-              <CodeDiffViewer
-                original={compareResult?.remoteContent || ""}
-                modified={compareResult?.localContent || ""}
-                originalTitle={t("externalEdit.compare.remoteSnapshot")}
-                modifiedTitle={t("externalEdit.compare.localDraft")}
-                badge={t("externalEdit.compare.readOnly")}
-                language="plaintext"
-                height="100%"
-              />
+            <div>
+              <div className="text-xs text-muted-foreground">{t("externalEdit.error.stepLabel")}</div>
+              <div>{safeSelectedError?.lastError?.step || ""}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">{t("externalEdit.error.suggestionLabel")}</div>
+              <div>{safeSelectedError?.lastError?.suggestion || ""}</div>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!selectedError} onOpenChange={(open) => !open && dismissErrorDetail()}>
+      <Dialog open={!!safeSelectedRecovery} onOpenChange={(open) => !open && dismissRecoveryDetail()}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>{t("externalEdit.error.title")}</DialogTitle>
-            <DialogDescription>{selectedError ? `${selectedError.remotePath}` : ""}</DialogDescription>
+            <DialogTitle>{t("externalEdit.recovery.title")}</DialogTitle>
+            <DialogDescription>{safeSelectedRecovery ? `${safeSelectedRecovery.remotePath}` : ""}</DialogDescription>
           </DialogHeader>
           <div className="space-y-3 text-sm">
-            <div>
-              <div className="text-xs text-muted-foreground">{t("externalEdit.error.summaryLabel")}</div>
-              <div>{selectedError?.lastError?.summary || ""}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">{t("externalEdit.error.stepLabel")}</div>
-              <div>{selectedError?.lastError?.step || ""}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">{t("externalEdit.error.suggestionLabel")}</div>
-              <div>{selectedError?.lastError?.suggestion || ""}</div>
+            <div>{t("externalEdit.recovery.description")}</div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={dismissRecoveryDetail}>
+                {t("action.cancel")}
+              </Button>
+              <Button
+                disabled={!safeSelectedRecovery || savingSessionId === safeSelectedRecovery.id}
+                onClick={() => safeSelectedRecovery && void handleRecoverExternalEdit(safeSelectedRecovery)}
+              >
+                {t("externalEdit.actions.reopenLocal")}
+              </Button>
             </div>
           </div>
         </DialogContent>

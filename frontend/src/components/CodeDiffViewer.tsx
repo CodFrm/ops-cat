@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
-import { DiffEditor } from "@monaco-editor/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
 import type * as MonacoNS from "monaco-editor";
 import { useResolvedTheme } from "./theme-provider";
 import type { CodeEditorLanguage } from "./CodeEditor";
+import { buildTextDiffBlocks, type TextDiffBlock } from "@/lib/textDiffBlocks";
 
 export interface CodeDiffViewerProps {
   original: string;
@@ -13,6 +14,10 @@ export interface CodeDiffViewerProps {
   language?: CodeEditorLanguage;
   height?: string | number;
   className?: string;
+  activeBlockIndex?: number;
+  navigationToken?: number;
+  onDiffStatsChange?: (stats: { total: number; blocks: TextDiffBlock[] }) => void;
+  testId?: string;
 }
 
 const DEFAULT_OPTIONS: MonacoNS.editor.IDiffEditorConstructionOptions = {
@@ -27,16 +32,69 @@ const DEFAULT_OPTIONS: MonacoNS.editor.IDiffEditorConstructionOptions = {
   renderIndicators: true,
   splitViewDefaultRatio: 0.5,
   enableSplitViewResizing: true,
-  renderOverviewRuler: false,
+  renderOverviewRuler: true,
   scrollBeyondLastLine: false,
   fixedOverflowWidgets: true,
   contextmenu: true,
   minimap: { enabled: false },
   diffWordWrap: "on",
   wordWrap: "on",
+  overviewRulerLanes: 3,
+  hideUnchangedRegions: { enabled: false },
   scrollbar: { alwaysConsumeMouseWheel: false, verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
   fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
 };
+
+function lineRangeDecorationClass(kind: TextDiffBlock["kind"], active: boolean, side: "original" | "modified") {
+  if (active) return "external-edit-compare-line-current";
+  if (kind === "insert") return side === "modified" ? "external-edit-compare-line-insert" : "";
+  if (kind === "delete") return side === "original" ? "external-edit-compare-line-delete" : "";
+  return "external-edit-compare-line-modify";
+}
+
+function lineMarkerDecorationClass(kind: TextDiffBlock["kind"], active: boolean, side: "original" | "modified") {
+  if (active) return "external-edit-compare-gutter-current";
+  if (kind === "insert") return side === "modified" ? "external-edit-compare-gutter-insert" : "";
+  if (kind === "delete") return side === "original" ? "external-edit-compare-gutter-delete" : "";
+  return "external-edit-compare-gutter-modify";
+}
+
+function makeEditorDecorations(
+  monaco: typeof MonacoNS,
+  blocks: TextDiffBlock[],
+  activeBlockIndex: number,
+  side: "original" | "modified"
+): MonacoNS.editor.IModelDeltaDecoration[] {
+  return blocks.flatMap((block, index) => {
+    const startLine = side === "original" ? block.originalStartLine : block.modifiedStartLine;
+    const endLine = side === "original" ? block.originalEndLine : block.modifiedEndLine;
+    if (endLine < startLine || startLine < 1) return [];
+    const isActive = index === activeBlockIndex;
+    const className = lineRangeDecorationClass(block.kind, isActive, side);
+    const glyphClassName = lineMarkerDecorationClass(block.kind, isActive, side);
+    if (!className && !glyphClassName) return [];
+    const color =
+      block.kind === "insert"
+        ? "#16a34a"
+        : block.kind === "delete"
+          ? "#dc2626"
+          : "#d97706";
+    return [
+      {
+        range: new monaco.Range(startLine, 1, endLine, 1),
+        options: {
+          isWholeLine: true,
+          className,
+          glyphMarginClassName: glyphClassName,
+          overviewRuler: {
+            color,
+            position: monaco.editor.OverviewRulerLane.Full,
+          },
+        },
+      },
+    ];
+  });
+}
 
 export function CodeDiffViewer({
   original,
@@ -47,11 +105,55 @@ export function CodeDiffViewer({
   language = "plaintext",
   height = "100%",
   className,
+  activeBlockIndex = 0,
+  navigationToken = 0,
+  onDiffStatsChange,
+  testId,
 }: CodeDiffViewerProps) {
   const resolvedTheme = useResolvedTheme();
+  const diffEditorRef = useRef<MonacoNS.editor.IStandaloneDiffEditor | null>(null);
+  const monacoRef = useRef<typeof MonacoNS | null>(null);
+  const originalDecorationsRef = useRef<MonacoNS.editor.IEditorDecorationsCollection | null>(null);
+  const modifiedDecorationsRef = useRef<MonacoNS.editor.IEditorDecorationsCollection | null>(null);
   const [monacoReady, setMonacoReady] = useState(false);
   const [monacoLoadError, setMonacoLoadError] = useState<unknown>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const diffBlocks = useMemo(() => buildTextDiffBlocks(original, modified), [original, modified]);
+
+  useEffect(() => {
+    onDiffStatsChange?.({ total: diffBlocks.length, blocks: diffBlocks });
+  }, [diffBlocks, onDiffStatsChange]);
+
+  const applyDecorations = useCallback(() => {
+    const diffEditor = diffEditorRef.current;
+    const monaco = monacoRef.current;
+    if (!diffEditor || !monaco) return;
+    const originalEditor = diffEditor.getOriginalEditor();
+    const modifiedEditor = diffEditor.getModifiedEditor();
+    const originalDecorations = makeEditorDecorations(monaco, diffBlocks, activeBlockIndex, "original");
+    const modifiedDecorations = makeEditorDecorations(monaco, diffBlocks, activeBlockIndex, "modified");
+    originalDecorationsRef.current?.clear();
+    modifiedDecorationsRef.current?.clear();
+    originalDecorationsRef.current = originalEditor.createDecorationsCollection(originalDecorations);
+    modifiedDecorationsRef.current = modifiedEditor.createDecorationsCollection(modifiedDecorations);
+  }, [activeBlockIndex, diffBlocks]);
+
+  useEffect(() => {
+    applyDecorations();
+  }, [applyDecorations]);
+
+  useEffect(() => {
+    const diffEditor = diffEditorRef.current;
+    if (!diffEditor || diffBlocks.length === 0) return;
+    const target = diffBlocks[Math.min(Math.max(activeBlockIndex, 0), diffBlocks.length - 1)];
+    const originalLine = Math.max(1, target.originalStartLine);
+    const modifiedLine = Math.max(1, target.modifiedStartLine);
+    diffEditor.getOriginalEditor().revealLineInCenter(originalLine);
+    diffEditor.getModifiedEditor().revealLineInCenter(modifiedLine);
+    diffEditor.getOriginalEditor().setPosition({ lineNumber: originalLine, column: 1 });
+    diffEditor.getModifiedEditor().setPosition({ lineNumber: modifiedLine, column: 1 });
+    applyDecorations();
+  }, [activeBlockIndex, applyDecorations, diffBlocks, navigationToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -72,6 +174,14 @@ export function CodeDiffViewer({
   const handleRetryLoad = useCallback(() => {
     setLoadAttempt((n) => n + 1);
   }, []);
+
+  const handleMount = useCallback<DiffOnMount>((editor, monaco) => {
+    diffEditorRef.current = editor;
+    monacoRef.current = monaco;
+    window.setTimeout(() => {
+      applyDecorations();
+    }, 0);
+  }, [applyDecorations]);
 
   const showHeader = originalTitle || modifiedTitle || badge;
   const header = showHeader ? (
@@ -137,6 +247,8 @@ export function CodeDiffViewer({
         modified={modified}
         theme={resolvedTheme === "dark" ? "opskat-dark" : "opskat-light"}
         options={DEFAULT_OPTIONS}
+        onMount={handleMount}
+        wrapperProps={testId ? { "data-testid": testId } : undefined}
       />
     </div>
   );

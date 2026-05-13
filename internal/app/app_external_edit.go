@@ -24,6 +24,8 @@ type ExternalEditOpenRequest = external_edit_svc.OpenRequest
 type ExternalEditSession = external_edit_svc.Session
 type ExternalEditSaveResult = external_edit_svc.SaveResult
 type ExternalEditCompareResult = external_edit_svc.CompareResult
+type ExternalEditMergePrepareResult = external_edit_svc.MergePrepareResult
+type ExternalEditMergeApplyRequest = external_edit_svc.MergeApplyRequest
 type ExternalEditDeleteResult = external_edit_svc.DeleteResult
 
 func (a *App) initExternalEdit() {
@@ -169,6 +171,30 @@ func (a *App) CompareExternalEditSession(sessionID string) (*ExternalEditCompare
 		return nil, err
 	}
 	return svc.Compare(sessionID)
+}
+
+func (a *App) PrepareExternalEditMerge(sessionID string) (*ExternalEditMergePrepareResult, error) {
+	svc, err := a.externalEditService()
+	if err != nil {
+		return nil, err
+	}
+	return svc.PrepareMerge(sessionID)
+}
+
+func (a *App) ApplyExternalEditMerge(req ExternalEditMergeApplyRequest) (*ExternalEditSaveResult, error) {
+	svc, err := a.externalEditService()
+	if err != nil {
+		return nil, err
+	}
+	return svc.ApplyMerge(a.langCtx(), req)
+}
+
+func (a *App) RecoverExternalEditSession(sessionID string) (*ExternalEditSession, error) {
+	svc, err := a.externalEditService()
+	if err != nil {
+		return nil, err
+	}
+	return svc.Recover(sessionID)
 }
 
 func (a *App) DeleteExternalEditSession(sessionID string, removeLocal bool) (*ExternalEditDeleteResult, error) {

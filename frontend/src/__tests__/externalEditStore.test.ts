@@ -1,5 +1,87 @@
-import { describe, expect, it } from "vitest";
-import { buildExternalEditConflicts, buildExternalEditDocuments } from "../stores/externalEditStore";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  buildExternalEditErrors,
+  buildExternalEditAttentionItems,
+  buildExternalEditConflicts,
+  buildExternalEditDocuments,
+  buildExternalEditRecoveries,
+  useExternalEditStore,
+} from "../stores/externalEditStore";
+import type { ExternalEditSession } from "../lib/externalEditApi";
+
+function makeSession(partial: Partial<ExternalEditSession> & { id: string }): ExternalEditSession {
+  return {
+    assetId: 101,
+    assetName: "asset-101",
+    documentKey: "101:/srv/app/demo.txt",
+    sessionId: "ssh-b",
+    remotePath: "/srv/app/demo.txt",
+    remoteRealPath: "/srv/app/demo.txt",
+    localPath: `/tmp/${partial.id}.txt`,
+    workspaceRoot: "/tmp",
+    workspaceDir: `/tmp/${partial.id}`,
+    editorId: "system-text",
+    editorName: "System Text Editor",
+    editorPath: "/bin/editor",
+    originalSha256: "a",
+    originalSize: 1,
+    originalModTime: 1,
+    originalEncoding: "utf-8",
+    lastLocalSha256: "b",
+    dirty: true,
+    state: "dirty",
+    hidden: false,
+    expired: false,
+    createdAt: 1,
+    updatedAt: 10,
+    lastLaunchedAt: 10,
+    lastSyncedAt: 1,
+    ...partial,
+    id: partial.id,
+  };
+}
+
+function makeClipboardResidueSession(
+  partial: Partial<ExternalEditSession> & { id?: string } = {}
+): ExternalEditSession {
+  return makeSession({
+    id: "clipboard",
+    documentKey: "101:/srv/app/folder/clipboard-d29e2e94d3cae23119571647cf236bee83860f702e384e36d17305631c609c88.png",
+    remotePath: "/srv/app/folder/clipboard-d29e2e94d3cae23119571647cf236bee83860f702e384e36d17305631c609c88.png",
+    remoteRealPath: "/srv/app/folder/clipboard-d29e2e94d3cae23119571647cf236bee83860f702e384e36d17305631c609c88.png",
+    localPath:
+      "C:\\Users\\asus\\AppData\\Local\\com.golutra\\clipboard-images\\clipboard-6607ba08467079f385199f18c460e71b33008a531841e07a90f9b4b613629f88.png",
+    workspaceDir: "C:\\Users\\asus\\AppData\\Local\\com.golutra\\clipboard-images",
+    state: "conflict",
+    recordState: "error",
+    resumeRequired: true,
+    lastError: { step: "write_remote_file", summary: "failed", suggestion: "retry", at: 1 },
+    updatedAt: 50,
+    ...partial,
+  });
+}
+
+beforeEach(() => {
+  useExternalEditStore.setState({
+    sessions: {},
+    loading: false,
+    savingSessionId: null,
+    autoSavePhases: {},
+    pendingConflict: null,
+    compareResult: null,
+    mergeResult: null,
+    selectedError: null,
+    selectedRecovery: null,
+  });
+  vi.stubGlobal("window", {
+    ...window,
+    go: {
+      app: {
+        App: {},
+      },
+    },
+  });
+});
 
 describe("buildExternalEditDocuments", () => {
   it("merges sessions that point to the same logical document", () => {
@@ -293,5 +375,230 @@ describe("buildExternalEditConflicts", () => {
     });
 
     expect(conflicts).toHaveLength(0);
+  });
+});
+
+describe("buildExternalEditAttentionItems", () => {
+  it("keeps only the highest priority visible pending record per document family", () => {
+    const sessions = {
+      conflict: makeSession({ id: "conflict", state: "conflict", updatedAt: 30 }),
+      error: makeSession({
+        id: "error",
+        state: "dirty",
+        recordState: "error",
+        lastError: { step: "write_remote_file", summary: "failed", suggestion: "retry", at: 1 },
+        updatedAt: 20,
+      }),
+      recovery: makeSession({
+        id: "recovery",
+        state: "dirty",
+        resumeRequired: true,
+        saveMode: "manual_restored",
+        updatedAt: 10,
+      }),
+    };
+
+    expect(buildExternalEditRecoveries(sessions).map((entry) => entry.session.id)).toEqual([]);
+    expect(buildExternalEditAttentionItems(sessions).map((entry) => `${entry.type}:${entry.session.id}`)).toEqual([
+      "conflict:conflict",
+    ]);
+  });
+
+  it("does not turn retained stale plus active reread drafts into a conflict attention item", () => {
+    const sessions = {
+      retained: makeSession({
+        id: "retained",
+        state: "stale",
+        supersededBySessionId: "active",
+        updatedAt: 30,
+      }),
+      active: makeSession({
+        id: "active",
+        state: "clean",
+        dirty: false,
+        sourceSessionId: "retained",
+        updatedAt: 40,
+      }),
+    };
+
+    expect(buildExternalEditConflicts(sessions)).toHaveLength(0);
+    expect(buildExternalEditAttentionItems(sessions)).toHaveLength(0);
+  });
+
+  it("filters clipboard residue from documents, conflicts, errors, recoveries, and attention items", () => {
+    const clipboard = makeClipboardResidueSession();
+    const valid = makeSession({ id: "valid", documentKey: "101:/srv/app/demo.txt", state: "dirty", updatedAt: 10 });
+    const sessions = { clipboard, valid };
+
+    expect(buildExternalEditDocuments(sessions).map((entry) => entry.session.id)).toEqual(["valid"]);
+    expect(buildExternalEditConflicts(sessions)).toHaveLength(0);
+    expect(buildExternalEditErrors(sessions)).toHaveLength(0);
+    expect(buildExternalEditRecoveries(sessions)).toHaveLength(0);
+    expect(buildExternalEditAttentionItems(sessions)).toHaveLength(0);
+  });
+});
+
+describe("external edit clipboard residue runtime state", () => {
+  it("promotes manual refresh conflict results into the pending conflict entry", async () => {
+    const refreshed = makeSession({
+      id: "reread-active",
+      documentKey: "101:/srv/app/ee68_c_conflict.txt",
+      remotePath: "/srv/app/ee68_c_conflict.txt",
+      remoteRealPath: "/srv/app/ee68_c_conflict.txt",
+      state: "conflict",
+      recordState: "conflict",
+      dirty: true,
+      resumeRequired: true,
+      sourceSessionId: "stale-original",
+    });
+    Object.assign(window.go!.app!.App!, {
+      RefreshExternalEditSession: vi.fn().mockResolvedValue(refreshed),
+    });
+
+    const session = await useExternalEditStore.getState().refreshSession(refreshed.id);
+
+    const state = useExternalEditStore.getState();
+    expect(session).toBe(refreshed);
+    expect(state.sessions[refreshed.id]).toEqual(refreshed);
+    expect(state.pendingConflict?.status).toBe("conflict_remote_changed");
+    expect(state.pendingConflict?.session?.id).toBe(refreshed.id);
+    expect(state.pendingConflict?.conflict?.primaryDraftSessionId).toBe(refreshed.id);
+  });
+
+  it("scrubs clipboard residue from pending dialogs, modal state, and event paths", () => {
+    const clipboard = makeClipboardResidueSession();
+    const valid = makeSession({ id: "valid", documentKey: "101:/srv/app/demo.txt", state: "dirty", updatedAt: 10 });
+
+    useExternalEditStore.setState({
+      sessions: {
+        clipboard,
+        valid,
+      },
+      autoSavePhases: {
+        [clipboard.documentKey]: "running",
+        [valid.documentKey]: "pending",
+      },
+      pendingConflict: {
+        status: "conflict_remote_changed",
+        session: clipboard,
+        conflict: {
+          documentKey: clipboard.documentKey,
+          primaryDraftSessionId: clipboard.id,
+        },
+      },
+      compareResult: {
+        documentKey: clipboard.documentKey,
+        primaryDraftSessionId: clipboard.id,
+        fileName: "clipboard.png",
+        remotePath: clipboard.remotePath,
+        localContent: "local",
+        remoteContent: "remote",
+        readOnly: true,
+        session: clipboard,
+      },
+      mergeResult: {
+        documentKey: clipboard.documentKey,
+        primaryDraftSessionId: clipboard.id,
+        fileName: "clipboard.png",
+        remotePath: clipboard.remotePath,
+        localContent: "local",
+        remoteContent: "remote",
+        finalContent: "local",
+        remoteHash: "remote-hash",
+        session: clipboard,
+      },
+      selectedError: clipboard,
+      selectedRecovery: clipboard,
+    });
+
+    useExternalEditStore.getState().applyEvent({
+      type: "session_conflict",
+      session: clipboard,
+      saveResult: {
+        status: "conflict_remote_changed",
+        session: clipboard,
+        conflict: {
+          documentKey: clipboard.documentKey,
+          primaryDraftSessionId: clipboard.id,
+        },
+      },
+    });
+    useExternalEditStore.getState().applyEvent({
+      type: "session_auto_save",
+      autoSave: {
+        documentKey: clipboard.documentKey,
+        phase: "running",
+      },
+    });
+
+    const state = useExternalEditStore.getState();
+    expect(state.sessions.clipboard).toBeUndefined();
+    expect(state.sessions.valid).toBeDefined();
+    expect(state.autoSavePhases[clipboard.documentKey]).toBeUndefined();
+    expect(state.autoSavePhases[valid.documentKey]).toBe("pending");
+    expect(state.pendingConflict).toBeNull();
+    expect(state.compareResult).toBeNull();
+    expect(state.mergeResult).toBeNull();
+    expect(state.selectedError).toBeNull();
+    expect(state.selectedRecovery).toBeNull();
+  });
+
+  it("ignores clipboard residue returned from save, compare, merge, recovery, and selected detail actions", async () => {
+    const clipboard = makeClipboardResidueSession();
+    const valid = makeSession({ id: "valid", documentKey: "101:/srv/app/demo.txt", state: "dirty", updatedAt: 10 });
+    Object.assign(window.go!.app!.App!, {
+      SaveExternalEditSession: vi.fn().mockResolvedValue({
+        status: "conflict_remote_changed",
+        session: clipboard,
+        conflict: { documentKey: clipboard.documentKey, primaryDraftSessionId: clipboard.id },
+      }),
+      CompareExternalEditSession: vi.fn().mockResolvedValue({
+        documentKey: clipboard.documentKey,
+        primaryDraftSessionId: clipboard.id,
+        fileName: "clipboard.png",
+        remotePath: clipboard.remotePath,
+        localContent: "local",
+        remoteContent: "remote",
+        readOnly: true,
+        session: clipboard,
+      }),
+      PrepareExternalEditMerge: vi.fn().mockResolvedValue({
+        documentKey: clipboard.documentKey,
+        primaryDraftSessionId: clipboard.id,
+        fileName: "clipboard.png",
+        remotePath: clipboard.remotePath,
+        localContent: "local",
+        remoteContent: "remote",
+        finalContent: "local",
+        remoteHash: "remote-hash",
+        session: clipboard,
+      }),
+      RecoverExternalEditSession: vi.fn().mockResolvedValue(clipboard),
+    });
+    useExternalEditStore.setState({
+      sessions: { clipboard, valid },
+      autoSavePhases: {
+        [clipboard.documentKey]: "running",
+        [valid.documentKey]: "pending",
+      },
+    });
+
+    await useExternalEditStore.getState().saveSession(clipboard.id);
+    await useExternalEditStore.getState().compareSession(clipboard.id);
+    await useExternalEditStore.getState().prepareMerge(clipboard.id);
+    await useExternalEditStore.getState().recoverSession(clipboard.id);
+    useExternalEditStore.getState().openErrorDetail(clipboard.id);
+    useExternalEditStore.getState().openRecoveryDetail(clipboard.id);
+
+    const state = useExternalEditStore.getState();
+    expect(state.sessions.clipboard).toBeUndefined();
+    expect(state.sessions.valid).toBeDefined();
+    expect(state.autoSavePhases[clipboard.documentKey]).toBeUndefined();
+    expect(state.autoSavePhases[valid.documentKey]).toBe("pending");
+    expect(state.pendingConflict).toBeNull();
+    expect(state.compareResult).toBeNull();
+    expect(state.mergeResult).toBeNull();
+    expect(state.selectedError).toBeNull();
+    expect(state.selectedRecovery).toBeNull();
   });
 });
