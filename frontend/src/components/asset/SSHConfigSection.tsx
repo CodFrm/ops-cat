@@ -123,12 +123,16 @@ export function SSHConfigSection({
 
   return (
     <>
-      {/* SSH: Connection Type + Host + Port */}
-      <div className="grid gap-2">
-        <Label>{t("asset.host")}</Label>
-        <div className="flex gap-2">
-          <Select value={connectionType} onValueChange={(v) => setConnectionType(v as "direct" | "jumphost" | "proxy")}>
-            <SelectTrigger className="w-[100px] shrink-0">
+      {/* SSH: Connection & Auth (single visual block) */}
+      <div className="grid gap-3 border rounded-lg p-3">
+        {/* Connection type (own label) */}
+        <div className="grid gap-2">
+          <Label>{t("asset.connectionType")}</Label>
+          <Select
+            value={connectionType}
+            onValueChange={(v) => setConnectionType(v as "direct" | "jumphost" | "proxy")}
+          >
+            <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -137,125 +141,140 @@ export function SSHConfigSection({
               <SelectItem value="proxy">{t("asset.connectionProxy")}</SelectItem>
             </SelectContent>
           </Select>
-          <Input className="flex-1" value={host} onChange={(e) => setHost(e.target.value)} placeholder="192.168.1.1" />
-          <Input
-            className="w-[80px] shrink-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-            type="number"
-            value={port}
-            onChange={(e) => setPort(Number(e.target.value))}
-          />
         </div>
-      </div>
 
-      {/* SSH: Jump Host selector */}
-      {connectionType === "jumphost" && (
-        <div className="grid gap-2">
-          <Label>{t("asset.selectJumpHost")}</Label>
-          <AssetSelect
-            value={sshTunnelId}
-            onValueChange={setSshTunnelId}
-            filterType="ssh"
-            excludeIds={jumpHostExcludeIds}
-            placeholder={t("asset.jumpHostNone")}
-          />
-        </div>
-      )}
-
-      {/* SSH: Proxy config */}
-      {connectionType === "proxy" && (
-        <div className="grid gap-3 border rounded-lg p-3">
-          <div className="grid grid-cols-3 gap-2">
-            <div className="grid gap-1">
-              <Label className="text-xs">{t("asset.proxyType")}</Label>
-              <Select value={proxyType} onValueChange={setProxyType}>
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="socks5">SOCKS5</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-1">
-              <Label className="text-xs">{t("asset.proxyHost")}</Label>
-              <Input
-                className="h-8 text-xs"
-                value={proxyHost}
-                onChange={(e) => setProxyHost(e.target.value)}
-                placeholder="127.0.0.1"
-              />
-            </div>
-            <div className="grid gap-1">
-              <Label className="text-xs">{t("asset.proxyPort")}</Label>
-              <Input
-                className="h-8 text-xs [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                type="number"
-                value={proxyPort}
-                onChange={(e) => setProxyPort(Number(e.target.value))}
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="grid gap-1">
-              <Label className="text-xs">{t("asset.proxyUsername")}</Label>
-              <Input className="h-8 text-xs" value={proxyUsername} onChange={(e) => setProxyUsername(e.target.value)} />
-            </div>
-            <div className="grid gap-1">
-              <Label className="text-xs">{t("asset.proxyPassword")}</Label>
-              <Input
-                className="h-8 text-xs"
-                type="password"
-                value={proxyPassword}
-                onChange={(e) => setProxyPassword(e.target.value)}
-                placeholder={encryptedProxyPassword ? t("asset.passwordUnchanged") : ""}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* SSH: Username + AuthType */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="grid gap-2">
-          <Label>{t("asset.username")}</Label>
-          <Input value={username} onChange={(e) => setUsername(e.target.value)} />
-        </div>
-        <div className="grid gap-2">
-          <Label>{t("asset.authType")}</Label>
-          <Select value={authType} onValueChange={setAuthType}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="password">{t("asset.authPassword")}</SelectItem>
-              <SelectItem value="key">{t("asset.authKey")}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {/* SSH: Password (when auth_type=password) */}
-      {authType === "password" && (
-        <PasswordSourceField
-          source={passwordSource}
-          onSourceChange={setPasswordSource}
-          password={password}
-          onPasswordChange={setPassword}
-          credentialId={passwordCredentialId}
-          onCredentialIdChange={setPasswordCredentialId}
-          managedPasswords={managedPasswords}
-          placeholder={t("asset.passwordPlaceholder")}
-          hasExistingPassword={!!encryptedPassword}
-          editAssetId={editAssetId}
-          onUsernameChange={setUsername}
-        />
-      )}
-
-      {/* SSH: Key config */}
-      {authType === "key" && (
-        <div className="grid gap-3 border rounded-lg p-3">
+        {/* Jump host selector */}
+        {connectionType === "jumphost" && (
           <div className="grid gap-2">
-            <Label>{t("asset.keySource")}</Label>
+            <Label>{t("asset.selectJumpHost")}</Label>
+            <AssetSelect
+              value={sshTunnelId}
+              onValueChange={setSshTunnelId}
+              filterType="ssh"
+              excludeIds={jumpHostExcludeIds}
+              placeholder={t("asset.jumpHostNone")}
+            />
+          </div>
+        )}
+
+        {/* Proxy config (inline, no nested border since we are already in a block) */}
+        {connectionType === "proxy" && (
+          <div className="grid gap-2">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="grid gap-1">
+                <Label className="text-xs">{t("asset.proxyType")}</Label>
+                <Select value={proxyType} onValueChange={setProxyType}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="socks5">SOCKS5</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-1">
+                <Label className="text-xs">{t("asset.proxyHost")}</Label>
+                <Input
+                  className="h-8 text-xs"
+                  value={proxyHost}
+                  onChange={(e) => setProxyHost(e.target.value)}
+                  placeholder="127.0.0.1"
+                />
+              </div>
+              <div className="grid gap-1">
+                <Label className="text-xs">{t("asset.proxyPort")}</Label>
+                <Input
+                  className="h-8 text-xs [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  type="number"
+                  value={proxyPort || ""}
+                  placeholder="1080"
+                  onChange={(e) => setProxyPort(Number(e.target.value))}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="grid gap-1">
+                <Label className="text-xs">{t("asset.proxyUsername")}</Label>
+                <Input
+                  className="h-8 text-xs"
+                  value={proxyUsername}
+                  onChange={(e) => setProxyUsername(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-1">
+                <Label className="text-xs">{t("asset.proxyPassword")}</Label>
+                <Input
+                  className="h-8 text-xs"
+                  type="password"
+                  value={proxyPassword}
+                  onChange={(e) => setProxyPassword(e.target.value)}
+                  placeholder={encryptedProxyPassword ? t("asset.passwordUnchanged") : ""}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Host + Port (each labeled) */}
+        <div className="grid grid-cols-[1fr_120px] gap-3">
+          <div className="grid gap-2">
+            <Label>{t("asset.host")}</Label>
+            <Input value={host} onChange={(e) => setHost(e.target.value)} placeholder="example.com" />
+          </div>
+          <div className="grid gap-2">
+            <Label>{t("asset.port")}</Label>
+            <Input
+              className="[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              type="number"
+              value={port || ""}
+              placeholder="22"
+              onChange={(e) => setPort(Number(e.target.value))}
+            />
+          </div>
+        </div>
+
+        {/* Username + Auth type */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-2">
+            <Label>{t("asset.username")}</Label>
+            <Input value={username} onChange={(e) => setUsername(e.target.value)} />
+          </div>
+          <div className="grid gap-2">
+            <Label>{t("asset.authType")}</Label>
+            <Select value={authType} onValueChange={setAuthType}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="password">{t("asset.authPassword")}</SelectItem>
+                <SelectItem value="key">{t("asset.authKey")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* Password (when auth_type=password) */}
+        {authType === "password" && (
+          <PasswordSourceField
+            source={passwordSource}
+            onSourceChange={setPasswordSource}
+            password={password}
+            onPasswordChange={setPassword}
+            credentialId={passwordCredentialId}
+            onCredentialIdChange={setPasswordCredentialId}
+            managedPasswords={managedPasswords}
+            placeholder={t("asset.passwordPlaceholder")}
+            hasExistingPassword={!!encryptedPassword}
+            editAssetId={editAssetId}
+            onUsernameChange={setUsername}
+          />
+        )}
+
+        {/* Key config (inline, no nested border since we are already in a block) */}
+        {authType === "key" && (
+          <div className="grid gap-3">
+            <div className="grid gap-2">
+              <Label>{t("asset.keySource")}</Label>
             <Select value={keySource} onValueChange={(v) => setKeySource(v as "managed" | "file")}>
               <SelectTrigger>
                 <SelectValue />
@@ -412,6 +431,7 @@ export function SSHConfigSection({
           )}
         </div>
       )}
+      </div>
     </>
   );
 }

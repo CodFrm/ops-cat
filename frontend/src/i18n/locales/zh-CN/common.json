@@ -208,6 +208,8 @@
     "testConnectionSuccess": "连接成功",
     "testConnectionFailed": "连接失败",
     "testing": "测试中...",
+    "cancelTest": "取消",
+    "testCancelled": "测试已取消",
     "moveUp": "上移",
     "moveDown": "下移",
     "moveTop": "置顶",

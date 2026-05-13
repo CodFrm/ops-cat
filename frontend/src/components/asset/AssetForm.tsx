@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
-import { Loader2, PlugZap } from "lucide-react";
+import { Loader2, PlugZap, XCircle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +33,7 @@ import {
   TestRedisConnection,
   TestMongoDBConnection,
   TestKafkaConnection,
+  CancelTest,
 } from "../../../wailsjs/go/app/App";
 import { app } from "../../../wailsjs/go/models";
 import { SSHConfigSection } from "@/components/asset/SSHConfigSection";
@@ -54,6 +55,14 @@ interface AssetFormProps {
   onOpenChange: (open: boolean) => void;
   editAsset?: asset_entity.Asset | null;
   defaultGroupId?: number;
+}
+
+// 生成测试连接的唯一 ID；用于配合后端 CancelTest 中断本次测试。
+function newTestId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `test-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 interface ProxyConfig {
@@ -298,6 +307,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   const [icon, setIcon] = useState("server");
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  // 当前 in-flight 测试的 ID；切换/取消时用来 race-discard 晚到的结果。
+  const activeTestIdRef = useRef<string | null>(null);
 
   // Connection type (SSH only)
   const [connectionType, setConnectionType] = useState<"direct" | "jumphost" | "proxy">("direct");
@@ -383,6 +394,17 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
 
   // Exclude self from jump host / SSH tunnel selection
   const jumpHostExcludeIds = editAsset?.ID ? [editAsset.ID] : undefined;
+
+  // 复位测试状态：open 切换时一律清掉上一次表单的 testing/testID 残留，
+  // 并取消任何还在后台跑的测试（关闭对话框时直接放弃结果）。
+  useEffect(() => {
+    const lastId = activeTestIdRef.current;
+    if (lastId) {
+      void CancelTest(lastId);
+    }
+    activeTestIdRef.current = null;
+    setTesting(false);
+  }, [open]);
 
   // Load managed keys/passwords and scan local keys when dialog opens
   useEffect(() => {
@@ -862,14 +884,19 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
         password: proxyPassword || undefined,
       };
     }
+    const testId = newTestId();
+    activeTestIdRef.current = testId;
     setTesting(true);
     try {
-      await TestSSHConnection(JSON.stringify(sshConfig), password);
-      toast.success(t("asset.testConnectionSuccess"));
+      await TestSSHConnection(testId, JSON.stringify(sshConfig), password);
+      if (activeTestIdRef.current === testId) toast.success(t("asset.testConnectionSuccess"));
     } catch (e) {
-      toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
+      if (activeTestIdRef.current === testId) toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
     } finally {
-      setTesting(false);
+      if (activeTestIdRef.current === testId) {
+        activeTestIdRef.current = null;
+        setTesting(false);
+      }
     }
   };
 
@@ -882,14 +909,19 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     if (sshTunnelId > 0) cfg.ssh_asset_id = sshTunnelId;
     if (params) cfg.params = params;
     applyTestPasswordSource(cfg);
+    const testId = newTestId();
+    activeTestIdRef.current = testId;
     setTesting(true);
     try {
-      await TestDatabaseConnection(JSON.stringify(cfg), password);
-      toast.success(t("asset.testConnectionSuccess"));
+      await TestDatabaseConnection(testId, JSON.stringify(cfg), password);
+      if (activeTestIdRef.current === testId) toast.success(t("asset.testConnectionSuccess"));
     } catch (e) {
-      toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
+      if (activeTestIdRef.current === testId) toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
     } finally {
-      setTesting(false);
+      if (activeTestIdRef.current === testId) {
+        activeTestIdRef.current = null;
+        setTesting(false);
+      }
     }
   };
 
@@ -908,14 +940,19 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     if (redisKeySeparator && redisKeySeparator !== ":") cfg.key_separator = redisKeySeparator;
     if (sshTunnelId > 0) cfg.ssh_asset_id = sshTunnelId;
     applyTestPasswordSource(cfg);
+    const testId = newTestId();
+    activeTestIdRef.current = testId;
     setTesting(true);
     try {
-      await TestRedisConnection(JSON.stringify(cfg), password);
-      toast.success(t("asset.testConnectionSuccess"));
+      await TestRedisConnection(testId, JSON.stringify(cfg), password);
+      if (activeTestIdRef.current === testId) toast.success(t("asset.testConnectionSuccess"));
     } catch (e) {
-      toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
+      if (activeTestIdRef.current === testId) toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
     } finally {
-      setTesting(false);
+      if (activeTestIdRef.current === testId) {
+        activeTestIdRef.current = null;
+        setTesting(false);
+      }
     }
   };
 
@@ -934,14 +971,19 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     if (tls) cfg.tls = true;
     if (sshTunnelId > 0) cfg.ssh_asset_id = sshTunnelId;
     applyTestPasswordSource(cfg);
+    const testId = newTestId();
+    activeTestIdRef.current = testId;
     setTesting(true);
     try {
-      await TestMongoDBConnection(JSON.stringify(cfg), password);
-      toast.success(t("asset.testConnectionSuccess"));
+      await TestMongoDBConnection(testId, JSON.stringify(cfg), password);
+      if (activeTestIdRef.current === testId) toast.success(t("asset.testConnectionSuccess"));
     } catch (e) {
-      toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
+      if (activeTestIdRef.current === testId) toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
     } finally {
-      setTesting(false);
+      if (activeTestIdRef.current === testId) {
+        activeTestIdRef.current = null;
+        setTesting(false);
+      }
     }
   };
 
@@ -950,15 +992,35 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
     if (kafkaSaslMechanism !== "none") {
       applyTestPasswordSource(cfg);
     }
+    const testId = newTestId();
+    activeTestIdRef.current = testId;
     setTesting(true);
     try {
-      await TestKafkaConnection(JSON.stringify(cfg), password);
-      toast.success(t("asset.testConnectionSuccess"));
+      await TestKafkaConnection(testId, JSON.stringify(cfg), password);
+      if (activeTestIdRef.current === testId) toast.success(t("asset.testConnectionSuccess"));
     } catch (e) {
-      toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
+      if (activeTestIdRef.current === testId) toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
     } finally {
-      setTesting(false);
+      if (activeTestIdRef.current === testId) {
+        activeTestIdRef.current = null;
+        setTesting(false);
+      }
     }
+  };
+
+  // 静默取消正在进行的测试（用于保存/关闭对话框等退出动作）。无 in-flight 测试时是 no-op。
+  const cancelActiveTest = () => {
+    const id = activeTestIdRef.current;
+    if (!id) return;
+    activeTestIdRef.current = null;
+    void CancelTest(id);
+    setTesting(false);
+  };
+
+  const handleCancelTest = () => {
+    if (!activeTestIdRef.current) return;
+    cancelActiveTest();
+    toast.info(t("asset.testCancelled"));
   };
 
   const encryptPasswordValue = async (): Promise<string | undefined> => {
@@ -1092,6 +1154,8 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
   };
 
   const handleSubmit = async () => {
+    // 用户决定保存：放弃任何正在进行的测试，避免和保存竞争或弹出过期的 toast。
+    cancelActiveTest();
     let config: string;
 
     if (assetType === "ssh") {
@@ -1325,7 +1389,13 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                   })();
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) cancelActiveTest();
+        onOpenChange(next);
+      }}
+    >
       <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto" onInteractOutside={(e) => e.preventDefault()}>
         <DialogHeader>
           <DialogTitle>
@@ -1360,34 +1430,44 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             </div>
           )}
 
-          {/* Name */}
+          {/* Icon + Name (same row, icon-first compact picker) */}
           <div className="grid gap-2">
             <Label>{t("asset.name")}</Label>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={
-                assetType === "ssh"
-                  ? "web-01"
-                  : assetType === "database"
-                    ? "prod-db"
-                    : assetType === "redis"
-                      ? "cache-01"
-                      : assetType === "mongodb"
-                        ? "mongo-01"
-                        : assetType === "kafka"
-                          ? "kafka-prod"
-                          : assetType === "k8s"
-                            ? "prod-cluster"
-                            : `my-${assetType}`
-              }
-            />
+            <div className="flex gap-2">
+              <IconPicker value={icon} onChange={setIcon} type="asset" compact />
+              <Input
+                className="flex-1"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={
+                  assetType === "ssh"
+                    ? "prod-web-01"
+                    : assetType === "database"
+                      ? "prod-mysql-01"
+                      : assetType === "redis"
+                        ? "prod-redis-01"
+                        : assetType === "mongodb"
+                          ? "prod-mongo-01"
+                          : assetType === "kafka"
+                            ? "prod-kafka-01"
+                            : assetType === "k8s"
+                              ? "prod-k8s-01"
+                              : `prod-${assetType}-01`
+                }
+              />
+            </div>
           </div>
 
-          {/* Icon */}
+          {/* Group */}
           <div className="grid gap-2">
-            <Label>{t("asset.icon")}</Label>
-            <IconPicker value={icon} onChange={setIcon} type="asset" />
+            <Label>{t("asset.group")}</Label>
+            <GroupSelect value={groupId} onValueChange={setGroupId} />
+          </div>
+
+          {/* Description */}
+          <div className="grid gap-2">
+            <Label>{t("asset.description")}</Label>
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
           </div>
 
           {/* Database Driver (database only, before host) */}
@@ -1654,58 +1734,60 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
               );
             })()}
 
-          {/* Test Connection */}
+          {/* Test Connection / Cancel Test */}
           {(assetType === "ssh" ||
             assetType === "database" ||
             assetType === "redis" ||
             assetType === "mongodb" ||
-            assetType === "kafka") && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={
-                assetType === "ssh"
-                  ? handleTestConnection
-                  : assetType === "database"
-                    ? handleTestDatabaseConnection
-                    : assetType === "mongodb"
-                      ? handleTestMongoDBConnection
-                      : assetType === "kafka"
-                        ? handleTestKafkaConnection
-                        : handleTestRedisConnection
-              }
-              disabled={
-                testing ||
-                (assetType === "kafka"
-                  ? kafkaBrokers().length === 0
-                  : assetType !== "mongodb"
-                    ? !host
-                    : mongoConnectionMode === "uri"
-                      ? !connectionURI
-                      : !host)
-              }
-              className="gap-1 w-fit"
-            >
-              {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
-              {testing ? t("asset.testing") : t("asset.testConnection")}
-            </Button>
-          )}
+            assetType === "kafka") &&
+            (testing ? (
+              <Button type="button" variant="outline" size="sm" onClick={handleCancelTest} className="gap-1 w-fit">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {t("asset.testing")}
+                <XCircle className="h-3.5 w-3.5 ml-1" />
+                {t("asset.cancelTest")}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={
+                  assetType === "ssh"
+                    ? handleTestConnection
+                    : assetType === "database"
+                      ? handleTestDatabaseConnection
+                      : assetType === "mongodb"
+                        ? handleTestMongoDBConnection
+                        : assetType === "kafka"
+                          ? handleTestKafkaConnection
+                          : handleTestRedisConnection
+                }
+                disabled={
+                  assetType === "kafka"
+                    ? kafkaBrokers().length === 0
+                    : assetType !== "mongodb"
+                      ? !host
+                      : mongoConnectionMode === "uri"
+                        ? !connectionURI
+                        : !host
+                }
+                className="gap-1 w-fit"
+              >
+                <PlugZap className="h-3.5 w-3.5" />
+                {t("asset.testConnection")}
+              </Button>
+            ))}
 
-          {/* Group - Tree Selector */}
-          <div className="grid gap-2">
-            <Label>{t("asset.group")}</Label>
-            <GroupSelect value={groupId} onValueChange={setGroupId} />
-          </div>
-
-          {/* Description */}
-          <div className="grid gap-2">
-            <Label>{t("asset.description")}</Label>
-            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
-          </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              cancelActiveTest();
+              onOpenChange(false);
+            }}
+          >
             {t("action.cancel")}
           </Button>
           <Button
