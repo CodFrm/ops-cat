@@ -96,3 +96,66 @@ func TestAssetSvc_Delete(t *testing.T) {
 		})
 	})
 }
+
+func TestAssetSvc_Reorder(t *testing.T) {
+	convey.Convey("Reorder：同分组插入到 beforeID 之前", t, func() {
+		ctx, mockRepo := setupTest(t)
+		// 原始顺序：[1, 2, 3, 4]，把 4 拖到 2 之前 → [1, 4, 2, 3]
+		moving := &asset_entity.Asset{ID: 4, GroupID: 10, SortOrder: 40}
+		siblings := []*asset_entity.Asset{
+			{ID: 1, GroupID: 10, SortOrder: 10},
+			{ID: 2, GroupID: 10, SortOrder: 20},
+			{ID: 3, GroupID: 10, SortOrder: 30},
+			moving,
+		}
+		mockRepo.EXPECT().Find(gomock.Any(), int64(4)).Return(moving, nil)
+		mockRepo.EXPECT().List(gomock.Any(), asset_repo.ListOptions{GroupID: 10, ExactGroupID: true}).Return(siblings, nil)
+		// 新顺序 [1, 4, 2, 3] → sort_order = 10/20/30/40
+		mockRepo.EXPECT().UpdateSortOrder(gomock.Any(), int64(4), 20).Return(nil)
+		mockRepo.EXPECT().UpdateSortOrder(gomock.Any(), int64(2), 30).Return(nil)
+		mockRepo.EXPECT().UpdateSortOrder(gomock.Any(), int64(3), 40).Return(nil)
+		// id=1 已经是 10，跳过
+
+		err := Asset().Reorder(ctx, 4, 10, 2)
+		assert.NoError(t, err)
+	})
+
+	convey.Convey("Reorder：beforeID==0 追加到末尾", t, func() {
+		ctx, mockRepo := setupTest(t)
+		moving := &asset_entity.Asset{ID: 1, GroupID: 10, SortOrder: 10}
+		siblings := []*asset_entity.Asset{
+			moving,
+			{ID: 2, GroupID: 10, SortOrder: 20},
+			{ID: 3, GroupID: 10, SortOrder: 30},
+		}
+		mockRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(moving, nil)
+		mockRepo.EXPECT().List(gomock.Any(), asset_repo.ListOptions{GroupID: 10, ExactGroupID: true}).Return(siblings, nil)
+		// 新顺序 [2, 3, 1]：2→10, 3→20, 1→30
+		mockRepo.EXPECT().UpdateSortOrder(gomock.Any(), int64(2), 10).Return(nil)
+		mockRepo.EXPECT().UpdateSortOrder(gomock.Any(), int64(3), 20).Return(nil)
+		mockRepo.EXPECT().UpdateSortOrder(gomock.Any(), int64(1), 30).Return(nil)
+
+		err := Asset().Reorder(ctx, 1, 10, 0)
+		assert.NoError(t, err)
+	})
+
+	convey.Convey("Reorder：跨分组迁移 + 重排", t, func() {
+		ctx, mockRepo := setupTest(t)
+		moving := &asset_entity.Asset{ID: 5, GroupID: 10, SortOrder: 10}
+		// 切换到目标分组后 List 时移动的资产已 GroupID=20
+		targetSiblings := []*asset_entity.Asset{
+			{ID: 7, GroupID: 20, SortOrder: 10},
+			{ID: 8, GroupID: 20, SortOrder: 20},
+			{ID: 5, GroupID: 20, SortOrder: 10}, // 假设 DB 返回，未必精确
+		}
+		mockRepo.EXPECT().Find(gomock.Any(), int64(5)).Return(moving, nil)
+		mockRepo.EXPECT().UpdateGroupID(gomock.Any(), int64(5), int64(20)).Return(nil)
+		mockRepo.EXPECT().List(gomock.Any(), asset_repo.ListOptions{GroupID: 20, ExactGroupID: true}).Return(targetSiblings, nil)
+		// 把 5 插到 8 之前 → [7, 5, 8]：7→10(skip), 5→20, 8→30
+		mockRepo.EXPECT().UpdateSortOrder(gomock.Any(), int64(5), 20).Return(nil)
+		mockRepo.EXPECT().UpdateSortOrder(gomock.Any(), int64(8), 30).Return(nil)
+
+		err := Asset().Reorder(ctx, 5, 20, 8)
+		assert.NoError(t, err)
+	})
+}

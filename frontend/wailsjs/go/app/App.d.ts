@@ -415,6 +415,10 @@ export function RedisZSetRemove(arg1:number,arg2:number,arg3:string,arg4:string)
 
 export function ReloadExtensions():Promise<void>;
 
+export function ReorderAsset(arg1:number,arg2:number,arg3:number):Promise<void>;
+
+export function ReorderGroup(arg1:number,arg2:number,arg3:number):Promise<void>;
+
 export function ResizeSSH(arg1:string,arg2:number,arg3:number):Promise<void>;
 
 export function RespondAIApproval(arg1:string,arg2:ai.ApprovalResponse):Promise<void>;

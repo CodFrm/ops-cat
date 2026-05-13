@@ -171,6 +171,20 @@ func (mr *MockAssetRepoMockRecorder) UpdateSortOrder(ctx, id, sortOrder any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateSortOrder", reflect.TypeOf((*MockAssetRepo)(nil).UpdateSortOrder), ctx, id, sortOrder)
 }
 
+// UpdateGroupID mocks base method.
+func (m *MockAssetRepo) UpdateGroupID(ctx context.Context, id, groupID int64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateGroupID", ctx, id, groupID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateGroupID indicates an expected call of UpdateGroupID.
+func (mr *MockAssetRepoMockRecorder) UpdateGroupID(ctx, id, groupID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateGroupID", reflect.TypeOf((*MockAssetRepo)(nil).UpdateGroupID), ctx, id, groupID)
+}
+
 // CountByTypes mocks base method.
 func (m *MockAssetRepo) CountByTypes(ctx context.Context, types []string) (int64, error) {
 	m.ctrl.T.Helper()

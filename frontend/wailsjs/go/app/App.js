@@ -782,6 +782,14 @@ export function ReloadExtensions() {
   return window['go']['app']['App']['ReloadExtensions']();
 }
 
+export function ReorderAsset(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ReorderAsset'](arg1, arg2, arg3);
+}
+
+export function ReorderGroup(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ReorderGroup'](arg1, arg2, arg3);
+}
+
 export function ResizeSSH(arg1, arg2, arg3) {
   return window['go']['app']['App']['ResizeSSH'](arg1, arg2, arg3);
 }
