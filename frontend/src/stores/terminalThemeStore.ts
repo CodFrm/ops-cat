@@ -7,6 +7,7 @@ import {
   DEFAULT_TERMINAL_FONT_PRESET_ID,
   findTerminalFontPreset,
   normalizeTerminalFontFamily,
+  quoteFamilyName,
   resolveTerminalFontFamily,
 } from "@/data/terminalFonts";
 
@@ -60,12 +61,24 @@ export const useTerminalThemeStore = create<TerminalThemeState>()(
           return;
         }
 
-        const preset = findTerminalFontPreset(id) || findTerminalFontPreset(DEFAULT_TERMINAL_FONT_PRESET_ID);
-        if (!preset) return;
+        const preset = findTerminalFontPreset(id);
+        if (preset) {
+          set({ fontPresetId: preset.id, fontFamily: preset.fontFamily });
+          return;
+        }
 
+        // Unknown id — treat as a system font family name picked from the
+        // dynamic dropdown (where items use the family name itself as their id).
+        // Blank input falls back to the default preset.
+        const familyName = normalizeTerminalFontFamily(id);
+        if (!familyName) {
+          const def = findTerminalFontPreset(DEFAULT_TERMINAL_FONT_PRESET_ID);
+          if (def) set({ fontPresetId: def.id, fontFamily: def.fontFamily });
+          return;
+        }
         set({
-          fontPresetId: preset.id,
-          fontFamily: preset.fontFamily,
+          fontPresetId: familyName,
+          fontFamily: quoteFamilyName(familyName),
         });
       },
 

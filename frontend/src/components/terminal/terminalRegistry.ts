@@ -1,6 +1,7 @@
 import { Terminal as XTerminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
+import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { WriteSSH } from "../../../wailsjs/go/app/App";
 import { EventsOn, EventsOff } from "../../../wailsjs/runtime/runtime";
@@ -47,6 +48,20 @@ export function getOrCreateTerminal(
   term.loadAddon(fitAddon);
   term.loadAddon(searchAddon);
   term.open(container);
+
+  // GPU renderer: required so customGlyphs (powerline U+E0A0–U+E0D7, box drawing)
+  // is drawn by xterm instead of the system font — fixes tofu boxes from terminal
+  // prompts (oh-my-zsh powerlevel10k, starship, etc.). Falls back to DOM renderer
+  // automatically on context loss or if WebGL initialization throws.
+  try {
+    const webglAddon = new WebglAddon();
+    webglAddon.onContextLoss(() => {
+      webglAddon.dispose();
+    });
+    term.loadAddon(webglAddon);
+  } catch (err) {
+    console.warn("WebGL renderer unavailable, falling back to DOM renderer", err);
+  }
 
   const onDataDispose = term.onData((data) => {
     WriteSSH(sessionId, bytesToBase64(new TextEncoder().encode(data))).catch(console.error);

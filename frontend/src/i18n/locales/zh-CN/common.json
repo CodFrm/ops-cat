@@ -88,6 +88,7 @@
     "moveToEnd": "移到最后"
   },
   "theme": {
+    "label": "主题",
     "toggle": "切换主题",
     "light": "亮色",
     "dark": "深色",
@@ -99,6 +100,7 @@
     "en": "English"
   },
   "appearance": {
+    "title": "外观",
     "startupTab": "启动时打开",
     "startupTabLast": "记住上次打开的标签",
     "startupTabHome": "首页"
@@ -918,6 +920,8 @@
     "desc": "终端配色与字体设置",
     "fontFamily": "字体",
     "defaultFont": "默认字体",
+    "fontRecommended": "推荐",
+    "fontOther": "其他",
     "customFont": "自定义",
     "customFontPlaceholder": "输入 font-family，例如 Iosevka Term, monospace",
     "fontSize": "字体大小",

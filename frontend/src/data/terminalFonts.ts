@@ -6,7 +6,17 @@ export interface TerminalFontPreset {
 
 export const DEFAULT_TERMINAL_FONT_PRESET_ID = "default";
 export const CUSTOM_TERMINAL_FONT_PRESET_ID = "custom";
+// Nerd Font families come first so per-glyph CSS font fallback supplies icons
+// (apple, folder, clock, etc.) for prompts like powerlevel10k / starship when
+// the user's primary font is a non-patched monospace. Both naming conventions
+// are listed: short "NFM" (nerd-fonts v3.1+) and long "Nerd Font Mono" (v3.0).
 export const DEFAULT_TERMINAL_FONT_FALLBACKS = [
+  "'JetBrainsMono NFM'",
+  "'JetBrainsMono Nerd Font Mono'",
+  "'MesloLGM NF'",
+  "'MesloLGM Nerd Font'",
+  "'FiraCode NFM'",
+  "'FiraCode Nerd Font Mono'",
   "'JetBrains Mono'",
   "'Fira Code'",
   "'Cascadia Code'",
@@ -156,4 +166,83 @@ export function withTerminalFontFallback(fontFamily: string): string {
 
 export function findTerminalFontPreset(id: string): TerminalFontPreset | undefined {
   return terminalFontPresets.find((preset) => preset.id === id);
+}
+
+// Recommended families shown at the top of the settings font dropdown when
+// they are detected as installed. Order is curated (not alphabetical): Nerd
+// Fonts first so prompts with powerline / icon glyphs render out of the box,
+// then plain mono fonts in popularity order. Both v3.1+ short and v3.0 long
+// Nerd Font naming conventions are listed.
+export const RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES: string[] = [
+  "JetBrainsMono NFM",
+  "JetBrainsMono Nerd Font Mono",
+  "MesloLGM NF",
+  "MesloLGM Nerd Font",
+  "MesloLGS NF",
+  "MesloLGS Nerd Font",
+  "FiraCode NFM",
+  "FiraCode Nerd Font Mono",
+  "Hack NFM",
+  "Hack Nerd Font Mono",
+  "CaskaydiaCove NF",
+  "CaskaydiaCove Nerd Font",
+  "JetBrains Mono",
+  "Fira Code",
+  "Cascadia Code",
+  "Cascadia Mono",
+  "SF Mono",
+  "Menlo",
+  "Monaco",
+  "Consolas",
+  "Source Code Pro",
+  "Hack",
+  "IBM Plex Mono",
+  "Roboto Mono",
+  "Noto Sans Mono",
+  "Ubuntu Mono",
+  "DejaVu Sans Mono",
+  "Iosevka",
+];
+
+// Quote a family name for use in CSS font-family. Pure identifiers can be
+// passed unquoted; anything with spaces, dots, or apostrophes is single-quoted.
+export function quoteFamilyName(name: string): string {
+  if (/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(name)) return name;
+  return `'${name.replace(/'/g, "\\'")}'`;
+}
+
+interface QueryLocalFontsApi {
+  queryLocalFonts?: () => Promise<Array<{ family: string }>>;
+}
+
+// Returns the first family in the default fallback chain that is installed on
+// this system — i.e. the family the browser will actually use for the bulk of
+// terminal glyphs when fontFamily === DEFAULT_TERMINAL_FONT_FAMILY. Returns
+// null when no chain entry is installed (browser will use generic monospace).
+export function resolveDefaultFontPrimary(installedFonts: string[] | null): string | null {
+  if (!installedFonts || installedFonts.length === 0) return null;
+  const installed = new Set(installedFonts);
+  for (const entry of DEFAULT_TERMINAL_FONT_FALLBACKS) {
+    const name = entry.replace(/^['"]|['"]$/g, "");
+    if (name === "monospace") return null;
+    if (installed.has(name)) return name;
+  }
+  return null;
+}
+
+// Returns deduplicated installed font family names, sorted alphabetically.
+// Resolves to null when the Local Font Access API is unavailable or denied —
+// caller is expected to fall back to a curated static list.
+export async function loadInstalledFonts(): Promise<string[] | null> {
+  if (typeof window === "undefined") return null;
+  const api = window as unknown as QueryLocalFontsApi;
+  if (typeof api.queryLocalFonts !== "function") return null;
+  try {
+    const fonts = await api.queryLocalFonts();
+    const families = new Set<string>();
+    for (const font of fonts) families.add(font.family);
+    return Array.from(families).sort((a, b) => a.localeCompare(b));
+  } catch {
+    return null;
+  }
 }

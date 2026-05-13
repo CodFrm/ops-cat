@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   cn,
@@ -7,7 +7,9 @@ import {
   Label,
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectSeparator,
   SelectTrigger,
   SelectValue,
@@ -24,6 +26,10 @@ import { builtinThemes, defaultLightTheme, defaultDarkTheme, TerminalTheme } fro
 import {
   CUSTOM_TERMINAL_FONT_PRESET_ID,
   DEFAULT_TERMINAL_FONT_PRESET_ID,
+  RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES,
+  loadInstalledFonts,
+  quoteFamilyName,
+  resolveDefaultFontPrimary,
   terminalFontPresets,
 } from "@/data/terminalFonts";
 import { TerminalThemeEditor } from "@/components/settings/TerminalThemeEditor";
@@ -42,11 +48,11 @@ export function AppearanceSection() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">{t("theme.toggle")}</CardTitle>
+        <CardTitle className="text-base">{t("appearance.title")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-2">
-          <Label>{t("theme.toggle")}</Label>
+          <Label>{t("theme.label")}</Label>
           <Select value={theme} onValueChange={setTheme as (v: string) => void}>
             <SelectTrigger>
               <SelectValue />
@@ -116,8 +122,38 @@ export function TerminalSection() {
   const resolvedTheme = useResolvedTheme();
   const [themeEditorOpen, setThemeEditorOpen] = useState(false);
   const [editingTheme, setEditingTheme] = useState<TerminalTheme | undefined>(undefined);
+  const [installedFonts, setInstalledFonts] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadInstalledFonts().then((fonts) => {
+      if (!cancelled) setInstalledFonts(fonts);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const { recommendedFonts, otherFonts } = useMemo(() => {
+    if (!installedFonts) return { recommendedFonts: [] as string[], otherFonts: [] as string[] };
+    const installed = new Set(installedFonts);
+    const recommendedSet = new Set(RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES);
+    const recommendedFonts = RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES.filter((name) => installed.has(name));
+    const otherFonts = installedFonts.filter((name) => !recommendedSet.has(name));
+    return { recommendedFonts, otherFonts };
+  }, [installedFonts]);
+
+  const defaultResolvedName = useMemo(() => resolveDefaultFontPrimary(installedFonts), [installedFonts]);
+
+  // Validity check: keep the currently-stored id as the select value as long
+  // as it resolves to something — either a hardcoded preset, the custom mode,
+  // or a system family we just loaded. Unknown values during initial load are
+  // optimistically preserved so the dropdown doesn't flash "Default".
   const fontSelectValue =
-    fontPresetId === CUSTOM_TERMINAL_FONT_PRESET_ID || terminalFontPresets.some((preset) => preset.id === fontPresetId)
+    fontPresetId === CUSTOM_TERMINAL_FONT_PRESET_ID ||
+    terminalFontPresets.some((preset) => preset.id === fontPresetId) ||
+    installedFonts === null ||
+    installedFonts.includes(fontPresetId)
       ? fontPresetId
       : DEFAULT_TERMINAL_FONT_PRESET_ID;
 
@@ -135,16 +171,48 @@ export function TerminalSection() {
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="min-w-[18rem]">
-                {terminalFontPresets.map((preset) => (
-                  <SelectItem key={preset.id} value={preset.id}>
-                    <span className="min-w-0 flex-1 truncate" style={{ fontFamily: preset.fontFamily }}>
-                      {preset.id === DEFAULT_TERMINAL_FONT_PRESET_ID ? t("terminal.defaultFont") : preset.name}
-                    </span>
-                  </SelectItem>
-                ))}
-                <SelectSeparator />
+              <SelectContent className="min-w-[18rem] max-h-[28rem]">
+                <SelectItem value={DEFAULT_TERMINAL_FONT_PRESET_ID}>
+                  <span className="min-w-0 flex-1 truncate">
+                    {t("terminal.defaultFont")}
+                    {defaultResolvedName && (
+                      <span className="text-muted-foreground ml-2" style={{ fontFamily: quoteFamilyName(defaultResolvedName) }}>
+                        ({defaultResolvedName})
+                      </span>
+                    )}
+                  </span>
+                </SelectItem>
                 <SelectItem value={CUSTOM_TERMINAL_FONT_PRESET_ID}>{t("terminal.customFont")}</SelectItem>
+                {recommendedFonts.length > 0 && (
+                  <>
+                    <SelectSeparator />
+                    <SelectGroup>
+                      <SelectLabel>{t("terminal.fontRecommended")}</SelectLabel>
+                      {recommendedFonts.map((name) => (
+                        <SelectItem key={`rec-${name}`} value={name}>
+                          <span className="min-w-0 flex-1 truncate" style={{ fontFamily: quoteFamilyName(name) }}>
+                            {name}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </>
+                )}
+                {otherFonts.length > 0 && (
+                  <>
+                    <SelectSeparator />
+                    <SelectGroup>
+                      <SelectLabel>{t("terminal.fontOther")}</SelectLabel>
+                      {otherFonts.map((name) => (
+                        <SelectItem key={`oth-${name}`} value={name}>
+                          <span className="min-w-0 flex-1 truncate" style={{ fontFamily: quoteFamilyName(name) }}>
+                            {name}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </>
+                )}
               </SelectContent>
             </Select>
             {fontPresetId === CUSTOM_TERMINAL_FONT_PRESET_ID && (
