@@ -133,18 +133,33 @@ func TestEventTranslator_TurnEndNoUsage(t *testing.T) {
 }
 
 func TestEventTranslator_Retry(t *testing.T) {
-	Convey("EventRetry → retry，错误信息透传", t, func() {
+	Convey("EventRetry → retry，Attempt/Delay/Cause 全部透传", t, func() {
 		out := drain(NewStreamTranslator(), agent.Event{
 			Kind: agent.EventRetry,
 			Retry: &agent.RetryEvent{
-				Attempt: 1,
-				Delay:   2 * time.Second,
+				Attempt: 2,
+				Delay:   3 * time.Second,
 				Cause:   errors.New("timeout"),
 			},
 		})
 		So(out, ShouldHaveLength, 1)
 		So(out[0].Type, ShouldEqual, "retry")
 		So(out[0].Error, ShouldEqual, "timeout")
+		// Attempt 放在 Content 字段，前端 parseInt(event.content) 解析。
+		So(out[0].Content, ShouldEqual, "2")
+		So(out[0].RetryDelayMs, ShouldEqual, 3000)
+	})
+
+	Convey("EventRetry 无 Retry 字段时退化到 ev.Error，不带 Attempt/Delay", t, func() {
+		out := drain(NewStreamTranslator(), agent.Event{
+			Kind:  agent.EventRetry,
+			Error: errors.New("fallback"),
+		})
+		So(out, ShouldHaveLength, 1)
+		So(out[0].Type, ShouldEqual, "retry")
+		So(out[0].Error, ShouldEqual, "fallback")
+		So(out[0].Content, ShouldEqual, "0")
+		So(out[0].RetryDelayMs, ShouldEqual, 0)
 	})
 }
 

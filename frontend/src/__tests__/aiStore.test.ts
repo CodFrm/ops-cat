@@ -1992,3 +1992,102 @@ describe("ChatMessage.id 稳定性", () => {
     expect(msgs[0].id).not.toBe(msgs[1].id);
   });
 });
+
+// AI 错误处理 & 自动重试：验证 cago EventRetry / EventError 翻译到前端后的状态机行为，
+// 以及 retryStatus → ErrorBlock 物化在退出路径的落盘。
+describe("retry/error handling", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useAIStore.setState({
+      tabStates: {},
+      conversations: [],
+      conversationMessages: {},
+      conversationStreaming: {},
+    });
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+    vi.mocked(SaveConversationMessages).mockResolvedValue(undefined as any);
+  });
+
+  async function startStreamingConv(convId: number) {
+    const callbacks: Array<(event: any) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((_n: string, h: (event: any) => void) => {
+      callbacks.push(h);
+      return () => {};
+    }) as any);
+    const tabId = `ai-${convId}`;
+    useTabStore.setState({
+      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: convId, title: "t" } }],
+      activeTabId: tabId,
+    });
+    useAIStore.setState({
+      tabStates: { [tabId]: createTabState() },
+      conversationMessages: { [convId]: [] },
+      conversationStreaming: { [convId]: { sending: false, pendingQueue: [] } },
+    });
+    await useAIStore.getState().sendToTab(tabId, "hi");
+    return callbacks;
+  }
+
+  it("retry 事件把 attempt/delayMs/cause 写入 lastAssistant.retryStatus", async () => {
+    const cbs = await startStreamingConv(401);
+    cbs[0]?.({ type: "retry", content: "2", retryDelayMs: 3000, error: "timeout" });
+    const last = useAIStore.getState().conversationMessages[401].at(-1)!;
+    expect(last.role).toBe("assistant");
+    expect(last.retryStatus).toBeTruthy();
+    expect(last.retryStatus!.attempt).toBe(2);
+    expect(last.retryStatus!.delayMs).toBe(3000);
+    expect(last.retryStatus!.cause).toBe("timeout");
+  });
+
+  it("retry 之后到达 tool_start 等非 retry 事件会清掉 retryStatus", async () => {
+    const cbs = await startStreamingConv(402);
+    cbs[0]?.({ type: "retry", content: "1", retryDelayMs: 2000, error: "timeout" });
+    expect(useAIStore.getState().conversationMessages[402].at(-1)?.retryStatus).toBeTruthy();
+    cbs[0]?.({ type: "tool_start", tool_name: "bash", tool_input: "{}", tool_call_id: "t1" });
+    expect(useAIStore.getState().conversationMessages[402].at(-1)?.retryStatus).toBeUndefined();
+  });
+
+  it("error 事件 push 一个 ErrorBlock 并 classify 分类", async () => {
+    const cbs = await startStreamingConv(403);
+    cbs[0]?.({ type: "error", error: "401 unauthorized: invalid api key" });
+    const last = useAIStore.getState().conversationMessages[403].at(-1)!;
+    const err = last.blocks.find((b) => b.type === "error");
+    expect(err).toBeTruthy();
+    expect(err?.errorKind).toBe("auth");
+    expect(err?.errorDetail).toContain("401");
+    expect(last.streaming).toBe(false);
+    expect(useAIStore.getState().conversationStreaming[403]?.sending).toBe(false);
+  });
+
+  it("stopped 事件清 retryStatus 但不 push ErrorBlock", async () => {
+    const cbs = await startStreamingConv(404);
+    cbs[0]?.({ type: "retry", content: "1", retryDelayMs: 1000, error: "timeout" });
+    cbs[0]?.({ type: "stopped" });
+    const last = useAIStore.getState().conversationMessages[404].at(-1)!;
+    expect(last.retryStatus).toBeUndefined();
+    expect(last.blocks.some((b) => b.type === "error")).toBe(false);
+  });
+
+  it("includeStreaming 落盘时把 retryStatus 物化成 kind=interrupted 的 ErrorBlock", async () => {
+    const cbs = await startStreamingConv(405);
+    cbs[0]?.({ type: "retry", content: "2", retryDelayMs: 5000, error: "connection reset" });
+    // 模拟应用退出 / 关 tab：触发 flushAllConversationsAsync 调 SaveConversationMessages(toDisplayMessages(.., true))
+    vi.mocked(SaveConversationMessages).mockClear();
+    const ev = useAIStore.getState();
+    // 直接通过 conversationMessages 验证 toDisplayMessages 路径：调用一次关闭 tab 触发 persist
+    useTabStore.getState().closeTab("ai-405");
+    await waitForStoreCondition(() => vi.mocked(SaveConversationMessages).mock.calls.length > 0);
+    const calls = vi.mocked(SaveConversationMessages).mock.calls;
+    const lastSaved = calls.at(-1)![1] as any[];
+    const lastMsg = lastSaved.at(-1);
+    const errBlock = lastMsg.blocks.find((b: any) => b.type === "error");
+    expect(errBlock).toBeTruthy();
+    expect(errBlock.errorKind).toBe("interrupted");
+    expect(errBlock.errorDetail).toBe("connection reset");
+    // 序列化结果中不应该有 retryStatus（ConversationDisplayMessage 没有该字段）。
+    expect((lastMsg as any).retryStatus).toBeUndefined();
+    void ev;
+  });
+});

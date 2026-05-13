@@ -43,6 +43,7 @@ type Usage struct {
 // StreamEvent 流式响应事件
 type StreamEvent struct {
 	Type       string `json:"type"`                   // "content" | "tool_start" | "tool_result" | "approval_request" | "approval_result" | "agent_start" | "agent_end" | "queue_consumed" | "done" | "error" | "thinking" | "thinking_done" | "stopped" | "retry" | "usage" | "compacted"
+	// type=retry 时 Content 携带 attempt 序号（字符串形式，从 1 开始），RetryDelayMs 是下一次重试前的等待毫秒（用于前端倒计时同步）。
 	Content    string `json:"content,omitempty"`      // type=content/tool_result/approval_result/agent_end 时的文本
 	QueueID    string `json:"queue_id,omitempty"`     // type=queue_consumed 时的前端队列项 ID
 	ToolName   string `json:"tool_name,omitempty"`    // type=tool_start/tool_result 时的工具名
@@ -60,6 +61,8 @@ type StreamEvent struct {
 	Patterns    []string       `json:"patterns,omitempty"`    // local_tool 默认 pattern 列表（与 sub-commands 对齐），前端预填可编辑
 	// type=usage 时的 token 统计（前端累加到当前 assistant 消息）
 	Usage *Usage `json:"usage,omitempty"`
+	// type=retry 时的等待毫秒；前端据此显示倒计时。0 表示无显式退避（立即重试）。
+	RetryDelayMs int `json:"retryDelayMs,omitempty"`
 }
 
 // PermissionResponse 权限响应

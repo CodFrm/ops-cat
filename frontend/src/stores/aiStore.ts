@@ -19,10 +19,13 @@ import { EventsOn, EventsEmit } from "../../wailsjs/runtime/runtime";
 import i18n from "../i18n";
 import { useTabStore, registerTabCloseHook, registerTabRestoreHook, type AITabMeta, type Tab } from "./tabStore";
 import { stripMentionTags } from "@/lib/mentionXml";
+import { classifyError, type ErrorKind } from "@/lib/aiError";
 
-// 内容块：文本、工具调用、Sub Agent 或审批
+// 内容块：文本、工具调用、Sub Agent、审批、错误（持久化字段）。
+// "error" 块由 EventError 推入，或在 retry 中途退出落盘时由 retryStatus 物化而来。
+// 不会作为历史回放发给 LLM —— ToAgentMessages 后端侧需过滤。
 export interface ContentBlock {
-  type: "text" | "tool" | "agent" | "approval" | "thinking";
+  type: "text" | "tool" | "agent" | "approval" | "thinking" | "error";
   content: string;
   toolName?: string;
   toolInput?: string;
@@ -48,6 +51,11 @@ export interface ContentBlock {
   approvalSessionId?: string;
   approvalToolName?: string; // local_tool: "bash" | "write" | "edit"
   approvalPatterns?: string[]; // local_tool: 默认 pattern 列表，本次会话允许时预填可编辑
+  // error 块专用：
+  //   kind   — classifyError 输出的归类标签，UI 据此显示标题/图标
+  //   detail — 原始错误正文（content 保留为空或拼接版，前端展示用 detail 优先）
+  errorKind?: ErrorKind;
+  errorDetail?: string;
 }
 
 // Assistant 消息累计 token 使用量；单次用户 turn 可能跨多轮 LLM 调用，前端按 usage 事件累加。
@@ -56,6 +64,17 @@ export interface TokenUsage {
   outputTokens?: number;
   cacheCreationTokens?: number;
   cacheReadTokens?: number;
+}
+
+// retry 期间的 transient 状态：cago EventRetry 时设置，下一条非 retry 事件到达时清掉。
+// 不持久化到 DB —— toDisplayMessages 序列化时直接 omit。
+// 应用退出 / 关 tab 时若该字段仍存在，会被 materializeRetryStatusAsError 物化成
+// 一个 ErrorBlock(kind=interrupted) 落盘，下次打开仍可见。
+export interface ChatMessageRetryStatus {
+  attempt: number;
+  delayMs: number;
+  startedAt: number; // Date.now()，前端做倒计时 countdown 用
+  cause?: string;
 }
 
 export interface ChatMessage {
@@ -68,6 +87,7 @@ export interface ChatMessage {
   blocks: ContentBlock[];
   streaming?: boolean;
   tokenUsage?: TokenUsage;
+  retryStatus?: ChatMessageRetryStatus;
 }
 
 export interface PendingQueueItem {
@@ -107,6 +127,8 @@ interface StreamEventData {
     cache_creation_tokens?: number;
     cache_read_tokens?: number;
   };
+  // retry 事件：下一次重试前的等待毫秒（Retry-After 头或指数退避）；attempt 序号放在 content 字段
+  retryDelayMs?: number;
 }
 
 // Sidebar 专用 UI 态（inputDraft / scrollTop / editTarget）。workspace tab 不使用这些字段，
@@ -488,8 +510,34 @@ function normalizeSnapshotStatus(status: ContentBlock["status"]): ContentBlock["
   return STREAMING_SNAPSHOT_STATUS_OVERRIDES[status] ?? status;
 }
 
+// materializeRetryStatusAsError 把 retry 进行中的 transient 状态物化成一个
+// kind="interrupted" 的 ErrorBlock。在 includeStreaming=true 的落盘路径调用
+// （关闭 tab / 切会话 / Wails OnBeforeClose 应用退出），保证下次打开仍能看到
+// "重试中被中断"的错误线索，而不是只看到一段灰色 cancelled 文本。
+//
+// 没有 retryStatus 时原样返回，避免无意义的对象拷贝。
+function materializeRetryStatusAsError(msg: ChatMessage): ChatMessage {
+  if (!msg.retryStatus) return msg;
+  const { kind, message } = classifyError(msg.retryStatus.cause, "interrupted");
+  const errBlock: ContentBlock = {
+    type: "error",
+    content: message,
+    errorKind: kind,
+    errorDetail: msg.retryStatus.cause || "",
+  };
+  return {
+    ...msg,
+    blocks: [...msg.blocks, errBlock],
+    retryStatus: undefined,
+  };
+}
+
 function toDisplayMessages(msgs: ChatMessage[], includeStreaming = false): app.ConversationDisplayMessage[] {
-  return msgs
+  // includeStreaming=true 的路径都是"非自然终态落盘"（tab 关闭 / 切会话 / 应用退出），
+  // 在这里把 retryStatus 物化为 interrupted ErrorBlock；其余路径 retryStatus 自动 omit
+  // （ChatMessage 顶层字段不进入 ConversationDisplayMessage）。
+  const prepared = includeStreaming ? msgs.map(materializeRetryStatusAsError) : msgs;
+  return prepared
     .filter((m) => includeStreaming || !m.streaming)
     .map(
       (m) =>
@@ -504,6 +552,8 @@ function toDisplayMessages(msgs: ChatMessage[], includeStreaming = false): app.C
                 toolName: b.toolName,
                 toolInput: b.toolInput,
                 status: includeStreaming ? normalizeSnapshotStatus(b.status) : b.status,
+                errorKind: b.errorKind,
+                errorDetail: b.errorDetail,
               })
           ),
           tokenUsage: m.tokenUsage ? new conversation_entity.TokenUsage(m.tokenUsage) : undefined,
@@ -517,11 +567,13 @@ function convertDisplayMessages(displayMsgs: app.ConversationDisplayMessage[]): 
     role: dm.role as "user" | "assistant" | "tool",
     content: dm.content,
     blocks: (dm.blocks || []).map((b: conversation_entity.ContentBlock) => ({
-      type: b.type as "text" | "tool" | "agent",
+      type: b.type as ContentBlock["type"],
       content: b.content,
       toolName: b.toolName,
       toolInput: b.toolInput,
-      status: b.status as "running" | "completed" | "error" | undefined,
+      status: b.status as ContentBlock["status"],
+      errorKind: b.errorKind as ErrorKind | undefined,
+      errorDetail: b.errorDetail,
     })),
     tokenUsage: dm.tokenUsage
       ? {
@@ -905,10 +957,30 @@ async function replayConversation(convId: number, nextMessages: ChatMessage[], c
   await _sendForConversation(convId, "");
 }
 
+// 清掉 lastAssistant 上的 retryStatus —— 任何非 retry 事件到达都意味着"流恢复"了
+// （要么是 cago handleRetry 后 ChatStream 重新出 delta，要么是 EventError/stopped/done 终止）。
+// 没有 retryStatus 时不触发额外 setState，避免高频事件产生空 update。
+function clearRetryStatusOnLastAssistant(convId: number) {
+  const msgs = useAIStore.getState().conversationMessages[convId];
+  if (!msgs || msgs.length === 0) return;
+  const lastIdx = msgs.length - 1;
+  const last = msgs[lastIdx];
+  if (last.role !== "assistant" || !last.retryStatus) return;
+  const updated = [...msgs];
+  updated[lastIdx] = { ...last, retryStatus: undefined };
+  updateConversation(convId, { messages: updated });
+}
+
 // 事件处理：核心流式状态机，完全基于 convId
 function handleStreamEvent(convId: number, event: StreamEventData) {
   const currentMsgs = useAIStore.getState().conversationMessages[convId] || [];
   if (!currentMsgs) return;
+
+  // 任何非 retry 事件都视为"流恢复"，立即清掉 lastAssistant 上的 retryStatus。
+  // 重试成功后下一帧 content/thinking 一到就把 RetryBanner 关掉，无须 UI 自行判定。
+  if (event.type !== "retry") {
+    clearRetryStatusOnLastAssistant(convId);
+  }
 
   // 高频事件缓冲：content/thinking 通过固定时间窗合并，避免每帧重解析 Markdown 抢占输入。
   if (event.type === "content" || event.type === "thinking") {
@@ -1231,10 +1303,17 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
     }
 
     case "retry": {
-      const reason = event.error ? `: ${event.error}` : "";
+      // Attempt 序号放在 content 字段（后端 strconv.Itoa）；解析失败时退化为 0，
+      // RetryBanner 仍能显示 "正在重试..." 文案。
+      const attempt = parseInt(event.content || "0", 10) || 0;
       const updated = updateLastAssistant(msgs, (msg) => ({
         ...msg,
-        blocks: appendText(msg.blocks, `\n\n*${i18n.t("ai.retrying", "重试中")} (${event.content})${reason}*`),
+        retryStatus: {
+          attempt,
+          delayMs: event.retryDelayMs ?? 0,
+          startedAt: Date.now(),
+          cause: event.error,
+        },
       }));
       if (updated) updateConversation(convId, { messages: updated });
       break;
@@ -1289,9 +1368,16 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
 
     case "error": {
       cleanupStreamBuffer(convId);
+      const { kind, message } = classifyError(event.error);
+      const errBlock: ContentBlock = {
+        type: "error",
+        content: message,
+        errorKind: kind,
+        errorDetail: event.error || "",
+      };
       const updated = updateLastAssistant(msgs, (msg) => ({
         ...msg,
-        blocks: appendText(msg.blocks, `\n\n**Error:** ${event.error}`),
+        blocks: [...msg.blocks, errBlock],
         streaming: false,
       }));
       if (updated) {
@@ -1386,7 +1472,8 @@ function expandToAPIMessages(messages: ChatMessage[]): ai.Message[] {
           })
         );
       }
-      // approval / agent 块不参与 LLM 历史还原，跳过
+      // approval / agent / error 块不参与 LLM 历史还原，跳过。
+      // error 块的归类标签和原始错误正文是 UI 显示用，不应作为历史 prompt 影响 LLM。
     }
     flushAssistant();
   }

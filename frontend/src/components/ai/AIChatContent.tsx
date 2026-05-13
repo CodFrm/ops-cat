@@ -48,6 +48,8 @@ import { formatModKey } from "@/stores/shortcutStore";
 import { ToolBlock } from "@/components/ai/ToolBlock";
 import { ThinkingBlock } from "@/components/ai/ThinkingBlock";
 import { AgentBlock } from "@/components/ai/AgentBlock";
+import { ErrorBlock as ErrorBlockView } from "@/components/ai/ErrorBlock";
+import { RetryBanner } from "@/components/ai/RetryBanner";
 import { ApprovalBlock } from "@/components/approval/ApprovalBlock";
 import { AISetupWizard } from "@/components/ai/AISetupWizard";
 import { CompactContext, useCompact } from "@/components/ai/AIChatContentContext";
@@ -789,7 +791,7 @@ const AssistantToolbar = memo(function AssistantToolbar({
   );
 });
 
-const AssistantMessage = memo(function AssistantMessage({
+export const AssistantMessage = memo(function AssistantMessage({
   msg,
   index,
   sending,
@@ -811,6 +813,10 @@ const AssistantMessage = memo(function AssistantMessage({
     return (
       <div className="flex flex-col items-start gap-1.5">
         <span className="text-xs font-semibold text-primary tracking-wide">Assistant</span>
+        {/* 503 等错误在 cago 同步路径下 retry，此时 assistant 占位 blocks 为空 +
+            content="" → 命中本分支。RetryBanner 必须在这里也渲染，否则 retry 期间
+            (1s/2s/4s 倒计时) UI 看不到任何"重试中"提示，最终只看到 ErrorBlock。 */}
+        {msg.retryStatus && <RetryBanner status={msg.retryStatus} />}
         <div className="rounded-xl rounded-bl-sm bg-muted px-3.5 py-2.5 max-w-[95%] shadow-sm">
           <div className="flex items-center gap-1 py-1">
             <span
@@ -835,6 +841,7 @@ const AssistantMessage = memo(function AssistantMessage({
     return (
       <div className="flex flex-col items-start gap-1.5 group/assistant">
         <span className="text-xs font-semibold text-primary tracking-wide">Assistant</span>
+        {msg.retryStatus && <RetryBanner status={msg.retryStatus} />}
         {segments.map((seg, si) =>
           seg.type === "approval" ? (
             <div key={si} className="w-full max-w-[95%]">
@@ -852,6 +859,7 @@ const AssistantMessage = memo(function AssistantMessage({
   return (
     <div className="flex flex-col items-start gap-1.5 group/assistant">
       <span className="text-xs font-semibold text-primary tracking-wide">Assistant</span>
+      {msg.retryStatus && <RetryBanner status={msg.retryStatus} />}
       <div
         className={`rounded-xl rounded-bl-sm bg-muted px-3.5 py-2.5 max-w-[95%] min-w-0 overflow-hidden break-words prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-pre:my-1 prose-pre:overflow-x-auto shadow-sm ${messageSelectionClass}`}
       >
@@ -888,6 +896,8 @@ const BubbleSegment = memo(function BubbleSegment({
           <ThinkingBlock key={idx} block={block} />
         ) : block.type === "agent" ? (
           <AgentBlock key={idx} block={block} />
+        ) : block.type === "error" ? (
+          <ErrorBlockView key={idx} block={block} />
         ) : (
           <ToolBlock key={idx} block={block} />
         )

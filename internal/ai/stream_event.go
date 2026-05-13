@@ -2,10 +2,14 @@ package ai
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cago-frame/agents/agent"
 	"github.com/cago-frame/agents/provider"
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 )
 
 // EventTranslator 把 cago agent.Event 翻译成 OpsKat 现有 StreamEvent。
@@ -79,13 +83,33 @@ func (t *EventTranslator) Translate(ev agent.Event, emit func(StreamEvent)) {
 		}
 
 	case agent.EventRetry:
+		// 透传 Attempt / Delay / Cause —— 前端用 RetryDelayMs 做倒计时同步、Content 显示第几次。
 		msg := ""
-		if ev.Retry != nil && ev.Retry.Cause != nil {
-			msg = ev.Retry.Cause.Error()
+		attempt := 0
+		delayMs := 0
+		if ev.Retry != nil {
+			attempt = ev.Retry.Attempt
+			delayMs = int(ev.Retry.Delay / time.Millisecond)
+			if ev.Retry.Cause != nil {
+				msg = ev.Retry.Cause.Error()
+			}
 		} else if ev.Error != nil {
 			msg = ev.Error.Error()
 		}
-		emit(StreamEvent{Type: "retry", Error: msg})
+		// 落运维日志：用户线上反馈"看不到 RetryBanner"时，先查后端日志确认 cago
+		// 真的触发了 retry。如果日志没有，说明 cago shouldRetry 没识别错误（多半
+		// 是 provider 没把 *APIError 包成 *provider.ProviderError），与前端无关。
+		logger.Default().Info("AI provider retry",
+			zap.Int("attempt", attempt),
+			zap.Int("delay_ms", delayMs),
+			zap.String("cause", msg),
+		)
+		emit(StreamEvent{
+			Type:         "retry",
+			Error:        msg,
+			Content:      strconv.Itoa(attempt),
+			RetryDelayMs: delayMs,
+		})
 
 	case agent.EventCancelled:
 		emit(StreamEvent{Type: "stopped"})
