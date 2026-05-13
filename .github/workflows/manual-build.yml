@@ -1,14 +1,9 @@
 name: Manual Build
-run-name: Manual build ${{ inputs.branch }}
+run-name: Manual build ${{ github.ref_name }}
 
 on:
   workflow_dispatch:
     inputs:
-      branch:
-        description: "Branch or ref to build"
-        required: true
-        default: "main"
-        type: string
       darwin_arm64:
         description: "Build darwin-arm64"
         required: false
@@ -58,7 +53,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.branch }}
           fetch-depth: 0
 
       - name: Compute version
