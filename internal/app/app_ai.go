@@ -477,7 +477,7 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 // QueueAIMessage 在生成过程中通过 cago Runner.Steer 把用户消息注入当前 turn，
 // 由 cago 在下一次 LLM 调用前把消息追加到 conversation。
 // content 已包含内联 <mention> XML（前端构造），无需再行 prepend。
-func (a *App) QueueAIMessage(convID int64, content string) error {
+func (a *App) QueueAIMessage(convID int64, queueID string, content string) error {
 	v, ok := a.runners.Load(convID)
 	if !ok {
 		return fmt.Errorf("会话 %d 没有正在运行的生成", convID)
@@ -486,12 +486,44 @@ func (a *App) QueueAIMessage(convID int64, content string) error {
 	if entry.runner == nil {
 		return fmt.Errorf("会话 %d 没有正在运行的生成", convID)
 	}
-	err := entry.runner.Steer(context.Background(), content, agent.WithSteerDisplay(content))
+	err := entry.runner.Steer(context.Background(), content, agent.WithSteerID(queueID), agent.WithSteerDisplay(content))
 	if err != nil && !errors.Is(err, agent.ErrSteerNoActiveTurn) {
 		logger.Default().Warn("cago Steer failed", zap.Error(err))
 		return err
 	}
 	return nil
+}
+
+// RemoveQueuedAIMessage 尝试从 cago Runner 尚未消费的 Steer 队列里删除一条消息。
+// 返回 false 表示该消息不存在、已被消费，或当前没有活跃 runner；调用方应等待
+// queue_consumed 事件来保持 UI 与 LLM 上下文一致。
+func (a *App) RemoveQueuedAIMessage(convID int64, queueID string) bool {
+	v, ok := a.runners.Load(convID)
+	if !ok || queueID == "" {
+		return false
+	}
+	entry := v.(*runnerEntry)
+	if entry.runner == nil {
+		return false
+	}
+	return entry.runner.RemovePendingSteer(queueID)
+}
+
+// ClearQueuedAIMessages 清空 cago Runner 尚未消费的 Steer 队列，并返回实际删除的队列 ID。
+func (a *App) ClearQueuedAIMessages(convID int64) []string {
+	v, ok := a.runners.Load(convID)
+	if !ok {
+		return []string{}
+	}
+	entry := v.(*runnerEntry)
+	if entry.runner == nil {
+		return []string{}
+	}
+	ids := entry.runner.ClearPendingSteers()
+	if ids == nil {
+		return []string{}
+	}
+	return ids
 }
 
 // StopAIGeneration 调用 cago Runner.Cancel 触发取消；事件消费 goroutine

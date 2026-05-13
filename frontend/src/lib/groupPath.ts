@@ -45,16 +45,31 @@ export function resolveGroupPath(
   return resolveGroupPathFromLookup(buildGroupLookup(groups), groupId, separator);
 }
 
+// 按 (groups 引用, separator) 缓存路径映射。
+// 高频调用点（如 AI 输入框 onUpdate）会在每次按键时调用本函数；assetStore.groups 引用稳定时直接命中缓存，
+// 避免 O(N²) 的重复路径回溯让输入产生肉眼可见的卡顿。
+const groupPathMapCache = new WeakMap<group_entity.Group[], Map<string, Map<number, string>>>();
+
 /** 把 group 列表解析为 groupId -> "父/子/孙" 路径映射。异常 parent 环会在当前视角截断，避免缓存污染。 */
 export function buildGroupPathMap(
   groups: group_entity.Group[],
   { separator = DEFAULT_SEPARATOR }: GroupPathOptions = {}
 ): Map<number, string> {
+  let bySeparator = groupPathMapCache.get(groups);
+  if (bySeparator) {
+    const cached = bySeparator.get(separator);
+    if (cached) return cached;
+  }
   const byId = buildGroupLookup(groups);
   const map = new Map<number, string>();
   for (const group of groups) {
     map.set(group.ID, resolveGroupPathFromLookup(byId, group.ID, separator));
   }
+  if (!bySeparator) {
+    bySeparator = new Map();
+    groupPathMapCache.set(groups, bySeparator);
+  }
+  bySeparator.set(separator, map);
   return map;
 }
 

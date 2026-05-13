@@ -13,7 +13,7 @@ import { SendAIMessage, CreateConversation, QueueAIMessage } from "../../wailsjs
 // mention 信息现在以内联 <mention> XML 形式写在 content 里，前端不再维护独立的
 // mentions 数组，也不再把 MentionedAssets 塞进 AIContext。这些 case 校验：
 //   - content 原样进入消息体（已经在前端 AIChatInput 里 build 好）
-//   - 排队场景下 QueueAIMessage 只透传 content（标签解析交给后端 prompt builder）
+//   - 排队场景下 QueueAIMessage 透传队列 ID + content（标签解析交给后端 prompt builder）
 //   - AIContext 只包含 openTabs，不再有 mentionedAssets
 
 const mentionXml = '<mention asset-id="42" type="mysql" host="10.0.0.5" group="数据库">@prod-db</mention>';
@@ -74,7 +74,7 @@ describe("aiStore mentions (XML inline)", () => {
     expect(Array.isArray(ctx.openTabs)).toBe(true);
   });
 
-  it("生成中时 sendToTab 把 content 入队并调用 QueueAIMessage(convId, content)", () => {
+  it("生成中时 sendToTab 把 content 入队并调用 QueueAIMessage(convId, queueId, content)", () => {
     useAIStore.setState((s) => ({
       conversationStreaming: {
         ...s.conversationStreaming,
@@ -86,13 +86,15 @@ describe("aiStore mentions (XML inline)", () => {
 
     const q = useAIStore.getState().conversationStreaming[1].pendingQueue;
     expect(q).toHaveLength(1);
-    expect(q[0]).toEqual({ text: content });
+    expect(q[0]?.id).toMatch(/^queue-/);
+    expect(q[0]?.text).toBe(content);
 
     expect(QueueAIMessage).toHaveBeenCalledTimes(1);
     const args = vi.mocked(QueueAIMessage).mock.calls[0];
     expect(args[0]).toBe(1);
-    expect(args[1]).toBe(content);
-    // 旧实现有第三个 MentionedAsset[] 参数；现在签名只剩两个参数。
-    expect(args).toHaveLength(2);
+    expect(args[1]).toBe(q[0]?.id);
+    expect(args[2]).toBe(content);
+    // 旧实现有第三个 MentionedAsset[] 参数；现在第三个参数是 content。
+    expect(args).toHaveLength(3);
   });
 });

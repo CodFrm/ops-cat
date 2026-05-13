@@ -822,6 +822,20 @@
       "tooltip": "Token usage for this reply"
     },
     "retrying": "Retrying",
+    "retry": {
+      "retrying": "Retrying",
+      "attempt": "Attempt {{n}}",
+      "countdown_seconds": "{{n}}s",
+      "now": "Retrying now..."
+    },
+    "error": {
+      "rate_limit": "Too many requests, please wait",
+      "server": "Service temporarily unavailable",
+      "network": "Unstable network connection",
+      "auth": "Authentication failed, please check API Key",
+      "interrupted": "Conversation interrupted",
+      "unknown": "Conversation failed"
+    },
     "newConversation": "New conversation",
     "sidebar": {
       "title": "AI Assistant",

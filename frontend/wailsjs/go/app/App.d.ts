@@ -43,6 +43,8 @@ export function Cleanup():Promise<void>;
 
 export function ClearGitHubToken():Promise<void>;
 
+export function ClearQueuedAIMessages(arg1:number):Promise<Array<string>>;
+
 export function ClearWebDAVConfig():Promise<void>;
 
 export function ConnectSSH(arg1:app.SSHConnectRequest):Promise<string>;
@@ -361,7 +363,7 @@ export function PreviewSSHConfig():Promise<import_svc.PreviewResult>;
 
 export function PreviewTabbyConfig():Promise<import_svc.PreviewResult>;
 
-export function QueueAIMessage(arg1:number,arg2:string):Promise<void>;
+export function QueueAIMessage(arg1:number,arg2:string,arg3:string):Promise<void>;
 
 export function RecordSnippetUse(arg1:number):Promise<void>;
 
@@ -414,6 +416,8 @@ export function RedisZSetAdd(arg1:number,arg2:number,arg3:string,arg4:string,arg
 export function RedisZSetRemove(arg1:number,arg2:number,arg3:string,arg4:string):Promise<void>;
 
 export function ReloadExtensions():Promise<void>;
+
+export function RemoveQueuedAIMessage(arg1:number,arg2:string):Promise<boolean>;
 
 export function ResizeSSH(arg1:string,arg2:number,arg3:number):Promise<void>;
 

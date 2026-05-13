@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AIChatContent } from "@/components/ai/AIChatContent";
-import { useAIStore, type ChatMessage } from "@/stores/aiStore";
+import { useAIStore, type ChatMessage, type PendingQueueItem } from "@/stores/aiStore";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTabStore } from "@/stores/tabStore";
 import { SendAIMessage, StopAIGeneration, SaveConversationMessages } from "../../wailsjs/go/app/App";
@@ -87,7 +87,7 @@ function setupConversationFixture({
   conversationId: number;
   messages: ChatMessage[];
   sending?: boolean;
-  pendingQueue?: Array<{ text: string }>;
+  pendingQueue?: PendingQueueItem[];
   tabId?: string;
 }) {
   useAIStore.setState({
@@ -244,7 +244,10 @@ describe("AIChat edit-and-resend regression", () => {
     setupConversationFixture({
       conversationId,
       sending: true,
-      pendingQueue: [{ text: "queued-1" }, { text: "queued-2" }],
+      pendingQueue: [
+        { id: "q1", text: "queued-1" },
+        { id: "q2", text: "queued-2" },
+      ],
       messages: [
         buildMessage("user", "root question"),
         buildMessage("assistant", "root answer"),

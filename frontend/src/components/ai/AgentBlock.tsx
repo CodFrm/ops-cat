@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Bot, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { ToolBlock } from "./ToolBlock";
 import type { ContentBlock } from "@/stores/aiStore";
@@ -7,7 +7,7 @@ interface AgentBlockProps {
   block: ContentBlock;
 }
 
-export function AgentBlock({ block }: AgentBlockProps) {
+export const AgentBlock = memo(function AgentBlock({ block }: AgentBlockProps) {
   const [expanded, setExpanded] = useState(block.status === "running");
 
   const isRunning = block.status === "running";
@@ -45,4 +45,4 @@ export function AgentBlock({ block }: AgentBlockProps) {
       )}
     </div>
   );
-}
+});
