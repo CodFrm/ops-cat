@@ -22,6 +22,10 @@ export function CancelSSHConnect(arg1) {
   return window['go']['app']['App']['CancelSSHConnect'](arg1);
 }
 
+export function CancelTest(arg1) {
+  return window['go']['app']['App']['CancelTest'](arg1);
+}
+
 export function ChangeSSHDirectory(arg1, arg2) {
   return window['go']['app']['App']['ChangeSSHDirectory'](arg1, arg2);
 }
@@ -938,28 +942,28 @@ export function SwitchConversation(arg1) {
   return window['go']['app']['App']['SwitchConversation'](arg1);
 }
 
-export function TestDatabaseConnection(arg1, arg2) {
-  return window['go']['app']['App']['TestDatabaseConnection'](arg1, arg2);
+export function TestDatabaseConnection(arg1, arg2, arg3) {
+  return window['go']['app']['App']['TestDatabaseConnection'](arg1, arg2, arg3);
 }
 
-export function TestKafkaConnection(arg1, arg2) {
-  return window['go']['app']['App']['TestKafkaConnection'](arg1, arg2);
+export function TestKafkaConnection(arg1, arg2, arg3) {
+  return window['go']['app']['App']['TestKafkaConnection'](arg1, arg2, arg3);
 }
 
-export function TestMongoDBConnection(arg1, arg2) {
-  return window['go']['app']['App']['TestMongoDBConnection'](arg1, arg2);
+export function TestMongoDBConnection(arg1, arg2, arg3) {
+  return window['go']['app']['App']['TestMongoDBConnection'](arg1, arg2, arg3);
 }
 
 export function TestPolicyRule(arg1) {
   return window['go']['app']['App']['TestPolicyRule'](arg1);
 }
 
-export function TestRedisConnection(arg1, arg2) {
-  return window['go']['app']['App']['TestRedisConnection'](arg1, arg2);
+export function TestRedisConnection(arg1, arg2, arg3) {
+  return window['go']['app']['App']['TestRedisConnection'](arg1, arg2, arg3);
 }
 
-export function TestSSHConnection(arg1, arg2) {
-  return window['go']['app']['App']['TestSSHConnection'](arg1, arg2);
+export function TestSSHConnection(arg1, arg2, arg3) {
+  return window['go']['app']['App']['TestSSHConnection'](arg1, arg2, arg3);
 }
 
 export function TestWebDAVConfig(arg1) {

@@ -145,57 +145,60 @@ export function KafkaConfigSection({
 
   return (
     <>
-      <div className="grid gap-2">
-        <Label>{t("asset.kafkaBrokers")}</Label>
-        <Textarea
-          value={brokersText}
-          onChange={(e) => setBrokersText(e.target.value)}
-          rows={3}
-          className="font-mono text-sm"
-          placeholder="192.168.100.50:9092"
-        />
-      </div>
-
-      <div className="grid gap-2">
-        <Label>{t("asset.kafkaClientId")}</Label>
-        <Input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="opskat" />
-      </div>
-
-      <div className="grid gap-2">
-        <Label>{t("asset.kafkaSaslMechanism")}</Label>
-        <Select value={saslMechanism} onValueChange={setSaslMechanism}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="none">{t("asset.kafkaSaslNone")}</SelectItem>
-            <SelectItem value="plain">PLAIN</SelectItem>
-            <SelectItem value="scram-sha-256">SCRAM-SHA-256</SelectItem>
-            <SelectItem value="scram-sha-512">SCRAM-SHA-512</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {saslEnabled && (
-        <>
-          <div className="grid gap-2">
-            <Label>{t("asset.username")}</Label>
-            <Input value={username} onChange={(e) => setUsername(e.target.value)} />
-          </div>
-          <PasswordSourceField
-            source={passwordSource}
-            onSourceChange={setPasswordSource}
-            password={password}
-            onPasswordChange={setPassword}
-            credentialId={passwordCredentialId}
-            onCredentialIdChange={setPasswordCredentialId}
-            managedPasswords={managedPasswords}
-            hasExistingPassword={!!encryptedPassword}
-            editAssetId={editAssetId}
-            onUsernameChange={setUsername}
+      {/* Connection & Auth (single visual block) */}
+      <div className="grid gap-3 border rounded-lg p-3">
+        <div className="grid gap-2">
+          <Label>{t("asset.kafkaBrokers")}</Label>
+          <Textarea
+            value={brokersText}
+            onChange={(e) => setBrokersText(e.target.value)}
+            rows={3}
+            className="font-mono text-sm"
+            placeholder="192.168.100.50:9092"
           />
-        </>
-      )}
+        </div>
+
+        <div className="grid gap-2">
+          <Label>{t("asset.kafkaClientId")}</Label>
+          <Input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="opskat" />
+        </div>
+
+        <div className="grid gap-2">
+          <Label>{t("asset.kafkaSaslMechanism")}</Label>
+          <Select value={saslMechanism} onValueChange={setSaslMechanism}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">{t("asset.kafkaSaslNone")}</SelectItem>
+              <SelectItem value="plain">PLAIN</SelectItem>
+              <SelectItem value="scram-sha-256">SCRAM-SHA-256</SelectItem>
+              <SelectItem value="scram-sha-512">SCRAM-SHA-512</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {saslEnabled && (
+          <>
+            <div className="grid gap-2">
+              <Label>{t("asset.username")}</Label>
+              <Input value={username} onChange={(e) => setUsername(e.target.value)} />
+            </div>
+            <PasswordSourceField
+              source={passwordSource}
+              onSourceChange={setPasswordSource}
+              password={password}
+              onPasswordChange={setPassword}
+              credentialId={passwordCredentialId}
+              onCredentialIdChange={setPasswordCredentialId}
+              managedPasswords={managedPasswords}
+              hasExistingPassword={!!encryptedPassword}
+              editAssetId={editAssetId}
+              onUsernameChange={setUsername}
+            />
+          </>
+        )}
+      </div>
 
       <div className="flex items-center justify-between">
         <Label>{t("asset.tls")}</Label>
