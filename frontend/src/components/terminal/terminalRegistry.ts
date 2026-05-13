@@ -1,12 +1,14 @@
 import { Terminal as XTerminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
+import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { WriteSSH, WriteSerial } from "../../../wailsjs/go/app/App";
 import { EventsOn, EventsOff } from "../../../wailsjs/runtime/runtime";
 import { bytesToBase64 } from "@/lib/terminalEncode";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useShortcutStore } from "@/stores/shortcutStore";
+import { useTerminalThemeStore } from "@/stores/terminalThemeStore";
 import { withTerminalFontFallback } from "@/data/terminalFonts";
 import i18n from "@/i18n";
 import { createTerminalInputBridge, type TerminalInputBridge } from "./terminalInputBridge";
@@ -28,7 +30,14 @@ const registry = new Map<string, InternalInstance>();
 
 export function getOrCreateTerminal(
   sessionId: string,
-  init: { fontSize: number; fontFamily: string; theme?: ITheme; scrollback: number; transport?: "ssh" | "serial" }
+  init: {
+    fontSize: number;
+    fontFamily: string;
+    theme?: ITheme;
+    scrollback: number;
+    transport?: "ssh" | "serial";
+    webglEnabled?: boolean;
+  }
 ): TerminalInstance {
   const cached = registry.get(sessionId);
   if (cached) return cached;
@@ -64,6 +73,32 @@ export function getOrCreateTerminal(
     onFilter: () => {},
     onCopy: () => false,
   });
+
+  // GPU renderer: required so customGlyphs (powerline U+E0A0–U+E0D7, box drawing)
+  // is drawn by xterm instead of the system font — fixes tofu boxes from terminal
+  // prompts (oh-my-zsh powerlevel10k, starship, etc.). Falls back to DOM renderer
+  // automatically on context loss or if WebGL initialization throws.
+  // 持有引用 + onContextLoss 订阅，instance.dispose 时显式释放 —— term.dispose
+  // 虽然会级联 addon，但订阅本身是独立 IDisposable，不主动 dispose 会泄漏。
+  // 失败时回写 store 的 webglEnabled=false：避免每开一个终端都重复 try/log，
+  // 而且让设置面板的开关如实反映当前可用性。用户可以手动再打开重试。
+  let webglAddon: WebglAddon | null = null;
+  let webglContextLossSub: { dispose: () => void } | null = null;
+  if (init.webglEnabled !== false) {
+    try {
+      const addon = new WebglAddon();
+      webglContextLossSub = addon.onContextLoss(() => {
+        addon.dispose();
+        webglAddon = null;
+        useTerminalThemeStore.getState().setWebglEnabled(false);
+      });
+      term.loadAddon(addon);
+      webglAddon = addon;
+    } catch (err) {
+      console.warn("WebGL renderer unavailable, falling back to DOM renderer", err);
+      useTerminalThemeStore.getState().setWebglEnabled(false);
+    }
+  }
 
   const writeData = (data: string) =>
     writeFn(sessionId, bytesToBase64(new TextEncoder().encode(data))).catch(console.error);
@@ -129,6 +164,10 @@ export function getOrCreateTerminal(
       onKeyDispose.dispose();
       EventsOff(dataEvent);
       EventsOff(closedEvent);
+      webglContextLossSub?.dispose();
+      webglContextLossSub = null;
+      webglAddon?.dispose();
+      webglAddon = null;
       term.dispose();
       registry.delete(sessionId);
     },
