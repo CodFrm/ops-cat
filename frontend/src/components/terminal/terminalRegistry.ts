@@ -2,18 +2,18 @@ import { Terminal as XTerminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
-import { WriteSSH } from "../../../wailsjs/go/app/App";
 import { EventsOn, EventsOff } from "../../../wailsjs/runtime/runtime";
-import { bytesToBase64 } from "@/lib/terminalEncode";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { withTerminalFontFallback } from "@/data/terminalFonts";
 import i18n from "@/i18n";
+import { TerminalInputWriter } from "./terminalInputWriter";
 
 export interface TerminalInstance {
   term: XTerminal;
   fitAddon: FitAddon;
   searchAddon: SearchAddon;
   container: HTMLDivElement;
+  writeInput: (data: string) => void;
 }
 
 interface InternalInstance extends TerminalInstance {
@@ -44,12 +44,13 @@ export function getOrCreateTerminal(
 
   const fitAddon = new FitAddon();
   const searchAddon = new SearchAddon();
+  const inputWriter = new TerminalInputWriter(sessionId);
   term.loadAddon(fitAddon);
   term.loadAddon(searchAddon);
   term.open(container);
 
   const onDataDispose = term.onData((data) => {
-    WriteSSH(sessionId, bytesToBase64(new TextEncoder().encode(data))).catch(console.error);
+    inputWriter.write(data);
   });
 
   const dataEvent = "ssh:data:" + sessionId;
@@ -72,10 +73,12 @@ export function getOrCreateTerminal(
     fitAddon,
     searchAddon,
     container,
+    writeInput: (data: string) => inputWriter.write(data),
     isClosed: false,
     dispose: () => {
       onDataDispose.dispose();
       onKeyDispose.dispose();
+      inputWriter.dispose();
       EventsOff(dataEvent);
       EventsOff(closedEvent);
       term.dispose();
@@ -108,4 +111,8 @@ export function disposeTerminal(sessionId: string): void {
 
 export function getTerminalInstance(sessionId: string): TerminalInstance | undefined {
   return registry.get(sessionId);
+}
+
+export function writeTerminalInput(sessionId: string, data: string): void {
+  registry.get(sessionId)?.writeInput(data);
 }

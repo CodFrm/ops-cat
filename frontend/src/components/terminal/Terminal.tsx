@@ -2,7 +2,7 @@ import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState,
 import type { Terminal as XTerminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { SearchAddon } from "@xterm/addon-search";
-import { WriteSSH, ResizeSSH } from "../../../wailsjs/go/app/App";
+import { ResizeSSH } from "../../../wailsjs/go/app/App";
 import { useShortcutStore, matchShortcut, formatBinding, formatModKey } from "@/stores/shortcutStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useTerminalThemeStore, toXtermTheme } from "@/stores/terminalThemeStore";
@@ -22,8 +22,7 @@ import {
 import { TerminalSearchBar } from "./TerminalSearchBar";
 import { useSFTPStore } from "@/stores/sftpStore";
 import { useTabStore } from "@/stores/tabStore";
-import { bytesToBase64 } from "@/lib/terminalEncode";
-import { getOrCreateTerminal, getTerminalInstance } from "./terminalRegistry";
+import { getOrCreateTerminal, getTerminalInstance, writeTerminalInput } from "./terminalRegistry";
 
 export interface TerminalHandle {
   toggleSearch: () => void;
@@ -75,7 +74,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const handlePaste = useCallback(() => {
     navigator.clipboard.readText().then((text) => {
       if (text && termRef.current) {
-        WriteSSH(sessionId, bytesToBase64(new TextEncoder().encode(text))).catch(console.error);
+        writeTerminalInput(sessionId, text);
       }
     });
   }, [sessionId]);
