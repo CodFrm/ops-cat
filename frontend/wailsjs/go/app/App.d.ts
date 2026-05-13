@@ -419,6 +419,10 @@ export function ReloadExtensions():Promise<void>;
 
 export function RemoveQueuedAIMessage(arg1:number,arg2:string):Promise<boolean>;
 
+export function ReorderAsset(arg1:number,arg2:number,arg3:number):Promise<void>;
+
+export function ReorderGroup(arg1:number,arg2:number,arg3:number):Promise<void>;
+
 export function ResizeSSH(arg1:string,arg2:number,arg3:number):Promise<void>;
 
 export function RespondAIApproval(arg1:string,arg2:ai.ApprovalResponse):Promise<void>;

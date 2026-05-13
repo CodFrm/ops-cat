@@ -131,3 +131,65 @@ func TestGroupSvc_List(t *testing.T) {
 		})
 	})
 }
+
+func TestGroupSvc_Reorder(t *testing.T) {
+	convey.Convey("Reorder：同父级排序", t, func() {
+		ctx, mockGroupRepo, _ := setupTest(t)
+		moving := &group_entity.Group{ID: 3, ParentID: 0, SortOrder: 30}
+		all := []*group_entity.Group{
+			{ID: 1, ParentID: 0, SortOrder: 10},
+			{ID: 2, ParentID: 0, SortOrder: 20},
+			moving,
+		}
+		mockGroupRepo.EXPECT().Find(gomock.Any(), int64(3)).Return(moving, nil)
+		mockGroupRepo.EXPECT().List(gomock.Any()).Return(all, nil)
+		// 把 3 拖到 1 之前 → [3, 1, 2]：3→10, 1→20, 2→30
+		mockGroupRepo.EXPECT().UpdateSortOrder(gomock.Any(), int64(3), 10).Return(nil)
+		mockGroupRepo.EXPECT().UpdateSortOrder(gomock.Any(), int64(1), 20).Return(nil)
+		mockGroupRepo.EXPECT().UpdateSortOrder(gomock.Any(), int64(2), 30).Return(nil)
+
+		err := Group().Reorder(ctx, 3, 0, 1)
+		assert.NoError(t, err)
+	})
+
+	convey.Convey("Reorder：改父级", t, func() {
+		ctx, mockGroupRepo, _ := setupTest(t)
+		moving := &group_entity.Group{ID: 5, ParentID: 0, SortOrder: 10}
+		all := []*group_entity.Group{
+			moving,
+			{ID: 10, ParentID: 0, SortOrder: 20},
+			{ID: 11, ParentID: 10, SortOrder: 10},
+		}
+		mockGroupRepo.EXPECT().Find(gomock.Any(), int64(5)).Return(moving, nil)
+		mockGroupRepo.EXPECT().List(gomock.Any()).Return(all, nil)
+		// 拖到 ID=10 下，beforeID=0（末尾）
+		mockGroupRepo.EXPECT().UpdateParentID(gomock.Any(), int64(5), int64(10)).Return(nil)
+		// 目标父级 10 下兄弟（不含 5）：[11]；插入 5 在末尾 → [11, 5]
+		// 11: sort_order 已经是 10，跳过；5: 写 20
+		mockGroupRepo.EXPECT().UpdateSortOrder(gomock.Any(), int64(5), 20).Return(nil)
+
+		err := Group().Reorder(ctx, 5, 10, 0)
+		assert.NoError(t, err)
+	})
+
+	convey.Convey("Reorder：拖到自身下被拒", t, func() {
+		ctx, _, _ := setupTest(t)
+		err := Group().Reorder(ctx, 7, 7, 0)
+		assert.Error(t, err)
+	})
+
+	convey.Convey("Reorder：拖到自己子孙下成环被拒", t, func() {
+		ctx, mockGroupRepo, _ := setupTest(t)
+		moving := &group_entity.Group{ID: 1, ParentID: 0}
+		all := []*group_entity.Group{
+			moving,
+			{ID: 2, ParentID: 1}, // 2 是 1 的子
+			{ID: 3, ParentID: 2}, // 3 是 1 的孙
+		}
+		mockGroupRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(moving, nil)
+		mockGroupRepo.EXPECT().List(gomock.Any()).Return(all, nil)
+		// 尝试把 1 拖到 3 下 → 应被拒绝
+		err := Group().Reorder(ctx, 1, 3, 0)
+		assert.Error(t, err)
+	})
+}
