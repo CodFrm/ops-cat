@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { AIChatInput, type AIChatInputHandle } from "@/components/ai/AIChatInput";
@@ -30,6 +30,116 @@ describe("AIChatInput", () => {
     const [content] = onSubmit.mock.calls[0];
     expect(content).toBe("hello");
     expect(content).not.toContain("<mention");
+  });
+
+  it("提交后同步清空外部草稿和编辑器内容", async () => {
+    const onSubmit = vi.fn();
+    const onDraftChange = vi.fn();
+    const editorRef = { current: null as Editor | null };
+    const handleRef = createRef<AIChatInputHandle>();
+    render(
+      <AIChatInput
+        ref={handleRef}
+        onSubmit={onSubmit}
+        onDraftChange={onDraftChange}
+        sendOnEnter={true}
+        editorRef={editorRef}
+      />
+    );
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+
+    act(() => {
+      editorRef.current!.chain().focus().insertContent("hello").run();
+      handleRef.current!.submit();
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith("hello");
+    expect(onDraftChange).toHaveBeenLastCalledWith({ content: "" });
+    await waitFor(() => expect(editorRef.current!.getText()).toBe(""));
+  });
+
+  it("提交时取消未刷新的草稿节流，避免旧内容尾随写回", async () => {
+    const onSubmit = vi.fn();
+    const onDraftChange = vi.fn();
+    const editorRef = { current: null as Editor | null };
+    const handleRef = createRef<AIChatInputHandle>();
+    render(
+      <AIChatInput
+        ref={handleRef}
+        onSubmit={onSubmit}
+        onDraftChange={onDraftChange}
+        sendOnEnter={true}
+        editorRef={editorRef}
+      />
+    );
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        editorRef.current!.chain().focus().insertContent("hello").run();
+        handleRef.current!.submit();
+      });
+      expect(onDraftChange).toHaveBeenLastCalledWith({ content: "" });
+
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+
+      expect(onSubmit).toHaveBeenCalledWith("hello");
+      expect(onDraftChange.mock.calls).not.toContainEqual([{ content: "hello" }]);
+      expect(onDraftChange).toHaveBeenLastCalledWith({ content: "" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("IME 组合输入期间 Enter 不触发发送", async () => {
+    const onSubmit = vi.fn();
+    const editorRef = { current: null as Editor | null };
+    render(<AIChatInput onSubmit={onSubmit} sendOnEnter={true} editorRef={editorRef} />);
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+    const editor = screen.getByRole("textbox");
+
+    act(() => {
+      editorRef.current!.chain().focus().insertContent("nihao").run();
+    });
+    fireEvent.compositionStart(editor);
+    fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 13 });
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("keyCode 229 的 Enter 不触发发送", async () => {
+    const onSubmit = vi.fn();
+    const editorRef = { current: null as Editor | null };
+    render(<AIChatInput onSubmit={onSubmit} sendOnEnter={true} editorRef={editorRef} />);
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+    const editor = screen.getByRole("textbox");
+
+    act(() => {
+      editorRef.current!.chain().focus().insertContent("nihao").run();
+    });
+    fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 229 });
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("IME 结束后普通 Enter 正常发送", async () => {
+    const onSubmit = vi.fn();
+    const editorRef = { current: null as Editor | null };
+    render(<AIChatInput onSubmit={onSubmit} sendOnEnter={true} editorRef={editorRef} />);
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+    const editor = screen.getByRole("textbox");
+
+    act(() => {
+      editorRef.current!.chain().focus().insertContent("你好").run();
+    });
+    fireEvent.compositionStart(editor);
+    fireEvent.compositionEnd(editor);
+    fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 13 });
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("你好"));
   });
 
   it("输入 @ 弹出 MentionList", async () => {

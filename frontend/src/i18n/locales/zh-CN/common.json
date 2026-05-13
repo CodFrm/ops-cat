@@ -807,6 +807,20 @@
       "tooltip": "本次回复 token 使用量"
     },
     "retrying": "重试中",
+    "retry": {
+      "retrying": "重试中",
+      "attempt": "第 {{n}} 次",
+      "countdown_seconds": "{{n}}s",
+      "now": "正在重试..."
+    },
+    "error": {
+      "rate_limit": "请求过于频繁，稍后再试",
+      "server": "服务暂时不可用",
+      "network": "网络连接不稳定",
+      "auth": "鉴权失败，请检查 API Key",
+      "interrupted": "对话被中断",
+      "unknown": "对话出错"
+    },
     "newConversation": "新对话",
     "sidebar": {
       "title": "AI 助手",

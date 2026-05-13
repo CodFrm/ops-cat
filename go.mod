@@ -3,7 +3,7 @@ module github.com/opskat/opskat
 go 1.26.0
 
 require (
-	github.com/cago-frame/agents v0.0.0-20260512092641-ad5c470b126f
+	github.com/cago-frame/agents v0.0.0-20260512154912-6fca6259bc2d
 	github.com/cago-frame/cago v0.0.0-20260307042250-c4ff92923947
 	github.com/coder/websocket v1.8.14
 	github.com/fsnotify/fsnotify v1.10.0
@@ -182,3 +182,7 @@ require (
 )
 
 // replace github.com/wailsapp/wails/v2 v2.10.2 => /Users/codfrm/go/pkg/mod
+
+// 临时本地路径：cago openai provider 加 wrapProviderError 修复 5xx/429 不重试问题。
+// 等 cago 上游 commit / 发版后请删除这条 replace，并 go get 到对应版本。
+replace github.com/cago-frame/agents => /Users/codfrm/Code/cago/agents

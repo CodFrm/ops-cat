@@ -96,6 +96,7 @@ func TestEventTranslator_TurnEndUsage(t *testing.T) {
 				CompletionTokens:    50,
 				CachedTokens:        20,
 				CacheCreationTokens: 10,
+				TotalTokens:         180,
 			}},
 		)
 		So(out, ShouldHaveLength, 1)
@@ -105,6 +106,22 @@ func TestEventTranslator_TurnEndUsage(t *testing.T) {
 		So(out[0].Usage.OutputTokens, ShouldEqual, 50)
 		So(out[0].Usage.CacheReadTokens, ShouldEqual, 20)
 		So(out[0].Usage.CacheCreationTokens, ShouldEqual, 10)
+	})
+
+	Convey("OpenAI 风格 usage：prompt_tokens 已包含 cached_tokens 时归一化为非缓存输入", t, func() {
+		out := drain(NewStreamTranslator(),
+			agent.Event{Kind: agent.EventTurnEnd, Usage: &provider.Usage{
+				PromptTokens:     100,
+				CompletionTokens: 50,
+				CachedTokens:     20,
+				TotalTokens:      150,
+			}},
+		)
+		So(out, ShouldHaveLength, 1)
+		So(out[0].Usage, ShouldNotBeNil)
+		So(out[0].Usage.InputTokens, ShouldEqual, 80)
+		So(out[0].Usage.OutputTokens, ShouldEqual, 50)
+		So(out[0].Usage.CacheReadTokens, ShouldEqual, 20)
 	})
 }
 
@@ -116,18 +133,33 @@ func TestEventTranslator_TurnEndNoUsage(t *testing.T) {
 }
 
 func TestEventTranslator_Retry(t *testing.T) {
-	Convey("EventRetry → retry，错误信息透传", t, func() {
+	Convey("EventRetry → retry，Attempt/Delay/Cause 全部透传", t, func() {
 		out := drain(NewStreamTranslator(), agent.Event{
 			Kind: agent.EventRetry,
 			Retry: &agent.RetryEvent{
-				Attempt: 1,
-				Delay:   2 * time.Second,
+				Attempt: 2,
+				Delay:   3 * time.Second,
 				Cause:   errors.New("timeout"),
 			},
 		})
 		So(out, ShouldHaveLength, 1)
 		So(out[0].Type, ShouldEqual, "retry")
 		So(out[0].Error, ShouldEqual, "timeout")
+		// Attempt 放在 Content 字段，前端 parseInt(event.content) 解析。
+		So(out[0].Content, ShouldEqual, "2")
+		So(out[0].RetryDelayMs, ShouldEqual, 3000)
+	})
+
+	Convey("EventRetry 无 Retry 字段时退化到 ev.Error，不带 Attempt/Delay", t, func() {
+		out := drain(NewStreamTranslator(), agent.Event{
+			Kind:  agent.EventRetry,
+			Error: errors.New("fallback"),
+		})
+		So(out, ShouldHaveLength, 1)
+		So(out[0].Type, ShouldEqual, "retry")
+		So(out[0].Error, ShouldEqual, "fallback")
+		So(out[0].Content, ShouldEqual, "0")
+		So(out[0].RetryDelayMs, ShouldEqual, 0)
 	})
 }
 
@@ -160,11 +192,12 @@ func TestEventTranslator_Compacted(t *testing.T) {
 }
 
 func TestEventTranslator_SteerConsumed(t *testing.T) {
-	Convey("EventSteerConsumed → queue_consumed，Content 透传 Delta", t, func() {
-		out := drain(NewStreamTranslator(), agent.Event{Kind: agent.EventSteerConsumed, Delta: "排队的内容"})
+	Convey("EventSteerConsumed → queue_consumed，Content / QueueID 透传", t, func() {
+		out := drain(NewStreamTranslator(), agent.Event{Kind: agent.EventSteerConsumed, Delta: "排队的内容", SteerID: "q1"})
 		So(out, ShouldHaveLength, 1)
 		So(out[0].Type, ShouldEqual, "queue_consumed")
 		So(out[0].Content, ShouldEqual, "排队的内容")
+		So(out[0].QueueID, ShouldEqual, "q1")
 	})
 
 	Convey("仍处于 thinking 时先发 thinking_done", t, func() {

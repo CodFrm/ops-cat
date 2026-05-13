@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -121,6 +124,166 @@ func TestRunner_SystemPromptHasOpsKatIntro(t *testing.T) {
 		So(text, ShouldNotContainSubstring, "lead Cago coding agent")
 		So(text, ShouldContainSubstring, "## Available tools")
 		So(text, ShouldContainSubstring, "## Guidelines")
+	})
+}
+
+// TestRunner_RetriesOn503ProviderError 验证 BuildSystem 注入的 agent.RetryPolicy
+// 在面对 503 时确实走 cago retry 路径：第一次 ChatStream chunk.Err 命中
+// defaultShouldRetry 的 408/425/429/500/502/503/504 白名单 → handleRetry 发出
+// EventRetry（被翻译为前端 type:"retry" StreamEvent）+ sleep InitialDelay →
+// 第二次 ChatStream 正常吐出 content + finish_reason → 整轮成功。
+//
+// 这是 OpsKat 端到端的回归 —— 当 cago 升级 / 配置漂移导致 RetryPolicy 失效时
+// 该测试会先于线上挂掉。
+func TestRunner_RetriesOn503ProviderError(t *testing.T) {
+	Convey("503 ProviderError 触发 cago retry → 收到 retry 事件 + 续传完成", t, func() {
+		// 两个 QueueStream entry：FIFO 消费，第一次 503 触发 retry，第二次正常返回。
+		mock := providertest.New().
+			QueueStream(provider.StreamChunk{Err: &provider.ProviderError{
+				Err:        errors.New("503 service unavailable"),
+				StatusCode: 503,
+			}}).
+			QueueStream(
+				provider.StreamChunk{ContentDelta: "recovered"},
+				provider.StreamChunk{FinishReason: provider.FinishStop},
+			)
+
+		// timeout 大于 InitialDelay(1s) 即可。
+		out := runOneTurn(t, mock, "", []Message{
+			{Role: RoleUser, Content: "hello"},
+		}, 8*time.Second)
+
+		var retryCount, contentCount, doneCount, errorCount int
+		var retryEv *StreamEvent
+		for i := range out {
+			e := &out[i]
+			switch e.Type {
+			case "retry":
+				retryCount++
+				retryEv = e
+			case "content":
+				contentCount++
+			case "done":
+				doneCount++
+			case "error":
+				errorCount++
+			}
+		}
+		So(retryCount, ShouldEqual, 1)
+		So(retryEv, ShouldNotBeNil)
+		// Attempt 序号放在 Content 字段；RetryDelayMs 透传 cago Delay。
+		So(retryEv.Content, ShouldEqual, "1")
+		So(retryEv.RetryDelayMs, ShouldBeGreaterThan, 0)
+		So(retryEv.Error, ShouldContainSubstring, "503")
+		So(contentCount, ShouldBeGreaterThanOrEqualTo, 1)
+		So(doneCount, ShouldEqual, 1)
+		So(errorCount, ShouldEqual, 0)
+		// ChatStream 被调用 2 次（首次失败 + 重试）。
+		So(len(mock.Received()), ShouldEqual, 2)
+	})
+}
+
+// TestRunner_EndToEnd_RealOpenAIProvider_503TriggersRetry 是更彻底的端到端回归：
+// 起一个真 httptest server，前 N 次返 503，最后一次正常返回 SSE 流。
+// 走的链路完全是生产路径：BuildProvider(*openai.AIProvider, apiKey) →
+// cago openai.NewProvider → BuildSystem (注入 RetryPolicy) → Runner.Send。
+//
+// 这条路径覆盖的关键 bug:
+//   - cago openai provider 必须把 *openai.APIError 包装成 *provider.ProviderError
+//     (status_code 走 defaultShouldRetry 白名单)
+//   - 如果包装失效，503 直接走 EventError，前端只看到 ErrorBlock 没有 RetryBanner
+//
+// 跟 TestRunner_RetriesOn503ProviderError 的区别：那个测试用 providertest
+// 直接注入 chunk.Err{ProviderError}，跳过了 OpenAI provider 的 HTTP 错误转换层。
+func TestRunner_EndToEnd_RealOpenAIProvider_503TriggersRetry(t *testing.T) {
+	Convey("真 OpenAI provider + 503 HTTP → cago retry 链路", t, func() {
+		var hits atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			n := hits.Add(1)
+			if n < 2 {
+				// 第一次返 503，模拟用户截图里的错误。
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = io.WriteString(w, `{"error":{"message":"No available channel for model gpt-5.51"}}`)
+				return
+			}
+			// 第二次返一段正常 SSE 流。
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher := w.(http.Flusher)
+			frames := []string{
+				`{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"recovered"}}]}`,
+				`{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			}
+			for _, f := range frames {
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", f)
+				flusher.Flush()
+			}
+			_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+			flusher.Flush()
+		}))
+		defer srv.Close()
+
+		// 走生产路径：BuildProvider 从 entity 构造 cago openai provider。
+		entity := &ai_provider_entity.AIProvider{
+			Type:    "openai",
+			APIBase: srv.URL,
+			Model:   "gpt-4o",
+		}
+		prov, err := BuildProvider(entity, "test-key")
+		So(err, ShouldBeNil)
+
+		cfg := SystemConfig{
+			Provider: prov,
+			Cwd:      t.TempDir(),
+			Model:    "gpt-4o",
+		}
+		sys, err := BuildSystem(context.Background(), cfg)
+		So(err, ShouldBeNil)
+		defer func() { _ = sys.Close(context.Background()) }()
+
+		conv := agent.LoadConversation(fmt.Sprintf("e2e-%d", time.Now().UnixNano()), nil)
+		runner := sys.Agent().Runner(conv)
+		defer func() { _ = runner.Close() }()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		events, err := runner.Send(ctx, "hello")
+		So(err, ShouldBeNil)
+
+		var retryCount, contentCount, doneCount, errorCount int
+		var retryEv *StreamEvent
+		translator := NewStreamTranslator()
+		for ev := range events {
+			translator.Translate(ev, func(se StreamEvent) {
+				switch se.Type {
+				case "retry":
+					retryCount++
+					sc := se
+					retryEv = &sc
+				case "content":
+					contentCount++
+				case "done":
+					doneCount++
+				case "error":
+					errorCount++
+				}
+			})
+		}
+
+		// 第一次 503 必须命中 cago retry：
+		//   - 后端 emit 一次 EventRetry → 前端 type:"retry" StreamEvent
+		//   - RetryDelayMs 应该 > 0 (cago InitialDelay=1s)
+		//   - Error 文本包含 503 状态码
+		So(retryCount, ShouldEqual, 1)
+		So(retryEv, ShouldNotBeNil)
+		So(retryEv.RetryDelayMs, ShouldBeGreaterThan, 0)
+		So(retryEv.Error, ShouldContainSubstring, "503")
+		// 第二次正常返回 → content + done，没有 error。
+		So(contentCount, ShouldBeGreaterThanOrEqualTo, 1)
+		So(doneCount, ShouldEqual, 1)
+		So(errorCount, ShouldEqual, 0)
+		// 服务器被命中 2 次。
+		So(hits.Load(), ShouldEqual, int32(2))
 	})
 }
 

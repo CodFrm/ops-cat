@@ -2,10 +2,14 @@ package ai
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cago-frame/agents/agent"
 	"github.com/cago-frame/agents/provider"
+	"github.com/cago-frame/cago/pkg/logger"
+	"go.uber.org/zap"
 )
 
 // EventTranslator 把 cago agent.Event 翻译成 OpsKat 现有 StreamEvent。
@@ -79,13 +83,33 @@ func (t *EventTranslator) Translate(ev agent.Event, emit func(StreamEvent)) {
 		}
 
 	case agent.EventRetry:
+		// 透传 Attempt / Delay / Cause —— 前端用 RetryDelayMs 做倒计时同步、Content 显示第几次。
 		msg := ""
-		if ev.Retry != nil && ev.Retry.Cause != nil {
-			msg = ev.Retry.Cause.Error()
+		attempt := 0
+		delayMs := 0
+		if ev.Retry != nil {
+			attempt = ev.Retry.Attempt
+			delayMs = int(ev.Retry.Delay / time.Millisecond)
+			if ev.Retry.Cause != nil {
+				msg = ev.Retry.Cause.Error()
+			}
 		} else if ev.Error != nil {
 			msg = ev.Error.Error()
 		}
-		emit(StreamEvent{Type: "retry", Error: msg})
+		// 落运维日志：用户线上反馈"看不到 RetryBanner"时，先查后端日志确认 cago
+		// 真的触发了 retry。如果日志没有，说明 cago shouldRetry 没识别错误（多半
+		// 是 provider 没把 *APIError 包成 *provider.ProviderError），与前端无关。
+		logger.Default().Info("AI provider retry",
+			zap.Int("attempt", attempt),
+			zap.Int("delay_ms", delayMs),
+			zap.String("cause", msg),
+		)
+		emit(StreamEvent{
+			Type:         "retry",
+			Error:        msg,
+			Content:      strconv.Itoa(attempt),
+			RetryDelayMs: delayMs,
+		})
 
 	case agent.EventCancelled:
 		emit(StreamEvent{Type: "stopped"})
@@ -107,7 +131,7 @@ func (t *EventTranslator) Translate(ev agent.Event, emit func(StreamEvent)) {
 		// 并从 pendingQueue 弹出首条。Delta 是 displayText（含 @mention 原样），
 		// 没有 display 时回落 LLM 文本，前端把它当 user 消息内容渲染。
 		t.flushThinking(emit)
-		emit(StreamEvent{Type: "queue_consumed", Content: ev.Delta})
+		emit(StreamEvent{Type: "queue_consumed", Content: ev.Delta, QueueID: ev.SteerID})
 
 	case agent.EventDone:
 		t.flushThinking(emit)
@@ -151,7 +175,7 @@ func extractToolResultText(blk *agent.ToolResultBlock) string {
 // convertUsage 把 cago provider.Usage 折算成 OpsKat Usage。
 //
 // 映射规则：
-//   - InputTokens         ← PromptTokens
+//   - InputTokens         ← normalized PromptTokens (uncached input)
 //   - OutputTokens        ← CompletionTokens（ReasoningTokens 已合并进 CompletionTokens 由 provider 上送）
 //   - CacheCreationTokens ← CacheCreationTokens
 //   - CacheReadTokens     ← CachedTokens
@@ -160,9 +184,27 @@ func convertUsage(u *provider.Usage) *Usage {
 		return nil
 	}
 	return &Usage{
-		InputTokens:         u.PromptTokens,
+		InputTokens:         normalizeInputTokens(u),
 		OutputTokens:        u.CompletionTokens,
 		CacheCreationTokens: u.CacheCreationTokens,
 		CacheReadTokens:     u.CachedTokens,
 	}
+}
+
+func normalizeInputTokens(u *provider.Usage) int {
+	input := u.PromptTokens
+	// OpenAI reports prompt_tokens with cached_tokens included, while Anthropic reports
+	// fresh input separately from cache read/write. Use TotalTokens to detect the former
+	// and keep OpsKat's InputTokens meaning consistent: uncached prompt input only.
+	if u.CachedTokens > 0 && u.TotalTokens > 0 {
+		cacheIncludedTotal := u.PromptTokens + u.CompletionTokens
+		cacheSeparatedTotal := u.PromptTokens + u.CacheCreationTokens + u.CachedTokens + u.CompletionTokens
+		if u.TotalTokens == cacheIncludedTotal && cacheSeparatedTotal != cacheIncludedTotal {
+			input -= u.CachedTokens
+		}
+	}
+	if input < 0 {
+		return 0
+	}
+	return input
 }

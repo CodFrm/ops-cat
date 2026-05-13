@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/cago-frame/agents/agent"
 	"github.com/cago-frame/agents/app/coding"
@@ -94,6 +95,17 @@ func BuildSystem(ctx context.Context, cfg SystemConfig) (*coding.System, error) 
 		coding.WithoutSlashCommands(),
 		coding.WithSystemTemplate(opskatSystemTemplate),
 		coding.WithAgentOpts(agent.Use(".*", auditMiddleware)),
+		// Provider/网络瞬态错误自动重试：429/5xx/timeout/EOF 等命中 cago 默认 ShouldRetry。
+		// MaxAttempts=6 = 1 次原始 + 5 次重试；指数退避序列 5s → 10s → 20s → 40s → 60s
+		// (40*2=80 被 MaxDelay=60s clamp)。总等待最长 ~135s，应对共享 distributor 长时
+		// 限流 / 高峰 503 持续 1-2 分钟的场景。命中 Retry-After 头时优先使用 provider 给
+		// 的时间。中途断流时 cago 把已流出的 partial 文本 finalize 为 PartialErrored 并
+		// 作为历史上下文续传，无须 OpsKat 介入。
+		coding.WithAgentOpts(agent.Retry(agent.RetryPolicy{
+			MaxAttempts:  6,
+			InitialDelay: 5 * time.Second,
+			MaxDelay:     60 * time.Second,
+		})),
 	}
 	if cfg.SystemPrompt != "" {
 		opts = append(opts, coding.AppendSystem(cfg.SystemPrompt))

@@ -58,12 +58,13 @@ describe("UserMessage", () => {
       blocks: [],
     } as any;
 
-    render(<UserMessage msg={msg} onEdit={onEdit} />);
+    render(<UserMessage msg={msg} index={2} onEdit={onEdit} />);
 
     expect(screen.getByRole("button", { name: editButtonName })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: copyButtonName })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: editButtonName }));
     expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit).toHaveBeenCalledWith(2, msg);
   });
 });

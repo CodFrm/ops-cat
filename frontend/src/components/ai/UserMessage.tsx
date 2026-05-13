@@ -24,10 +24,13 @@ async function copyUserMessageText(text: string, copiedText: string, failedText:
 
 interface UserMessageProps {
   msg: ChatMessage;
-  onEdit?: () => void;
+  // 显式传 index 而非闭包，让父组件的 onEdit 可以保持稳定引用，
+  // 流式时 UserMessage 的 memo 才能真正跳过重渲染。
+  index?: number;
+  onEdit?: (index: number, msg: ChatMessage) => void;
 }
 
-export const UserMessage = memo(function UserMessage({ msg, onEdit }: UserMessageProps) {
+export const UserMessage = memo(function UserMessage({ msg, index, onEdit }: UserMessageProps) {
   const compact = useCompact();
   const maxWidthClass = compact ? "max-w-[95%]" : "max-w-[85%]";
   const segments = parseMentionContent(msg.content);
@@ -45,9 +48,10 @@ export const UserMessage = memo(function UserMessage({ msg, onEdit }: UserMessag
     void copyUserMessageText(copyText, t("ai.copied", "已复制到剪贴板"), t("ai.copyFailed", "复制失败"));
   }, [msg.content, t]);
 
+  const canEdit = !!onEdit && index != null;
   const handleEdit = useCallback(() => {
-    onEdit?.();
-  }, [onEdit]);
+    if (onEdit && index != null) onEdit(index, msg);
+  }, [onEdit, index, msg]);
 
   return (
     <div className="flex flex-col items-end gap-1.5 group/user">
@@ -74,12 +78,12 @@ export const UserMessage = memo(function UserMessage({ msg, onEdit }: UserMessag
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          {onEdit && <ContextMenuItem onClick={handleEdit}>{t("ai.editMessage", "编辑消息")}</ContextMenuItem>}
+          {canEdit && <ContextMenuItem onClick={handleEdit}>{t("ai.editMessage", "编辑消息")}</ContextMenuItem>}
           <ContextMenuItem onClick={handleContextCopy}>{t("action.copy", "复制")}</ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
       <div className="flex items-center gap-2 min-h-[18px] pr-0.5">
-        {onEdit && (
+        {canEdit && (
           <button
             type="button"
             className="opacity-0 group-hover/user:opacity-100 transition-opacity text-muted-foreground/50 hover:text-primary"
