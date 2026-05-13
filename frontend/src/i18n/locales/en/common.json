@@ -88,6 +88,7 @@
     "moveToEnd": "Move to End"
   },
   "theme": {
+    "label": "Theme",
     "toggle": "Toggle theme",
     "light": "Light",
     "dark": "Dark",
@@ -99,6 +100,7 @@
     "en": "English"
   },
   "appearance": {
+    "title": "Appearance",
     "startupTab": "Open on Startup",
     "startupTabLast": "Remember Last Tab",
     "startupTabHome": "Home"
@@ -945,6 +947,8 @@
     "desc": "Terminal color scheme and font settings",
     "fontFamily": "Font",
     "defaultFont": "Default Font",
+    "fontRecommended": "Recommended",
+    "fontOther": "Other",
     "customFont": "Custom",
     "customFontPlaceholder": "Enter font-family, e.g. Iosevka Term, monospace",
     "fontSize": "Font Size",

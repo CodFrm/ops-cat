@@ -1,10 +1,18 @@
-import { Moon, Sun } from "lucide-react";
+import { Check, Moon, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@opskat/ui";
-import { useTheme } from "@/components/theme-provider";
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@opskat/ui";
+import { useTheme, type Theme } from "@/components/theme-provider";
+
+const THEME_OPTIONS: Theme[] = ["light", "dark", "system"];
 
 export function ModeToggle() {
-  const { setTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
   const { t } = useTranslation();
 
   return (
@@ -16,10 +24,17 @@ export function ModeToggle() {
           <span className="sr-only">{t("theme.toggle")}</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => setTheme("light")}>{t("theme.light")}</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("dark")}>{t("theme.dark")}</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("system")}>{t("theme.system")}</DropdownMenuItem>
+      <DropdownMenuContent align="end" className="min-w-[8rem]">
+        {THEME_OPTIONS.map((option) => (
+          <DropdownMenuItem
+            key={option}
+            onClick={() => setTheme(option)}
+            className="flex items-center justify-between gap-4"
+          >
+            <span>{t(`theme.${option}`)}</span>
+            {theme === option && <Check className="size-4 text-muted-foreground" />}
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );
