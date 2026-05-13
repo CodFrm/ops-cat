@@ -96,7 +96,7 @@ type ContentBlock struct {
 	ToolName   string `json:"toolName,omitempty"`
 	ToolInput  string `json:"toolInput,omitempty"`
 	ToolCallID string `json:"toolCallId,omitempty"` // 跨 turn 还原 tool_calls 历史；老数据无此字段，前端兜底为塌缩消息
-	Status     string `json:"status,omitempty"`     // "running" | "completed" | "error" | "cancelled"
+	Status     string `json:"status,omitempty"`     // "running" | "completed" | "error" | "canceled"
 	// error 块字段：
 	//   ErrorKind   — "rate_limit" | "server" | "network" | "auth" | "interrupted" | "unknown"
 	//   ErrorDetail — 原始错误正文，UI 直接展示

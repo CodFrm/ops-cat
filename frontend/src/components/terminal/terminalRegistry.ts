@@ -6,14 +6,17 @@ import { WriteSSH } from "../../../wailsjs/go/app/App";
 import { EventsOn, EventsOff } from "../../../wailsjs/runtime/runtime";
 import { bytesToBase64 } from "@/lib/terminalEncode";
 import { useTerminalStore } from "@/stores/terminalStore";
+import { useShortcutStore } from "@/stores/shortcutStore";
 import { withTerminalFontFallback } from "@/data/terminalFonts";
 import i18n from "@/i18n";
+import { createTerminalInputBridge, type TerminalInputBridge } from "./terminalInputBridge";
 
 export interface TerminalInstance {
   term: XTerminal;
   fitAddon: FitAddon;
   searchAddon: SearchAddon;
   container: HTMLDivElement;
+  bridge: TerminalInputBridge;
 }
 
 interface InternalInstance extends TerminalInstance {
@@ -48,6 +51,15 @@ export function getOrCreateTerminal(
   term.loadAddon(searchAddon);
   term.open(container);
 
+  // 单一 keyboard 处理入口：IME 守卫 + shortcut 拦截 + Cmd+C 选区复制。
+  // 占位回调由 Terminal.tsx 在挂载时通过 setOnFilter/setOnCopy 注入。
+  const bridge = createTerminalInputBridge({
+    term,
+    shortcuts: useShortcutStore.getState().shortcuts,
+    onFilter: () => {},
+    onCopy: () => false,
+  });
+
   const onDataDispose = term.onData((data) => {
     WriteSSH(sessionId, bytesToBase64(new TextEncoder().encode(data))).catch(console.error);
   });
@@ -72,8 +84,12 @@ export function getOrCreateTerminal(
     fitAddon,
     searchAddon,
     container,
+    bridge,
     isClosed: false,
     dispose: () => {
+      // bridge 持有 term.attachCustomKeyEventHandler 槽位的还原逻辑,
+      // 必须在 term.dispose 之前调用,避免 dispose 后访问已释放对象。
+      bridge.dispose();
       onDataDispose.dispose();
       onKeyDispose.dispose();
       EventsOff(dataEvent);

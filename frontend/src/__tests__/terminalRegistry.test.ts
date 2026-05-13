@@ -6,10 +6,21 @@ const hoisted = vi.hoisted(() => {
   const disposeSpy = vi.fn();
   const reconnectBySessionMock = vi.fn();
   const terminalCtor = vi.fn();
+  const bridgeDisposeSpy = vi.fn();
+  const disposeOrder: string[] = [];
   const state: { capturedOnKey: ((e: { key: string }) => void) | null } = {
     capturedOnKey: null,
   };
-  return { eventHandlers, writeSpy, disposeSpy, reconnectBySessionMock, terminalCtor, state };
+  return {
+    eventHandlers,
+    writeSpy,
+    disposeSpy,
+    reconnectBySessionMock,
+    terminalCtor,
+    bridgeDisposeSpy,
+    disposeOrder,
+    state,
+  };
 });
 
 vi.mock("../../wailsjs/runtime/runtime", () => ({
@@ -35,13 +46,29 @@ vi.mock("@xterm/xterm", () => {
       hoisted.state.capturedOnKey = handler;
       return { dispose: vi.fn() };
     });
-    dispose = hoisted.disposeSpy;
+    attachCustomKeyEventHandler = vi.fn();
+    dispose = vi.fn(() => {
+      hoisted.disposeOrder.push("term");
+      hoisted.disposeSpy();
+    });
     constructor() {
       hoisted.terminalCtor();
     }
   }
   return { Terminal: MockTerminal };
 });
+
+vi.mock("@/components/terminal/terminalInputBridge", () => ({
+  createTerminalInputBridge: vi.fn(() => ({
+    setShortcuts: vi.fn(),
+    setOnFilter: vi.fn(),
+    setOnCopy: vi.fn(),
+    dispose: vi.fn(() => {
+      hoisted.disposeOrder.push("bridge");
+      hoisted.bridgeDisposeSpy();
+    }),
+  })),
+}));
 
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class {} }));
 vi.mock("@xterm/addon-search", () => ({ SearchAddon: class {} }));
@@ -73,6 +100,8 @@ describe("terminalRegistry", () => {
     hoisted.disposeSpy.mockClear();
     hoisted.reconnectBySessionMock.mockClear();
     hoisted.terminalCtor.mockClear();
+    hoisted.bridgeDisposeSpy.mockClear();
+    hoisted.disposeOrder.length = 0;
   });
 
   it("writes the i18n closed hint and marks closed when ssh:closed fires", () => {
@@ -120,6 +149,14 @@ describe("terminalRegistry", () => {
     hoisted.state.capturedOnKey?.({ key: "\r" });
     expect(hoisted.reconnectBySessionMock).not.toHaveBeenCalled();
     disposeTerminal("sess-4");
+  });
+
+  it("disposes the input bridge before the xterm instance", () => {
+    getOrCreateTerminal("sess-order", { fontSize: 14, fontFamily: "mono", scrollback: 1000 });
+    disposeTerminal("sess-order");
+    expect(hoisted.bridgeDisposeSpy).toHaveBeenCalled();
+    expect(hoisted.disposeSpy).toHaveBeenCalled();
+    expect(hoisted.disposeOrder).toEqual(["bridge", "term"]);
   });
 
   it("re-creates a fresh terminal after dispose for the same sessionId", () => {
