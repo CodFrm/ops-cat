@@ -4,15 +4,13 @@ import {
   ChevronRight,
   ChevronDown,
   Folder,
+  FolderOpen,
   Server,
   Plus,
   FolderPlus,
   Search,
   Loader2,
   Eye,
-  ArrowUp,
-  ArrowDown,
-  ChevronsUp,
   Pencil,
   Copy,
   Trash2,
@@ -48,7 +46,7 @@ import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useExtensionStore } from "@/extension";
 import { useActiveAssetIds } from "@/hooks/useActiveAssetIds";
-import { MoveAsset, MoveGroup, ReorderAsset, ReorderGroup } from "../../../wailsjs/go/app/App";
+import { ReorderAsset, ReorderGroup } from "../../../wailsjs/go/app/App";
 import { asset_entity, group_entity } from "../../../wailsjs/go/models";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -66,6 +64,7 @@ interface AssetTreeProps {
   onCopyAsset: (asset: asset_entity.Asset) => void;
   onConnectAsset: (asset: asset_entity.Asset) => void;
   onConnectAssetInNewTab?: (asset: asset_entity.Asset) => void;
+  onOpenFileManager?: (asset: asset_entity.Asset) => void;
   onSelectAsset: (asset: asset_entity.Asset) => void;
   onOpenInfoTab?: (type: "asset" | "group", id: number, name: string, icon?: string) => void;
 }
@@ -112,6 +111,7 @@ export function AssetTree({
   onCopyAsset,
   onConnectAsset,
   onConnectAssetInNewTab,
+  onOpenFileManager,
   onSelectAsset,
   onOpenInfoTab,
 }: AssetTreeProps) {
@@ -182,24 +182,6 @@ export function AssetTree({
       setDeleteConfirm({ id, assetCount: directAssetCount });
     } else {
       deleteGroup(id, false).catch((e) => toast.error(String(e)));
-    }
-  };
-
-  const handleMoveAsset = async (id: number, direction: string) => {
-    try {
-      await MoveAsset(id, direction);
-      await refresh();
-    } catch (e) {
-      toast.error(String(e));
-    }
-  };
-
-  const handleMoveGroup = async (id: number, direction: string) => {
-    try {
-      await MoveGroup(id, direction);
-      await refresh();
-    } catch (e) {
-      toast.error(String(e));
     }
   };
 
@@ -375,12 +357,11 @@ export function AssetTree({
                       onCopyAsset={onCopyAsset}
                       onConnectAsset={onConnectAsset}
                       onConnectAssetInNewTab={onConnectAssetInNewTab}
+                      onOpenFileManager={onOpenFileManager}
                       onEditGroup={onEditGroup}
                       onGroupDetail={onGroupDetail}
                       onDeleteGroup={handleDeleteGroup}
                       onDeleteAsset={(asset: asset_entity.Asset) => setDeleteAssetConfirm(asset)}
-                      onMoveAsset={handleMoveAsset}
-                      onMoveGroup={handleMoveGroup}
                       onOpenInfoTab={onOpenInfoTab}
                       depth={0}
                       t={t}
@@ -407,12 +388,11 @@ export function AssetTree({
                       onCopyAsset={onCopyAsset}
                       onConnectAsset={onConnectAsset}
                       onConnectAssetInNewTab={onConnectAssetInNewTab}
+                      onOpenFileManager={onOpenFileManager}
                       onEditGroup={onEditGroup}
                       onGroupDetail={onGroupDetail}
                       onDeleteGroup={handleDeleteGroup}
                       onDeleteAsset={(asset) => setDeleteAssetConfirm(asset)}
-                      onMoveAsset={handleMoveAsset}
-                      onMoveGroup={handleMoveGroup}
                       onOpenInfoTab={onOpenInfoTab}
                       depth={0}
                       t={t}
@@ -493,12 +473,11 @@ function GroupItem({
   onCopyAsset,
   onConnectAsset,
   onConnectAssetInNewTab,
+  onOpenFileManager,
   onEditGroup,
   onGroupDetail,
   onDeleteGroup,
   onDeleteAsset,
-  onMoveAsset,
-  onMoveGroup,
   onOpenInfoTab,
   depth,
   t,
@@ -517,12 +496,11 @@ function GroupItem({
   onCopyAsset: (asset: asset_entity.Asset) => void;
   onConnectAsset: (asset: asset_entity.Asset) => void;
   onConnectAssetInNewTab?: (asset: asset_entity.Asset) => void;
+  onOpenFileManager?: (asset: asset_entity.Asset) => void;
   onEditGroup: (group: group_entity.Group) => void;
   onGroupDetail: (group: group_entity.Group) => void;
   onDeleteGroup: (id: number) => void;
   onDeleteAsset: (asset: asset_entity.Asset) => void;
-  onMoveAsset: (id: number, direction: string) => void;
-  onMoveGroup: (id: number, direction: string) => void;
   onOpenInfoTab?: (type: "asset" | "group", id: number, name: string, icon?: string) => void;
   depth: number;
   t: (key: string) => string;
@@ -595,19 +573,6 @@ function GroupItem({
               {t("action.edit")}
             </ContextMenuItem>
             <ContextMenuSeparator />
-            <ContextMenuItem onClick={() => onMoveGroup(group.ID, "up")}>
-              <ArrowUp className="h-3.5 w-3.5 mr-1.5" />
-              {t("asset.moveUp")}
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onMoveGroup(group.ID, "down")}>
-              <ArrowDown className="h-3.5 w-3.5 mr-1.5" />
-              {t("asset.moveDown")}
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onMoveGroup(group.ID, "top")}>
-              <ChevronsUp className="h-3.5 w-3.5 mr-1.5" />
-              {t("asset.moveTop")}
-            </ContextMenuItem>
-            <ContextMenuSeparator />
             <ContextMenuItem className="text-destructive" onClick={() => onDeleteGroup(group.ID)}>
               <Trash2 className="h-3.5 w-3.5 mr-1.5" />
               {t("action.delete")}
@@ -636,12 +601,11 @@ function GroupItem({
               onCopyAsset={onCopyAsset}
               onConnectAsset={onConnectAsset}
               onConnectAssetInNewTab={onConnectAssetInNewTab}
+              onOpenFileManager={onOpenFileManager}
               onEditGroup={onEditGroup}
               onGroupDetail={onGroupDetail}
               onDeleteGroup={onDeleteGroup}
               onDeleteAsset={onDeleteAsset}
-              onMoveAsset={onMoveAsset}
-              onMoveGroup={onMoveGroup}
               onOpenInfoTab={onOpenInfoTab}
               depth={depth + 1}
               t={t}
@@ -661,8 +625,8 @@ function GroupItem({
               onCopyAsset={onCopyAsset}
               onConnectAsset={onConnectAsset}
               onConnectAssetInNewTab={onConnectAssetInNewTab}
+              onOpenFileManager={onOpenFileManager}
               onDeleteAsset={onDeleteAsset}
-              onMoveAsset={onMoveAsset}
               onOpenInfoTab={onOpenInfoTab}
               t={t}
             />
@@ -694,8 +658,8 @@ function AssetRow({
   onCopyAsset,
   onConnectAsset,
   onConnectAssetInNewTab,
+  onOpenFileManager,
   onDeleteAsset,
-  onMoveAsset,
   onOpenInfoTab,
   t,
 }: {
@@ -710,8 +674,8 @@ function AssetRow({
   onCopyAsset: (asset: asset_entity.Asset) => void;
   onConnectAsset: (asset: asset_entity.Asset) => void;
   onConnectAssetInNewTab?: (asset: asset_entity.Asset) => void;
+  onOpenFileManager?: (asset: asset_entity.Asset) => void;
   onDeleteAsset: (asset: asset_entity.Asset) => void;
-  onMoveAsset: (id: number, direction: string) => void;
   onOpenInfoTab?: (type: "asset" | "group", id: number, name: string, icon?: string) => void;
   t: (key: string) => string;
 }) {
@@ -790,6 +754,12 @@ function AssetRow({
             {t("asset.connectInNewTab")}
           </ContextMenuItem>
         )}
+        {asset.Type === "ssh" && onOpenFileManager && (
+          <ContextMenuItem onClick={() => onOpenFileManager(asset)}>
+            <FolderOpen className="h-3.5 w-3.5 mr-1.5" />
+            {t("sftp.fileManager")}
+          </ContextMenuItem>
+        )}
         {onOpenInfoTab && (
           <ContextMenuItem onClick={() => onOpenInfoTab("asset", asset.ID, asset.Name, asset.Icon)}>
             <Eye className="h-3.5 w-3.5 mr-1.5" />
@@ -803,19 +773,6 @@ function AssetRow({
         <ContextMenuItem onClick={() => onCopyAsset(asset)}>
           <Copy className="h-3.5 w-3.5 mr-1.5" />
           {t("action.copy")}
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => onMoveAsset(asset.ID, "up")}>
-          <ArrowUp className="h-3.5 w-3.5 mr-1.5" />
-          {t("asset.moveUp")}
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => onMoveAsset(asset.ID, "down")}>
-          <ArrowDown className="h-3.5 w-3.5 mr-1.5" />
-          {t("asset.moveDown")}
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => onMoveAsset(asset.ID, "top")}>
-          <ChevronsUp className="h-3.5 w-3.5 mr-1.5" />
-          {t("asset.moveTop")}
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem className="text-destructive" onClick={() => onDeleteAsset(asset)}>
