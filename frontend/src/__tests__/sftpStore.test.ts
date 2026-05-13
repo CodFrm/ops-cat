@@ -2,9 +2,15 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useSFTPStore, type SFTPTransfer } from "../stores/sftpStore";
 import { SFTPUpload, SFTPDownload, SFTPCancelTransfer } from "../../wailsjs/go/app/App";
 
-function makeTransfer(id: string, sessionId: string, status: SFTPTransfer["status"] = "active"): SFTPTransfer {
+function makeTransfer(
+  id: string,
+  sessionId: string,
+  status: SFTPTransfer["status"] = "active",
+  tabId = `tab-${sessionId}`
+): SFTPTransfer {
   return {
     transferId: id,
+    tabId,
     sessionId,
     direction: "upload",
     currentFile: "test.txt",
@@ -93,6 +99,25 @@ describe("sftpStore", () => {
     });
   });
 
+  describe("clearCompletedForTab", () => {
+    it("removes non-active transfers for a specific tab only", () => {
+      useSFTPStore.setState({
+        transfers: {
+          t1: makeTransfer("t1", "s1", "done", "tab1"),
+          t2: makeTransfer("t2", "s1", "active", "tab1"),
+          t3: makeTransfer("t3", "s2", "done", "tab2"),
+        },
+      });
+
+      useSFTPStore.getState().clearCompletedForTab("tab1");
+
+      const transfers = useSFTPStore.getState().transfers;
+      expect(transfers).not.toHaveProperty("t1");
+      expect(transfers).toHaveProperty("t2");
+      expect(transfers).toHaveProperty("t3");
+    });
+  });
+
   describe("getSessionTransfers", () => {
     it("returns only transfers for the given session", () => {
       useSFTPStore.setState({
@@ -111,6 +136,22 @@ describe("sftpStore", () => {
     it("returns empty array when no transfers for session", () => {
       const result = useSFTPStore.getState().getSessionTransfers("unknown");
       expect(result).toEqual([]);
+    });
+  });
+
+  describe("getTabTransfers", () => {
+    it("returns only transfers for the given tab", () => {
+      useSFTPStore.setState({
+        transfers: {
+          t1: makeTransfer("t1", "s1", "active", "tab1"),
+          t2: makeTransfer("t2", "s2", "active", "tab2"),
+          t3: makeTransfer("t3", "s3", "active", "tab1"),
+        },
+      });
+
+      const result = useSFTPStore.getState().getTabTransfers("tab1");
+      expect(result).toHaveLength(2);
+      expect(result.map((t) => t.transferId).sort()).toEqual(["t1", "t3"]);
     });
   });
 
@@ -162,10 +203,12 @@ describe("sftpStore", () => {
     it("calls backend and initializes transfer on success", async () => {
       vi.mocked(SFTPUpload).mockResolvedValue("transfer-123");
 
-      const result = await useSFTPStore.getState().startUpload("s1", "/remote/path");
+      const result = await useSFTPStore.getState().startUpload({ tabId: "tab1", sessionId: "s1" }, "/remote/path");
       expect(result).toBe("transfer-123");
       expect(SFTPUpload).toHaveBeenCalledWith("s1", "/remote/path");
       expect(useSFTPStore.getState().transfers["transfer-123"]).toBeDefined();
+      expect(useSFTPStore.getState().transfers["transfer-123"].tabId).toBe("tab1");
+      expect(useSFTPStore.getState().transfers["transfer-123"].sessionId).toBe("s1");
       expect(useSFTPStore.getState().transfers["transfer-123"].status).toBe("active");
       expect(useSFTPStore.getState().transfers["transfer-123"].direction).toBe("upload");
     });
@@ -173,8 +216,30 @@ describe("sftpStore", () => {
     it("returns null when backend returns empty", async () => {
       vi.mocked(SFTPUpload).mockResolvedValue("");
 
-      const result = await useSFTPStore.getState().startUpload("s1", "/remote/path");
+      const result = await useSFTPStore.getState().startUpload({ tabId: "tab1", sessionId: "s1" }, "/remote/path");
       expect(result).toBeNull();
+    });
+
+    it("keeps transfers scoped to their initiating tabs", async () => {
+      vi.mocked(SFTPUpload).mockResolvedValueOnce("transfer-1").mockResolvedValueOnce("transfer-2");
+
+      await useSFTPStore.getState().startUpload({ tabId: "tab1", sessionId: "s1" }, "/remote/file1");
+      await useSFTPStore.getState().startUpload({ tabId: "tab2", sessionId: "s2" }, "/remote/file2");
+
+      expect(
+        useSFTPStore
+          .getState()
+          .getTabTransfers("tab1")
+          .map((transfer) => transfer.transferId)
+      ).toEqual(["transfer-1"]);
+      expect(
+        useSFTPStore
+          .getState()
+          .getTabTransfers("tab2")
+          .map((transfer) => transfer.transferId)
+      ).toEqual(["transfer-2"]);
+      expect(SFTPUpload).toHaveBeenNthCalledWith(1, "s1", "/remote/file1");
+      expect(SFTPUpload).toHaveBeenNthCalledWith(2, "s2", "/remote/file2");
     });
   });
 
@@ -182,8 +247,11 @@ describe("sftpStore", () => {
     it("calls backend and initializes download transfer", async () => {
       vi.mocked(SFTPDownload).mockResolvedValue("dl-123");
 
-      const result = await useSFTPStore.getState().startDownload("s1", "/remote/file.txt");
+      const result = await useSFTPStore
+        .getState()
+        .startDownload({ tabId: "tab1", sessionId: "s1" }, "/remote/file.txt");
       expect(result).toBe("dl-123");
+      expect(useSFTPStore.getState().transfers["dl-123"].tabId).toBe("tab1");
       expect(useSFTPStore.getState().transfers["dl-123"].direction).toBe("download");
     });
   });
