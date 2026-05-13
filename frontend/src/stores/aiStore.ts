@@ -59,6 +59,10 @@ export interface TokenUsage {
 }
 
 export interface ChatMessage {
+  // 前端会话内稳定 ID（仅前端使用，不随后端持久化往返）。
+  // 用作 React list key，避免编辑重发 / queue_consumed 截断重插时按 index 复用错误的子组件实例
+  // （ToolBlock / ThinkingBlock 的 expanded 等本地 state 串到别的消息）。
+  id?: string;
   role: "user" | "assistant" | "tool";
   content: string;
   blocks: ContentBlock[];
@@ -509,6 +513,7 @@ function toDisplayMessages(msgs: ChatMessage[], includeStreaming = false): app.C
 
 function convertDisplayMessages(displayMsgs: app.ConversationDisplayMessage[]): ChatMessage[] {
   return (displayMsgs || []).map((dm: app.ConversationDisplayMessage) => ({
+    id: crypto.randomUUID(),
     role: dm.role as "user" | "assistant" | "tool",
     content: dm.content,
     blocks: (dm.blocks || []).map((b: conversation_entity.ContentBlock) => ({
@@ -854,6 +859,7 @@ function drainQueue(convId: number) {
   const newMsgs = [...currentMsgs];
   for (const item of queue) {
     newMsgs.push({
+      id: crypto.randomUUID(),
       role: "user" as const,
       content: item.text,
       blocks: [],
@@ -1159,12 +1165,14 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
         }
       }
       nextMsgs.push({
+        id: crypto.randomUUID(),
         role: "user" as const,
         content: event.content || "",
         blocks: [],
         streaming: false,
       });
       nextMsgs.push({
+        id: crypto.randomUUID(),
         role: "assistant" as const,
         content: "",
         blocks: [],
@@ -1421,6 +1429,7 @@ async function _sendForConversation(convId: number, content: string) {
     updateConversation(convId, { sending: true });
   } else {
     newMessages.push({
+      id: crypto.randomUUID(),
       role: "user",
       content,
       blocks: [],
@@ -1432,6 +1441,7 @@ async function _sendForConversation(convId: number, content: string) {
   }
 
   const assistantMsg: ChatMessage = {
+    id: crypto.randomUUID(),
     role: "assistant",
     content: "",
     blocks: [],

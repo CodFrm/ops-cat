@@ -42,7 +42,7 @@ type Usage struct {
 
 // StreamEvent 流式响应事件
 type StreamEvent struct {
-	Type       string `json:"type"`                   // "content" | "tool_start" | "tool_result" | "approval_request" | "approval_result" | "agent_start" | "agent_end" | "queue_consumed" | "done" | "error" | "thinking" | "thinking_done" | "stopped" | "retry" | "usage"
+	Type       string `json:"type"`                   // "content" | "tool_start" | "tool_result" | "approval_request" | "approval_result" | "agent_start" | "agent_end" | "queue_consumed" | "done" | "error" | "thinking" | "thinking_done" | "stopped" | "retry" | "usage" | "compacted"
 	Content    string `json:"content,omitempty"`      // type=content/tool_result/approval_result/agent_end 时的文本
 	QueueID    string `json:"queue_id,omitempty"`     // type=queue_consumed 时的前端队列项 ID
 	ToolName   string `json:"tool_name,omitempty"`    // type=tool_start/tool_result 时的工具名

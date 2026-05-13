@@ -272,8 +272,11 @@ export function AIChatContent({
     if (!viewport || !content || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
       if (!isAtBottomRef.current) return;
-      if (viewport.scrollTop !== viewport.scrollHeight) {
-        viewport.scrollTop = viewport.scrollHeight;
+      // scrollTop 的最大值是 scrollHeight - clientHeight，不是 scrollHeight；
+      // 用 maxScrollTop 比较，避免每次尺寸变化都无效重写 scrollTop。
+      const maxScrollTop = viewport.scrollHeight - viewport.clientHeight;
+      if (viewport.scrollTop < maxScrollTop) {
+        viewport.scrollTop = maxScrollTop;
       }
     });
     ro.observe(content);
@@ -498,8 +501,12 @@ export function AIChatContent({
               const cvStyle: React.CSSProperties | undefined = isLast
                 ? undefined
                 : { contentVisibility: "auto", containIntrinsicSize: "auto 120px" };
+              // 必须用稳定的 msg.id 作 key：edit&resend / queue_consumed 会截断重插消息，
+              // 用 index 作 key 时 React 会复用错误节点，ToolBlock/ThinkingBlock 的 expanded
+              // 等本地 state 会串到别的消息。源头创建处均分配 id；测试 fixture 走 fallback。
+              const key = msg.id ?? `idx-${i}-${msg.role}`;
               return (
-                <div key={i} className="text-sm" style={cvStyle}>
+                <div key={key} className="text-sm" style={cvStyle}>
                   {msg.role === "user" ? (
                     <UserMessage msg={msg} index={i} onEdit={handleEditMessage} />
                   ) : (

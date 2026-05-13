@@ -548,7 +548,8 @@ describe("AIChatContent", () => {
       triggerResizeObservers();
     });
 
-    expect(viewport!.scrollTop).toBe(500);
+    // 到底部的 scrollTop 上限是 scrollHeight - clientHeight = 500 - 200 = 300
+    expect(viewport!.scrollTop).toBe(300);
   });
 
   it("does not drop follow when content shrinks (e.g. ThinkingBlock collapses) and the browser clamps scrollTop", () => {
@@ -591,7 +592,8 @@ describe("AIChatContent", () => {
     act(() => {
       triggerResizeObservers();
     });
-    expect(viewport!.scrollTop).toBe(700);
+    // 到底部的 scrollTop 上限是 scrollHeight - clientHeight = 700 - 200 = 500
+    expect(viewport!.scrollTop).toBe(500);
   });
 
   it("does not pull the outer viewport back to bottom after the user scrolled up", () => {

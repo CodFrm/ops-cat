@@ -1933,3 +1933,62 @@ describe("queue_consumed handler", () => {
     expect(msgs[3].blocks).toEqual([]);
   });
 });
+
+describe("ChatMessage.id 稳定性", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+  });
+
+  // 回归 Copilot review：index 作 key 时，edit&resend / queue_consumed 截断重插会让
+  // React 复用错误 fiber，ToolBlock/ThinkingBlock 的 expanded 等本地 state 串到别的消息。
+  // 修复方式是给 ChatMessage 分配稳定 id，且新插消息 id 必须与旧消息不同。
+  it("send + queue_consumed 写入的消息都有唯一 id", async () => {
+    const callbacks: Array<(event: any) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((_eventName: string, handler: (event: any) => void) => {
+      callbacks.push(handler);
+      return () => {};
+    }) as any);
+
+    const tabId = "ai-200";
+    useTabStore.setState({
+      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 200, title: "t" } }],
+      activeTabId: tabId,
+    });
+    useAIStore.setState({
+      tabStates: { [tabId]: createTabState() },
+      conversationMessages: { 200: [] },
+      conversationStreaming: { 200: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendToTab(tabId, "hi");
+    callbacks[0]?.({ type: "content", content: "answer" });
+    callbacks[0]?.({ type: "queue_consumed", content: "next" });
+
+    const msgs = useAIStore.getState().conversationMessages[200];
+    const ids = msgs.map((m) => m.id);
+    expect(ids.every((id) => typeof id === "string" && id.length > 0)).toBe(true);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("convertDisplayMessages 给从后端加载的每条消息分配 id", async () => {
+    vi.mocked(LoadConversationMessages).mockResolvedValue([
+      { role: "user", content: "a", blocks: [] },
+      { role: "assistant", content: "b", blocks: [] },
+    ] as any);
+    useAIStore.setState({
+      conversationMessages: {},
+      conversationStreaming: {},
+    });
+
+    await useAIStore.getState().openConversationTab(300);
+    await waitForStoreCondition(() => (useAIStore.getState().conversationMessages[300] || []).length === 2);
+
+    const msgs = useAIStore.getState().conversationMessages[300];
+    expect(msgs[0].id).toBeTruthy();
+    expect(msgs[1].id).toBeTruthy();
+    expect(msgs[0].id).not.toBe(msgs[1].id);
+  });
+});
