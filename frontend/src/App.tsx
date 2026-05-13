@@ -21,6 +21,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useQueryStore } from "@/stores/queryStore";
+import { useSFTPStore } from "@/stores/sftpStore";
 import { getAssetType } from "@/lib/assetTypes";
 import { useTabStore } from "@/stores/tabStore";
 import { useExtensionStore } from "@/extension";
@@ -305,6 +306,20 @@ function App() {
     }
   };
 
+  const handleOpenFileManager = async (asset: asset_entity.Asset) => {
+    if (asset.Type !== "ssh") return;
+    try {
+      const tabId = await connect(asset);
+      if (!tabId) return;
+      const sftp = useSFTPStore.getState();
+      if (!sftp.fileManagerOpenTabs[tabId]) {
+        sftp.toggleFileManager(tabId);
+      }
+    } catch (e) {
+      toast.error(`${asset.Name}: ${String(e)}`);
+    }
+  };
+
   // Sidebar page navigation
   const handlePageChange = useCallback((page: string) => {
     const tabStore = useTabStore.getState();
@@ -380,6 +395,7 @@ function App() {
                         onCopyAsset={handleCopyAsset}
                         onConnectAsset={handleConnectAsset}
                         onConnectAssetInNewTab={handleConnectAssetInNewTab}
+                        onOpenFileManager={handleOpenFileManager}
                         onSelectAsset={handleSelectAsset}
                         onOpenInfoTab={handleOpenInfoTab}
                       />
@@ -429,6 +445,7 @@ function App() {
                     onCopyAsset={handleCopyAsset}
                     onConnectAsset={handleConnectAsset}
                     onConnectAssetInNewTab={handleConnectAssetInNewTab}
+                    onOpenFileManager={handleOpenFileManager}
                     onSelectAsset={handleSelectAsset}
                     onOpenInfoTab={handleOpenInfoTab}
                   />

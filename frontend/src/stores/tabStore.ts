@@ -69,6 +69,15 @@ export function registerTabCloseHook(hook: TabCloseHook) {
   closeHooks.push(hook);
 }
 
+// === Replace Hook ===
+
+type TabReplaceHook = (oldId: string, newId: string) => void;
+const replaceHooks: TabReplaceHook[] = [];
+
+export function registerTabReplaceHook(hook: TabReplaceHook) {
+  replaceHooks.push(hook);
+}
+
 // === Restore Hook ===
 
 type TabRestoreHook = (tabs: Tab[]) => void;
@@ -193,6 +202,7 @@ export const useTabStore = create<TabStoreState>((set, get) => ({
       tabs: s.tabs.map((t) => (t.id === oldId ? { ...t, id: newId } : t)),
       activeTabId: s.activeTabId === oldId ? newId : s.activeTabId,
     }));
+    for (const hook of replaceHooks) hook(oldId, newId);
   },
 
   reorderTab: (fromId, toId) => {
