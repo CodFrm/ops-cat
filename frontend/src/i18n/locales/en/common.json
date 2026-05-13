@@ -209,6 +209,8 @@
     "testConnectionSuccess": "Connection successful",
     "testConnectionFailed": "Connection failed",
     "testing": "Testing...",
+    "cancelTest": "Cancel",
+    "testCancelled": "Test cancelled",
     "moveUp": "Move Up",
     "moveDown": "Move Down",
     "moveTop": "Move to Top",

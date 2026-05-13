@@ -2,6 +2,7 @@ package serial_svc
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,8 @@ import (
 	"go.bug.st/serial"
 	"go.uber.org/zap"
 )
+
+var openSerialPort = serial.Open
 
 // CommandSession 是供 AI 串口命令执行使用的最小会话接口。
 type CommandSession interface {
@@ -304,7 +307,7 @@ func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
 		return "", err
 	}
 
-	port, err := serial.Open(cfg.PortPath, mode)
+	port, err := openSerialPort(cfg.PortPath, mode)
 	if err != nil {
 		return "", fmt.Errorf("open serial port %s: %w", cfg.PortPath, err)
 	}
@@ -357,6 +360,51 @@ func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
 	m.watchCallbackSetup(sess, callbackSetupGracePeriod)
 
 	return sessionID, nil
+}
+
+// TestConnection opens a serial port and immediately closes it.
+// It returns as soon as ctx is canceled; if the underlying open call completes
+// after cancellation, the temporary session is still closed in the background.
+func (m *Manager) TestConnection(ctx context.Context, cfg ConnectConfig) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	type connectResult struct {
+		sessionID string
+		err       error
+	}
+	resultCh := make(chan connectResult, 1)
+	go func() {
+		sessionID, err := m.Connect(cfg)
+		resultCh <- connectResult{sessionID: sessionID, err: err}
+	}()
+
+	cleanup := func(result connectResult) {
+		if result.sessionID != "" {
+			m.Disconnect(result.sessionID)
+		}
+	}
+
+	select {
+	case <-ctx.Done():
+		go func() {
+			cleanup(<-resultCh)
+		}()
+		return ctx.Err()
+	case result := <-resultCh:
+		if result.err != nil {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return result.err
+		}
+		defer cleanup(result)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return nil
+	}
 }
 
 // SetCallbacks 设置会话的数据和关闭回调（在 Connect 返回 sessionId 后调用）。

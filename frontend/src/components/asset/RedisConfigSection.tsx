@@ -88,43 +88,50 @@ export function RedisConfigSection({
 
   return (
     <>
-      {/* Host + Port */}
-      <div className="grid gap-2">
-        <Label>{t("asset.host")}</Label>
-        <div className="flex gap-2">
-          <Input className="flex-1" value={host} onChange={(e) => setHost(e.target.value)} placeholder="192.168.1.1" />
+      {/* Connection & Auth (single visual block) */}
+      <div className="grid gap-3 border rounded-lg p-3">
+        {/* Host + Port (each labeled) */}
+        <div className="grid grid-cols-[1fr_120px] gap-3">
+          <div className="grid gap-2">
+            <Label>{t("asset.host")}</Label>
+            <Input value={host} onChange={(e) => setHost(e.target.value)} placeholder="example.com" />
+          </div>
+          <div className="grid gap-2">
+            <Label>{t("asset.port")}</Label>
+            <Input
+              className="[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              type="number"
+              value={port || ""}
+              placeholder="6379"
+              onChange={(e) => setPort(Number(e.target.value))}
+            />
+          </div>
+        </div>
+
+        {/* Username */}
+        <div className="grid gap-2">
+          <Label>{t("asset.username")}</Label>
           <Input
-            className="w-[80px] shrink-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-            type="number"
-            value={port}
-            onChange={(e) => setPort(Number(e.target.value))}
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder={t("asset.username") + " (" + t("asset.databasePlaceholder").split("\uFF08")[0] + ")"}
           />
         </div>
-      </div>
 
-      {/* Username */}
-      <div className="grid gap-2">
-        <Label>{t("asset.username")}</Label>
-        <Input
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder={t("asset.username") + " (" + t("asset.databasePlaceholder").split("\uFF08")[0] + ")"}
+        {/* Password */}
+        <PasswordSourceField
+          source={passwordSource}
+          onSourceChange={setPasswordSource}
+          password={password}
+          onPasswordChange={setPassword}
+          credentialId={passwordCredentialId}
+          onCredentialIdChange={setPasswordCredentialId}
+          managedPasswords={managedPasswords}
+          hasExistingPassword={!!encryptedPassword}
+          editAssetId={editAssetId}
+          onUsernameChange={setUsername}
         />
       </div>
-
-      {/* Password */}
-      <PasswordSourceField
-        source={passwordSource}
-        onSourceChange={setPasswordSource}
-        password={password}
-        onPasswordChange={setPassword}
-        credentialId={passwordCredentialId}
-        onCredentialIdChange={setPasswordCredentialId}
-        managedPasswords={managedPasswords}
-        hasExistingPassword={!!encryptedPassword}
-        editAssetId={editAssetId}
-        onUsernameChange={setUsername}
-      />
 
       {/* TLS */}
       <div className="flex items-center justify-between">

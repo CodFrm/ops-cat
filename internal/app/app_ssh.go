@@ -14,6 +14,7 @@ import (
 	"github.com/opskat/opskat/internal/service/asset_svc"
 	"github.com/opskat/opskat/internal/service/credential_svc"
 	"github.com/opskat/opskat/internal/service/ssh_svc"
+	"github.com/opskat/opskat/internal/service/testreg"
 	"github.com/opskat/opskat/internal/sshpool"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -322,12 +323,18 @@ func (a *App) UpdateAssetPassword(assetID int64, password string) error {
 }
 
 // TestSSHConnection 测试 SSH 连接（不创建终端会话）
+// testID: 前端生成的本次测试唯一标识，用于配合 CancelTest 中断
 // configJSON: SSHConfig JSON，plainPassword: 明文密码（前端表单直接传入）
-func (a *App) TestSSHConnection(configJSON string, plainPassword string) error {
+func (a *App) TestSSHConnection(testID string, configJSON string, plainPassword string) error {
 	var sshCfg asset_entity.SSHConfig
 	if err := json.Unmarshal([]byte(configJSON), &sshCfg); err != nil {
 		return fmt.Errorf("配置解析失败: %w", err)
 	}
+
+	parent, parentCancel := context.WithTimeout(a.langCtx(), 10*time.Second)
+	defer parentCancel()
+	ctx, release := testreg.Begin(parent, testID)
+	defer release()
 
 	storedPassword, key, passphrase := a.resolveSSHCredentialsFull(&sshCfg)
 	password := plainPassword
@@ -375,7 +382,7 @@ func (a *App) TestSSHConnection(configJSON string, plainPassword string) error {
 		connectCfg.JumpHosts = jumpHosts
 	}
 
-	return a.sshManager.TestConnection(connectCfg)
+	return a.sshManager.TestConnection(ctx, connectCfg)
 }
 
 // WriteSSH 向 SSH 终端写入数据（base64 编码）

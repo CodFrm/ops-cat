@@ -72,88 +72,88 @@ export function MongoDBConfigSection({
 
   return (
     <>
-      {/* Connection Mode Toggle */}
-      <Tabs value={connectionMode} onValueChange={(v) => setConnectionMode(v as "manual" | "uri")}>
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="manual">Manual</TabsTrigger>
-          <TabsTrigger value="uri">URI</TabsTrigger>
-        </TabsList>
+      {/* Connection & Auth (single visual block) */}
+      <div className="grid gap-3 border rounded-lg p-3">
+        {/* Connection Mode Toggle */}
+        <Tabs value={connectionMode} onValueChange={(v) => setConnectionMode(v as "manual" | "uri")}>
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="manual">Manual</TabsTrigger>
+            <TabsTrigger value="uri">URI</TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="manual" className="space-y-4 mt-4">
-          {/* Host + Port */}
-          <div className="grid gap-2">
-            <Label>{t("asset.host")}</Label>
-            <div className="flex gap-2">
+          <TabsContent value="manual" className="space-y-3 mt-3">
+            {/* Host + Port (each labeled) */}
+            <div className="grid grid-cols-[1fr_120px] gap-3">
+              <div className="grid gap-2">
+                <Label>{t("asset.host")}</Label>
+                <Input value={host} onChange={(e) => setHost(e.target.value)} placeholder="example.com" />
+              </div>
+              <div className="grid gap-2">
+                <Label>{t("asset.port")}</Label>
+                <Input
+                  className="[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  type="number"
+                  value={port || ""}
+                  placeholder="27017"
+                  onChange={(e) => setPort(Number(e.target.value))}
+                />
+              </div>
+            </div>
+
+            {/* Replica Set */}
+            <div className="grid gap-2">
+              <Label>{t("asset.mongoReplicaSet")}</Label>
               <Input
-                className="flex-1"
-                value={host}
-                onChange={(e) => setHost(e.target.value)}
-                placeholder="192.168.1.1"
-              />
-              <Input
-                className="w-[80px] shrink-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                type="number"
-                value={port}
-                onChange={(e) => setPort(Number(e.target.value))}
+                value={replicaSet}
+                onChange={(e) => setReplicaSet(e.target.value)}
+                placeholder={t("asset.mongoReplicaSetPlaceholder")}
               />
             </div>
-          </div>
 
-          {/* Replica Set */}
-          <div className="grid gap-2">
-            <Label>{t("asset.mongoReplicaSet")}</Label>
-            <Input
-              value={replicaSet}
-              onChange={(e) => setReplicaSet(e.target.value)}
-              placeholder={t("asset.mongoReplicaSetPlaceholder")}
-            />
-          </div>
+            {/* Auth Source */}
+            <div className="grid gap-2">
+              <Label>{t("asset.mongoAuthSource")}</Label>
+              <Input
+                value={authSource}
+                onChange={(e) => setAuthSource(e.target.value)}
+                placeholder={t("asset.mongoAuthSourcePlaceholder")}
+              />
+            </div>
+          </TabsContent>
 
-          {/* Auth Source */}
-          <div className="grid gap-2">
-            <Label>{t("asset.mongoAuthSource")}</Label>
-            <Input
-              value={authSource}
-              onChange={(e) => setAuthSource(e.target.value)}
-              placeholder={t("asset.mongoAuthSourcePlaceholder")}
-            />
-          </div>
-        </TabsContent>
+          <TabsContent value="uri" className="space-y-3 mt-3">
+            {/* Connection URI */}
+            <div className="grid gap-2">
+              <Label>{t("asset.mongoUri")}</Label>
+              <Input
+                value={connectionURI}
+                onChange={(e) => setConnectionURI(e.target.value)}
+                placeholder={t("asset.mongoUriPlaceholder")}
+              />
+            </div>
+          </TabsContent>
+        </Tabs>
 
-        <TabsContent value="uri" className="space-y-4 mt-4">
-          {/* Connection URI */}
-          <div className="grid gap-2">
-            <Label>{t("asset.mongoUri")}</Label>
-            <Input
-              value={connectionURI}
-              onChange={(e) => setConnectionURI(e.target.value)}
-              placeholder={t("asset.mongoUriPlaceholder")}
-            />
-          </div>
-        </TabsContent>
-      </Tabs>
+        {/* Username */}
+        <div className="grid gap-2">
+          <Label>{t("asset.username")}</Label>
+          <Input value={username} onChange={(e) => setUsername(e.target.value)} />
+        </div>
 
-      {/* Common fields (shown for both modes) */}
-
-      {/* Username */}
-      <div className="grid gap-2">
-        <Label>{t("asset.username")}</Label>
-        <Input value={username} onChange={(e) => setUsername(e.target.value)} />
+        {/* Password */}
+        <PasswordSourceField
+          source={passwordSource}
+          onSourceChange={setPasswordSource}
+          password={password}
+          onPasswordChange={setPassword}
+          credentialId={passwordCredentialId}
+          onCredentialIdChange={setPasswordCredentialId}
+          managedPasswords={managedPasswords}
+          hasExistingPassword={!!encryptedPassword}
+          editAssetId={editAssetId}
+          onUsernameChange={setUsername}
+        />
       </div>
-
-      {/* Password */}
-      <PasswordSourceField
-        source={passwordSource}
-        onSourceChange={setPasswordSource}
-        password={password}
-        onPasswordChange={setPassword}
-        credentialId={passwordCredentialId}
-        onCredentialIdChange={setPasswordCredentialId}
-        managedPasswords={managedPasswords}
-        hasExistingPassword={!!encryptedPassword}
-        editAssetId={editAssetId}
-        onUsernameChange={setUsername}
-      />
 
       {/* Default Database */}
       <div className="grid gap-2">
