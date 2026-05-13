@@ -32,6 +32,70 @@ func recordUpdate(calls *[]struct {
 	}
 }
 
+func idsOf(items []testItem) []int64 {
+	ids := make([]int64, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.id)
+	}
+	return ids
+}
+
+func TestReorderSiblings(t *testing.T) {
+	Convey("ReorderSiblings 通用同级重排逻辑", t, func() {
+		baseItems := []testItem{
+			{id: 1, order: 10},
+			{id: 2, order: 20},
+			{id: 3, order: 30},
+			{id: 4, order: 40},
+		}
+
+		cases := []struct {
+			name     string
+			movedID  int64
+			beforeID int64
+			want     []int64
+		}{
+			{
+				name:     "插入到 beforeID 之前",
+				movedID:  4,
+				beforeID: 2,
+				want:     []int64{1, 4, 2, 3},
+			},
+			{
+				name:     "beforeID 为 0 时追加到末尾",
+				movedID:  1,
+				beforeID: 0,
+				want:     []int64{2, 3, 4, 1},
+			},
+			{
+				name:     "beforeID 不存在时追加到末尾",
+				movedID:  2,
+				beforeID: 99,
+				want:     []int64{1, 3, 4, 2},
+			},
+			{
+				name:     "movedID 不存在时原样返回",
+				movedID:  99,
+				beforeID: 2,
+				want:     []int64{1, 2, 3, 4},
+			},
+			{
+				name:     "移动到自身前时顺序稳定",
+				movedID:  2,
+				beforeID: 2,
+				want:     []int64{1, 2, 3, 4},
+			},
+		}
+
+		for _, tc := range cases {
+			Convey(tc.name, func() {
+				got := ReorderSiblings(baseItems, tc.movedID, tc.beforeID, getID)
+				So(idsOf(got), ShouldResemble, tc.want)
+			})
+		}
+	})
+}
+
 func TestMoveItem(t *testing.T) {
 	Convey("MoveItem 通用排序移动逻辑", t, func() {
 
