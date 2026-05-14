@@ -12,21 +12,25 @@ import (
 	"github.com/opskat/opskat/internal/service/asset_svc"
 	"github.com/opskat/opskat/internal/service/credential_resolver"
 	"github.com/opskat/opskat/internal/service/query_svc"
+	"github.com/opskat/opskat/internal/service/testreg"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
 )
 
 // TestDatabaseConnection 测试数据库连接
+// testID: 前端生成的本次测试唯一标识，用于配合 CancelTest 中断
 // configJSON: DatabaseConfig JSON，plainPassword: 明文密码
-func (a *App) TestDatabaseConnection(configJSON string, plainPassword string) error {
+func (a *App) TestDatabaseConnection(testID string, configJSON string, plainPassword string) error {
 	var cfg asset_entity.DatabaseConfig
 	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
 		return fmt.Errorf("配置解析失败: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(a.langCtx(), 10*time.Second)
-	defer cancel()
+	parent, parentCancel := context.WithTimeout(a.langCtx(), 10*time.Second)
+	defer parentCancel()
+	ctx, release := testreg.Begin(parent, testID)
+	defer release()
 
 	password := plainPassword
 	if password == "" {
@@ -57,15 +61,18 @@ func (a *App) TestDatabaseConnection(configJSON string, plainPassword string) er
 }
 
 // TestRedisConnection 测试 Redis 连接
+// testID: 前端生成的本次测试唯一标识，用于配合 CancelTest 中断
 // configJSON: RedisConfig JSON，plainPassword: 明文密码
-func (a *App) TestRedisConnection(configJSON string, plainPassword string) error {
+func (a *App) TestRedisConnection(testID string, configJSON string, plainPassword string) error {
 	var cfg asset_entity.RedisConfig
 	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
 		return fmt.Errorf("配置解析失败: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(a.langCtx(), 10*time.Second)
-	defer cancel()
+	parent, parentCancel := context.WithTimeout(a.langCtx(), 10*time.Second)
+	defer parentCancel()
+	ctx, release := testreg.Begin(parent, testID)
+	defer release()
 
 	password := plainPassword
 	if password == "" {
@@ -276,15 +283,18 @@ func (a *App) ExecuteRedis(assetID int64, command string, db int) (string, error
 }
 
 // TestMongoDBConnection 测试 MongoDB 连接
+// testID: 前端生成的本次测试唯一标识，用于配合 CancelTest 中断
 // configJSON: MongoDBConfig JSON，plainPassword: 明文密码
-func (a *App) TestMongoDBConnection(configJSON string, plainPassword string) error {
+func (a *App) TestMongoDBConnection(testID string, configJSON string, plainPassword string) error {
 	var cfg asset_entity.MongoDBConfig
 	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
 		return fmt.Errorf("配置解析失败: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(a.langCtx(), 10*time.Second)
-	defer cancel()
+	parent, parentCancel := context.WithTimeout(a.langCtx(), 10*time.Second)
+	defer parentCancel()
+	ctx, release := testreg.Begin(parent, testID)
+	defer release()
 
 	password := plainPassword
 	if password == "" {

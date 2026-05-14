@@ -176,6 +176,18 @@ func (a *App) MoveGroup(id int64, direction string) error {
 	return group_svc.Group().Move(a.langCtx(), id, direction)
 }
 
+// ReorderAsset 把资产拖到 targetGroupID 内 beforeID 之前；beforeID==0 表示追加末尾。
+// 跨分组时同步 GroupID。
+func (a *App) ReorderAsset(id, targetGroupID, beforeID int64) error {
+	return asset_svc.Asset().Reorder(a.langCtx(), id, targetGroupID, beforeID)
+}
+
+// ReorderGroup 把分组拖到 targetParentID 下 beforeID 之前；beforeID==0 表示追加末尾。
+// 跨父级时同步 ParentID。禁止拖到自身或自己的子孙下。
+func (a *App) ReorderGroup(id, targetParentID, beforeID int64) error {
+	return group_svc.Group().Reorder(a.langCtx(), id, targetParentID, beforeID)
+}
+
 // --- 分组操作 ---
 
 // ListGroups 列出所有分组

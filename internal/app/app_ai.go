@@ -396,6 +396,9 @@ func (a *App) SendAIMessage(convID int64, messages []ai.Message, aiCtx ai.AICont
 	if a.kafkaService != nil {
 		chatCtx = ai.WithKafkaService(chatCtx, a.kafkaService)
 	}
+	if a.serialManager != nil {
+		chatCtx = ai.WithSerialManager(chatCtx, a.serialManager)
+	}
 
 	onEvent := func(event ai.StreamEvent) {
 		wailsRuntime.EventsEmit(a.ctx, eventName, event)

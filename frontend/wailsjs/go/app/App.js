@@ -22,6 +22,10 @@ export function CancelSSHConnect(arg1) {
   return window['go']['app']['App']['CancelSSHConnect'](arg1);
 }
 
+export function CancelTest(arg1) {
+  return window['go']['app']['App']['CancelTest'](arg1);
+}
+
 export function ChangeSSHDirectory(arg1, arg2) {
   return window['go']['app']['App']['ChangeSSHDirectory'](arg1, arg2);
 }
@@ -52,6 +56,10 @@ export function ConnectSSH(arg1) {
 
 export function ConnectSSHAsync(arg1) {
   return window['go']['app']['App']['ConnectSSHAsync'](arg1);
+}
+
+export function ConnectSerialAsync(arg1) {
+  return window['go']['app']['App']['ConnectSerialAsync'](arg1);
 }
 
 export function CopyPolicyGroup(arg1, arg2) {
@@ -136,6 +144,10 @@ export function DisableExtension(arg1) {
 
 export function DisconnectSSH(arg1) {
   return window['go']['app']['App']['DisconnectSSH'](arg1);
+}
+
+export function DisconnectSerial(arg1) {
+  return window['go']['app']['App']['DisconnectSerial'](arg1);
 }
 
 export function DownloadAndInstallUpdate(arg1) {
@@ -626,12 +638,20 @@ export function ListPolicyGroups(arg1) {
   return window['go']['app']['App']['ListPolicyGroups'](arg1);
 }
 
+export function ListSerialPorts() {
+  return window['go']['app']['App']['ListSerialPorts']();
+}
+
 export function ListSnippetCategories() {
   return window['go']['app']['App']['ListSnippetCategories']();
 }
 
 export function ListSnippets(arg1) {
   return window['go']['app']['App']['ListSnippets'](arg1);
+}
+
+export function ListSystemFonts() {
+  return window['go']['app']['App']['ListSystemFonts']();
 }
 
 export function ListWebDAVBackups() {
@@ -790,8 +810,20 @@ export function RemoveQueuedAIMessage(arg1, arg2) {
   return window['go']['app']['App']['RemoveQueuedAIMessage'](arg1, arg2);
 }
 
+export function ReorderAsset(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ReorderAsset'](arg1, arg2, arg3);
+}
+
+export function ReorderGroup(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ReorderGroup'](arg1, arg2, arg3);
+}
+
 export function ResizeSSH(arg1, arg2, arg3) {
   return window['go']['app']['App']['ResizeSSH'](arg1, arg2, arg3);
+}
+
+export function ResizeSerialTerminal(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ResizeSerialTerminal'](arg1, arg2, arg3);
 }
 
 export function RespondAIApproval(arg1, arg2) {
@@ -812,6 +844,10 @@ export function RespondOpsctlApproval(arg1, arg2) {
 
 export function RespondPermission(arg1, arg2) {
   return window['go']['app']['App']['RespondPermission'](arg1, arg2);
+}
+
+export function RestartApp() {
+  return window['go']['app']['App']['RestartApp']();
 }
 
 export function SFTPCancelTransfer(arg1) {
@@ -938,28 +974,32 @@ export function SwitchConversation(arg1) {
   return window['go']['app']['App']['SwitchConversation'](arg1);
 }
 
-export function TestDatabaseConnection(arg1, arg2) {
-  return window['go']['app']['App']['TestDatabaseConnection'](arg1, arg2);
+export function TestDatabaseConnection(arg1, arg2, arg3) {
+  return window['go']['app']['App']['TestDatabaseConnection'](arg1, arg2, arg3);
 }
 
-export function TestKafkaConnection(arg1, arg2) {
-  return window['go']['app']['App']['TestKafkaConnection'](arg1, arg2);
+export function TestKafkaConnection(arg1, arg2, arg3) {
+  return window['go']['app']['App']['TestKafkaConnection'](arg1, arg2, arg3);
 }
 
-export function TestMongoDBConnection(arg1, arg2) {
-  return window['go']['app']['App']['TestMongoDBConnection'](arg1, arg2);
+export function TestMongoDBConnection(arg1, arg2, arg3) {
+  return window['go']['app']['App']['TestMongoDBConnection'](arg1, arg2, arg3);
 }
 
 export function TestPolicyRule(arg1) {
   return window['go']['app']['App']['TestPolicyRule'](arg1);
 }
 
-export function TestRedisConnection(arg1, arg2) {
-  return window['go']['app']['App']['TestRedisConnection'](arg1, arg2);
+export function TestRedisConnection(arg1, arg2, arg3) {
+  return window['go']['app']['App']['TestRedisConnection'](arg1, arg2, arg3);
 }
 
-export function TestSSHConnection(arg1, arg2) {
-  return window['go']['app']['App']['TestSSHConnection'](arg1, arg2);
+export function TestSSHConnection(arg1, arg2, arg3) {
+  return window['go']['app']['App']['TestSSHConnection'](arg1, arg2, arg3);
+}
+
+export function TestSerialConnection(arg1, arg2) {
+  return window['go']['app']['App']['TestSerialConnection'](arg1, arg2);
 }
 
 export function TestWebDAVConfig(arg1) {
@@ -1024,6 +1064,10 @@ export function WaitGitHubDeviceAuth(arg1, arg2) {
 
 export function WriteSSH(arg1, arg2) {
   return window['go']['app']['App']['WriteSSH'](arg1, arg2);
+}
+
+export function WriteSerial(arg1, arg2) {
+  return window['go']['app']['App']['WriteSerial'](arg1, arg2);
 }
 
 export function WriteTableExportFile(arg1, arg2, arg3) {

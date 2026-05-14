@@ -12,6 +12,7 @@ import { registerTabCloseHook, registerTabReplaceHook } from "./tabStore";
 
 export interface SFTPTransfer {
   transferId: string;
+  tabId: string;
   sessionId: string;
   direction: "upload" | "download";
   currentFile: string;
@@ -22,6 +23,11 @@ export interface SFTPTransfer {
   speed: number;
   status: "active" | "done" | "error" | "cancelled";
   error?: string;
+}
+
+export interface SFTPTransferTarget {
+  tabId: string;
+  sessionId: string;
 }
 
 const DEFAULT_FILE_MANAGER_WIDTH = 280;
@@ -36,16 +42,18 @@ interface SFTPState {
   fileManagerPaths: Record<string, string>;
   fileManagerWidth: number;
 
-  startUpload: (sessionId: string, remotePath: string) => Promise<string | null>;
-  startUploadDir: (sessionId: string, remotePath: string) => Promise<string | null>;
-  startUploadFile: (sessionId: string, localPath: string, remotePath: string) => Promise<string | null>;
-  startDownload: (sessionId: string, remotePath: string) => Promise<string | null>;
-  startDownloadDir: (sessionId: string, remotePath: string) => Promise<string | null>;
+  startUpload: (target: SFTPTransferTarget, remotePath: string) => Promise<string | null>;
+  startUploadDir: (target: SFTPTransferTarget, remotePath: string) => Promise<string | null>;
+  startUploadFile: (target: SFTPTransferTarget, localPath: string, remotePath: string) => Promise<string | null>;
+  startDownload: (target: SFTPTransferTarget, remotePath: string) => Promise<string | null>;
+  startDownloadDir: (target: SFTPTransferTarget, remotePath: string) => Promise<string | null>;
   cancelTransfer: (transferId: string) => void;
   clearTransfer: (transferId: string) => void;
   clearCompleted: () => void;
   clearCompletedForSession: (sessionId: string) => void;
+  clearCompletedForTab: (tabId: string) => void;
   getSessionTransfers: (sessionId: string) => SFTPTransfer[];
+  getTabTransfers: (tabId: string) => SFTPTransfer[];
 
   toggleFileManager: (tabId: string) => void;
   setFileManagerPath: (tabId: string, path: string) => void;
@@ -54,7 +62,7 @@ interface SFTPState {
 
 function subscribeProgress(
   transferId: string,
-  sessionId: string,
+  target: SFTPTransferTarget,
   direction: "upload" | "download",
   set: (fn: (state: SFTPState) => Partial<SFTPState>) => void,
   get: () => SFTPState
@@ -65,7 +73,8 @@ function subscribeProgress(
       ...state.transfers,
       [transferId]: {
         transferId,
-        sessionId,
+        tabId: target.tabId,
+        sessionId: target.sessionId,
         direction,
         currentFile: "",
         filesCompleted: 0,
@@ -156,38 +165,38 @@ export const useSFTPStore = create<SFTPState>((set, get) => ({
   fileManagerPaths: {},
   fileManagerWidth: DEFAULT_FILE_MANAGER_WIDTH,
 
-  startUpload: async (sessionId, remotePath) => {
-    const transferId = await SFTPUpload(sessionId, remotePath);
+  startUpload: async (target, remotePath) => {
+    const transferId = await SFTPUpload(target.sessionId, remotePath);
     if (!transferId) return null;
-    subscribeProgress(transferId, sessionId, "upload", set, get);
+    subscribeProgress(transferId, target, "upload", set, get);
     return transferId;
   },
 
-  startUploadDir: async (sessionId, remotePath) => {
-    const transferId = await SFTPUploadDir(sessionId, remotePath);
+  startUploadDir: async (target, remotePath) => {
+    const transferId = await SFTPUploadDir(target.sessionId, remotePath);
     if (!transferId) return null;
-    subscribeProgress(transferId, sessionId, "upload", set, get);
+    subscribeProgress(transferId, target, "upload", set, get);
     return transferId;
   },
 
-  startUploadFile: async (sessionId, localPath, remotePath) => {
-    const transferId = await SFTPUploadFile(sessionId, localPath, remotePath);
+  startUploadFile: async (target, localPath, remotePath) => {
+    const transferId = await SFTPUploadFile(target.sessionId, localPath, remotePath);
     if (!transferId) return null;
-    subscribeProgress(transferId, sessionId, "upload", set, get);
+    subscribeProgress(transferId, target, "upload", set, get);
     return transferId;
   },
 
-  startDownload: async (sessionId, remotePath) => {
-    const transferId = await SFTPDownload(sessionId, remotePath);
+  startDownload: async (target, remotePath) => {
+    const transferId = await SFTPDownload(target.sessionId, remotePath);
     if (!transferId) return null;
-    subscribeProgress(transferId, sessionId, "download", set, get);
+    subscribeProgress(transferId, target, "download", set, get);
     return transferId;
   },
 
-  startDownloadDir: async (sessionId, remotePath) => {
-    const transferId = await SFTPDownloadDir(sessionId, remotePath);
+  startDownloadDir: async (target, remotePath) => {
+    const transferId = await SFTPDownloadDir(target.sessionId, remotePath);
     if (!transferId) return null;
-    subscribeProgress(transferId, sessionId, "download", set, get);
+    subscribeProgress(transferId, target, "download", set, get);
     return transferId;
   },
 
@@ -226,8 +235,24 @@ export const useSFTPStore = create<SFTPState>((set, get) => ({
     });
   },
 
+  clearCompletedForTab: (tabId) => {
+    set((state) => {
+      const kept: Record<string, SFTPTransfer> = {};
+      for (const [id, t] of Object.entries(state.transfers)) {
+        if (t.tabId !== tabId || t.status === "active") {
+          kept[id] = t;
+        }
+      }
+      return { transfers: kept };
+    });
+  },
+
   getSessionTransfers: (sessionId) => {
     return Object.values(get().transfers).filter((t) => t.sessionId === sessionId);
+  },
+
+  getTabTransfers: (tabId) => {
+    return Object.values(get().transfers).filter((t) => t.tabId === tabId);
   },
 
   toggleFileManager: (tabId) => {
@@ -274,8 +299,8 @@ registerTabCloseHook((tab) => {
 // connecting stay open after.
 registerTabReplaceHook((oldId, newId) => {
   useSFTPStore.setState((state) => {
-    const hasOpen = oldId in state.fileManagerOpenTabs;
-    const hasPath = oldId in state.fileManagerPaths;
+    const hasOpen = Object.prototype.hasOwnProperty.call(state.fileManagerOpenTabs, oldId);
+    const hasPath = Object.prototype.hasOwnProperty.call(state.fileManagerPaths, oldId);
     if (!hasOpen && !hasPath) return state;
     const nextOpenTabs = { ...state.fileManagerOpenTabs };
     if (hasOpen) {

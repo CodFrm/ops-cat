@@ -28,15 +28,15 @@ func TestMiddlewareChain_AuditCapturesGateDeny(t *testing.T) {
 	})
 
 	td := &agent.ToolDispatcher{
-		Tools: []agent.Tool{stubLocalTool{name: "bash"}},
+		Tools: []agent.Tool{stubLocalTool{name: "local_bash"}},
 		Middleware: []agent.ToolHookEntry[agent.ToolMiddleware]{
 			{Matcher: ".*", Fn: auditMiddleware},
-			{Matcher: "^bash$", Fn: gate.Middleware()},
+			{Matcher: "^local_bash$", Fn: gate.Middleware()},
 		},
 	}
 
 	res := td.Run(WithConversationID(context.Background(), 11), agent.DispatchInput{
-		ToolName:  "bash",
+		ToolName:  "local_bash",
 		ToolUseID: "tu_chain_deny",
 		Input:     map[string]any{"command": "rm -rf /"},
 	})
@@ -44,7 +44,7 @@ func TestMiddlewareChain_AuditCapturesGateDeny(t *testing.T) {
 	assert.True(t, res.Output != nil && res.Output.IsError, "gate 应该 deny 出 IsError 块")
 	waitForAudit(t, mockRepo, 1)
 	entry := mockRepo.logs[0]
-	assert.Equal(t, "bash", entry.ToolName, "审计应记录 deny 路径下的工具调用")
+	assert.Equal(t, "local_bash", entry.ToolName, "审计应记录 deny 路径下的工具调用")
 	assert.Equal(t, 0, entry.Success)
 }
 

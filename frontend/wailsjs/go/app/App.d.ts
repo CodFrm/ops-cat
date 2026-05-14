@@ -20,6 +20,7 @@ import {status} from '../models';
 import {import_svc} from '../models';
 import {kafka_svc} from '../models';
 import {audit_repo} from '../models';
+import {serial_svc} from '../models';
 import {redis_svc} from '../models';
 import {ai} from '../models';
 import {sftp_svc} from '../models';
@@ -34,6 +35,8 @@ export function CancelExtensionAction(arg1:string):Promise<void>;
 export function CancelGitHubAuth():Promise<void>;
 
 export function CancelSSHConnect(arg1:string):Promise<void>;
+
+export function CancelTest(arg1:string):Promise<void>;
 
 export function ChangeSSHDirectory(arg1:string,arg2:string):Promise<void>;
 
@@ -50,6 +53,8 @@ export function ClearWebDAVConfig():Promise<void>;
 export function ConnectSSH(arg1:app.SSHConnectRequest):Promise<string>;
 
 export function ConnectSSHAsync(arg1:app.SSHConnectRequest):Promise<string>;
+
+export function ConnectSerialAsync(arg1:app.SerialConnectRequest):Promise<string>;
 
 export function CopyPolicyGroup(arg1:string,arg2:string):Promise<policy_group_entity.PolicyGroup>;
 
@@ -92,6 +97,8 @@ export function DetectSkills():Promise<Array<app.SkillTarget>>;
 export function DisableExtension(arg1:string):Promise<void>;
 
 export function DisconnectSSH(arg1:string):Promise<void>;
+
+export function DisconnectSerial(arg1:string):Promise<void>;
 
 export function DownloadAndInstallUpdate(arg1:boolean):Promise<void>;
 
@@ -337,9 +344,13 @@ export function ListMongoDatabases(arg1:number):Promise<string>;
 
 export function ListPolicyGroups(arg1:string):Promise<Array<policy_group_entity.PolicyGroupItem>>;
 
+export function ListSerialPorts():Promise<Array<serial_svc.SerialPortInfo>>;
+
 export function ListSnippetCategories():Promise<Array<snippet_svc.Category>>;
 
 export function ListSnippets(arg1:snippet_svc.ListReq):Promise<Array<snippet_entity.Snippet>>;
+
+export function ListSystemFonts():Promise<Array<string>>;
 
 export function ListWebDAVBackups():Promise<Array<backup_svc.WebDAVBackupInfo>>;
 
@@ -419,7 +430,13 @@ export function ReloadExtensions():Promise<void>;
 
 export function RemoveQueuedAIMessage(arg1:number,arg2:string):Promise<boolean>;
 
+export function ReorderAsset(arg1:number,arg2:number,arg3:number):Promise<void>;
+
+export function ReorderGroup(arg1:number,arg2:number,arg3:number):Promise<void>;
+
 export function ResizeSSH(arg1:string,arg2:number,arg3:number):Promise<void>;
+
+export function ResizeSerialTerminal(arg1:string,arg2:number,arg3:number):Promise<void>;
 
 export function RespondAIApproval(arg1:string,arg2:ai.ApprovalResponse):Promise<void>;
 
@@ -430,6 +447,8 @@ export function RespondHostKeyVerify(arg1:string,arg2:number):Promise<void>;
 export function RespondOpsctlApproval(arg1:string,arg2:ai.ApprovalResponse):Promise<void>;
 
 export function RespondPermission(arg1:string,arg2:string):Promise<void>;
+
+export function RestartApp():Promise<void>;
 
 export function SFTPCancelTransfer(arg1:string):Promise<void>;
 
@@ -493,17 +512,19 @@ export function StopK8sPodLogs(arg1:string):Promise<void>;
 
 export function SwitchConversation(arg1:number):Promise<Array<app.ConversationDisplayMessage>>;
 
-export function TestDatabaseConnection(arg1:string,arg2:string):Promise<void>;
+export function TestDatabaseConnection(arg1:string,arg2:string,arg3:string):Promise<void>;
 
-export function TestKafkaConnection(arg1:string,arg2:string):Promise<void>;
+export function TestKafkaConnection(arg1:string,arg2:string,arg3:string):Promise<void>;
 
-export function TestMongoDBConnection(arg1:string,arg2:string):Promise<void>;
+export function TestMongoDBConnection(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function TestPolicyRule(arg1:app.PolicyTestRequest):Promise<app.PolicyTestResult>;
 
-export function TestRedisConnection(arg1:string,arg2:string):Promise<void>;
+export function TestRedisConnection(arg1:string,arg2:string,arg3:string):Promise<void>;
 
-export function TestSSHConnection(arg1:string,arg2:string):Promise<void>;
+export function TestSSHConnection(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function TestSerialConnection(arg1:string,arg2:string):Promise<void>;
 
 export function TestWebDAVConfig(arg1:app.WebDAVSaveInput):Promise<void>;
 
@@ -536,5 +557,7 @@ export function WaitAIFlushAck():Promise<any>;
 export function WaitGitHubDeviceAuth(arg1:string,arg2:number):Promise<string>;
 
 export function WriteSSH(arg1:string,arg2:string):Promise<void>;
+
+export function WriteSerial(arg1:string,arg2:string):Promise<void>;
 
 export function WriteTableExportFile(arg1:string,arg2:string,arg3:app.TableExportWriteOptions):Promise<void>;
