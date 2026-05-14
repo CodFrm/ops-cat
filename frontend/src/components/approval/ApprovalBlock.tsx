@@ -176,7 +176,10 @@ export const ApprovalBlock = memo(function ApprovalBlock({ block }: ApprovalBloc
             placeholder={t("opsctlApproval.patternPlaceholder")}
           />
           <div className="text-[10px] text-muted-foreground/70">
-            {t("ai.approvalLocalToolPatternHint", "每行一条；* 通配符（local_bash 按命令、local_write/local_edit 按路径）。")}
+            {t(
+              "ai.approvalLocalToolPatternHint",
+              "每行一条；* 通配符（local_bash 按命令、local_write/local_edit 按路径）。"
+            )}
           </div>
         </div>
       )}
