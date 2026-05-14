@@ -27,6 +27,7 @@ if [ "$3" = "app" ]; then
 else
   nohup "$2" >/dev/null 2>&1 &
 fi`
+	// #nosec G204 -- script is a constant string literal; launchPath is the app's own executable/bundle path resolved internally, not user input
 	cmd := exec.Command("/bin/sh", "-c", script, "opskat-restart", strconv.Itoa(pid), launchPath, mode)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	return cmd.Start()
