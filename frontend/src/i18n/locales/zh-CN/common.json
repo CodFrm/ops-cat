@@ -928,6 +928,13 @@
     "showSidebar": "显示工具条",
     "showAIPanel": "显示 AI 助手"
   },
+  "topBar": {
+    "searchPlaceholder": "搜索资产或命令...",
+    "hideAssetTree": "隐藏资产列表",
+    "showAssetTree": "显示资产列表",
+    "hideAIPanel": "隐藏 AI 对话",
+    "showAIPanel": "显示 AI 对话"
+  },
   "sideTabs": {
     "title": "打开的 Tabs",
     "filterPlaceholder": "过滤 tab 名称...",

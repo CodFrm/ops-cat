@@ -14,7 +14,6 @@ import { asset_entity } from "../../../wailsjs/go/models";
 import { ExtensionPage } from "@/extension";
 import { TopTabBar } from "./TopTabBar";
 import { useLayoutStore } from "@/stores/layoutStore";
-import { CommandPalette } from "@/components/command/CommandPalette";
 
 const AssetDetail = lazy(() => import("@/components/asset/AssetDetail").then((m) => ({ default: m.AssetDetail })));
 const GroupDetail = lazy(() => import("@/components/asset/GroupDetail").then((m) => ({ default: m.GroupDetail })));
@@ -51,8 +50,6 @@ interface MainPanelProps {
   onEditAsset: (asset: asset_entity.Asset) => void;
   onDeleteAsset: (id: number) => void;
   onConnectAsset: (asset: asset_entity.Asset) => void;
-  commandOpen: boolean;
-  setCommandOpen: (open: boolean) => void;
 }
 
 function PanelFallback() {
@@ -67,7 +64,7 @@ function LazySurface({ children }: { children: ReactNode }) {
   return <Suspense fallback={<PanelFallback />}>{children}</Suspense>;
 }
 
-export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset, commandOpen, setCommandOpen }: MainPanelProps) {
+export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPanelProps) {
   const { t } = useTranslation();
   const isFullscreen = useFullscreen();
 
@@ -384,8 +381,6 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset, commandO
           </div>
         )}
       </div>
-
-      <CommandPalette open={commandOpen} onOpenChange={setCommandOpen} onConnectAsset={onConnectAsset} />
     </div>
   );
 }
