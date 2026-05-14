@@ -781,7 +781,7 @@
     "approvalLocalToolTitle": "AI wants to run local {{tool}} tool",
     "approvalLocalToolContentPreview": "Show content to write",
     "approvalLocalToolEditPreview": "Show edit preview",
-    "approvalLocalToolPatternHint": "One pattern per line; * wildcards (bash matches commands, write/edit matches paths).",
+    "approvalLocalToolPatternHint": "One pattern per line; * wildcards (local_bash matches commands, local_write/local_edit matches paths).",
     "permissionRequestHint": "AI is requesting command execution permission. You can edit the pattern before approving.",
     "permissionPatternPlaceholder": "Command pattern, supports * wildcard",
     "permissionApprove": "Approve",
