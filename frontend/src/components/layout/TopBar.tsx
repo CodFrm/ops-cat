@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Search, PanelLeft, PanelLeftDashed, PanelRight, PanelRightDashed } from "lucide-react";
+import { Search } from "lucide-react";
+import { Icon } from "@iconify/react";
 import { Popover, PopoverContent, PopoverTrigger, Tooltip, TooltipContent, TooltipTrigger, cn } from "@opskat/ui";
 import { CommandPalette } from "@/components/command/CommandPalette";
 import { useFullscreen } from "@/hooks/useFullscreen";
@@ -111,11 +112,10 @@ export function TopBar({
                   assetTreeCollapsed ? "text-muted-foreground hover:text-foreground" : "text-foreground"
                 )}
               >
-                {assetTreeCollapsed ? (
-                  <PanelLeftDashed className="h-4 w-4" />
-                ) : (
-                  <PanelLeft className="h-4 w-4" />
-                )}
+                <Icon
+                  icon={assetTreeCollapsed ? "ph:panel-left" : "ph:panel-left-fill"}
+                  className="h-4 w-4"
+                />
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
@@ -135,11 +135,10 @@ export function TopBar({
                   aiPanelCollapsed ? "text-muted-foreground hover:text-foreground" : "text-foreground"
                 )}
               >
-                {aiPanelCollapsed ? (
-                  <PanelRightDashed className="h-4 w-4" />
-                ) : (
-                  <PanelRight className="h-4 w-4" />
-                )}
+                <Icon
+                  icon={aiPanelCollapsed ? "ph:panel-right" : "ph:panel-right-fill"}
+                  className="h-4 w-4"
+                />
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
