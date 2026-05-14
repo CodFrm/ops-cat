@@ -3,7 +3,7 @@ module github.com/opskat/opskat
 go 1.26.0
 
 require (
-	github.com/cago-frame/agents v0.0.0-20260513055252-abb8e51e0eac
+	github.com/cago-frame/agents v0.0.0-20260514070654-c98128a03c31
 	github.com/cago-frame/cago v0.0.0-20260307042250-c4ff92923947
 	github.com/coder/websocket v1.8.14
 	github.com/fsnotify/fsnotify v1.10.0
@@ -182,6 +182,3 @@ require (
 )
 
 // replace github.com/wailsapp/wails/v2 v2.10.2 => /Users/codfrm/go/pkg/mod
-
-// 本地联调 cago WithToolDecorator（feat/with-tool-decorator 分支）；cago 发版后改回版本号并删除本行
-replace github.com/cago-frame/agents => /Users/codfrm/Code/cago/agents
