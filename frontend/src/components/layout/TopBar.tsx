@@ -1,7 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Search } from "lucide-react";
-import { Icon } from "@iconify/react";
+import {
+  IconLayoutSidebar,
+  IconLayoutSidebarFilled,
+  IconLayoutSidebarRight,
+  IconLayoutSidebarRightFilled,
+} from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger, Tooltip, TooltipContent, TooltipTrigger, cn } from "@opskat/ui";
 import { CommandPalette } from "@/components/command/CommandPalette";
 import { useFullscreen } from "@/hooks/useFullscreen";
@@ -112,10 +117,11 @@ export function TopBar({
                   assetTreeCollapsed ? "text-muted-foreground hover:text-foreground" : "text-foreground"
                 )}
               >
-                <Icon
-                  icon={assetTreeCollapsed ? "ph:panel-left" : "ph:panel-left-fill"}
-                  className="h-4 w-4"
-                />
+                {assetTreeCollapsed ? (
+                  <IconLayoutSidebar className="h-4 w-4" stroke={1.75} />
+                ) : (
+                  <IconLayoutSidebarFilled className="h-4 w-4" />
+                )}
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
@@ -135,10 +141,11 @@ export function TopBar({
                   aiPanelCollapsed ? "text-muted-foreground hover:text-foreground" : "text-foreground"
                 )}
               >
-                <Icon
-                  icon={aiPanelCollapsed ? "ph:panel-right" : "ph:panel-right-fill"}
-                  className="h-4 w-4"
-                />
+                {aiPanelCollapsed ? (
+                  <IconLayoutSidebarRight className="h-4 w-4" stroke={1.75} />
+                ) : (
+                  <IconLayoutSidebarRightFilled className="h-4 w-4" />
+                )}
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
