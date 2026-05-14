@@ -44,3 +44,6 @@ coverage_new.out
 
 .github/pr-assets/
 .gocache/
+
+# Local Golutra team control plane (never commit)
+.golutra/
