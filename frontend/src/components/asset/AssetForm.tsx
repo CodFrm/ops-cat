@@ -1070,14 +1070,19 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
       parity: serialParity,
     };
     if (serialFlowControl !== "none") cfg.flow_control = serialFlowControl;
+    const testId = newTestId();
+    activeTestIdRef.current = testId;
     setTesting(true);
     try {
-      await TestSerialConnection(JSON.stringify(cfg));
-      toast.success(t("asset.testConnectionSuccess"));
+      await TestSerialConnection(testId, JSON.stringify(cfg));
+      if (activeTestIdRef.current === testId) toast.success(t("asset.testConnectionSuccess"));
     } catch (e) {
-      toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
+      if (activeTestIdRef.current === testId) toast.error(`${t("asset.testConnectionFailed")}: ${String(e)}`);
     } finally {
-      setTesting(false);
+      if (activeTestIdRef.current === testId) {
+        activeTestIdRef.current = null;
+        setTesting(false);
+      }
     }
   };
 

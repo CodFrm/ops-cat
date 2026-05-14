@@ -522,7 +522,7 @@ export function TestRedisConnection(arg1:string,arg2:string,arg3:string):Promise
 
 export function TestSSHConnection(arg1:string,arg2:string,arg3:string):Promise<void>;
 
-export function TestSerialConnection(arg1:string):Promise<void>;
+export function TestSerialConnection(arg1:string,arg2:string):Promise<void>;
 
 export function TestWebDAVConfig(arg1:app.WebDAVSaveInput):Promise<void>;
 

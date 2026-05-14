@@ -994,8 +994,8 @@ export function TestSSHConnection(arg1, arg2, arg3) {
   return window['go']['app']['App']['TestSSHConnection'](arg1, arg2, arg3);
 }
 
-export function TestSerialConnection(arg1) {
-  return window['go']['app']['App']['TestSerialConnection'](arg1);
+export function TestSerialConnection(arg1, arg2) {
+  return window['go']['app']['App']['TestSerialConnection'](arg1, arg2);
 }
 
 export function TestWebDAVConfig(arg1) {
