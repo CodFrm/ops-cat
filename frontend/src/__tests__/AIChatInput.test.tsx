@@ -32,6 +32,38 @@ describe("AIChatInput", () => {
     expect(content).not.toContain("<mention");
   });
 
+  it("Shift+Enter 插入换行而不是发送", async () => {
+    const onSubmit = vi.fn();
+    render(<AIChatInput onSubmit={onSubmit} sendOnEnter={true} />);
+    const editor = screen.getByRole("textbox");
+
+    await userEvent.click(editor);
+    await userEvent.keyboard("hello");
+    await userEvent.keyboard("{Shift>}{Enter}{/Shift}");
+    expect(onSubmit).not.toHaveBeenCalled();
+    await userEvent.keyboard("world");
+    await userEvent.keyboard("{Enter}");
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith("hello\nworld");
+  });
+
+  it("Enter 发送模式下 Ctrl+Enter 插入换行而不是发送", async () => {
+    const onSubmit = vi.fn();
+    render(<AIChatInput onSubmit={onSubmit} sendOnEnter={true} />);
+    const editor = screen.getByRole("textbox");
+
+    await userEvent.click(editor);
+    await userEvent.keyboard("hello");
+    await userEvent.keyboard("{Control>}{Enter}{/Control}");
+    expect(onSubmit).not.toHaveBeenCalled();
+    await userEvent.keyboard("world");
+    await userEvent.keyboard("{Enter}");
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith("hello\nworld");
+  });
+
   it("提交后同步清空外部草稿和编辑器内容", async () => {
     const onSubmit = vi.fn();
     const onDraftChange = vi.fn();
