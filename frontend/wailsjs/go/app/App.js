@@ -814,6 +814,10 @@ export function RespondPermission(arg1, arg2) {
   return window['go']['app']['App']['RespondPermission'](arg1, arg2);
 }
 
+export function RestartApp() {
+  return window['go']['app']['App']['RestartApp']();
+}
+
 export function SFTPCancelTransfer(arg1) {
   return window['go']['app']['App']['SFTPCancelTransfer'](arg1);
 }
