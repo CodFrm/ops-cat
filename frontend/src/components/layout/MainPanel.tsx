@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
 import logoLight from "@/assets/images/logo.png";
 import logoDark from "@/assets/images/logo-dark.png";
-import { useFullscreen } from "@/hooks/useFullscreen";
 import { K8sClusterPage } from "@/components/k8s/K8sClusterPage";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useAssetStore } from "@/stores/assetStore";
@@ -14,7 +13,6 @@ import { asset_entity } from "../../../wailsjs/go/models";
 import { ExtensionPage } from "@/extension";
 import { TopTabBar } from "./TopTabBar";
 import { useLayoutStore } from "@/stores/layoutStore";
-import { CommandPalette } from "@/components/command/CommandPalette";
 
 const AssetDetail = lazy(() => import("@/components/asset/AssetDetail").then((m) => ({ default: m.AssetDetail })));
 const GroupDetail = lazy(() => import("@/components/asset/GroupDetail").then((m) => ({ default: m.GroupDetail })));
@@ -51,8 +49,6 @@ interface MainPanelProps {
   onEditAsset: (asset: asset_entity.Asset) => void;
   onDeleteAsset: (id: number) => void;
   onConnectAsset: (asset: asset_entity.Asset) => void;
-  commandOpen: boolean;
-  setCommandOpen: (open: boolean) => void;
 }
 
 function PanelFallback() {
@@ -67,9 +63,8 @@ function LazySurface({ children }: { children: ReactNode }) {
   return <Suspense fallback={<PanelFallback />}>{children}</Suspense>;
 }
 
-export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset, commandOpen, setCommandOpen }: MainPanelProps) {
+export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPanelProps) {
   const { t } = useTranslation();
-  const isFullscreen = useFullscreen();
 
   const tabs = useTabStore((s) => s.tabs);
   const activeTabId = useTabStore((s) => s.activeTabId);
@@ -216,14 +211,6 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset, commandO
 
   return (
     <div className="flex flex-1 flex-col min-w-0">
-      {/* When no tabs, show standalone drag region; also always shown in left layout (TopTabBar absent) */}
-      {(!hasTabs || tabBarLayout === "left") && (
-        <div
-          className={`${isFullscreen ? "h-0" : "h-8"} w-full shrink-0`}
-          style={{ "--wails-draggable": "drag" } as React.CSSProperties}
-        />
-      )}
-
       {/* Tab bar with integrated drag region (top layout only) */}
       {hasTabs && tabBarLayout === "top" && <TopTabBar />}
 
@@ -384,8 +371,6 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset, commandO
           </div>
         )}
       </div>
-
-      <CommandPalette open={commandOpen} onOpenChange={setCommandOpen} onConnectAsset={onConnectAsset} />
     </div>
   );
 }

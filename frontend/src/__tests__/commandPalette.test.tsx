@@ -62,10 +62,10 @@ function makeAITab(id: string, label: string) {
 }
 
 const onConnectAsset = vi.fn();
-const onOpenChange = vi.fn();
+const onClose = vi.fn();
 
 function renderPalette(open: boolean) {
-  return render(<CommandPalette open={open} onOpenChange={onOpenChange} onConnectAsset={onConnectAsset} />);
+  return render(<CommandPalette open={open} onClose={onClose} onConnectAsset={onConnectAsset} />);
 }
 
 // ──────────────────────────────────────────────
@@ -147,7 +147,7 @@ describe("CommandPalette", () => {
     expect(screen.queryByText("commandPalette.section.assets")).toBeNull();
   });
 
-  // 4. ↓ then Enter on an opened tab → calls activateTab and onOpenChange(false)
+  // 4. ↓ then Enter on an opened tab → calls activateTab and onClose(false)
   it("keyboard: down arrow + enter on opened tab calls activateTab and closes palette", () => {
     const tab1 = makeTerminalTab("tab-1", "Server A", 1);
     const tab2 = makeTerminalTab("tab-2", "Server B", 2);
@@ -161,7 +161,7 @@ describe("CommandPalette", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(useTabStore.getState().activeTabId).toBe("tab-1");
-    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(onClose).toHaveBeenCalled();
   });
 
   it("keyboard: down arrow moves selection and enter activates second tab", () => {
@@ -178,10 +178,10 @@ describe("CommandPalette", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(useTabStore.getState().activeTabId).toBe("tab-2");
-    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(onClose).toHaveBeenCalled();
   });
 
-  // 5. ↓ ↓ Enter on an asset → calls onConnectAsset (for canConnect asset) and onOpenChange(false)
+  // 5. ↓ ↓ Enter on an asset → calls onConnectAsset (for canConnect asset) and onClose(false)
   it("keyboard: enter on an asset row calls openAssetDefault", () => {
     const spy = vi.spyOn(openAssetDefaultModule, "openAssetDefault");
 
@@ -198,20 +198,15 @@ describe("CommandPalette", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(spy).toHaveBeenCalledWith(asset1, onConnectAsset);
-    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(onClose).toHaveBeenCalled();
   });
 
-  // 6. Escape → onOpenChange(false)
-  // Note: Radix Dialog handles Escape natively; we verify the onOpenChange prop is wired
-  // by testing that the dialog responds to `open=false` transition.
-  it("onOpenChange is called when dialog wants to close", () => {
+  // 6. Escape key inside the input → calls onClose
+  it("escape key calls onClose", () => {
     renderPalette(true);
-    // The dialog is open; Radix would call onOpenChange(false) on Escape.
-    // We verify the prop is wired by checking the component renders and accepts the prop.
-    expect(screen.getByRole("textbox")).toBeDefined();
-    // Simulate programmatic close
-    onOpenChange(false);
-    expect(onOpenChange).toHaveBeenCalledWith(false);
+    const input = screen.getByRole("textbox");
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(onClose).toHaveBeenCalled();
   });
 
   // 7. IME composing: keydown with isComposing=true does NOT move activeIndex
@@ -232,7 +227,7 @@ describe("CommandPalette", () => {
 
     // activeTabId should remain null (no tab was activated)
     expect(useTabStore.getState().activeTabId).toBeNull();
-    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   // 8. activeIndex clamps at boundaries (no wrap)

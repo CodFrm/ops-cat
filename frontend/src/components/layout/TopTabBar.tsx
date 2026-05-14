@@ -1,7 +1,6 @@
 import { createContext, useContext, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { X, MessageSquare, Server, Folder } from "lucide-react";
-import { useFullscreen } from "@/hooks/useFullscreen";
 import { useTabDragAndDrop } from "@/hooks/useTabDragAndDrop";
 import { useTabStore, type Tab, type InfoTabMeta } from "@/stores/tabStore";
 import { useTerminalStore } from "@/stores/terminalStore";
@@ -138,7 +137,6 @@ function TabItem({
 
 export function TopTabBar() {
   const { t } = useTranslation();
-  const isFullscreen = useFullscreen();
 
   const tabs = useTabStore((s) => s.tabs);
   const activeTabId = useTabStore((s) => s.activeTabId);
@@ -281,7 +279,7 @@ export function TopTabBar() {
     <TabBarContext.Provider value={tabBarCtx}>
       <div
         data-top-tabbar
-        className={`flex items-center border-b overflow-hidden bg-background ${isFullscreen ? "pt-0" : "pt-8"}`}
+        className="flex items-center border-b overflow-hidden bg-background"
         style={{ "--wails-draggable": "drag" } as React.CSSProperties}
       >
         <div className="flex items-center min-w-0 flex-1">{tabs.map((tab) => renderTabItem(tab))}</div>
