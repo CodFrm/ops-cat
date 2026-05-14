@@ -2,13 +2,13 @@ import {
   Home,
   Settings,
   KeyRound,
+  EyeOff,
   ScrollText,
   ArrowRightLeft,
   Server,
   LayoutList,
   FileCode,
 } from "lucide-react";
-import { IconEyeClosed } from "@tabler/icons-react";
 import logoLight from "@/assets/images/logo.png";
 import logoDark from "@/assets/images/logo-dark.png";
 import { useTranslation } from "react-i18next";
@@ -151,7 +151,7 @@ export function Sidebar({ activePage, onPageChange, onHideSidebar }: SidebarProp
               className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors duration-150"
               onClick={onHideSidebar}
             >
-              <IconEyeClosed className="h-4 w-4" stroke={1.75} />
+              <EyeOff className="h-4 w-4" />
             </button>
           </TooltipTrigger>
           <TooltipContent side="right">{t("panel.hideSidebar")}</TooltipContent>
