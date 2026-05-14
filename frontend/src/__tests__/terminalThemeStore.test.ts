@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useTerminalThemeStore, SCROLLBACK_DEFAULT } from "../stores/terminalThemeStore";
 import { builtinThemes, type TerminalTheme } from "../data/terminalThemes";
+import { DEFAULT_TERMINAL_FONT_FAMILY } from "../data/terminalFonts";
 
 type TerminalThemeStoreState = ReturnType<typeof useTerminalThemeStore.getState>;
 
@@ -39,7 +40,7 @@ describe("terminalThemeStore", () => {
       fontSize: 14,
       fontPresetId: "default",
       customFontFamily: "",
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+      fontFamily: DEFAULT_TERMINAL_FONT_FAMILY,
       scrollback: SCROLLBACK_DEFAULT,
     });
   });
@@ -69,7 +70,7 @@ describe("terminalThemeStore", () => {
   });
 
   describe("font presets", () => {
-    const defaultFontFamily = "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace";
+    const defaultFontFamily = DEFAULT_TERMINAL_FONT_FAMILY;
 
     it("defaults to the existing terminal font stack", () => {
       expect(useTerminalThemeStore.getState().fontFamily).toBe(defaultFontFamily);
@@ -82,6 +83,24 @@ describe("terminalThemeStore", () => {
 
       expect(useTerminalThemeStore.getState().fontPresetId).toBe("fira-code");
       expect(useTerminalThemeStore.getState().fontFamily).toBe("'Fira Code'");
+    });
+
+    it("treats an unknown id as a system font family name", () => {
+      const state: TerminalThemeStoreState = useTerminalThemeStore.getState();
+
+      state.setFontPresetId("JetBrainsMono NFM");
+
+      expect(useTerminalThemeStore.getState().fontPresetId).toBe("JetBrainsMono NFM");
+      expect(useTerminalThemeStore.getState().fontFamily).toBe("'JetBrainsMono NFM'");
+    });
+
+    it("falls back to default when the id is whitespace-only", () => {
+      const state: TerminalThemeStoreState = useTerminalThemeStore.getState();
+
+      state.setFontPresetId("   ");
+
+      expect(useTerminalThemeStore.getState().fontPresetId).toBe("default");
+      expect(useTerminalThemeStore.getState().fontFamily).toBe(defaultFontFamily);
     });
 
     it("uses the edited custom font family and falls back when blank", () => {

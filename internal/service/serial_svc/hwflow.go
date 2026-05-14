@@ -19,7 +19,7 @@ func extractPortHandle(port serial.Port) (uint64, error) {
 		return 0, fmt.Errorf("serial.Port is nil")
 	}
 	v := reflect.ValueOf(port)
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			return 0, fmt.Errorf("serial.Port pointer is nil")
 		}
