@@ -87,5 +87,13 @@ func TestCheckK8sPolicy_DefaultsAndWildcard(t *testing.T) {
 			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
 			So(result.MatchedPattern, ShouldEqual, "*")
 		})
+
+		Convey("parser 成功但提取不到执行单元时不能整串匹配 allow *", func() {
+			// 仅注释，ExtractSubCommands 返回 []。禁止退回到 `[]string{command}`，
+			// 否则 allow `*` 会把整串当成命令并放行
+			policy := &asset_entity.K8sPolicy{AllowList: []string{"*"}}
+			result := CheckK8sPolicy(ctx, policy, "# kubectl delete pod nginx")
+			So(result.Decision, ShouldEqual, NeedConfirm)
+		})
 	})
 }

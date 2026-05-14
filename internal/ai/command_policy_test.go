@@ -333,6 +333,41 @@ func TestExtractSubCommands(t *testing.T) {
 			_, err := ExtractSubCommands("echo $(")
 			So(err, ShouldNotBeNil)
 		})
+
+		Convey("重定向目标里的命令替换会被提取", func() {
+			// `> $(rm -rf /)`：redirect target word 含 CmdSubst，必须把内部命令拿出来
+			cmds, err := ExtractSubCommands("echo ok > $(rm -rf /)")
+			So(err, ShouldBeNil)
+			So(cmds, ShouldContain, "rm -rf /")
+		})
+
+		Convey("命令前的环境变量赋值里的命令替换会被提取", func() {
+			// CallExpr.Assigns 的 RHS 可执行 CmdSubst：PAYLOAD=$(rm -rf /) echo ok
+			cmds, err := ExtractSubCommands("PAYLOAD=$(rm -rf /) echo ok")
+			So(err, ShouldBeNil)
+			So(cmds, ShouldContain, "rm -rf /")
+			So(cmds, ShouldContain, "echo ok")
+		})
+
+		Convey("进程替换 <(...) 内的命令会被提取", func() {
+			cmds, err := ExtractSubCommands("cat <(rm -rf /)")
+			So(err, ShouldBeNil)
+			So(cmds, ShouldContain, "rm -rf /")
+		})
+
+		Convey("参数展开默认值里的命令替换会被提取", func() {
+			// ${VAR:-$(rm -rf /)} 的 default value 是 word，含 CmdSubst
+			cmds, err := ExtractSubCommands(`echo ${VAR:-$(rm -rf /)}`)
+			So(err, ShouldBeNil)
+			So(cmds, ShouldContain, "rm -rf /")
+		})
+
+		Convey("仅注释/空白时返回空切片", func() {
+			// parser 成功但没有可执行 Stmt — 让上层按 NeedConfirm 兜底
+			cmds, err := ExtractSubCommands("   ")
+			So(err, ShouldBeNil)
+			So(cmds, ShouldBeEmpty)
+		})
 	})
 }
 

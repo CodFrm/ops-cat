@@ -49,14 +49,11 @@ func CheckPermission(ctx context.Context, assetType string, assetID int64, comma
 // --- SSH ---
 
 func checkSSHPermission(ctx context.Context, assetID int64, command string) CheckResult {
+	// 解析失败或没有可枚举的执行单元（注释/空白等）都退回 NeedConfirm，
+	// 不能整串匹配，否则 `allow *` 会误放行 parser 失败或仅注释的输入。
 	subCmds, err := ExtractSubCommands(command)
-	if err != nil {
-		// 无法完整枚举子命令时不能退回整串匹配，否则 `echo "$(rm -rf /)"` 这类
-		// parser 失败的输入会被 `allow *` 误放行。
+	if err != nil || len(subCmds) == 0 {
 		return CheckResult{Decision: NeedConfirm}
-	}
-	if len(subCmds) == 0 {
-		subCmds = []string{command}
 	}
 
 	asset, err := asset_svc.Asset().Get(ctx, assetID)
@@ -197,12 +194,10 @@ func checkRedisPermission(ctx context.Context, assetID int64, command string) Ch
 func checkK8sPermission(ctx context.Context, assetID int64, command string) CheckResult {
 	// K8s 也是 shell 类，组通用策略要按 AST 子命令逐条比对，避免整串匹配把
 	// `kubectl get pods && curl evil` 这类组合命令误放行。
+	// 解析失败或子命令为空（注释/空白等）一律 NeedConfirm，不退回整串。
 	subCmds, err := ExtractSubCommands(command)
-	if err != nil {
+	if err != nil || len(subCmds) == 0 {
 		return CheckResult{Decision: NeedConfirm}
-	}
-	if len(subCmds) == 0 {
-		subCmds = []string{command}
 	}
 
 	groupResult := CheckGroupGenericPolicy(ctx, assetID, subCmds, MatchCommandRule)
@@ -222,7 +217,9 @@ func checkK8sPermission(ctx context.Context, assetID int64, command string) Chec
 		return result
 	}
 
-	if grantResult := matchGrantForAsset(ctx, assetID, command); grantResult != nil {
+	// K8s grant 也要按子命令逐条匹配，否则 `kubectl get *` 整串匹配会让
+	// `kubectl get pods && kubectl apply -f x.yaml` 被错误放行。
+	if grantResult := matchGrantForAssetSubCmds(ctx, assetID, subCmds); grantResult != nil {
 		return *grantResult
 	}
 
@@ -348,6 +345,15 @@ func matchGrantForAsset(ctx context.Context, assetID int64, command string) *Che
 }
 
 func matchGrantForAssetWith(ctx context.Context, assetID int64, command string, matchFn MatchFunc) *CheckResult {
+	return matchGrantForAssetSubCmdsWith(ctx, assetID, []string{command}, matchFn)
+}
+
+// matchGrantForAssetSubCmds 用 MatchCommandRule 按子命令逐条匹配，专给 shell 类资产（如 K8s）使用。
+func matchGrantForAssetSubCmds(ctx context.Context, assetID int64, subCmds []string) *CheckResult {
+	return matchGrantForAssetSubCmdsWith(ctx, assetID, subCmds, MatchCommandRule)
+}
+
+func matchGrantForAssetSubCmdsWith(ctx context.Context, assetID int64, subCmds []string, matchFn MatchFunc) *CheckResult {
 	asset, err := asset_svc.Asset().Get(ctx, assetID)
 	if err != nil {
 		return nil
@@ -356,7 +362,7 @@ func matchGrantForAssetWith(ctx context.Context, assetID int64, command string, 
 	if asset != nil && asset.GroupID > 0 {
 		groups = resolveGroupChain(ctx, asset.GroupID)
 	}
-	if pattern := matchGrantPatternsWith(ctx, assetID, groups, []string{command}, matchFn); pattern != "" {
+	if pattern := matchGrantPatternsWith(ctx, assetID, groups, subCmds, matchFn); pattern != "" {
 		return &CheckResult{Decision: Allow, DecisionSource: SourceGrantAllow, MatchedPattern: pattern}
 	}
 	return nil

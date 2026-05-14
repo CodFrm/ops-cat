@@ -16,13 +16,12 @@ func checkK8sPolicyRules(ctx context.Context, policy *asset_entity.K8sPolicy, co
 		return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
 	}
 
-	// 拆 shell 执行单元，避免组合命令绕过策略
+	// 拆 shell 执行单元，避免组合命令绕过策略。
+	// 解析失败或提取不到执行单元（仅注释/空白等）时都退到 NeedConfirm，
+	// 禁止退回到整串匹配，否则 allow `*` 会误放行无法枚举为子命令的输入。
 	subCmds, err := ExtractSubCommands(command)
-	if err != nil {
+	if err != nil || len(subCmds) == 0 {
 		return CheckResult{Decision: NeedConfirm}
-	}
-	if len(subCmds) == 0 {
-		subCmds = []string{command}
 	}
 
 	// deny：任一子命令命中即拒绝

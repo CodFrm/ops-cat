@@ -254,6 +254,36 @@ func TestTestK8sPolicy(t *testing.T) {
 			So(out.Decision, ShouldEqual, Allow)
 		})
 
+		Convey("组通用 CmdPolicy deny 命中 K8s 命令", func() {
+			// 与真实路径 checkK8sPermission 对齐：testK8sPolicy 也要走 CheckGroupGenericPolicy
+			groups := []*group_entity.Group{
+				makeGroup("安全组", `{"deny_list":["kubectl delete *"]}`),
+			}
+			out := testK8sPolicy(ctx, nil, groups, "kubectl delete pod nginx")
+			So(out.Decision, ShouldEqual, Deny)
+			So(out.MatchedSource, ShouldEqual, "安全组")
+			So(out.MatchedPattern, ShouldEqual, "kubectl delete *")
+		})
+
+		Convey("组通用 CmdPolicy allow 命中 K8s 命令", func() {
+			groups := []*group_entity.Group{
+				makeGroup("dev组", `{"allow_list":["kubectl rollout *"]}`),
+			}
+			// kubectl rollout restart 不在默认允许里，依赖组通用 allow 提升为 Allow
+			out := testK8sPolicy(ctx, nil, groups, "kubectl rollout restart deploy/api")
+			So(out.Decision, ShouldEqual, Allow)
+			So(out.MatchedSource, ShouldEqual, "dev组")
+		})
+
+		Convey("K8s 组通用 allow 必须按子命令逐条命中", func() {
+			groups := []*group_entity.Group{
+				makeGroup("k8s组", `{"allow_list":["kubectl *"]}`),
+			}
+			// 第二个子命令不是 kubectl —— 不能因为 "kubectl *" 整串匹配就放行
+			out := testK8sPolicy(ctx, nil, groups, "kubectl get pods && curl http://evil.com")
+			So(out.Decision, ShouldNotEqual, Allow)
+		})
+
 		Convey("默认策略正确生效", func() {
 			p := policy.DefaultK8sPolicy()
 			out := testK8sPolicy(ctx, p, nil, "kubectl get pods")

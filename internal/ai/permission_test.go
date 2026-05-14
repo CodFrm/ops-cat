@@ -1120,6 +1120,73 @@ func TestCheckPermission_K8sAstParseError(t *testing.T) {
 	})
 }
 
+// TestCheckPermission_K8sAllowAllGrantSplit 覆盖 K8s allowAll 保存 grant 时按子命令拆，
+// 防止 `kubectl get *` 这种宽规则被存成单条 grant 后被 `kubectl get pods && kubectl apply -f x` 绕过。
+func TestCheckPermission_K8sAllowAllGrantSplit(t *testing.T) {
+	Convey("K8s allowAll 也按子命令拆 grant 并按子命令匹配", t, func() {
+		ctx, mockAsset, _ := setupPolicyTest(t)
+		stubGrant := newStubGrantRepo()
+		origGrant := grant_repo.Grant()
+		grant_repo.RegisterGrant(stubGrant)
+		t.Cleanup(func() {
+			if origGrant != nil {
+				grant_repo.RegisterGrant(origGrant)
+			}
+		})
+
+		asset := &asset_entity.Asset{ID: 1, Name: "k8s-01", Type: asset_entity.AssetTypeK8s}
+		mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+		checker := NewCommandPolicyChecker(func(_ context.Context, _ string, _ []ApprovalItem) ApprovalResponse {
+			return ApprovalResponse{Decision: "allowAll"}
+		})
+
+		sessCtx := WithSessionID(ctx, "sess-k8s-split")
+
+		// 默认 K8s 策略只允许 read-only：apply 与 rollout restart 都会触发 NeedConfirm 走 confirm 回调
+		// 期望保存成 ["kubectl apply -f deploy.yaml", "kubectl rollout restart deploy/api"] 两条，而不是单条原文
+		result := checker.CheckForAsset(sessCtx, 1, asset_entity.AssetTypeK8s, "kubectl apply -f deploy.yaml && kubectl rollout restart deploy/api")
+		So(result.Decision, ShouldEqual, Allow)
+		So(stubGrant.items["sess-k8s-split"], ShouldHaveLength, 2)
+		So(stubGrant.items["sess-k8s-split"][0].Command, ShouldEqual, "kubectl apply -f deploy.yaml")
+		So(stubGrant.items["sess-k8s-split"][1].Command, ShouldEqual, "kubectl rollout restart deploy/api")
+
+		// 第二次：组合命令里 `kubectl delete` 被默认 deny 拦截 → Deny
+		result2 := CheckPermission(sessCtx, asset_entity.AssetTypeK8s, 1, "kubectl apply -f deploy.yaml && kubectl delete pod api-0")
+		So(result2.Decision, ShouldEqual, Deny)
+	})
+}
+
+// TestCheckPermission_K8sGrantNotReusedAcrossComposite 覆盖 K8s grant 匹配也要走子命令，
+// 否则 `kubectl get *` grant 整串匹配会让 `kubectl get pods && kubectl apply -f x` 被错误放行。
+func TestCheckPermission_K8sGrantNotReusedAcrossComposite(t *testing.T) {
+	Convey("K8s grant 整串匹配不能绕过子命令检查", t, func() {
+		ctx, mockAsset, _ := setupPolicyTest(t)
+		stubGrant := newStubGrantRepo()
+		origGrant := grant_repo.Grant()
+		grant_repo.RegisterGrant(stubGrant)
+		t.Cleanup(func() {
+			if origGrant != nil {
+				grant_repo.RegisterGrant(origGrant)
+			}
+		})
+
+		asset := &asset_entity.Asset{ID: 1, Type: asset_entity.AssetTypeK8s}
+		mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+		stubGrant.sessions["sess-k8s-grant"] = &grant_entity.GrantSession{
+			ID: "sess-k8s-grant", Status: grant_entity.GrantStatusApproved,
+		}
+		stubGrant.items["sess-k8s-grant"] = []*grant_entity.GrantItem{
+			{GrantSessionID: "sess-k8s-grant", AssetID: 1, Command: "kubectl get *"},
+		}
+
+		grantCtx := WithSessionID(ctx, "sess-k8s-grant")
+		result := CheckPermission(grantCtx, asset_entity.AssetTypeK8s, 1, "kubectl get pods && kubectl apply -f deploy.yaml")
+		So(result.Decision, ShouldNotEqual, Allow)
+	})
+}
+
 // TestCheckPermission_K8sGroupGenericBypass 覆盖 #2：组通用 allow 不能用整串匹配绕过子命令检查。
 func TestCheckPermission_K8sGroupGenericBypass(t *testing.T) {
 	Convey("组通用 CmdPolicy allow 必须按子命令逐条命中", t, func() {

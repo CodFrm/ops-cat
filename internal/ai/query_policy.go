@@ -3,7 +3,6 @@ package ai
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tidb/pkg/parser/ast"
@@ -153,15 +152,18 @@ func containsStr(slice []string, s string) bool {
 	return false
 }
 
+// appendUnique 按精确字符串去重。
+// 不能按 ToUpper 折叠 —— Redis key、Kafka resource、shell 命令模式都是大小写敏感的，
+// `GET User:*` 与 `GET user:*` 是两条不同的规则，合并会让其中一条静默失效。
 func appendUnique(base []string, items ...string) []string {
 	seen := make(map[string]bool, len(base))
 	for _, s := range base {
-		seen[strings.ToUpper(s)] = true
+		seen[s] = true
 	}
 	for _, s := range items {
-		if !seen[strings.ToUpper(s)] {
+		if !seen[s] {
 			base = append(base, s)
-			seen[strings.ToUpper(s)] = true
+			seen[s] = true
 		}
 	}
 	return base

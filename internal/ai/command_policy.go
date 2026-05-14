@@ -336,6 +336,9 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 	if resp.Decision == "allowAll" {
 		sessionID := GetSessionID(ctx)
 		var patterns []string
+		// SSH 与 K8s 都是 shell 类，grant 必须按子命令拆开存储，否则
+		// `kubectl get *` 这种宽规则会被组合命令一整串匹配复用，绕过子命令检查。
+		shellType := assetType == asset_entity.AssetTypeSSH || assetType == asset_entity.AssetTypeK8s
 		// 优先使用用户编辑后的模式（支持 * 通配符）
 		if len(resp.EditedItems) > 0 {
 			for _, item := range resp.EditedItems {
@@ -343,8 +346,8 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 				if cmd == "" {
 					continue
 				}
-				if assetType == asset_entity.AssetTypeSSH {
-					// SSH：按行 + ExtractSubCommands 拆，保证每条 grant 可单独匹配
+				if shellType {
+					// 按行 + ExtractSubCommands 拆，保证每条 grant 可单独匹配
 					for line := range strings.SplitSeq(cmd, "\n") {
 						line = strings.TrimSpace(line)
 						if line == "" {
@@ -362,9 +365,9 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 				}
 			}
 		}
-		// 无编辑项时回退：SSH 解析子命令，其他类型直接使用原始命令
+		// 无编辑项时回退：shell 类资产解析子命令，其他类型直接使用原始命令
 		if len(patterns) == 0 {
-			if assetType == asset_entity.AssetTypeSSH {
+			if shellType {
 				subCmds, _ := ExtractSubCommands(command)
 				if len(subCmds) == 0 {
 					subCmds = []string{command}

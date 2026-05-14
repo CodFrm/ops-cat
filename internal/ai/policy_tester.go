@@ -117,11 +117,9 @@ func checkGenericAllow(rules []taggedRule, command string, matchFn MatchFunc) *P
 
 func testSSHPolicy(ctx context.Context, current *asset_entity.CommandPolicy, groups []*group_entity.Group, command string) PolicyTestOutput {
 	subCmds, err := ExtractSubCommands(command)
-	if err != nil {
+	if err != nil || len(subCmds) == 0 {
+		// 不能整串 fallback，否则与真实路径不一致
 		return PolicyTestOutput{Decision: NeedConfirm}
-	}
-	if len(subCmds) == 0 {
-		subCmds = []string{command}
 	}
 
 	var denyRules, allowRules []taggedRule
@@ -270,6 +268,25 @@ func testRedisPolicy(ctx context.Context, current *asset_entity.RedisPolicy, gro
 // --- K8S ---
 
 func testK8sPolicy(ctx context.Context, current *asset_entity.K8sPolicy, groups []*group_entity.Group, command string) PolicyTestOutput {
+	// 与真实 checkK8sPermission 对齐：先按 AST 拆 → 走组通用 CmdPolicy → 再走 K8s 策略。
+	subCmds, err := ExtractSubCommands(command)
+	if err != nil || len(subCmds) == 0 {
+		return PolicyTestOutput{Decision: NeedConfirm}
+	}
+
+	groupDeny, groupAllow := collectGroupGenericRules(ctx, groups)
+
+	// 组通用 deny：任一子命令命中即拒
+	for _, sub := range subCmds {
+		if out := checkGenericDeny(groupDeny, sub, MatchCommandRule); out != nil {
+			out.Message = policyFmt(ctx, "command denied by group [%s] policy: %s", "命令被组 [%s] 策略禁止: %s", out.MatchedSource, sub)
+			return *out
+		}
+	}
+
+	// 组通用 allow：每条子命令都命中才算 allow
+	groupAllowDecision := groupGenericAllowAllSubCmds(groupAllow, subCmds, MatchCommandRule)
+
 	merged := mergeK8sPoliciesForTest(ctx, current, groups)
 	result := checkK8sPolicyRules(ctx, effectiveK8sPolicy(ctx, merged), command)
 	if result.Decision == Deny {
@@ -280,10 +297,45 @@ func testK8sPolicy(ctx context.Context, current *asset_entity.K8sPolicy, groups 
 			Message:        result.Message,
 		}
 	}
+
+	// K8s 策略 NeedConfirm 时由组通用 allow 提升为 Allow
+	if result.Decision == NeedConfirm && groupAllowDecision != nil {
+		return *groupAllowDecision
+	}
+
 	if result.Decision == NeedConfirm {
 		return PolicyTestOutput{Decision: NeedConfirm}
 	}
 	return PolicyTestOutput{Decision: Allow}
+}
+
+// groupGenericAllowAllSubCmds 返回所有子命令都被组 allow 命中时的结果，否则 nil。
+func groupGenericAllowAllSubCmds(rules []taggedRule, subCmds []string, matchFn MatchFunc) *PolicyTestOutput {
+	if len(rules) == 0 {
+		return nil
+	}
+	var firstSource, firstPattern string
+	for _, sub := range subCmds {
+		matched := false
+		for _, tr := range rules {
+			if matchFn(tr.Rule, sub) {
+				matched = true
+				if firstSource == "" {
+					firstSource = tr.Source
+					firstPattern = tr.Rule
+				}
+				break
+			}
+		}
+		if !matched {
+			return nil
+		}
+	}
+	return &PolicyTestOutput{
+		Decision:       Allow,
+		MatchedSource:  firstSource,
+		MatchedPattern: firstPattern,
+	}
 }
 
 func mergeQueryPoliciesForTest(ctx context.Context, current *asset_entity.QueryPolicy, groups []*group_entity.Group) *asset_entity.QueryPolicy {

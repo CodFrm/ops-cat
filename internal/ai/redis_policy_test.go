@@ -196,4 +196,3 @@ func TestCheckRedisPolicy(t *testing.T) {
 		})
 	})
 }
-

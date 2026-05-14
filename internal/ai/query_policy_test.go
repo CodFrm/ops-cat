@@ -167,3 +167,24 @@ func TestCheckQueryPolicy(t *testing.T) {
 		})
 	})
 }
+
+func TestAppendUnique_CaseSensitive(t *testing.T) {
+	Convey("appendUnique 必须保留大小写不同的模式（Redis key / Kafka resource 都是大小写敏感的）", t, func() {
+		Convey("Redis key 模式大小写不同时不能合并", func() {
+			merged := appendUnique([]string{"GET User:*"}, "GET user:*")
+			So(merged, ShouldContain, "GET User:*")
+			So(merged, ShouldContain, "GET user:*")
+		})
+
+		Convey("Kafka resource 模式大小写不同时不能合并", func() {
+			merged := appendUnique([]string{"topic.read Orders"}, "topic.read orders")
+			So(merged, ShouldContain, "topic.read Orders")
+			So(merged, ShouldContain, "topic.read orders")
+		})
+
+		Convey("完全相同的项仍然去重", func() {
+			merged := appendUnique([]string{"SELECT"}, "SELECT")
+			So(merged, ShouldHaveLength, 1)
+		})
+	})
+}
