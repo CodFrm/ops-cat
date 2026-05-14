@@ -129,6 +129,7 @@ Use **gitmoji** for commit messages. Common prefixes:
 
 - Go mocks: generated with `go.uber.org/mock` in `mock_*/` subdirectories
 - Go test assertions: goconvey + testify
+- Go service unit tests should mock transaction boundaries instead of opening in-memory SQLite; use `dbutil.WithTransactionRunner` when code under test calls `dbutil.WithTransaction`.
 - Frontend formatting: Prettier (120 char width, 2-space indent)
 - Soft deletes via Status field (StatusActive=1, StatusDeleted=2), not GORM soft delete
 - i18n keys namespaced under `"common"` — use `t("key.subkey")`

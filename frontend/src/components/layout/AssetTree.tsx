@@ -41,6 +41,7 @@ import {
 } from "@opskat/ui";
 import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
 import { filterAssets } from "@/lib/assetSearch";
+import { getAssetTreeMoveBeforeId, type AssetTreeSortableItem } from "@/lib/assetTreeReorder";
 import { getAssetType } from "@/lib/assetTypes";
 import { getAssetTypeOptions, matchSelectedTypes } from "@/lib/assetTypes/options";
 import { AssetTypeFilterButton } from "@/components/asset/AssetTypeFilterButton";
@@ -245,7 +246,19 @@ export function AssetTree({
       if (activeKind === "asset") {
         if (overKind === "asset") {
           const overAsset = assets.find((a) => a.ID === overId);
-          await ReorderAsset(activeId, overAsset?.GroupID ?? 0, overId);
+          const targetGroupID = overAsset?.GroupID ?? 0;
+          const assetGroupById = new Map(assets.map((a) => [a.ID, a.GroupID ?? 0] as const));
+          const beforeID = getAssetTreeMoveBeforeId({
+            sortableIds,
+            activeSortableId: activeStr,
+            overSortableId: overStr,
+            targetKind: "asset",
+            targetContainerId: targetGroupID,
+            getContainerId: (item: AssetTreeSortableItem) =>
+              item.kind === "asset" ? assetGroupById.get(item.id) : undefined,
+          });
+          if (beforeID === null) return;
+          await ReorderAsset(activeId, targetGroupID, beforeID);
         } else if (overKind === "group") {
           // 拖到分组（含未分组桶 id=0）→ 追加到该分组末尾
           await ReorderAsset(activeId, overId, 0);
@@ -260,8 +273,19 @@ export function AssetTree({
             return;
           }
           const overGroup = groups.find((g) => g.ID === overId);
-          // 同父级排序：插入到目标之前
-          await ReorderGroup(activeId, overGroup?.ParentID ?? 0, overId);
+          const targetParentID = overGroup?.ParentID ?? 0;
+          const groupParentById = new Map(groups.map((g) => [g.ID, g.ParentID ?? 0] as const));
+          const beforeID = getAssetTreeMoveBeforeId({
+            sortableIds,
+            activeSortableId: activeStr,
+            overSortableId: overStr,
+            targetKind: "group",
+            targetContainerId: targetParentID,
+            getContainerId: (item: AssetTreeSortableItem) =>
+              item.kind === "group" ? groupParentById.get(item.id) : undefined,
+          });
+          if (beforeID === null) return;
+          await ReorderGroup(activeId, targetParentID, beforeID);
         } else if (overKind === "asset") {
           const overAsset = assets.find((a) => a.ID === overId);
           if (!overAsset || overAsset.GroupID === 0) return;
@@ -532,8 +556,12 @@ function GroupItem({
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const children = group.ID > 0 ? childGroups(group.ID) : [];
   const totalCount = countAssetsInGroup(group.ID);
+  const isUngrouped = group.ID === 0;
 
-  const sortable = useSortable({ id: `group-${group.ID}` });
+  const sortable = useSortable({
+    id: `group-${group.ID}`,
+    disabled: isUngrouped ? { draggable: true, droppable: false } : false,
+  });
   const groupRowStyle: React.CSSProperties = {
     paddingLeft: `${8 + depth * 12}px`,
     transform: CSS.Transform.toString(sortable.transform),
@@ -547,9 +575,9 @@ function GroupItem({
       // eslint-disable-next-line react-hooks/refs
       ref={sortable.setNodeRef}
       // eslint-disable-next-line react-hooks/refs
-      {...sortable.attributes}
+      {...(!isUngrouped ? sortable.attributes : {})}
       // eslint-disable-next-line react-hooks/refs
-      {...sortable.listeners}
+      {...(!isUngrouped ? sortable.listeners : {})}
       className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium hover:bg-sidebar-accent cursor-pointer transition-colors duration-150"
       style={groupRowStyle}
       onClick={() => toggleGroupCollapsed(group.ID)}
@@ -571,7 +599,7 @@ function GroupItem({
 
   return (
     <div>
-      {group.ID > 0 ? (
+      {!isUngrouped ? (
         <ContextMenu>
           <ContextMenuTrigger>{groupRow}</ContextMenuTrigger>
           <ContextMenuContent>

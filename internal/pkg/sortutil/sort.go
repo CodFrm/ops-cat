@@ -6,6 +6,10 @@ import "fmt"
 // beforeID == 0 或未在 siblings 中找到时，追加到末尾。
 // 返回重排后的切片；若 movedID 未在 siblings 中找到，原样返回。
 func ReorderSiblings[T any](siblings []T, movedID, beforeID int64, getID func(T) int64) []T {
+	if movedID == beforeID {
+		return siblings
+	}
+
 	var moved T
 	var foundMoved bool
 	rest := make([]T, 0, len(siblings))

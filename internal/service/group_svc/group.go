@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/opskat/opskat/internal/model/entity/group_entity"
+	"github.com/opskat/opskat/internal/pkg/dbutil"
 	"github.com/opskat/opskat/internal/pkg/sortutil"
 	"github.com/opskat/opskat/internal/repository/asset_repo"
 	"github.com/opskat/opskat/internal/repository/group_repo"
@@ -115,66 +116,68 @@ func (s *groupSvc) Reorder(ctx context.Context, id, targetParentID, beforeID int
 		return fmt.Errorf("不能把分组拖到自身下")
 	}
 
-	group, err := group_repo.Group().Find(ctx, id)
-	if err != nil {
-		return err
-	}
+	return dbutil.WithTransaction(ctx, func(txCtx context.Context) error {
+		group, err := group_repo.Group().Find(txCtx, id)
+		if err != nil {
+			return err
+		}
 
-	allGroups, err := group_repo.Group().List(ctx)
-	if err != nil {
-		return err
-	}
+		allGroups, err := group_repo.Group().List(txCtx)
+		if err != nil {
+			return err
+		}
 
-	// 成环校验：从 targetParentID 沿 ParentID 链向上走，若经过 id 则成环。
-	if targetParentID != 0 {
-		parents := make(map[int64]int64, len(allGroups))
+		// 成环校验：从 targetParentID 沿 ParentID 链向上走，若经过 id 则成环。
+		if targetParentID != 0 {
+			parents := make(map[int64]int64, len(allGroups))
+			for _, g := range allGroups {
+				parents[g.ID] = g.ParentID
+			}
+			cursor := targetParentID
+			for cursor != 0 {
+				if cursor == id {
+					return fmt.Errorf("不能把分组拖到自己的子孙下")
+				}
+				next, ok := parents[cursor]
+				if !ok {
+					break
+				}
+				cursor = next
+			}
+		}
+
+		// 跨父级迁移
+		if group.ParentID != targetParentID {
+			if err := group_repo.Group().UpdateParentID(txCtx, id, targetParentID); err != nil {
+				return err
+			}
+			group.ParentID = targetParentID
+		}
+
+		var siblings []*group_entity.Group
 		for _, g := range allGroups {
-			parents[g.ID] = g.ParentID
-		}
-		cursor := targetParentID
-		for cursor != 0 {
-			if cursor == id {
-				return fmt.Errorf("不能把分组拖到自己的子孙下")
+			if g.ID == id {
+				continue
 			}
-			next, ok := parents[cursor]
-			if !ok {
-				break
+			if g.ParentID == targetParentID {
+				siblings = append(siblings, g)
 			}
-			cursor = next
 		}
-	}
+		siblings = append(siblings, group)
 
-	// 跨父级迁移
-	if group.ParentID != targetParentID {
-		if err := group_repo.Group().UpdateParentID(ctx, id, targetParentID); err != nil {
-			return err
-		}
-		group.ParentID = targetParentID
-	}
+		reordered := sortutil.ReorderSiblings(siblings, id, beforeID,
+			func(item *group_entity.Group) int64 { return item.ID },
+		)
 
-	var siblings []*group_entity.Group
-	for _, g := range allGroups {
-		if g.ID == id {
-			continue
+		for i, item := range reordered {
+			newOrder := (i + 1) * 10
+			if item.SortOrder == newOrder && item.ID != id {
+				continue
+			}
+			if err := group_repo.Group().UpdateSortOrder(txCtx, item.ID, newOrder); err != nil {
+				return err
+			}
 		}
-		if g.ParentID == targetParentID {
-			siblings = append(siblings, g)
-		}
-	}
-	siblings = append(siblings, group)
-
-	reordered := sortutil.ReorderSiblings(siblings, id, beforeID,
-		func(item *group_entity.Group) int64 { return item.ID },
-	)
-
-	for i, item := range reordered {
-		newOrder := (i + 1) * 10
-		if item.SortOrder == newOrder && item.ID != id {
-			continue
-		}
-		if err := group_repo.Group().UpdateSortOrder(ctx, item.ID, newOrder); err != nil {
-			return err
-		}
-	}
-	return nil
+		return nil
+	})
 }

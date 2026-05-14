@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/opskat/opskat/internal/model/entity/group_entity"
+	"github.com/opskat/opskat/internal/pkg/dbutil"
 	"github.com/opskat/opskat/internal/repository/asset_repo"
 	"github.com/opskat/opskat/internal/repository/asset_repo/mock_asset_repo"
 	"github.com/opskat/opskat/internal/repository/group_repo"
@@ -18,7 +19,9 @@ import (
 func setupTest(t *testing.T) (context.Context, *mock_group_repo.MockGroupRepo, *mock_asset_repo.MockAssetRepo) {
 	mockCtrl := gomock.NewController(t)
 	t.Cleanup(func() { mockCtrl.Finish() })
-	ctx := context.Background()
+	ctx := dbutil.WithTransactionRunner(context.Background(), func(ctx context.Context, fn func(context.Context) error) error {
+		return fn(ctx)
+	})
 	mockGroupRepo := mock_group_repo.NewMockGroupRepo(mockCtrl)
 	mockAssetRepo := mock_asset_repo.NewMockAssetRepo(mockCtrl)
 	group_repo.RegisterGroup(mockGroupRepo)

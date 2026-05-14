@@ -10,6 +10,7 @@ import (
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/model/entity/policy"
+	"github.com/opskat/opskat/internal/pkg/dbutil"
 	"github.com/opskat/opskat/internal/pkg/sortutil"
 	"github.com/opskat/opskat/internal/repository/asset_repo"
 )
@@ -101,36 +102,38 @@ func (s *assetSvc) Move(ctx context.Context, id int64, direction string) error {
 // Reorder 把 id 移动到 targetGroupID 内 beforeID 之前。beforeID == 0 表示插到末尾。
 // 跨分组时同步 GroupID。重排目标容器内所有兄弟的 sort_order，等间距 (10/20/30...)。
 func (s *assetSvc) Reorder(ctx context.Context, id, targetGroupID, beforeID int64) error {
-	asset, err := asset_repo.Asset().Find(ctx, id)
-	if err != nil {
-		return err
-	}
-
-	// 跨分组迁移
-	if asset.GroupID != targetGroupID {
-		if err := asset_repo.Asset().UpdateGroupID(ctx, id, targetGroupID); err != nil {
+	return dbutil.WithTransaction(ctx, func(txCtx context.Context) error {
+		asset, err := asset_repo.Asset().Find(txCtx, id)
+		if err != nil {
 			return err
 		}
-		asset.GroupID = targetGroupID
-	}
 
-	siblings, err := asset_repo.Asset().List(ctx, asset_repo.ListOptions{GroupID: targetGroupID, ExactGroupID: true})
-	if err != nil {
-		return err
-	}
-
-	reordered := sortutil.ReorderSiblings(siblings, id, beforeID,
-		func(item *asset_entity.Asset) int64 { return item.ID },
-	)
-
-	for i, item := range reordered {
-		newOrder := (i + 1) * 10
-		if item.SortOrder == newOrder && item.ID != id {
-			continue
+		// 跨分组迁移
+		if asset.GroupID != targetGroupID {
+			if err := asset_repo.Asset().UpdateGroupID(txCtx, id, targetGroupID); err != nil {
+				return err
+			}
+			asset.GroupID = targetGroupID
 		}
-		if err := asset_repo.Asset().UpdateSortOrder(ctx, item.ID, newOrder); err != nil {
+
+		siblings, err := asset_repo.Asset().List(txCtx, asset_repo.ListOptions{GroupID: targetGroupID, ExactGroupID: true})
+		if err != nil {
 			return err
 		}
-	}
-	return nil
+
+		reordered := sortutil.ReorderSiblings(siblings, id, beforeID,
+			func(item *asset_entity.Asset) int64 { return item.ID },
+		)
+
+		for i, item := range reordered {
+			newOrder := (i + 1) * 10
+			if item.SortOrder == newOrder && item.ID != id {
+				continue
+			}
+			if err := asset_repo.Asset().UpdateSortOrder(txCtx, item.ID, newOrder); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

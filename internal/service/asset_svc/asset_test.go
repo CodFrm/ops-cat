@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
+	"github.com/opskat/opskat/internal/pkg/dbutil"
 	"github.com/opskat/opskat/internal/repository/asset_repo"
 	"github.com/opskat/opskat/internal/repository/asset_repo/mock_asset_repo"
 
@@ -16,7 +17,9 @@ import (
 func setupTest(t *testing.T) (context.Context, *mock_asset_repo.MockAssetRepo) {
 	mockCtrl := gomock.NewController(t)
 	t.Cleanup(func() { mockCtrl.Finish() })
-	ctx := context.Background()
+	ctx := dbutil.WithTransactionRunner(context.Background(), func(ctx context.Context, fn func(context.Context) error) error {
+		return fn(ctx)
+	})
 	mockRepo := mock_asset_repo.NewMockAssetRepo(mockCtrl)
 	asset_repo.RegisterAsset(mockRepo)
 	return ctx, mockRepo
