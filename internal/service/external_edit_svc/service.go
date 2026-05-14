@@ -2579,7 +2579,7 @@ func (s *Service) compareInternal(sessionID string) (*CompareResult, error) {
 		return nil, err
 	}
 
-	localData, err := os.ReadFile(primary.LocalPath) //nolint:gosec // local path is controlled by the service workspace
+	localData, err := os.ReadFile(primary.LocalPath)
 	if err != nil {
 		return nil, fmt.Errorf("读取本地副本失败: %w", err)
 	}
@@ -2657,7 +2657,7 @@ func (s *Service) prepareMergeInternal(sessionID string) (*MergePrepareResult, e
 		return nil, err
 	}
 
-	localData, err := os.ReadFile(current.LocalPath) //nolint:gosec // local path is controlled by the service workspace
+	localData, err := os.ReadFile(current.LocalPath)
 	if err != nil {
 		return nil, fmt.Errorf("读取本地副本失败: %w", err)
 	}
@@ -3334,7 +3334,7 @@ func (s *Service) hydrateSessionEncodingLocked(session *Session) error {
 	if session == nil || strings.TrimSpace(session.OriginalEncoding) != "" {
 		return nil
 	}
-	data, err := os.ReadFile(session.LocalPath) //nolint:gosec // local path is controlled by the service workspace
+	data, err := os.ReadFile(session.LocalPath)
 	if err != nil {
 		return fmt.Errorf("读取本地副本失败: %w", err)
 	}
