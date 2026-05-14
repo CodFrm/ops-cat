@@ -4,6 +4,7 @@ import {
   ChevronRight,
   ChevronDown,
   Folder,
+  FolderOpen,
   Server,
   Plus,
   FolderPlus,
@@ -67,6 +68,7 @@ interface AssetTreeProps {
   onCopyAsset: (asset: asset_entity.Asset) => void;
   onConnectAsset: (asset: asset_entity.Asset) => void;
   onConnectAssetInNewTab?: (asset: asset_entity.Asset) => void;
+  onOpenFileManager?: (asset: asset_entity.Asset) => void;
   onSelectAsset: (asset: asset_entity.Asset) => void;
   onOpenInfoTab?: (type: "asset" | "group", id: number, name: string, icon?: string) => void;
 }
@@ -113,6 +115,7 @@ export function AssetTree({
   onCopyAsset,
   onConnectAsset,
   onConnectAssetInNewTab,
+  onOpenFileManager,
   onSelectAsset,
   onOpenInfoTab,
 }: AssetTreeProps) {
@@ -399,6 +402,7 @@ export function AssetTree({
                       onCopyAsset={onCopyAsset}
                       onConnectAsset={onConnectAsset}
                       onConnectAssetInNewTab={onConnectAssetInNewTab}
+                      onOpenFileManager={onOpenFileManager}
                       onEditGroup={onEditGroup}
                       onGroupDetail={onGroupDetail}
                       onDeleteGroup={handleDeleteGroup}
@@ -431,6 +435,7 @@ export function AssetTree({
                       onCopyAsset={onCopyAsset}
                       onConnectAsset={onConnectAsset}
                       onConnectAssetInNewTab={onConnectAssetInNewTab}
+                      onOpenFileManager={onOpenFileManager}
                       onEditGroup={onEditGroup}
                       onGroupDetail={onGroupDetail}
                       onDeleteGroup={handleDeleteGroup}
@@ -517,6 +522,7 @@ function GroupItem({
   onCopyAsset,
   onConnectAsset,
   onConnectAssetInNewTab,
+  onOpenFileManager,
   onEditGroup,
   onGroupDetail,
   onDeleteGroup,
@@ -541,6 +547,7 @@ function GroupItem({
   onCopyAsset: (asset: asset_entity.Asset) => void;
   onConnectAsset: (asset: asset_entity.Asset) => void;
   onConnectAssetInNewTab?: (asset: asset_entity.Asset) => void;
+  onOpenFileManager?: (asset: asset_entity.Asset) => void;
   onEditGroup: (group: group_entity.Group) => void;
   onGroupDetail: (group: group_entity.Group) => void;
   onDeleteGroup: (id: number) => void;
@@ -664,6 +671,7 @@ function GroupItem({
               onCopyAsset={onCopyAsset}
               onConnectAsset={onConnectAsset}
               onConnectAssetInNewTab={onConnectAssetInNewTab}
+              onOpenFileManager={onOpenFileManager}
               onEditGroup={onEditGroup}
               onGroupDetail={onGroupDetail}
               onDeleteGroup={onDeleteGroup}
@@ -689,6 +697,7 @@ function GroupItem({
               onCopyAsset={onCopyAsset}
               onConnectAsset={onConnectAsset}
               onConnectAssetInNewTab={onConnectAssetInNewTab}
+              onOpenFileManager={onOpenFileManager}
               onDeleteAsset={onDeleteAsset}
               onMoveAsset={onMoveAsset}
               onOpenInfoTab={onOpenInfoTab}
@@ -722,6 +731,7 @@ function AssetRow({
   onCopyAsset,
   onConnectAsset,
   onConnectAssetInNewTab,
+  onOpenFileManager,
   onDeleteAsset,
   onMoveAsset,
   onOpenInfoTab,
@@ -738,6 +748,7 @@ function AssetRow({
   onCopyAsset: (asset: asset_entity.Asset) => void;
   onConnectAsset: (asset: asset_entity.Asset) => void;
   onConnectAssetInNewTab?: (asset: asset_entity.Asset) => void;
+  onOpenFileManager?: (asset: asset_entity.Asset) => void;
   onDeleteAsset: (asset: asset_entity.Asset) => void;
   onMoveAsset: (id: number, direction: string) => void;
   onOpenInfoTab?: (type: "asset" | "group", id: number, name: string, icon?: string) => void;
@@ -816,6 +827,12 @@ function AssetRow({
           <ContextMenuItem onClick={() => onConnectAssetInNewTab(asset)} disabled={isConnecting}>
             <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
             {t("asset.connectInNewTab")}
+          </ContextMenuItem>
+        )}
+        {asset.Type === "ssh" && onOpenFileManager && (
+          <ContextMenuItem onClick={() => onOpenFileManager(asset)}>
+            <FolderOpen className="h-3.5 w-3.5 mr-1.5" />
+            {t("sftp.fileManager")}
           </ContextMenuItem>
         )}
         {onOpenInfoTab && (

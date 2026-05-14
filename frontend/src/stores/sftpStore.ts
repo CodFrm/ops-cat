@@ -8,7 +8,7 @@ import {
   SFTPCancelTransfer,
 } from "../../wailsjs/go/app/App";
 import { EventsOn, EventsOff } from "../../wailsjs/runtime/runtime";
-import { registerTabCloseHook } from "./tabStore";
+import { registerTabCloseHook, registerTabReplaceHook } from "./tabStore";
 
 export interface SFTPTransfer {
   transferId: string;
@@ -287,6 +287,31 @@ registerTabCloseHook((tab) => {
     delete nextOpenTabs[tab.id];
     const nextPaths = { ...state.fileManagerPaths };
     delete nextPaths[tab.id];
+    return {
+      fileManagerOpenTabs: nextOpenTabs,
+      fileManagerPaths: nextPaths,
+    };
+  });
+});
+
+// SSH terminal tabs flip from connectionId → sessionId once the session establishes.
+// Migrate keyed file-manager state across that rename so panels opened during
+// connecting stay open after.
+registerTabReplaceHook((oldId, newId) => {
+  useSFTPStore.setState((state) => {
+    const hasOpen = Object.prototype.hasOwnProperty.call(state.fileManagerOpenTabs, oldId);
+    const hasPath = Object.prototype.hasOwnProperty.call(state.fileManagerPaths, oldId);
+    if (!hasOpen && !hasPath) return state;
+    const nextOpenTabs = { ...state.fileManagerOpenTabs };
+    if (hasOpen) {
+      nextOpenTabs[newId] = nextOpenTabs[oldId];
+      delete nextOpenTabs[oldId];
+    }
+    const nextPaths = { ...state.fileManagerPaths };
+    if (hasPath) {
+      nextPaths[newId] = nextPaths[oldId];
+      delete nextPaths[oldId];
+    }
     return {
       fileManagerOpenTabs: nextOpenTabs,
       fileManagerPaths: nextPaths,
