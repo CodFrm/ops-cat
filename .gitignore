@@ -28,7 +28,10 @@ internal/embedded/opsctl_bin
 coverage.out
 coverage.html
 
-superpowers
+/.workflow/
+/docs/plans/
+/docs/superpowers/plans/
+/docs/superpowers/specs/
 .omc
 
 coverage_new.out

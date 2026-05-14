@@ -197,6 +197,14 @@ func (a *App) RecoverExternalEditSession(sessionID string) (*ExternalEditSession
 	return svc.Recover(sessionID)
 }
 
+func (a *App) ContinueExternalEditSession(sessionID string) (*ExternalEditSession, error) {
+	svc, err := a.externalEditService()
+	if err != nil {
+		return nil, err
+	}
+	return svc.Continue(sessionID)
+}
+
 func (a *App) DeleteExternalEditSession(sessionID string, removeLocal bool) (*ExternalEditDeleteResult, error) {
 	svc, err := a.externalEditService()
 	if err != nil {

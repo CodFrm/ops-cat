@@ -255,6 +255,7 @@ type Session struct {
 	State                 string         `json:"state"`
 	RecordState           string         `json:"recordState,omitempty"`
 	SaveMode              string         `json:"saveMode,omitempty"`
+	PendingReview         bool           `json:"pendingReview,omitempty"`
 	Hidden                bool           `json:"hidden"`
 	Expired               bool           `json:"expired"`
 	LastError             *ErrorSnapshot `json:"lastError,omitempty"`
@@ -380,6 +381,7 @@ type auditSessionPayload struct {
 	State                 string `json:"state,omitempty"`
 	RecordState           string `json:"recordState,omitempty"`
 	SaveMode              string `json:"saveMode,omitempty"`
+	PendingReview         bool   `json:"pendingReview,omitempty"`
 	Hidden                bool   `json:"hidden"`
 	Expired               bool   `json:"expired"`
 	SourceSessionID       string `json:"sourceSessionId,omitempty"`
@@ -716,6 +718,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (*Session, error) {
 		reusable.RemoteRealPath = remoteRealPath
 		reusable.RecordState = recordStateActive
 		reusable.SaveMode = saveModeAutoLive
+		reusable.PendingReview = false
 		reusable.Hidden = false
 		reusable.LastError = nil
 		reusable.ResumeRequired = false
@@ -802,6 +805,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (*Session, error) {
 		State:           sessionStateClean,
 		RecordState:     recordStateActive,
 		SaveMode:        saveModeAutoLive,
+		PendingReview:   false,
 		CreatedAt:       nowUnix,
 		UpdatedAt:       nowUnix,
 		LastLaunchedAt:  nowUnix,
@@ -1281,6 +1285,7 @@ func (s *Service) restoreSessions() error {
 			continue
 		}
 		session.SaveMode = saveModeManualRestore
+		session.PendingReview = false
 		if session.UpdatedAt <= expireAt && canCleanupRetainedSession(session) {
 			cleaned = append(cleaned, id)
 			s.removeSessionLocked(id)
@@ -1421,6 +1426,7 @@ func (s *Service) reconcileLocalCopy(sessionID string) {
 	setSessionLocalHash(current, localHash)
 	current.Dirty = dirty
 	current.State = nextState
+	current.PendingReview = nextState == sessionStateDirty && current.SaveMode == saveModeAutoLive
 	if current.RecordState == "" || current.RecordState == recordStateCompleted || current.RecordState == recordStateAbandoned {
 		current.RecordState = recordStateActive
 	}
@@ -1568,6 +1574,7 @@ func (s *Service) markSaved(sessionID, localHash string, localData []byte, remot
 	session.Dirty = false
 	session.State = sessionStateClean
 	session.RecordState = recordStateActive
+	session.PendingReview = false
 	session.Hidden = false
 	session.Expired = false
 	session.LastError = nil
@@ -1595,8 +1602,10 @@ func (s *Service) markSessionState(sessionID, state string, dirty bool, localHas
 	switch state {
 	case sessionStateConflict, sessionStateRemoteMissing, sessionStateStale:
 		session.RecordState = recordStateConflict
+		session.PendingReview = false
 		session.Hidden = false
 	case sessionStateClean, sessionStateDirty, sessionStateExpired:
+		session.PendingReview = state == sessionStateDirty && session.SaveMode == saveModeAutoLive
 		if session.RecordState == "" || session.RecordState == recordStateCompleted || session.RecordState == recordStateAbandoned {
 			session.RecordState = recordStateActive
 		}
@@ -1739,6 +1748,9 @@ func (s *Service) markResumeRequired(sessionID string, required bool) *Session {
 		return nil
 	}
 	session.ResumeRequired = required
+	if required {
+		session.PendingReview = false
+	}
 	session.Hidden = false
 	if session.RecordState == "" || session.RecordState == recordStateCompleted || session.RecordState == recordStateAbandoned {
 		session.RecordState = recordStateActive
@@ -2866,6 +2878,16 @@ func (s *Service) Recover(sessionID string) (*Session, error) {
 	return result, err
 }
 
+func (s *Service) Continue(sessionID string) (*Session, error) {
+	var result *Session
+	err := s.withDocumentRunner(sessionID, func() error {
+		var continueErr error
+		result, continueErr = s.continueInternal(sessionID)
+		return continueErr
+	})
+	return result, err
+}
+
 func (s *Service) recoverInternal(sessionID string) (*Session, error) {
 	session := s.getSession(sessionID)
 	if session == nil {
@@ -2891,6 +2913,35 @@ func (s *Service) recoverInternal(sessionID string) (*Session, error) {
 	updated := s.markResumeRequired(sessionID, true)
 	s.writeAudit(updated, "external_edit_recover", true, nil, updated, nil)
 	s.emit(Event{Type: eventSessionRestored, Session: updated})
+	return updated, nil
+}
+
+func (s *Service) continueInternal(sessionID string) (*Session, error) {
+	session := s.getSession(sessionID)
+	if session == nil {
+		return nil, fmt.Errorf("外部编辑会话不存在")
+	}
+	if session.Hidden || session.RecordState == recordStateCompleted || session.RecordState == recordStateAbandoned {
+		return nil, fmt.Errorf("当前记录已归档，不能继续编辑")
+	}
+
+	s.mu.Lock()
+	current := s.sessions[sessionID]
+	if current == nil {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("外部编辑会话不存在")
+	}
+	current.PendingReview = false
+	current.UpdatedAt = s.now().Unix()
+	if err := s.saveManifestLocked(); err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	updated := cloneSession(current)
+	s.mu.Unlock()
+
+	s.writeAudit(updated, "external_edit_continue", true, nil, updated, nil)
+	s.emit(Event{Type: eventSessionChanged, Session: updated})
 	return updated, nil
 }
 

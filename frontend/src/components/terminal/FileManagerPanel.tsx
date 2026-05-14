@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, GitMerge, RotateCcw, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, GitMerge, Upload, X } from "lucide-react";
 import type * as MonacoNS from "monaco-editor";
 import {
   Button,
@@ -57,7 +57,15 @@ const EXTERNAL_EDIT_SAFE_ERROR_KEY = "externalEdit.error.safeActionFailed";
 const EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS =
   "!h-auto max-w-full justify-start !whitespace-normal break-words px-2 py-1.5 text-left leading-4";
 
-type ExternalEditPendingItem = ExternalEditAttentionItem | { id: string; type: "conflict"; session: ExternalEditSession };
+type ExternalEditPendingItem =
+  | ExternalEditAttentionItem
+  | {
+      id: string;
+      type: "pending" | "conflict" | "remote_missing";
+      session: ExternalEditSession;
+      decisionType?: "pending" | "conflict";
+      sourceType?: "runtime" | "recovery";
+    };
 
 type MergePaneRole = "local" | "final" | "remote";
 type MergeEditorRefs = Record<
@@ -261,6 +269,10 @@ function ExternalEditIdeaEditorPane({ badge, children, tone, title }: ExternalEd
 
 export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onWidthChange }: FileManagerPanelProps) {
   const { t } = useTranslation();
+  const continueEditLabel = (() => {
+    const label = t("externalEdit.actions.continueEdit");
+    return label === "externalEdit.actions.continueEdit" ? "继续修改" : label;
+  })();
   const {
     currentPath,
     currentPathRef,
@@ -324,19 +336,15 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
   const pendingConflict = useExternalEditStore((s) => s.pendingConflict);
   const dismissCompare = useExternalEditStore((s) => s.dismissCompare);
   const dismissMerge = useExternalEditStore((s) => s.dismissMerge);
-  const deleteSession = useExternalEditStore((s) => s.deleteSession);
   const dismissErrorDetail = useExternalEditStore((s) => s.dismissErrorDetail);
-  const dismissRecoveryDetail = useExternalEditStore((s) => s.dismissRecoveryDetail);
   const compareResult = useExternalEditStore((s) => s.compareResult);
   const mergeResult = useExternalEditStore((s) => s.mergeResult);
   const selectedError = useExternalEditStore((s) => s.selectedError);
-  const selectedRecovery = useExternalEditStore((s) => s.selectedRecovery);
   const openErrorDetail = useExternalEditStore((s) => s.openErrorDetail);
-  const openRecoveryDetail = useExternalEditStore((s) => s.openRecoveryDetail);
   const prepareMerge = useExternalEditStore((s) => s.prepareMerge);
   const applyMerge = useExternalEditStore((s) => s.applyMerge);
-  const recoverSession = useExternalEditStore((s) => s.recoverSession);
   const resolveConflict = useExternalEditStore((s) => s.resolveConflict);
+  const continuePendingSession = useExternalEditStore((s) => s.continuePendingSession);
   const savingSessionId = useExternalEditStore((s) => s.savingSessionId);
   const safePendingConflict = isExternalEditClipboardResidueSession(pendingConflict?.session) ? null : pendingConflict;
   const safeCompareResult = isExternalEditClipboardResidueSession(compareResult?.session) ? null : compareResult;
@@ -346,7 +354,6 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
     : preparedMergeResult;
   const safeMergeResult = safeStoreMergeResult || safePreparedMergeResult;
   const safeSelectedError = isExternalEditClipboardResidueSession(selectedError) ? null : selectedError;
-  const safeSelectedRecovery = isExternalEditClipboardResidueSession(selectedRecovery) ? null : selectedRecovery;
 
   const sessionTransfers = useMemo(
     () => Object.values(allTransfers).filter((transfer) => transfer.sessionId === sessionId),
@@ -360,17 +367,29 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
     const items: ExternalEditPendingItem[] = [...attentionItems];
     const pendingSession = safePendingConflict?.session;
     if (pendingSession && pendingSession.assetId === assetId) {
-      const exists = items.some((item) => item.session.id === pendingSession.id && item.type === "conflict");
+      const runtimeType =
+        safePendingConflict?.status === "remote_missing"
+          ? "remote_missing"
+          : safePendingConflict?.status === "conflict_remote_changed"
+            ? "conflict"
+            : null;
+      if (!runtimeType) {
+        return items.filter((item) => !isExternalEditClipboardResidueSession(item.session));
+      }
+      const decisionType = runtimeType === "remote_missing" ? undefined : runtimeType;
+      const exists = items.some((item) => item.session.id === pendingSession.id && item.type === runtimeType);
       if (!exists) {
         items.unshift({
-          id: `conflict:${pendingSession.id}`,
-          type: "conflict",
+          id: `${runtimeType}:${pendingSession.id}`,
+          type: runtimeType,
           session: pendingSession,
+          decisionType,
+          sourceType: "runtime",
         });
       }
     }
     return items.filter((item) => !isExternalEditClipboardResidueSession(item.session));
-  }, [assetId, attentionItems, safePendingConflict?.session]);
+  }, [assetId, attentionItems, safePendingConflict]);
   const mergeConflictBlocks = useMemo(
     () =>
       safeMergeResult
@@ -644,26 +663,38 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
     });
   }, [mergeActiveBlockIndex, mergeConflictBlocks, mergeNavigationToken]);
 
-  const handleRecoverExternalEdit = useCallback(
-    async (session: ExternalEditSession) => {
+  const handlePendingContinueEdit = useCallback(
+    async (session: ExternalEditSession, sourceType?: "runtime" | "recovery") => {
       try {
-        await recoverSession(session.id);
+        await continuePendingSession(session.id, sourceType);
+        setPendingDialogOpen((open) => {
+          if (!open) return open;
+          const latestSessions = useExternalEditStore.getState().sessions;
+          const latestPendingConflict = useExternalEditStore.getState().pendingConflict;
+          const latestAttentionItems = buildExternalEditAttentionItems(latestSessions).filter(
+            (entry) => entry.session.assetId === assetId
+          );
+          const latestPendingSession = latestPendingConflict?.session;
+          const latestRuntimeType =
+            latestPendingConflict?.status === "remote_missing"
+              ? "remote_missing"
+              : latestPendingConflict?.status === "conflict_remote_changed"
+                ? "conflict"
+                : null;
+          const hasRuntimeItem =
+            !!latestPendingSession &&
+            latestPendingSession.assetId === assetId &&
+            latestRuntimeType !== null &&
+            !latestAttentionItems.some(
+              (item) => item.session.id === latestPendingSession.id && item.type === latestRuntimeType
+            );
+          return latestAttentionItems.length > 0 || hasRuntimeItem;
+        });
       } catch (error) {
         setError(t(EXTERNAL_EDIT_SAFE_ERROR_KEY));
       }
     },
-    [recoverSession, setError, t]
-  );
-
-  const handleDeleteExternalEdit = useCallback(
-    async (session: ExternalEditSession, removeLocal: boolean) => {
-      try {
-        await deleteSession(session.id, removeLocal);
-      } catch (error) {
-        setError(String(error));
-      }
-    },
-    [deleteSession, setError]
+    [assetId, continuePendingSession, setError, t]
   );
 
   const handleCtxAction = useCallback(
@@ -844,18 +875,23 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
               pendingItems.map((item) => {
                 const session = item.session;
                 const fileName = session.remotePath.split("/").filter(Boolean).pop() || session.remotePath;
-                const isConflict = item.type === "conflict";
+                const isPendingDecision = item.decisionType === "pending";
+                const isConflictDecision = item.decisionType === "conflict";
                 const isError = item.type === "error";
-                const isRecovery = item.type === "recovery";
-                const isRemoteMissing = session.state === "remote_missing";
+                const isRemoteMissing = item.type === "remote_missing" || session.state === "remote_missing";
+                const cardTone = isConflictDecision
+                  ? "border-amber-400/30 bg-amber-500/5"
+                  : isPendingDecision
+                    ? "border-sky-400/30 bg-sky-500/5"
+                    : isError
+                      ? "border-rose-400/30 bg-rose-500/5"
+                      : "border-amber-400/30 bg-amber-500/5";
                 return (
                   <div
                     key={item.id}
                     className={cn(
                       "rounded border px-4 py-4 text-sm",
-                      isConflict && "border-amber-400/30 bg-amber-500/5",
-                      isError && "border-rose-400/30 bg-rose-500/5",
-                      isRecovery && "border-sky-400/30 bg-sky-500/5"
+                      cardTone
                     )}
                     data-testid={`external-edit-pending-${item.type}`}
                   >
@@ -877,16 +913,21 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                           className="break-words whitespace-normal text-xs leading-5 text-muted-foreground"
                           data-testid={`external-edit-pending-summary-${session.id}`}
                         >
-                          {isConflict && t(isRemoteMissing ? "externalEdit.conflict.remoteMissingTitle" : "externalEdit.conflict.remoteChangedTitle")}
+                          {isConflictDecision && t("externalEdit.conflict.remoteChangedTitle")}
+                          {isPendingDecision && t("externalEdit.recovery.summary")}
+                          {!isConflictDecision &&
+                            !isPendingDecision &&
+                            !isError &&
+                            isRemoteMissing &&
+                            t("externalEdit.conflict.remoteMissingTitle")}
                           {isError && (session.lastError?.summary || t("externalEdit.error.title"))}
-                          {isRecovery && t("externalEdit.recovery.summary")}
                         </div>
                       </div>
                       <div
                         className="flex w-full flex-wrap items-start gap-2"
                         data-testid={`external-edit-pending-actions-${session.id}`}
                       >
-                        {isConflict && !isRemoteMissing && (
+                        {isConflictDecision && (
                           <>
                             <Button
                               size="xs"
@@ -916,26 +957,40 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                             >
                               {t("externalEdit.actions.overwrite")}
                             </Button>
+                          </>
+                        )}
+                        {isPendingDecision && (
+                          <>
                             <Button
                               size="xs"
                               variant="outline"
                               className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
-                              onClick={() => void handleDeleteExternalEdit(session, false)}
+                              disabled={savingSessionId === session.id}
+                              onClick={() => void handlePendingContinueEdit(session, item.sourceType)}
                             >
-                              {t("externalEdit.actions.hideRecord")}
+                              {continueEditLabel}
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
+                              disabled={savingSessionId === session.id}
+                              onClick={() => void handlePendingAcceptRemote(session)}
+                            >
+                              {t("externalEdit.actions.reread")}
                             </Button>
                             <Button
                               size="xs"
                               variant="destructive"
                               className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
-                              onClick={() => void handleDeleteExternalEdit(session, true)}
+                              disabled={savingSessionId === session.id}
+                              onClick={() => void handlePendingOverwrite(session)}
                             >
-                              <Trash2 className="mr-1 h-3 w-3" />
-                              {t("externalEdit.actions.deleteLocal")}
+                              {t("externalEdit.actions.overwrite")}
                             </Button>
                           </>
                         )}
-                        {isConflict && isRemoteMissing && (
+                        {!isConflictDecision && !isPendingDecision && isRemoteMissing && (
                           <>
                             <Button
                               size="xs"
@@ -945,23 +1000,6 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                               onClick={() => void handlePendingOverwrite(session)}
                             >
                               {t("externalEdit.actions.saveAgain")}
-                            </Button>
-                            <Button
-                              size="xs"
-                              variant="outline"
-                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
-                              onClick={() => void handleDeleteExternalEdit(session, false)}
-                            >
-                              {t("externalEdit.actions.hideRecord")}
-                            </Button>
-                            <Button
-                              size="xs"
-                              variant="destructive"
-                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
-                              onClick={() => void handleDeleteExternalEdit(session, true)}
-                            >
-                              <Trash2 className="mr-1 h-3 w-3" />
-                              {t("externalEdit.actions.deleteLocal")}
                             </Button>
                           </>
                         )}
@@ -975,62 +1013,6 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
                             >
                               <AlertTriangle className="mr-1 h-3 w-3" />
                               {t("externalEdit.actions.viewError")}
-                            </Button>
-                            <Button
-                              size="xs"
-                              variant="outline"
-                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
-                              onClick={() => void handleDeleteExternalEdit(session, false)}
-                            >
-                              {t("externalEdit.actions.hideRecord")}
-                            </Button>
-                            <Button
-                              size="xs"
-                              variant="destructive"
-                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
-                              onClick={() => void handleDeleteExternalEdit(session, true)}
-                            >
-                              <Trash2 className="mr-1 h-3 w-3" />
-                              {t("externalEdit.actions.deleteLocal")}
-                            </Button>
-                          </>
-                        )}
-                        {isRecovery && (
-                          <>
-                            <Button
-                              size="xs"
-                              variant="outline"
-                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
-                              onClick={() => openRecoveryDetail(session.id)}
-                            >
-                              <RotateCcw className="mr-1 h-3 w-3" />
-                              {t("externalEdit.actions.viewRecovery")}
-                            </Button>
-                            <Button
-                              size="xs"
-                              variant="outline"
-                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
-                              disabled={savingSessionId === session.id}
-                              onClick={() => void handleRecoverExternalEdit(session)}
-                            >
-                              {t("externalEdit.actions.reopenLocal")}
-                            </Button>
-                            <Button
-                              size="xs"
-                              variant="outline"
-                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
-                              onClick={() => void handleDeleteExternalEdit(session, false)}
-                            >
-                              {t("externalEdit.actions.hideRecord")}
-                            </Button>
-                            <Button
-                              size="xs"
-                              variant="destructive"
-                              className={EXTERNAL_EDIT_PENDING_ACTION_BUTTON_CLASS}
-                              onClick={() => void handleDeleteExternalEdit(session, true)}
-                            >
-                              <Trash2 className="mr-1 h-3 w-3" />
-                              {t("externalEdit.actions.deleteLocal")}
                             </Button>
                           </>
                         )}
@@ -1309,29 +1291,6 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
             <div>
               <div className="text-xs text-muted-foreground">{t("externalEdit.error.suggestionLabel")}</div>
               <div>{safeSelectedError?.lastError?.suggestion || ""}</div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!safeSelectedRecovery} onOpenChange={(open) => !open && dismissRecoveryDetail()}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>{t("externalEdit.recovery.title")}</DialogTitle>
-            <DialogDescription>{safeSelectedRecovery ? `${safeSelectedRecovery.remotePath}` : ""}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 text-sm">
-            <div>{t("externalEdit.recovery.description")}</div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={dismissRecoveryDetail}>
-                {t("action.cancel")}
-              </Button>
-              <Button
-                disabled={!safeSelectedRecovery || savingSessionId === safeSelectedRecovery.id}
-                onClick={() => safeSelectedRecovery && void handleRecoverExternalEdit(safeSelectedRecovery)}
-              >
-                {t("externalEdit.actions.reopenLocal")}
-              </Button>
             </div>
           </div>
         </DialogContent>

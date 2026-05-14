@@ -67,6 +67,7 @@ export interface ExternalEditSession {
   state: string;
   recordState?: "active" | "conflict" | "error" | "completed" | "abandoned";
   saveMode?: "auto_live" | "manual_restored";
+  pendingReview?: boolean;
   hidden: boolean;
   expired: boolean;
   lastError?: {
@@ -169,6 +170,7 @@ declare global {
           PrepareExternalEditMerge?: (sessionId: string) => MaybePromise<ExternalEditMergePrepareResult>;
           ApplyExternalEditMerge?: (req: ExternalEditMergeApplyRequest) => MaybePromise<ExternalEditSaveResult>;
           RecoverExternalEditSession?: (sessionId: string) => MaybePromise<ExternalEditSession>;
+          ContinueExternalEditSession?: (sessionId: string) => MaybePromise<ExternalEditSession>;
           DeleteExternalEditSession?: (
             sessionId: string,
             removeLocal: boolean
@@ -239,6 +241,10 @@ export function applyExternalEditMerge(req: ExternalEditMergeApplyRequest) {
 
 export function recoverExternalEditSession(sessionId: string) {
   return appBindings().RecoverExternalEditSession!(sessionId);
+}
+
+export function continueExternalEditSession(sessionId: string) {
+  return appBindings().ContinueExternalEditSession!(sessionId);
 }
 
 export function deleteExternalEditSession(sessionId: string, removeLocal: boolean) {

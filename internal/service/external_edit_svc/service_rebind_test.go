@@ -1560,6 +1560,60 @@ func TestExternalEditRestartRecoveryMarksResumeRequiredWithoutAutoUpload(t *test
 	require.False(t, saved.Session.ResumeRequired)
 }
 
+func TestExternalEditRuntimeDirtyDraftMarksPendingReview(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/runtime-pending.txt", "/srv/app/runtime-pending.txt", []byte("base\n"))
+
+	markDirtyLocalCopy(t, session, []byte("runtime dirty\n"))
+	h.svc.reconcileLocalCopy(session.ID)
+
+	stored := h.refreshSession(t, session.ID)
+	require.True(t, stored.PendingReview)
+	require.Equal(t, sessionStateDirty, stored.State)
+	require.Equal(t, saveModeAutoLive, stored.SaveMode)
+
+	events := h.snapshotEvents()
+	require.NotEmpty(t, events)
+	require.Condition(t, func() bool {
+		for _, event := range events {
+			if event.Type == eventSessionChanged && event.Session != nil && event.Session.ID == session.ID && event.Session.PendingReview {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func TestExternalEditContinueClearsRuntimePendingReview(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
+	session := h.openSession(t, "ssh-b", "/srv/app/runtime-pending.txt", "/srv/app/runtime-pending.txt", []byte("base\n"))
+
+	markDirtyLocalCopy(t, session, []byte("runtime dirty\n"))
+	h.svc.reconcileLocalCopy(session.ID)
+
+	continued, err := h.svc.Continue(session.ID)
+	require.NoError(t, err)
+	require.NotNil(t, continued)
+	require.False(t, continued.PendingReview)
+	require.Equal(t, sessionStateDirty, continued.State)
+
+	stored := h.refreshSession(t, session.ID)
+	require.False(t, stored.PendingReview)
+	require.Equal(t, sessionStateDirty, stored.State)
+
+	events := h.snapshotEvents()
+	require.NotEmpty(t, events)
+	require.Condition(t, func() bool {
+		for _, event := range events {
+			if event.Type == eventSessionChanged && event.Session != nil && event.Session.ID == session.ID && !event.Session.PendingReview {
+				return true
+			}
+		}
+		return false
+	})
+	assert.Equal(t, "external_edit_continue", h.audit.lastTool())
+}
+
 func TestExternalEditClipboardResidueIsFilteredFromManifestRestoreAndList(t *testing.T) {
 	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
 	valid := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("base\n"))

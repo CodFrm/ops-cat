@@ -3,9 +3,8 @@ import { toast } from "sonner";
 import {
   applyExternalEditMerge,
   compareExternalEditSession,
-  deleteExternalEditSession,
+  continueExternalEditSession,
   type ExternalEditCompareResult,
-  type ExternalEditDeleteResult,
   type ExternalEditEvent,
   type ExternalEditMergePrepareResult,
   type ExternalEditSaveResult,
@@ -44,9 +43,11 @@ export interface ExternalEditRecoveryView {
 
 export interface ExternalEditAttentionItem {
   id: string;
-  type: "conflict" | "error" | "recovery";
+  type: "pending" | "conflict" | "remote_missing" | "error";
   documentKey: string;
   session: ExternalEditSession;
+  decisionType?: "pending" | "conflict";
+  sourceType?: "runtime" | "recovery";
 }
 
 const EXTERNAL_EDIT_CLIPBOARD_RESIDUE_MARKERS = ["clipboard-images", "folder/clipboard", "folder\\clipboard"];
@@ -62,26 +63,25 @@ interface ExternalEditState {
   compareResult: ExternalEditCompareResult | null;
   mergeResult: ExternalEditMergePrepareResult | null;
   selectedError: ExternalEditSession | null;
-  selectedRecovery: ExternalEditSession | null;
   fetchSessions: () => Promise<void>;
   saveSession: (sessionId: string) => Promise<ExternalEditSaveResult>;
   refreshSession: (sessionId: string) => Promise<ExternalEditSession>;
   compareSession: (sessionId: string) => Promise<ExternalEditCompareResult>;
   prepareMerge: (sessionId: string) => Promise<ExternalEditMergePrepareResult>;
   applyMerge: (sessionId: string, finalContent: string, remoteHash: string) => Promise<ExternalEditSaveResult>;
-  recoverSession: (sessionId: string) => Promise<ExternalEditSession>;
-  deleteSession: (sessionId: string, removeLocal: boolean) => Promise<ExternalEditDeleteResult>;
   resolveConflict: (
     sessionId: string,
     resolution: "overwrite" | "recreate" | "reread"
   ) => Promise<ExternalEditSaveResult>;
+  continuePendingSession: (
+    sessionId: string,
+    sourceType?: "runtime" | "recovery"
+  ) => Promise<ExternalEditSession | null>;
   dismissConflict: () => void;
   dismissCompare: () => void;
   dismissMerge: () => void;
   openErrorDetail: (sessionId: string) => void;
   dismissErrorDetail: () => void;
-  openRecoveryDetail: (sessionId: string) => void;
-  dismissRecoveryDetail: () => void;
   applyEvent: (event: ExternalEditEvent) => void;
 }
 
@@ -276,7 +276,7 @@ function isExternalEditClipboardResidueMergeResult(result?: ExternalEditMergePre
 function scrubExternalEditRuntimeState(
   state: Pick<
     ExternalEditState,
-    "pendingConflict" | "compareResult" | "mergeResult" | "selectedError" | "selectedRecovery" | "autoSavePhases"
+    "pendingConflict" | "compareResult" | "mergeResult" | "selectedError" | "autoSavePhases"
   >,
   residueSession?: ExternalEditSession | null
 ) {
@@ -307,11 +307,6 @@ function scrubExternalEditRuntimeState(
       (residueSession?.id && state.selectedError?.id === residueSession.id)
         ? null
         : state.selectedError,
-    selectedRecovery:
-      isExternalEditClipboardResidueSession(state.selectedRecovery) ||
-      (residueSession?.id && state.selectedRecovery?.id === residueSession.id)
-        ? null
-        : state.selectedRecovery,
   };
 }
 
@@ -320,14 +315,47 @@ export function buildExternalEditAttentionItems(
 ): ExternalEditAttentionItem[] {
   return visiblePrimarySessionsByDocument(sessions)
     .flatMap((session): ExternalEditAttentionItem[] => {
-      if (session.state === "conflict" || session.state === "remote_missing") {
-        return [{ id: `conflict:${session.documentKey}`, type: "conflict", documentKey: session.documentKey, session }];
+      if (session.state === "remote_missing") {
+        return [{ id: `remote-missing:${session.documentKey}`, type: "remote_missing", documentKey: session.documentKey, session }];
+      }
+      if (session.state === "conflict") {
+        return [
+          {
+            id: `conflict:${session.documentKey}`,
+            type: "conflict",
+            documentKey: session.documentKey,
+            session,
+            decisionType: "conflict",
+            sourceType: "recovery",
+          },
+        ];
       }
       if (session.recordState === "error" && session.lastError) {
         return [{ id: `error:${session.documentKey}`, type: "error", documentKey: session.documentKey, session }];
       }
       if (session.resumeRequired) {
-        return [{ id: `recovery:${session.documentKey}`, type: "recovery", documentKey: session.documentKey, session }];
+        return [
+          {
+            id: `pending:${session.documentKey}`,
+            type: "pending",
+            documentKey: session.documentKey,
+            session,
+            decisionType: "pending",
+            sourceType: "recovery",
+          },
+        ];
+      }
+      if (session.pendingReview) {
+        return [
+          {
+            id: `pending-runtime:${session.documentKey}`,
+            type: "pending",
+            documentKey: session.documentKey,
+            session,
+            decisionType: "pending",
+            sourceType: "runtime",
+          },
+        ];
       }
       return [];
     })
@@ -396,7 +424,6 @@ export const useExternalEditStore = create<ExternalEditState>((set) => ({
   compareResult: null,
   mergeResult: null,
   selectedError: null,
-  selectedRecovery: null,
 
   fetchSessions: async () => {
     set({ loading: true });
@@ -507,55 +534,6 @@ export const useExternalEditStore = create<ExternalEditState>((set) => ({
     }
   },
 
-  recoverSession: async (sessionId) => {
-    set({ savingSessionId: sessionId });
-    try {
-      const session = await recoverExternalEditSession(sessionId);
-      set((state) => ({
-        sessions: upsertSession(state, session),
-        ...scrubExternalEditRuntimeState(state, session),
-        selectedRecovery: isExternalEditClipboardResidueSession(session) ? null : session,
-      }));
-      return session;
-    } finally {
-      set({ savingSessionId: null });
-    }
-  },
-
-  deleteSession: async (sessionId, removeLocal) => {
-    set({ savingSessionId: sessionId });
-    try {
-      const result = await deleteExternalEditSession(sessionId, removeLocal);
-      set((state) => {
-        const next = { ...state.sessions };
-        const resultDocumentKey = result.session?.documentKey || state.sessions[sessionId]?.documentKey;
-        if (removeLocal && resultDocumentKey) {
-          for (const [id, session] of Object.entries(next)) {
-            if (session.documentKey === resultDocumentKey) {
-              delete next[id];
-            }
-          }
-        } else if (removeLocal || result.session?.id === sessionId) {
-          if (removeLocal) {
-            delete next[sessionId];
-          } else if (result.session) {
-            next[result.session.id] = result.session;
-          }
-        }
-        const scrubbed = scrubExternalEditRuntimeState(state, result.session);
-        return {
-          sessions: next,
-          ...scrubbed,
-          selectedError: state.selectedError?.id === sessionId ? null : scrubbed.selectedError,
-          selectedRecovery: state.selectedRecovery?.id === sessionId ? null : scrubbed.selectedRecovery,
-        };
-      });
-      return result;
-    } finally {
-      set({ savingSessionId: null });
-    }
-  },
-
   resolveConflict: async (sessionId, resolution) => {
     set({ savingSessionId: sessionId });
     try {
@@ -575,6 +553,34 @@ export const useExternalEditStore = create<ExternalEditState>((set) => ({
     }
   },
 
+  continuePendingSession: async (sessionId, sourceType) => {
+    if (sourceType === "recovery") {
+      set({ savingSessionId: sessionId });
+      try {
+        const session = await recoverExternalEditSession(sessionId);
+        set((state) => ({
+          sessions: upsertSession(state, session),
+          ...scrubExternalEditRuntimeState(state, session),
+        }));
+        return session;
+      } finally {
+        set({ savingSessionId: null });
+      }
+    }
+
+    set({ savingSessionId: sessionId });
+    try {
+      const session = await continueExternalEditSession(sessionId);
+      set((state) => ({
+        sessions: upsertSession(state, session),
+        ...scrubExternalEditRuntimeState(state, session),
+        pendingConflict: state.pendingConflict?.session?.id === sessionId ? null : state.pendingConflict,
+      }));
+      return session;
+    } finally {
+      set({ savingSessionId: null });
+    }
+  },
   dismissConflict: () => set({ pendingConflict: null }),
   dismissCompare: () => set({ compareResult: null }),
   dismissMerge: () => set({ mergeResult: null }),
@@ -585,13 +591,6 @@ export const useExternalEditStore = create<ExternalEditState>((set) => ({
         : state.sessions[sessionId] || null,
     })),
   dismissErrorDetail: () => set({ selectedError: null }),
-  openRecoveryDetail: (sessionId) =>
-    set((state) => ({
-      selectedRecovery: isExternalEditClipboardResidueSession(state.sessions[sessionId])
-        ? null
-        : state.sessions[sessionId] || null,
-    })),
-  dismissRecoveryDetail: () => set({ selectedRecovery: null }),
 
   applyEvent: (event) => {
     // 前端把 external-edit:event 当成后端状态机的单一事实来源：
@@ -633,10 +632,6 @@ export const useExternalEditStore = create<ExternalEditState>((set) => ({
                   : scrubbed.pendingConflict,
             selectedError:
               event.session && scrubbed.selectedError?.id === event.session.id ? event.session : scrubbed.selectedError,
-            selectedRecovery:
-              event.session && scrubbed.selectedRecovery?.id === event.session.id
-                ? event.session
-                : scrubbed.selectedRecovery,
           };
         });
         break;

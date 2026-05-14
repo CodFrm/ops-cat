@@ -71,7 +71,6 @@ beforeEach(() => {
     compareResult: null,
     mergeResult: null,
     selectedError: null,
-    selectedRecovery: null,
   });
   vi.stubGlobal("window", {
     ...window,
@@ -399,8 +398,57 @@ describe("buildExternalEditAttentionItems", () => {
     };
 
     expect(buildExternalEditRecoveries(sessions).map((entry) => entry.session.id)).toEqual([]);
-    expect(buildExternalEditAttentionItems(sessions).map((entry) => `${entry.type}:${entry.session.id}`)).toEqual([
-      "conflict:conflict",
+    expect(
+      buildExternalEditAttentionItems(sessions).map(
+        (entry) => `${entry.type}:${entry.decisionType || "none"}:${entry.sourceType || "none"}:${entry.session.id}`
+      )
+    ).toEqual(["conflict:conflict:recovery:conflict"]);
+  });
+
+  it("projects recovery records into pending decision items and keeps remote-missing independent", () => {
+    const recovery = makeSession({
+      id: "recovery",
+      state: "dirty",
+      resumeRequired: true,
+      saveMode: "manual_restored",
+      updatedAt: 30,
+    });
+    const remoteMissing = makeSession({
+      id: "missing",
+      state: "remote_missing",
+      recordState: "conflict",
+      updatedAt: 20,
+    });
+
+    expect(
+      buildExternalEditAttentionItems({ recovery }).map((entry) => ({
+        type: entry.type,
+        decisionType: entry.decisionType,
+        sourceType: entry.sourceType,
+        sessionId: entry.session.id,
+      }))
+    ).toEqual([
+      {
+        type: "pending",
+        decisionType: "pending",
+        sourceType: "recovery",
+        sessionId: "recovery",
+      },
+    ]);
+    expect(
+      buildExternalEditAttentionItems({ remoteMissing }).map((entry) => ({
+        type: entry.type,
+        decisionType: entry.decisionType,
+        sourceType: entry.sourceType,
+        sessionId: entry.session.id,
+      }))
+    ).toEqual([
+      {
+        type: "remote_missing",
+        decisionType: undefined,
+        sourceType: undefined,
+        sessionId: "missing",
+      },
     ]);
   });
 
@@ -465,6 +513,94 @@ describe("external edit clipboard residue runtime state", () => {
     expect(state.pendingConflict?.conflict?.primaryDraftSessionId).toBe(refreshed.id);
   });
 
+  it("reuses the existing recovery capability for continue-edit without a recovery detail shell", async () => {
+    const recovery = makeSession({
+      id: "recovery",
+      documentKey: "101:/srv/app/recovery.txt",
+      remotePath: "/srv/app/recovery.txt",
+      remoteRealPath: "/srv/app/recovery.txt",
+      state: "dirty",
+      resumeRequired: true,
+      updatedAt: 20,
+    });
+    const resumed = { ...recovery, resumeRequired: false, updatedAt: 30 };
+    Object.assign(window.go!.app!.App!, {
+      RecoverExternalEditSession: vi.fn().mockResolvedValue(resumed),
+    });
+    useExternalEditStore.setState({
+      sessions: { [recovery.id]: recovery },
+    });
+
+    const result = await useExternalEditStore.getState().continuePendingSession(recovery.id, "recovery");
+    const state = useExternalEditStore.getState();
+
+    expect(result).toEqual(resumed);
+    expect(state.sessions[recovery.id]).toEqual(resumed);
+    expect(state.pendingConflict).toBeNull();
+    expect(state.selectedError).toBeNull();
+  });
+
+  it("projects runtime pending-review sessions into the unified pending attention items", async () => {
+    const runtimePending = makeSession({
+      id: "runtime-pending",
+      documentKey: "101:/srv/app/runtime-pending.txt",
+      remotePath: "/srv/app/runtime-pending.txt",
+      remoteRealPath: "/srv/app/runtime-pending.txt",
+      state: "dirty",
+      recordState: "active",
+      saveMode: "auto_live",
+      pendingReview: true,
+      resumeRequired: false,
+      updatedAt: 30,
+    });
+
+    expect(
+      buildExternalEditAttentionItems({ [runtimePending.id]: runtimePending }).map((entry) => ({
+        type: entry.type,
+        decisionType: entry.decisionType,
+        sourceType: entry.sourceType,
+        sessionId: entry.session.id,
+      }))
+    ).toEqual([
+      {
+        type: "pending",
+        decisionType: "pending",
+        sourceType: "runtime",
+        sessionId: "runtime-pending",
+      },
+    ]);
+  });
+
+  it("continues runtime pending-review sessions through the real Wails contract", async () => {
+    const runtimePending = makeSession({
+      id: "runtime-pending",
+      documentKey: "101:/srv/app/runtime-pending.txt",
+      remotePath: "/srv/app/runtime-pending.txt",
+      remoteRealPath: "/srv/app/runtime-pending.txt",
+      state: "dirty",
+      recordState: "active",
+      saveMode: "auto_live",
+      pendingReview: true,
+      resumeRequired: false,
+      updatedAt: 20,
+    });
+    const continued = { ...runtimePending, pendingReview: false, updatedAt: 30 };
+    Object.assign(window.go!.app!.App!, {
+      ContinueExternalEditSession: vi.fn().mockResolvedValue(continued),
+    });
+    useExternalEditStore.setState({
+      sessions: { [runtimePending.id]: runtimePending },
+    });
+
+    const result = await useExternalEditStore.getState().continuePendingSession(runtimePending.id, "runtime");
+    const state = useExternalEditStore.getState();
+
+    expect(result).toEqual(continued);
+    expect(state.sessions[runtimePending.id]).toEqual(continued);
+    expect(state.pendingConflict).toBeNull();
+  });
+
+
   it("scrubs clipboard residue from pending dialogs, modal state, and event paths", () => {
     const clipboard = makeClipboardResidueSession();
     const valid = makeSession({ id: "valid", documentKey: "101:/srv/app/demo.txt", state: "dirty", updatedAt: 10 });
@@ -508,7 +644,6 @@ describe("external edit clipboard residue runtime state", () => {
         session: clipboard,
       },
       selectedError: clipboard,
-      selectedRecovery: clipboard,
     });
 
     useExternalEditStore.getState().applyEvent({
@@ -540,10 +675,9 @@ describe("external edit clipboard residue runtime state", () => {
     expect(state.compareResult).toBeNull();
     expect(state.mergeResult).toBeNull();
     expect(state.selectedError).toBeNull();
-    expect(state.selectedRecovery).toBeNull();
   });
 
-  it("ignores clipboard residue returned from save, compare, merge, recovery, and selected detail actions", async () => {
+  it("ignores clipboard residue returned from save, compare, merge, continue-edit recovery, and selected detail actions", async () => {
     const clipboard = makeClipboardResidueSession();
     const valid = makeSession({ id: "valid", documentKey: "101:/srv/app/demo.txt", state: "dirty", updatedAt: 10 });
     Object.assign(window.go!.app!.App!, {
@@ -586,9 +720,8 @@ describe("external edit clipboard residue runtime state", () => {
     await useExternalEditStore.getState().saveSession(clipboard.id);
     await useExternalEditStore.getState().compareSession(clipboard.id);
     await useExternalEditStore.getState().prepareMerge(clipboard.id);
-    await useExternalEditStore.getState().recoverSession(clipboard.id);
+    await useExternalEditStore.getState().continuePendingSession(clipboard.id, "recovery");
     useExternalEditStore.getState().openErrorDetail(clipboard.id);
-    useExternalEditStore.getState().openRecoveryDetail(clipboard.id);
 
     const state = useExternalEditStore.getState();
     expect(state.sessions.clipboard).toBeUndefined();
@@ -599,6 +732,5 @@ describe("external edit clipboard residue runtime state", () => {
     expect(state.compareResult).toBeNull();
     expect(state.mergeResult).toBeNull();
     expect(state.selectedError).toBeNull();
-    expect(state.selectedRecovery).toBeNull();
   });
 });
