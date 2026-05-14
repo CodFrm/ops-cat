@@ -334,10 +334,7 @@ export function IconPicker({ value, onChange, type = "asset", compact = false }:
         ) : (
           <Button variant="outline" role="combobox" className="w-full justify-between font-normal h-9">
             <div className="flex items-center gap-2">
-              <SelectedIcon
-                className="h-4 w-4 shrink-0"
-                style={resolvedColor ? { color: resolvedColor } : undefined}
-              />
+              <SelectedIcon className="h-4 w-4 shrink-0" style={resolvedColor ? { color: resolvedColor } : undefined} />
               <span className="truncate">{displayName}</span>
             </div>
             <ChevronDown className="ml-auto h-4 w-4 shrink-0 opacity-50" />

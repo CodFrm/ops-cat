@@ -128,10 +128,7 @@ export function SSHConfigSection({
         {/* Connection type (own label) */}
         <div className="grid gap-2">
           <Label>{t("asset.connectionType")}</Label>
-          <Select
-            value={connectionType}
-            onValueChange={(v) => setConnectionType(v as "direct" | "jumphost" | "proxy")}
-          >
+          <Select value={connectionType} onValueChange={(v) => setConnectionType(v as "direct" | "jumphost" | "proxy")}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -275,162 +272,162 @@ export function SSHConfigSection({
           <div className="grid gap-3">
             <div className="grid gap-2">
               <Label>{t("asset.keySource")}</Label>
-            <Select value={keySource} onValueChange={(v) => setKeySource(v as "managed" | "file")}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="managed">{t("asset.keySourceManaged")}</SelectItem>
-                <SelectItem value="file">{t("asset.keySourceFile")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+              <Select value={keySource} onValueChange={(v) => setKeySource(v as "managed" | "file")}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="managed">{t("asset.keySourceManaged")}</SelectItem>
+                  <SelectItem value="file">{t("asset.keySourceFile")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-          {keySource === "managed" && (
-            <div className="grid gap-2">
-              <Label>{t("asset.selectKey")}</Label>
-              {managedKeys.length > 0 ? (
-                <Select
-                  value={String(credentialId)}
-                  onValueChange={(v) => {
-                    const id = Number(v);
-                    setCredentialId(id);
-                    if (id !== 0) {
-                      const cred = managedKeys.find((k) => k.id === id);
-                      if (cred && cred.username) {
-                        setUsername(cred.username);
+            {keySource === "managed" && (
+              <div className="grid gap-2">
+                <Label>{t("asset.selectKey")}</Label>
+                {managedKeys.length > 0 ? (
+                  <Select
+                    value={String(credentialId)}
+                    onValueChange={(v) => {
+                      const id = Number(v);
+                      setCredentialId(id);
+                      if (id !== 0) {
+                        const cred = managedKeys.find((k) => k.id === id);
+                        if (cred && cred.username) {
+                          setUsername(cred.username);
+                        }
                       }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={t("asset.selectKeyPlaceholder")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">{t("asset.selectKeyPlaceholder")}</SelectItem>
+                      {managedKeys.map((k) => (
+                        <SelectItem key={k.id} value={String(k.id)}>
+                          {k.name}
+                          {k.username ? ` (${k.username})` : ""} ({(k.keyType || "").toUpperCase()})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <p className="text-xs text-muted-foreground">{t("asset.noManagedKeys")}</p>
+                )}
+              </div>
+            )}
+
+            {keySource === "file" && (
+              <div className="grid gap-2">
+                <Label>{t("asset.discoveredKeys")}</Label>
+                {scanningKeys ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    {t("asset.scanningKeys")}
+                  </div>
+                ) : localKeys.length > 0 ? (
+                  <div className="grid gap-1.5">
+                    {localKeys.map((k) => {
+                      const selected = selectedKeyPaths.includes(k.path);
+                      return (
+                        <label
+                          key={k.path}
+                          className="flex items-center gap-2 text-xs cursor-pointer hover:bg-accent rounded px-2 py-1.5"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => {
+                              if (selected) {
+                                setSelectedKeyPaths(selectedKeyPaths.filter((p) => p !== k.path));
+                              } else {
+                                setSelectedKeyPaths([...selectedKeyPaths, k.path]);
+                              }
+                            }}
+                            className="rounded"
+                          />
+                          {k.isEncrypted && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Lock className="h-3 w-3 text-amber-500" />
+                              </TooltipTrigger>
+                              <TooltipContent>{t("asset.keyEncrypted")}</TooltipContent>
+                            </Tooltip>
+                          )}
+                          <span className="font-medium truncate">{k.path.split("/").pop()}</span>
+                          <span className="text-muted-foreground">({k.keyType})</span>
+                          {k.fingerprint && (
+                            <span className="text-muted-foreground truncate ml-auto" title={k.fingerprint}>
+                              {k.fingerprint.substring(0, 20)}...
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">{t("asset.noLocalKeys")}</p>
+                )}
+
+                {selectedKeyPaths
+                  .filter((p) => !localKeys.some((k) => k.path === p))
+                  .map((path) => (
+                    <div key={path} className="flex items-center gap-2 text-xs px-2 py-1.5 bg-accent rounded">
+                      <span className="truncate flex-1">{path}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 shrink-0"
+                        onClick={() => setSelectedKeyPaths(selectedKeyPaths.filter((p2) => p2 !== path))}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full mt-1"
+                  onClick={async () => {
+                    try {
+                      const info = await SelectSSHKeyFile();
+                      if (info && !selectedKeyPaths.includes(info.path)) {
+                        setSelectedKeyPaths([...selectedKeyPaths, info.path]);
+                        if (!localKeys.some((k) => k.path === info.path)) {
+                          setLocalKeys([...localKeys, info]);
+                        }
+                      }
+                    } catch (e) {
+                      toast.error(String(e));
                     }
                   }}
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder={t("asset.selectKeyPlaceholder")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="0">{t("asset.selectKeyPlaceholder")}</SelectItem>
-                    {managedKeys.map((k) => (
-                      <SelectItem key={k.id} value={String(k.id)}>
-                        {k.name}
-                        {k.username ? ` (${k.username})` : ""} ({(k.keyType || "").toUpperCase()})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <p className="text-xs text-muted-foreground">{t("asset.noManagedKeys")}</p>
-              )}
-            </div>
-          )}
+                  <FolderOpen className="h-3.5 w-3.5 mr-1.5" />
+                  {t("asset.browseKeyFile")}
+                </Button>
 
-          {keySource === "file" && (
-            <div className="grid gap-2">
-              <Label>{t("asset.discoveredKeys")}</Label>
-              {scanningKeys ? (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  {t("asset.scanningKeys")}
-                </div>
-              ) : localKeys.length > 0 ? (
-                <div className="grid gap-1.5">
-                  {localKeys.map((k) => {
-                    const selected = selectedKeyPaths.includes(k.path);
-                    return (
-                      <label
-                        key={k.path}
-                        className="flex items-center gap-2 text-xs cursor-pointer hover:bg-accent rounded px-2 py-1.5"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          onChange={() => {
-                            if (selected) {
-                              setSelectedKeyPaths(selectedKeyPaths.filter((p) => p !== k.path));
-                            } else {
-                              setSelectedKeyPaths([...selectedKeyPaths, k.path]);
-                            }
-                          }}
-                          className="rounded"
-                        />
-                        {k.isEncrypted && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Lock className="h-3 w-3 text-amber-500" />
-                            </TooltipTrigger>
-                            <TooltipContent>{t("asset.keyEncrypted")}</TooltipContent>
-                          </Tooltip>
-                        )}
-                        <span className="font-medium truncate">{k.path.split("/").pop()}</span>
-                        <span className="text-muted-foreground">({k.keyType})</span>
-                        {k.fingerprint && (
-                          <span className="text-muted-foreground truncate ml-auto" title={k.fingerprint}>
-                            {k.fingerprint.substring(0, 20)}...
-                          </span>
-                        )}
-                      </label>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">{t("asset.noLocalKeys")}</p>
-              )}
-
-              {selectedKeyPaths
-                .filter((p) => !localKeys.some((k) => k.path === p))
-                .map((path) => (
-                  <div key={path} className="flex items-center gap-2 text-xs px-2 py-1.5 bg-accent rounded">
-                    <span className="truncate flex-1">{path}</span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-5 w-5 shrink-0"
-                      onClick={() => setSelectedKeyPaths(selectedKeyPaths.filter((p2) => p2 !== path))}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
+                {/* Passphrase for local key file */}
+                {selectedKeyPaths.length > 0 && (
+                  <div className="grid gap-1.5 mt-2">
+                    <Label className="text-xs">{t("sshKey.passphrase")}</Label>
+                    <Input
+                      type="password"
+                      className="h-8 text-xs"
+                      value={privateKeyPassphrase}
+                      onChange={(e) => setPrivateKeyPassphrase(e.target.value)}
+                      placeholder={t("sshKey.passphrasePlaceholder")}
+                    />
                   </div>
-                ))}
-
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-full mt-1"
-                onClick={async () => {
-                  try {
-                    const info = await SelectSSHKeyFile();
-                    if (info && !selectedKeyPaths.includes(info.path)) {
-                      setSelectedKeyPaths([...selectedKeyPaths, info.path]);
-                      if (!localKeys.some((k) => k.path === info.path)) {
-                        setLocalKeys([...localKeys, info]);
-                      }
-                    }
-                  } catch (e) {
-                    toast.error(String(e));
-                  }
-                }}
-              >
-                <FolderOpen className="h-3.5 w-3.5 mr-1.5" />
-                {t("asset.browseKeyFile")}
-              </Button>
-
-              {/* Passphrase for local key file */}
-              {selectedKeyPaths.length > 0 && (
-                <div className="grid gap-1.5 mt-2">
-                  <Label className="text-xs">{t("sshKey.passphrase")}</Label>
-                  <Input
-                    type="password"
-                    className="h-8 text-xs"
-                    value={privateKeyPassphrase}
-                    onChange={(e) => setPrivateKeyPassphrase(e.target.value)}
-                    placeholder={t("sshKey.passphrasePlaceholder")}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </>
   );
