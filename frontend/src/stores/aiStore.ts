@@ -544,26 +544,36 @@ function toDisplayMessages(msgs: ChatMessage[], includeStreaming = false): app.C
   const prepared = includeStreaming ? msgs.map(materializeRetryStatusAsError) : msgs;
   return prepared
     .filter((m) => includeStreaming || !m.streaming)
-    .map(
-      (m) =>
-        new app.ConversationDisplayMessage({
-          role: m.role,
-          content: m.content,
-          blocks: m.blocks.map(
-            (b) =>
-              new conversation_entity.ContentBlock({
-                type: b.type,
-                content: b.content,
-                toolName: b.toolName,
-                toolInput: b.toolInput,
-                status: includeStreaming ? normalizeSnapshotStatus(b.status) : b.status,
-                ...(b.errorKind ? { errorKind: b.errorKind } : {}),
-                ...(b.errorDetail ? { errorDetail: b.errorDetail } : {}),
-              })
-          ),
-          tokenUsage: m.tokenUsage ? new conversation_entity.TokenUsage(m.tokenUsage) : undefined,
-        })
-    );
+    .map((m) => {
+      const displayMessage = new app.ConversationDisplayMessage({
+        role: m.role,
+        content: m.content,
+        blocks: m.blocks.map(
+          (b) =>
+            new conversation_entity.ContentBlock({
+              type: b.type,
+              content: b.content,
+              toolName: b.toolName,
+              toolInput: b.toolInput,
+              status: includeStreaming ? normalizeSnapshotStatus(b.status) : b.status,
+              ...(b.errorKind ? { errorKind: b.errorKind } : {}),
+              ...(b.errorDetail ? { errorDetail: b.errorDetail } : {}),
+            })
+        ),
+        tokenUsage: m.tokenUsage ? new conversation_entity.TokenUsage(m.tokenUsage) : undefined,
+      });
+
+      // Wails 当前生成的 ContentBlock TS 类还没声明 errorKind/errorDetail；
+      // 重新构造后需要把这两个持久化字段补回实例本身，保证 save/load round-trip 不丢。
+      m.blocks.forEach((b, index) => {
+        const persistedBlock = displayMessage.blocks[index] as PersistedConversationContentBlock | undefined;
+        if (!persistedBlock) return;
+        if (b.errorKind) persistedBlock.errorKind = b.errorKind;
+        if (b.errorDetail) persistedBlock.errorDetail = b.errorDetail;
+      });
+
+      return displayMessage;
+    });
 }
 
 function convertDisplayMessages(displayMsgs: app.ConversationDisplayMessage[]): ChatMessage[] {

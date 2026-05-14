@@ -2061,6 +2061,37 @@ describe("retry/error handling", () => {
     expect(useAIStore.getState().conversationStreaming[403]?.sending).toBe(false);
   });
 
+  it("error 分类块在 save/load round-trip 中保留 errorKind 和 errorDetail", async () => {
+    const cbs = await startStreamingConv(406);
+    cbs[0]?.({ type: "error", error: "401 unauthorized: invalid api key" });
+
+    vi.mocked(SaveConversationMessages).mockClear();
+    useTabStore.getState().closeTab("ai-406");
+    await waitForStoreCondition(() => vi.mocked(SaveConversationMessages).mock.calls.length > 0);
+
+    const saved = vi.mocked(SaveConversationMessages).mock.calls.at(-1)![1] as any[];
+    const savedErr = saved.at(-1)?.blocks.find((b: any) => b.type === "error");
+    expect(savedErr?.errorKind).toBe("auth");
+    expect(savedErr?.errorDetail).toContain("401");
+
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useAIStore.setState({
+      conversationMessages: {},
+      conversationStreaming: {},
+      conversations: [{ ID: 406, Title: "t", Updatetime: 0 } as any],
+    });
+    vi.mocked(LoadConversationMessages).mockResolvedValueOnce(saved as any);
+
+    await useAIStore.getState().openConversationTab(406);
+
+    const loadedErr = useAIStore
+      .getState()
+      .conversationMessages[406].at(-1)
+      ?.blocks.find((b) => b.type === "error");
+    expect(loadedErr?.errorKind).toBe("auth");
+    expect(loadedErr?.errorDetail).toContain("401");
+  });
+
   it("stopped 事件清 retryStatus 但不 push ErrorBlock", async () => {
     const cbs = await startStreamingConv(404);
     cbs[0]?.({ type: "retry", content: "1", retryDelayMs: 1000, error: "timeout" });
@@ -2070,12 +2101,11 @@ describe("retry/error handling", () => {
     expect(last.blocks.some((b) => b.type === "error")).toBe(false);
   });
 
-  it("includeStreaming 落盘时把 retryStatus 物化成 kind=interrupted 的 ErrorBlock", async () => {
+  it("includeStreaming 落盘时把 retryStatus 物化成 kind=interrupted 的 ErrorBlock 并在 round-trip 中保留", async () => {
     const cbs = await startStreamingConv(405);
     cbs[0]?.({ type: "retry", content: "2", retryDelayMs: 5000, error: "connection reset" });
     // 模拟应用退出 / 关 tab：触发 flushAllConversationsAsync 调 SaveConversationMessages(toDisplayMessages(.., true))
     vi.mocked(SaveConversationMessages).mockClear();
-    const ev = useAIStore.getState();
     // 直接通过 conversationMessages 验证 toDisplayMessages 路径：调用一次关闭 tab 触发 persist
     useTabStore.getState().closeTab("ai-405");
     await waitForStoreCondition(() => vi.mocked(SaveConversationMessages).mock.calls.length > 0);
@@ -2088,6 +2118,22 @@ describe("retry/error handling", () => {
     expect(errBlock.errorDetail).toBe("connection reset");
     // 序列化结果中不应该有 retryStatus（ConversationDisplayMessage 没有该字段）。
     expect((lastMsg as any).retryStatus).toBeUndefined();
-    void ev;
+
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useAIStore.setState({
+      conversationMessages: {},
+      conversationStreaming: {},
+      conversations: [{ ID: 405, Title: "t", Updatetime: 0 } as any],
+    });
+    vi.mocked(LoadConversationMessages).mockResolvedValueOnce(lastSaved as any);
+
+    await useAIStore.getState().openConversationTab(405);
+
+    const loadedErr = useAIStore
+      .getState()
+      .conversationMessages[405].at(-1)
+      ?.blocks.find((b) => b.type === "error");
+    expect(loadedErr?.errorKind).toBe("interrupted");
+    expect(loadedErr?.errorDetail).toBe("connection reset");
   });
 });
