@@ -2,7 +2,6 @@ package ai
 
 import (
 	"context"
-	"strings"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 )
@@ -46,26 +45,4 @@ func checkK8sPolicyRules(ctx context.Context, policy *asset_entity.K8sPolicy, co
 	}
 
 	return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
-}
-
-func mergeK8sPolicy(custom, defaults *asset_entity.K8sPolicy) *asset_entity.K8sPolicy {
-	result := &asset_entity.K8sPolicy{}
-	if custom != nil {
-		result.AllowList = custom.AllowList
-		result.DenyList = append(result.DenyList, custom.DenyList...)
-	}
-	if defaults != nil {
-		seen := make(map[string]bool, len(result.DenyList))
-		for _, rule := range result.DenyList {
-			seen[strings.ToUpper(rule)] = true
-		}
-		for _, rule := range defaults.DenyList {
-			key := strings.ToUpper(rule)
-			if !seen[key] {
-				result.DenyList = append(result.DenyList, rule)
-				seen[key] = true
-			}
-		}
-	}
-	return result
 }

@@ -83,15 +83,3 @@ func checkKafkaPolicyRules(ctx context.Context, policy *asset_entity.KafkaPolicy
 	}
 	return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
 }
-
-func mergeKafkaPolicy(custom, defaults *asset_entity.KafkaPolicy) *asset_entity.KafkaPolicy {
-	result := &asset_entity.KafkaPolicy{}
-	if custom != nil {
-		result.AllowList = custom.AllowList
-		result.DenyList = append(result.DenyList, custom.DenyList...)
-	}
-	if defaults != nil {
-		result.DenyList = appendUnique(result.DenyList, defaults.DenyList...)
-	}
-	return result
-}

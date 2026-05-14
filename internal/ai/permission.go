@@ -325,18 +325,6 @@ func CheckMongoDBPolicy(ctx context.Context, p *asset_entity.MongoPolicy, operat
 	return checkMongoPolicyRules(ctx, merged, operation)
 }
 
-func mergeMongoPolicy(custom, defaults *asset_entity.MongoPolicy) *asset_entity.MongoPolicy {
-	result := &asset_entity.MongoPolicy{}
-	if custom != nil {
-		result.AllowTypes = custom.AllowTypes
-		result.DenyTypes = append(result.DenyTypes, custom.DenyTypes...)
-	}
-	if defaults != nil {
-		result.DenyTypes = appendUnique(result.DenyTypes, defaults.DenyTypes...)
-	}
-	return result
-}
-
 // --- Grant 匹配辅助 ---
 
 // matchGrantForAsset 为 database/redis 类型做 DB Grant 匹配

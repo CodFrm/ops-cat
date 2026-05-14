@@ -144,20 +144,6 @@ func checkQueryPolicyRules(ctx context.Context, policy *asset_entity.QueryPolicy
 	return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
 }
 
-func mergeQueryPolicy(custom, defaults *asset_entity.QueryPolicy) *asset_entity.QueryPolicy {
-	result := &asset_entity.QueryPolicy{}
-	if custom != nil {
-		result.AllowTypes = custom.AllowTypes
-		result.DenyTypes = append(result.DenyTypes, custom.DenyTypes...)
-		result.DenyFlags = append(result.DenyFlags, custom.DenyFlags...)
-	}
-	if defaults != nil {
-		result.DenyTypes = appendUnique(result.DenyTypes, defaults.DenyTypes...)
-		result.DenyFlags = appendUnique(result.DenyFlags, defaults.DenyFlags...)
-	}
-	return result
-}
-
 func containsStr(slice []string, s string) bool {
 	for _, item := range slice {
 		if item == s {
