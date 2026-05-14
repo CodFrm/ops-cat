@@ -73,6 +73,11 @@ describe("terminalFonts", () => {
       expect(quoteFamilyName("Trailing\\")).toBe("'Trailing\\\\'");
       expect(quoteFamilyName("Mix\\'s")).toBe("'Mix\\\\\\'s'");
     });
+
+    it("strips control characters before quoting", () => {
+      expect(quoteFamilyName("Foo\nBar")).toBe("FooBar");
+      expect(quoteFamilyName("\tJetBrains Mono\r")).toBe("'JetBrains Mono'");
+    });
   });
 
   describe("RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES", () => {
@@ -117,6 +122,14 @@ describe("terminalFonts", () => {
           ]),
       });
       expect(await loadInstalledFonts()).toEqual(["JetBrains Mono", "Menlo", "Zed Mono"]);
+    });
+
+    it("normalizes installed font family names before returning them", async () => {
+      vi.stubGlobal("window", {
+        queryLocalFonts: () =>
+          Promise.resolve([{ family: " Zed Mono\n" }, { family: "Bad\u0000Name" }, { family: "\t" }]),
+      });
+      expect(await loadInstalledFonts()).toEqual(["BadName", "Zed Mono"]);
     });
 
     it("falls back to the Wails backend when queryLocalFonts is unavailable", async () => {

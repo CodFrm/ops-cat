@@ -250,9 +250,11 @@ export function buildTerminalFontGroups(installedFonts: string[] | null | undefi
 
 // Quote a family name for use in CSS font-family. Pure identifiers can be
 // passed unquoted; anything with spaces, dots, or apostrophes is single-quoted.
-// Backslashes must be escaped before apostrophes — otherwise a trailing `\`
-// would escape the closing quote and break the declaration.
+// Control characters are stripped, and backslashes must be escaped before
+// apostrophes — otherwise a trailing `\` would escape the closing quote and
+// break the declaration.
 export function quoteFamilyName(name: string): string {
+  name = cleanFamilyName(name);
   if (/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(name)) return name;
   return `'${name.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 }
@@ -289,10 +291,14 @@ export function resolveDefaultFontPrimary(installedFonts: string[] | null): stri
 function normalizeInstalledFontFamilies(fonts: string[]): string[] {
   const families = new Set<string>();
   for (const font of fonts) {
-    const family = font.trim();
+    const family = cleanFamilyName(font);
     if (family) families.add(family);
   }
   return Array.from(families).sort((a, b) => a.localeCompare(b));
+}
+
+function cleanFamilyName(name: string): string {
+  return name.replace(/[\u0000-\u001f\u007f]/g, "").trim();
 }
 
 async function loadInstalledFontsFromBrowser(): Promise<string[] | null> {
