@@ -1560,12 +1560,6 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
             <GroupSelect value={groupId} onValueChange={setGroupId} />
           </div>
 
-          {/* Description */}
-          <div className="grid gap-2">
-            <Label>{t("asset.description")}</Label>
-            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
-          </div>
-
           {/* Database Driver (database only, before host) */}
           {assetType === "database" && (
             <div className="grid gap-2">
@@ -1883,6 +1877,12 @@ export function AssetForm({ open, onOpenChange, editAsset, defaultGroupId = 0 }:
                 {testing ? t("asset.testing") : t("asset.testConnection")}
               </Button>
             ))}
+
+          {/* Description */}
+          <div className="grid gap-2">
+            <Label>{t("asset.description")}</Label>
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+          </div>
         </div>
         <DialogFooter>
           <Button
