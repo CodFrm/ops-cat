@@ -92,6 +92,16 @@ func TestCheckQueryPolicy(t *testing.T) {
 			So(result.Decision, ShouldEqual, NeedConfirm)
 		})
 
+		Convey("explicit allow_types still keeps default dangerous deny", func() {
+			p := &asset_entity.QueryPolicy{
+				AllowTypes: []string{"SELECT"},
+			}
+			stmts, _ := ClassifyStatements("DROP TABLE users")
+			result := CheckQueryPolicy(ctx, p, stmts)
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
+		})
+
 		Convey("DROP TABLE in deny_types → Deny", func() {
 			p := &asset_entity.QueryPolicy{
 				DenyTypes: []string{"DROP TABLE"},
@@ -101,32 +111,80 @@ func TestCheckQueryPolicy(t *testing.T) {
 			So(result.Decision, ShouldEqual, Deny)
 		})
 
-		Convey("nil policy — no AllowTypes check, all allowed", func() {
-			// DefaultQueryPolicy 只有 Groups 引用，mergeQueryPolicy 不解析 Groups
-			// 所以 nil policy 时 AllowTypes/DenyTypes 都为空 → Allow
+		Convey("nil policy uses default read-only allow", func() {
 			stmts, _ := ClassifyStatements("SELECT 1")
 			result := CheckQueryPolicy(ctx, nil, stmts)
 			So(result.Decision, ShouldEqual, Allow)
 		})
 
-		Convey("nil policy — DROP TABLE also allowed (defaults not resolved)", func() {
-			// 这是一个已知限制：DefaultQueryPolicy 的 Groups 引用在 mergeQueryPolicy 中不被解析
-			// 实际场景中 collectQueryPolicies 会解析 Groups
+		Convey("nil policy requires confirmation for non-default write SQL", func() {
+			stmts, _ := ClassifyStatements("INSERT INTO users (name) VALUES ('test')")
+			result := CheckQueryPolicy(ctx, nil, stmts)
+			So(result.Decision, ShouldEqual, NeedConfirm)
+		})
+
+		Convey("nil policy applies default dangerous deny", func() {
 			stmts, _ := ClassifyStatements("DROP TABLE users")
 			result := CheckQueryPolicy(ctx, nil, stmts)
-			So(result.Decision, ShouldEqual, Allow)
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
 		})
 
 		Convey("explicit allow_types with SELECT matches SELECT 1", func() {
 			// 这是关键场景：AllowTypes 包含 "SELECT"，SQL 是 "SELECT 1"
 			// ClassifyStatements 将 "SELECT 1" 分类为 Type="SELECT"
-			// containsStrFold 比较 "SELECT" == "SELECT" → 匹配
+			// 类型规则比较 "SELECT" == "SELECT" → 匹配
 			p := &asset_entity.QueryPolicy{
 				AllowTypes: []string{"SELECT", "SHOW", "DESCRIBE", "EXPLAIN", "USE"},
 			}
 			stmts, _ := ClassifyStatements("SELECT 1")
 			result := CheckQueryPolicy(ctx, p, stmts)
 			So(result.Decision, ShouldEqual, Allow)
+		})
+
+		Convey("allow_types wildcard allows any non-dangerous SQL type", func() {
+			p := &asset_entity.QueryPolicy{AllowTypes: []string{"*"}}
+			stmts, _ := ClassifyStatements("INSERT INTO users (name) VALUES ('test')")
+			result := CheckQueryPolicy(ctx, p, stmts)
+			So(result.Decision, ShouldEqual, Allow)
+		})
+
+		Convey("allow_types wildcard does not override default dangerous deny", func() {
+			p := &asset_entity.QueryPolicy{AllowTypes: []string{"*"}}
+			stmts, _ := ClassifyStatements("DROP TABLE users")
+			result := CheckQueryPolicy(ctx, p, stmts)
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
+		})
+
+		Convey("deny_types wildcard denies every SQL statement", func() {
+			p := &asset_entity.QueryPolicy{DenyTypes: []string{"*"}}
+			stmts, _ := ClassifyStatements("SELECT 1")
+			result := CheckQueryPolicy(ctx, p, stmts)
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
+			So(result.MatchedPattern, ShouldEqual, "*")
+		})
+	})
+}
+
+func TestAppendUnique_CaseSensitive(t *testing.T) {
+	Convey("appendUnique 必须保留大小写不同的模式（Redis key / Kafka resource 都是大小写敏感的）", t, func() {
+		Convey("Redis key 模式大小写不同时不能合并", func() {
+			merged := appendUnique([]string{"GET User:*"}, "GET user:*")
+			So(merged, ShouldContain, "GET User:*")
+			So(merged, ShouldContain, "GET user:*")
+		})
+
+		Convey("Kafka resource 模式大小写不同时不能合并", func() {
+			merged := appendUnique([]string{"topic.read Orders"}, "topic.read orders")
+			So(merged, ShouldContain, "topic.read Orders")
+			So(merged, ShouldContain, "topic.read orders")
+		})
+
+		Convey("完全相同的项仍然去重", func() {
+			merged := appendUnique([]string{"SELECT"}, "SELECT")
+			So(merged, ShouldHaveLength, 1)
 		})
 	})
 }

@@ -13,6 +13,7 @@ import {
   Container,
   Cpu,
   Network,
+  Usb,
   Folder,
   FolderOpen,
   FolderHeart,
@@ -89,6 +90,7 @@ const ICON_DISPLAY_NAMES: Record<string, string> = {
   container: "Container",
   cpu: "CPU",
   network: "Network",
+  usb: "USB",
   aws: "AWS",
   azure: "Azure",
   gcp: "Google Cloud",
@@ -143,6 +145,7 @@ const CATEGORIES: IconCategory[] = [
       container: Container,
       cpu: Cpu,
       network: Network,
+      usb: Usb,
     },
   },
   {

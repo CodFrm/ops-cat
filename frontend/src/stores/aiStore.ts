@@ -49,7 +49,7 @@ export interface ContentBlock {
   }>;
   approvalDescription?: string;
   approvalSessionId?: string;
-  approvalToolName?: string; // local_tool: "bash" | "write" | "edit"
+  approvalToolName?: string; // local_tool: "local_bash" | "local_write" | "local_edit"
   approvalPatterns?: string[]; // local_tool: 默认 pattern 列表，本次会话允许时预填可编辑
   // error 块专用：
   //   kind   — classifyError 输出的归类标签，UI 据此显示标题/图标
