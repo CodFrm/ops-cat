@@ -23,6 +23,7 @@
     "@iconify/react": "^6.0.2",
     "@monaco-editor/react": "^4.7.0",
     "@opskat/ui": "workspace:*",
+    "@tabler/icons-react": "^3.44.0",
     "@tailwindcss/typography": "0.5.0-alpha.3",
     "@tanstack/react-virtual": "^3.13.23",
     "@tiptap/core": "^2.27.2",

@@ -943,6 +943,13 @@
     "showSidebar": "Show Toolbar",
     "showAIPanel": "Show AI Assistant"
   },
+  "topBar": {
+    "searchPlaceholder": "Search assets or commands...",
+    "hideAssetTree": "Hide Asset Tree",
+    "showAssetTree": "Show Asset Tree",
+    "hideAIPanel": "Hide AI Chat",
+    "showAIPanel": "Show AI Chat"
+  },
   "sideTabs": {
     "title": "Open Tabs",
     "filterPlaceholder": "Filter tabs...",
