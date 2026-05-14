@@ -90,6 +90,7 @@
     "moveToEnd": "移到最后"
   },
   "theme": {
+    "label": "主题",
     "toggle": "切换主题",
     "light": "亮色",
     "dark": "深色",
@@ -101,6 +102,7 @@
     "en": "English"
   },
   "appearance": {
+    "title": "外观",
     "startupTab": "启动时打开",
     "startupTabLast": "记住上次打开的标签",
     "startupTabHome": "首页"
@@ -927,6 +929,13 @@
     "showSidebar": "显示工具条",
     "showAIPanel": "显示 AI 助手"
   },
+  "topBar": {
+    "searchPlaceholder": "搜索资产或命令...",
+    "hideAssetTree": "隐藏资产列表",
+    "showAssetTree": "显示资产列表",
+    "hideAIPanel": "隐藏 AI 对话",
+    "showAIPanel": "显示 AI 对话"
+  },
   "sideTabs": {
     "title": "打开的 Tabs",
     "filterPlaceholder": "过滤 tab 名称...",
@@ -947,12 +956,16 @@
     "desc": "终端配色与字体设置",
     "fontFamily": "字体",
     "defaultFont": "默认字体",
+    "fontRecommended": "推荐",
+    "fontOther": "其他",
     "customFont": "自定义",
     "customFontPlaceholder": "输入 font-family，例如 Iosevka Term, monospace",
     "fontSize": "字体大小",
     "scrollback": "回滚缓冲区",
     "scrollbackUnit": "行",
     "scrollbackHint": "终端可向上回滚的最大行数，越大越占内存（范围 100 - 1000000）",
+    "gpuAcceleration": "GPU 加速",
+    "gpuAccelerationHint": "使用 WebGL 渲染终端，初始化失败时会自动关闭",
     "default": "默认",
     "builtinThemes": "预置配色",
     "customThemes": "自定义配色",

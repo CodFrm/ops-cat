@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Server, MessageSquare } from "lucide-react";
-import { Dialog, DialogContent, DialogTitle, Input, ScrollArea, cn } from "@opskat/ui";
+import { Input, ScrollArea, cn } from "@opskat/ui";
 import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
 import { filterAssets } from "@/lib/assetSearch";
 import { highlightMatch, type HighlightSegment } from "@/lib/highlightMatch";
@@ -17,7 +17,7 @@ import type { asset_entity } from "../../../wailsjs/go/models";
 
 export interface CommandPaletteProps {
   open: boolean;
-  onOpenChange: (open: boolean) => void;
+  onClose: () => void;
   onConnectAsset: (asset: asset_entity.Asset) => void;
 }
 
@@ -112,10 +112,10 @@ function HighlightedText({ segments }: { segments: HighlightSegment[] }) {
 }
 
 // ──────────────────────────────────────────────
-// Main component
+// Main component — popover body (no wrapper)
 // ──────────────────────────────────────────────
 
-export function CommandPalette({ open, onOpenChange, onConnectAsset }: CommandPaletteProps) {
+export function CommandPalette({ open, onClose, onConnectAsset }: CommandPaletteProps) {
   const { t } = useTranslation();
 
   // Store subscriptions
@@ -127,13 +127,16 @@ export function CommandPalette({ open, onOpenChange, onConnectAsset }: CommandPa
   // Local state
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  // Reset state on open
+  // Reset state on open transition (closed -> open)
   const prevOpen = useRef(false);
   useEffect(() => {
     if (open && !prevOpen.current) {
       setQuery("");
       setActiveIndex(0);
+      // Focus on next tick to win against Radix focus management
+      requestAnimationFrame(() => inputRef.current?.focus());
     }
     prevOpen.current = open;
   }, [open]);
@@ -151,29 +154,14 @@ export function CommandPalette({ open, onOpenChange, onConnectAsset }: CommandPa
     const assetById = new Map(assets.map((a) => [a.ID, a]));
 
     if (!query.trim()) {
-      // ── Empty query ──────────────────────────
-      // Section 1: all open tabs
-      const openedRows: TabRow[] = tabs.map((tab) => ({
-        kind: "tab",
-        id: `tab-${tab.id}`,
-        tab,
-      }));
-
-      // Collect assetIds already in section 1
+      const openedRows: TabRow[] = tabs.map((tab) => ({ kind: "tab", id: `tab-${tab.id}`, tab }));
       const openedAssetIds = new Set(tabs.map(tabAssetId).filter((id): id is number => id !== null));
-
-      // Section 2: recent assets (not already in opened, still in store, take first 5)
       const recentRows: AssetRow[] = recentIds
         .filter((id) => !openedAssetIds.has(id) && assetById.has(id))
         .slice(0, 5)
         .map((id) => {
           const asset = assetById.get(id)!;
-          return {
-            kind: "asset",
-            id: `asset-recent-${id}`,
-            asset,
-            groupPath: "",
-          };
+          return { kind: "asset", id: `asset-recent-${id}`, asset, groupPath: "" };
         });
 
       const result: Section[] = [];
@@ -186,10 +174,8 @@ export function CommandPalette({ open, onOpenChange, onConnectAsset }: CommandPa
       return result;
     }
 
-    // ── Non-empty query ──────────────────────
     const lowerQuery = query.toLowerCase();
 
-    // Section 1: opened tabs matching query
     const matchedTabs = tabs.filter((tab) => {
       if (tab.label.toLowerCase().includes(lowerQuery)) return true;
       const assetId = tabAssetId(tab);
@@ -200,25 +186,13 @@ export function CommandPalette({ open, onOpenChange, onConnectAsset }: CommandPa
       return false;
     });
 
-    const openedRows: TabRow[] = matchedTabs.map((tab) => ({
-      kind: "tab",
-      id: `tab-${tab.id}`,
-      tab,
-    }));
-
-    // Collect assetIds already in section 1
+    const openedRows: TabRow[] = matchedTabs.map((tab) => ({ kind: "tab", id: `tab-${tab.id}`, tab }));
     const openedAssetIds = new Set(matchedTabs.map(tabAssetId).filter((id): id is number => id !== null));
 
-    // Section 2: filtered assets (deduped against opened)
     const filtered = filterAssets(assets, groups, { query, limit: 50 });
     const assetRows: AssetRow[] = filtered
       .filter(({ asset }) => !openedAssetIds.has(asset.ID))
-      .map(({ asset, groupPath }) => ({
-        kind: "asset",
-        id: `asset-${asset.ID}`,
-        asset,
-        groupPath,
-      }));
+      .map(({ asset, groupPath }) => ({ kind: "asset", id: `asset-${asset.ID}`, asset, groupPath }));
 
     const result: Section[] = [];
     if (openedRows.length > 0) {
@@ -230,7 +204,6 @@ export function CommandPalette({ open, onOpenChange, onConnectAsset }: CommandPa
     return result;
   }, [query, tabs, assets, groups, recentIds, t]);
 
-  // Flat list for keyboard navigation
   const flatRows = useMemo(() => sections.flatMap((s) => s.rows), [sections]);
 
   // ────────────────────────────────────────────
@@ -258,7 +231,11 @@ export function CommandPalette({ open, onOpenChange, onConnectAsset }: CommandPa
       activateRow(row);
       return;
     }
-    // Escape is handled by Radix Dialog, we don't need to duplicate it
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onClose();
+      return;
+    }
   };
 
   const activateRow = (row: Row) => {
@@ -267,7 +244,7 @@ export function CommandPalette({ open, onOpenChange, onConnectAsset }: CommandPa
     } else {
       openAssetDefault(row.asset, onConnectAsset);
     }
-    onOpenChange(false);
+    onClose();
   };
 
   // ────────────────────────────────────────────
@@ -312,86 +289,47 @@ export function CommandPalette({ open, onOpenChange, onConnectAsset }: CommandPa
     flatRows.length === 0 ? (query.trim() ? "commandPalette.empty.noMatch" : "commandPalette.empty.noContent") : null;
 
   // ────────────────────────────────────────────
-  // Render
+  // Render — flat body, meant to live inside a popover
   // ────────────────────────────────────────────
 
-  // Track row index across sections
+  if (!open) return null;
+
   let rowIndex = 0;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="max-w-2xl p-0 gap-0 top-[12%] translate-y-0 data-[state=closed]:zoom-out-100 data-[state=open]:zoom-in-100 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2"
-        showCloseButton={false}
-      >
-        <DialogTitle className="sr-only">{t("commandPalette.placeholder")}</DialogTitle>
+    <div className="flex flex-col" role="dialog" aria-label={t("commandPalette.placeholder")}>
+      {/* Search input */}
+      <div className="flex items-center border-b px-3">
+        <Input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={t("commandPalette.placeholder")}
+          className="border-0 shadow-none focus-visible:ring-0 rounded-none h-11 text-sm px-0"
+        />
+      </div>
 
-        {/* Search input */}
-        <div className="flex items-center border-b px-3">
-          <Input
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={t("commandPalette.placeholder")}
-            className="border-0 shadow-none focus-visible:ring-0 rounded-none h-12 text-sm px-0"
-          />
-        </div>
+      {/* Results list */}
+      <ScrollArea className="max-h-96">
+        <div ref={listRef} className="py-1">
+          {emptyKey ? (
+            <p className="px-4 py-8 text-center text-sm text-muted-foreground">{t(emptyKey)}</p>
+          ) : (
+            <div role="listbox" aria-label={t("commandPalette.placeholder")}>
+              {sections.map((section) => (
+                <div key={section.label}>
+                  <p className="px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {section.label}
+                  </p>
+                  {section.rows.map((row) => {
+                    const idx = rowIndex++;
+                    const isActive = idx === activeIndex;
 
-        {/* Results list */}
-        <ScrollArea className="max-h-96">
-          <div ref={listRef} className="py-1">
-            {emptyKey ? (
-              <p className="px-4 py-8 text-center text-sm text-muted-foreground">{t(emptyKey)}</p>
-            ) : (
-              <div role="listbox" aria-label={t("commandPalette.placeholder")}>
-                {sections.map((section) => (
-                  <div key={section.label}>
-                    <p className="px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      {section.label}
-                    </p>
-                    {section.rows.map((row) => {
-                      const idx = rowIndex++;
-                      const isActive = idx === activeIndex;
-
-                      if (row.kind === "tab") {
-                        const { tab } = row;
-                        const key = badgeKey(tab);
-                        const segments = highlightMatch(tab.label, query);
-                        return (
-                          <button
-                            key={row.id}
-                            type="button"
-                            role="option"
-                            data-active-index={idx}
-                            aria-selected={isActive}
-                            className={cn(
-                              "flex w-full items-center gap-2.5 px-3 py-2 cursor-pointer select-none rounded-sm mx-1 text-left",
-                              isActive ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
-                            )}
-                            onClick={() => activateRow(row)}
-                            onMouseEnter={() => setActiveIndex(idx)}
-                          >
-                            {/* Green dot: open tab indicator */}
-                            <span className="h-1.5 w-1.5 rounded-full bg-green-500 shrink-0" />
-                            {renderIcon(resolveTabIcon(tab))}
-                            <span className="flex-1 truncate text-sm">
-                              <HighlightedText segments={segments} />
-                            </span>
-                            {key && (
-                              <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                                {t(key)}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      }
-
-                      // Asset row
-                      const { asset, groupPath } = row;
-                      const assetIconMeta = resolveAssetIcon(asset);
-                      const segments = highlightMatch(asset.Name, query);
-
+                    if (row.kind === "tab") {
+                      const { tab } = row;
+                      const key = badgeKey(tab);
+                      const segments = highlightMatch(tab.label, query);
                       return (
                         <button
                           key={row.id}
@@ -406,28 +344,59 @@ export function CommandPalette({ open, onOpenChange, onConnectAsset }: CommandPa
                           onClick={() => activateRow(row)}
                           onMouseEnter={() => setActiveIndex(idx)}
                         >
-                          {renderIcon(assetIconMeta)}
-                          <span className="flex-1 min-w-0 truncate text-sm">
+                          <span className="h-1.5 w-1.5 rounded-full bg-green-500 shrink-0" />
+                          {renderIcon(resolveTabIcon(tab))}
+                          <span className="flex-1 truncate text-sm">
                             <HighlightedText segments={segments} />
-                            {groupPath && <span className="ml-2 text-xs text-muted-foreground">{groupPath}</span>}
                           </span>
+                          {key && (
+                            <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                              {t(key)}
+                            </span>
+                          )}
                         </button>
                       );
-                    })}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </ScrollArea>
+                    }
 
-        {/* Footer */}
-        <div className="flex items-center gap-3 border-t px-4 py-2 text-xs text-muted-foreground">
-          <span>↑↓ {t("commandPalette.footer.navigate")}</span>
-          <span>↵ {t("commandPalette.footer.open")}</span>
-          <span>Esc {t("commandPalette.footer.close")}</span>
+                    const { asset, groupPath } = row;
+                    const assetIconMeta = resolveAssetIcon(asset);
+                    const segments = highlightMatch(asset.Name, query);
+
+                    return (
+                      <button
+                        key={row.id}
+                        type="button"
+                        role="option"
+                        data-active-index={idx}
+                        aria-selected={isActive}
+                        className={cn(
+                          "flex w-full items-center gap-2.5 px-3 py-2 cursor-pointer select-none rounded-sm mx-1 text-left",
+                          isActive ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
+                        )}
+                        onClick={() => activateRow(row)}
+                        onMouseEnter={() => setActiveIndex(idx)}
+                      >
+                        {renderIcon(assetIconMeta)}
+                        <span className="flex-1 min-w-0 truncate text-sm">
+                          <HighlightedText segments={segments} />
+                          {groupPath && <span className="ml-2 text-xs text-muted-foreground">{groupPath}</span>}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      </DialogContent>
-    </Dialog>
+      </ScrollArea>
+
+      {/* Footer */}
+      <div className="flex items-center gap-3 border-t px-4 py-2 text-xs text-muted-foreground">
+        <span>↑↓ {t("commandPalette.footer.navigate")}</span>
+        <span>↵ {t("commandPalette.footer.open")}</span>
+        <span>Esc {t("commandPalette.footer.close")}</span>
+      </div>
+    </div>
   );
 }

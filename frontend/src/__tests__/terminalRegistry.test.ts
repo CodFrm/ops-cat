@@ -7,6 +7,10 @@ const hoisted = vi.hoisted(() => {
   const reconnectBySessionMock = vi.fn();
   const terminalCtor = vi.fn();
   const bridgeDisposeSpy = vi.fn();
+  const webglAddonCtor = vi.fn();
+  const webglAddonDisposeSpy = vi.fn();
+  const webglContextLossDisposeSpy = vi.fn();
+  const setWebglEnabledSpy = vi.fn();
   const disposeOrder: string[] = [];
   const state: { capturedOnKey: ((e: { key: string }) => void) | null } = {
     capturedOnKey: null,
@@ -18,6 +22,10 @@ const hoisted = vi.hoisted(() => {
     reconnectBySessionMock,
     terminalCtor,
     bridgeDisposeSpy,
+    webglAddonCtor,
+    webglAddonDisposeSpy,
+    webglContextLossDisposeSpy,
+    setWebglEnabledSpy,
     disposeOrder,
     state,
   };
@@ -72,6 +80,23 @@ vi.mock("@/components/terminal/terminalInputBridge", () => ({
 
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class {} }));
 vi.mock("@xterm/addon-search", () => ({ SearchAddon: class {} }));
+vi.mock("@xterm/addon-webgl", () => {
+  class MockWebglAddon {
+    constructor() {
+      hoisted.webglAddonCtor();
+    }
+    onContextLoss = vi.fn(() => ({
+      dispose: vi.fn(() => {
+        hoisted.webglContextLossDisposeSpy();
+      }),
+    }));
+    dispose = vi.fn(() => {
+      hoisted.disposeOrder.push("webgl");
+      hoisted.webglAddonDisposeSpy();
+    });
+  }
+  return { WebglAddon: MockWebglAddon };
+});
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 
 vi.mock("@/stores/terminalStore", () => ({
@@ -79,6 +104,14 @@ vi.mock("@/stores/terminalStore", () => ({
     getState: () => ({
       markClosed: vi.fn(),
       reconnectBySession: hoisted.reconnectBySessionMock,
+    }),
+  },
+}));
+
+vi.mock("@/stores/terminalThemeStore", () => ({
+  useTerminalThemeStore: {
+    getState: () => ({
+      setWebglEnabled: hoisted.setWebglEnabledSpy,
     }),
   },
 }));
@@ -101,6 +134,10 @@ describe("terminalRegistry", () => {
     hoisted.reconnectBySessionMock.mockClear();
     hoisted.terminalCtor.mockClear();
     hoisted.bridgeDisposeSpy.mockClear();
+    hoisted.webglAddonCtor.mockClear();
+    hoisted.webglAddonDisposeSpy.mockClear();
+    hoisted.webglContextLossDisposeSpy.mockClear();
+    hoisted.setWebglEnabledSpy.mockClear();
     hoisted.disposeOrder.length = 0;
   });
 
@@ -156,7 +193,30 @@ describe("terminalRegistry", () => {
     disposeTerminal("sess-order");
     expect(hoisted.bridgeDisposeSpy).toHaveBeenCalled();
     expect(hoisted.disposeSpy).toHaveBeenCalled();
-    expect(hoisted.disposeOrder).toEqual(["bridge", "term"]);
+    expect(hoisted.disposeOrder).toEqual(["bridge", "webgl", "term"]);
+  });
+
+  // 上游 term.dispose() 虽然会级联释放已加载 addon，但 onContextLoss 返回的
+  // 订阅是独立 IDisposable，不显式 dispose 会留下事件监听器引用 → 资源泄露。
+  it("disposes the WebGL addon and its onContextLoss subscription before xterm dispose", () => {
+    getOrCreateTerminal("sess-webgl", { fontSize: 14, fontFamily: "mono", scrollback: 1000 });
+    expect(hoisted.webglAddonCtor).toHaveBeenCalledTimes(1);
+    disposeTerminal("sess-webgl");
+    expect(hoisted.webglAddonDisposeSpy).toHaveBeenCalledTimes(1);
+    expect(hoisted.webglContextLossDisposeSpy).toHaveBeenCalledTimes(1);
+    expect(hoisted.disposeOrder.indexOf("webgl")).toBeLessThan(hoisted.disposeOrder.indexOf("term"));
+  });
+
+  it("skips WebGL when webglEnabled is false", () => {
+    getOrCreateTerminal("sess-no-webgl", {
+      fontSize: 14,
+      fontFamily: "mono",
+      scrollback: 1000,
+      webglEnabled: false,
+    });
+    expect(hoisted.webglAddonCtor).not.toHaveBeenCalled();
+    disposeTerminal("sess-no-webgl");
+    expect(hoisted.webglAddonDisposeSpy).not.toHaveBeenCalled();
   });
 
   it("re-creates a fresh terminal after dispose for the same sessionId", () => {

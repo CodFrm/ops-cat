@@ -350,6 +350,8 @@ export function ListSnippetCategories():Promise<Array<snippet_svc.Category>>;
 
 export function ListSnippets(arg1:snippet_svc.ListReq):Promise<Array<snippet_entity.Snippet>>;
 
+export function ListSystemFonts():Promise<Array<string>>;
+
 export function ListWebDAVBackups():Promise<Array<backup_svc.WebDAVBackupInfo>>;
 
 export function LoadConversationMessages(arg1:number):Promise<Array<app.ConversationDisplayMessage>>;

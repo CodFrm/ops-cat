@@ -90,6 +90,7 @@
     "moveToEnd": "Move to End"
   },
   "theme": {
+    "label": "Theme",
     "toggle": "Toggle theme",
     "light": "Light",
     "dark": "Dark",
@@ -101,6 +102,7 @@
     "en": "English"
   },
   "appearance": {
+    "title": "Appearance",
     "startupTab": "Open on Startup",
     "startupTabLast": "Remember Last Tab",
     "startupTabHome": "Home"
@@ -942,6 +944,13 @@
     "showSidebar": "Show Toolbar",
     "showAIPanel": "Show AI Assistant"
   },
+  "topBar": {
+    "searchPlaceholder": "Search assets or commands...",
+    "hideAssetTree": "Hide Asset Tree",
+    "showAssetTree": "Show Asset Tree",
+    "hideAIPanel": "Hide AI Chat",
+    "showAIPanel": "Show AI Chat"
+  },
   "sideTabs": {
     "title": "Open Tabs",
     "filterPlaceholder": "Filter tabs...",
@@ -962,12 +971,16 @@
     "desc": "Terminal color scheme and font settings",
     "fontFamily": "Font",
     "defaultFont": "Default Font",
+    "fontRecommended": "Recommended",
+    "fontOther": "Other",
     "customFont": "Custom",
     "customFontPlaceholder": "Enter font-family, e.g. Iosevka Term, monospace",
     "fontSize": "Font Size",
     "scrollback": "Scrollback",
     "scrollbackUnit": "lines",
     "scrollbackHint": "Maximum lines retained for scrolling back. Larger values use more memory (range 100 - 1000000).",
+    "gpuAcceleration": "GPU Acceleration",
+    "gpuAccelerationHint": "Use WebGL to render the terminal. Auto-disables on init failure.",
     "default": "Default",
     "builtinThemes": "Built-in Themes",
     "customThemes": "Custom Themes",

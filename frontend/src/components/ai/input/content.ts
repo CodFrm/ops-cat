@@ -28,6 +28,8 @@ export function extractContentXml(doc: ProseMirrorLikeNode): string {
   doc.descendants((node) => {
     if (node.type.name === "text") {
       out += escapeXmlText(node.text ?? "");
+    } else if (node.type.name === "hardBreak") {
+      out += "\n";
     } else if (node.type.name === "mention") {
       const id = Number(node.attrs.id);
       const label = String(node.attrs.label ?? "");
