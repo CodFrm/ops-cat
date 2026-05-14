@@ -4,7 +4,6 @@ import { Search, Server, Folder, MessageSquare } from "lucide-react";
 import { cn } from "@opskat/ui";
 import { useTabStore, type Tab, type InfoTabMeta } from "@/stores/tabStore";
 import { useTerminalStore } from "@/stores/terminalStore";
-import { useFullscreen } from "@/hooks/useFullscreen";
 import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
 import { filterMatches, highlightMatch } from "@/lib/highlightMatch";
 import { useLayoutStore, isCollapsed } from "@/stores/layoutStore";
@@ -15,7 +14,6 @@ import { getBuiltinPageMeta, resolveTabLabel } from "./pageTabMeta";
 
 export function SideTabList() {
   const { t } = useTranslation();
-  const isFullscreen = useFullscreen();
   const tabs = useTabStore((s) => s.tabs);
   const activeTabId = useTabStore((s) => s.activeTabId);
   const visibleTabs = tabs;
@@ -92,10 +90,6 @@ export function SideTabList() {
 
   return (
     <div data-tab-panel className="flex flex-col h-full bg-sidebar">
-      <div
-        className={`${isFullscreen ? "h-0" : "h-8"} w-full shrink-0`}
-        style={{ "--wails-draggable": "drag" } as React.CSSProperties}
-      />
       {!collapsed && (
         <div className="flex items-center gap-1 px-2 py-1.5 border-b border-panel-divider shrink-0">
           <span className="text-xs font-medium uppercase text-muted-foreground tracking-wide flex-1">
