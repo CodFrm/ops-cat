@@ -271,9 +271,9 @@ function TypeBadge({ type, compact }: { type: string; compact?: boolean }) {
     mongo: Database,
     kafka: Database,
     grant: Globe,
-    bash: Terminal,
-    write: FilePlus,
-    edit: FileEdit,
+    local_bash: Terminal,
+    local_write: FilePlus,
+    local_edit: FileEdit,
   };
   const Icon = icons[type] || Terminal;
   if (compact) {

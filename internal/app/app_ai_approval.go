@@ -128,7 +128,7 @@ func (a *App) makeGrantRequestFunc() ai.GrantRequestFunc {
 	}
 }
 
-// makeLocalToolConfirmFunc 创建 coding agent 本地工具（bash/write/edit）审批回调。
+// makeLocalToolConfirmFunc 创建 coding agent 本地工具（local_bash/local_write/local_edit）审批回调。
 //
 // 复用 pendingAIApprovals channel 阻塞机制；事件 Kind="local_tool"，
 // 与现有 single/batch/grant 不共用 dialog 组件——前端按 Kind 路由。
