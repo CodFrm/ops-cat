@@ -71,12 +71,14 @@ func (a *App) startApprovalServer(authToken string) {
 				return approval.ApprovalResponse{Approved: false, Reason: "user denied"}
 			}
 			// "allowAll" → 保存用户编辑后的 grant 模式（支持 * 通配符）
+			// 走 SaveGrantPatternsForApproval：SSH/K8s 按 AST 子命令拆，
+			// 其他类型直通；保持 opsctl/AI/handleConfirm 三条路径一致。
 			if resp.Decision == "allowAll" && req.SessionID != "" {
 				pattern := req.Command
 				if len(resp.EditedItems) > 0 {
 					pattern = resp.EditedItems[0].Command
 				}
-				ai.SaveGrantPattern(a.langCtx(), req.SessionID, req.AssetID, req.AssetName, pattern)
+				ai.SaveGrantPatternsForApproval(a.langCtx(), req.SessionID, req.AssetID, req.AssetName, req.Type, pattern)
 			}
 			return approval.ApprovalResponse{Approved: true}
 		case <-a.ctx.Done():

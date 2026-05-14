@@ -92,19 +92,23 @@ func (a *App) makeGrantRequestFunc() ai.GrantRequestFunc {
 			if resp.Decision == "deny" {
 				return false, nil
 			}
+			// SSH/K8s 等 shell 类资产的 grant 必须按 AST 子命令拆开保存，
+			// 走 SaveGrantPatternsForApproval 与 opsctl/handleConfirm 三条路径保持一致；
+			// finalPatterns 仍按用户编辑或原始 items 的"一项一条"展示给上层。
 			var finalPatterns []string
+			sessionID := fmt.Sprintf("conv_%d", convID)
 			if len(resp.EditedItems) > 0 {
 				for _, item := range resp.EditedItems {
 					cmd := strings.TrimSpace(item.Command)
 					if cmd != "" {
 						finalPatterns = append(finalPatterns, cmd)
-						ai.SaveGrantPattern(a.langCtx(), fmt.Sprintf("conv_%d", convID), item.AssetID, item.AssetName, cmd)
+						ai.SaveGrantPatternsForApproval(a.langCtx(), sessionID, item.AssetID, item.AssetName, item.Type, cmd)
 					}
 				}
 			} else {
 				for _, item := range items {
 					finalPatterns = append(finalPatterns, item.Command)
-					ai.SaveGrantPattern(a.langCtx(), fmt.Sprintf("conv_%d", convID), item.AssetID, item.AssetName, item.Command)
+					ai.SaveGrantPatternsForApproval(a.langCtx(), sessionID, item.AssetID, item.AssetName, item.Type, item.Command)
 				}
 			}
 			return true, finalPatterns

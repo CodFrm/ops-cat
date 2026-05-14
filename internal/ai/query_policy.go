@@ -3,7 +3,6 @@ package ai
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tidb/pkg/parser/ast"
@@ -106,7 +105,7 @@ func classifyStmt(stmt ast.StmtNode) StatementInfo {
 
 // CheckQueryPolicy 检查 SQL 语句是否符合策略（合并默认策略后检查）
 func CheckQueryPolicy(ctx context.Context, policy *asset_entity.QueryPolicy, stmts []StatementInfo) CheckResult {
-	merged := mergeQueryPolicy(policy, asset_entity.DefaultQueryPolicy())
+	merged := effectiveQueryPolicy(ctx, policy)
 	return checkQueryPolicyRules(ctx, merged, stmts)
 }
 
@@ -118,7 +117,7 @@ func checkQueryPolicyRules(ctx context.Context, policy *asset_entity.QueryPolicy
 	for _, stmt := range stmts {
 		// deny_types 检查
 		for _, denied := range policy.DenyTypes {
-			if strings.EqualFold(stmt.Type, denied) {
+			if policyValueMatches(denied, stmt.Type) {
 				return CheckResult{
 					Decision:       Deny,
 					Message:        policyFmt(ctx, "SQL statement type %s denied by policy", "SQL 语句类型 %s 被策略禁止", stmt.Type),
@@ -137,25 +136,11 @@ func checkQueryPolicyRules(ctx context.Context, policy *asset_entity.QueryPolicy
 			}
 		}
 		// allow_types 白名单
-		if len(policy.AllowTypes) > 0 && !containsStrFold(policy.AllowTypes, stmt.Type) {
+		if len(policy.AllowTypes) > 0 && !containsPolicyValue(policy.AllowTypes, stmt.Type) {
 			return CheckResult{Decision: NeedConfirm}
 		}
 	}
 	return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
-}
-
-func mergeQueryPolicy(custom, defaults *asset_entity.QueryPolicy) *asset_entity.QueryPolicy {
-	result := &asset_entity.QueryPolicy{}
-	if custom != nil {
-		result.AllowTypes = custom.AllowTypes
-		result.DenyTypes = append(result.DenyTypes, custom.DenyTypes...)
-		result.DenyFlags = append(result.DenyFlags, custom.DenyFlags...)
-	}
-	if defaults != nil {
-		result.DenyTypes = appendUnique(result.DenyTypes, defaults.DenyTypes...)
-		result.DenyFlags = appendUnique(result.DenyFlags, defaults.DenyFlags...)
-	}
-	return result
 }
 
 func containsStr(slice []string, s string) bool {
@@ -167,24 +152,18 @@ func containsStr(slice []string, s string) bool {
 	return false
 }
 
-func containsStrFold(slice []string, s string) bool {
-	for _, item := range slice {
-		if strings.EqualFold(item, s) {
-			return true
-		}
-	}
-	return false
-}
-
+// appendUnique 按精确字符串去重。
+// 不能按 ToUpper 折叠 —— Redis key、Kafka resource、shell 命令模式都是大小写敏感的，
+// `GET User:*` 与 `GET user:*` 是两条不同的规则，合并会让其中一条静默失效。
 func appendUnique(base []string, items ...string) []string {
 	seen := make(map[string]bool, len(base))
 	for _, s := range base {
-		seen[strings.ToUpper(s)] = true
+		seen[s] = true
 	}
 	for _, s := range items {
-		if !seen[strings.ToUpper(s)] {
+		if !seen[s] {
 			base = append(base, s)
-			seen[strings.ToUpper(s)] = true
+			seen[s] = true
 		}
 	}
 	return base
