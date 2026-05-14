@@ -9,7 +9,10 @@ import (
 	"github.com/cago-frame/agents/tool"
 )
 
-func TestWrapLocalTool_RenamesBashWriteEdit(t *testing.T) {
+func TestWrapLocalTool_RenamesLocalFileShell(t *testing.T) {
+	// 7 件套：3 件动作类 (bash/write/edit) + 4 件查询类 (read/grep/find/ls)
+	// 都要加 local_ 前缀。bash_output/kill_shell（cago runtime 文案依赖）和
+	// task_*（非文件/shell 操作）保留原名，由 LeavesOtherToolsAlone 覆盖。
 	cases := []struct {
 		orig    string
 		want    string
@@ -19,6 +22,10 @@ func TestWrapLocalTool_RenamesBashWriteEdit(t *testing.T) {
 		{"bash", "local_bash", "Execute a bash command", "LOCAL MACHINE ONLY"},
 		{"write", "local_write", "Write to a file", "LOCAL MACHINE ONLY"},
 		{"edit", "local_edit", "Edit a file", "LOCAL MACHINE ONLY"},
+		{"read", "local_read", "Read a file", "LOCAL MACHINE ONLY"},
+		{"grep", "local_grep", "Search by regex", "LOCAL MACHINE ONLY"},
+		{"find", "local_find", "Find files", "LOCAL MACHINE ONLY"},
+		{"ls", "local_ls", "List files", "LOCAL MACHINE ONLY"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.orig, func(t *testing.T) {
@@ -38,7 +45,10 @@ func TestWrapLocalTool_RenamesBashWriteEdit(t *testing.T) {
 }
 
 func TestWrapLocalTool_LeavesOtherToolsAlone(t *testing.T) {
-	for _, name := range []string{"read", "grep", "find", "ls", "bash_output", "kill_shell", "task_create", "run_command"} {
+	// bash_output/kill_shell: cago tool/bash/background.go runtime 文案写死了名字。
+	// task_*: 任务管理，与文件/shell 操作正交。
+	// run_command: OpsKat 自家远程工具，根本不走 WithToolDecorator（这里只是回归）。
+	for _, name := range []string{"bash_output", "kill_shell", "task_create", "task_list", "run_command"} {
 		t.Run(name, func(t *testing.T) {
 			in := &tool.RawTool{NameStr: name, DescStr: "orig"}
 			out := WrapLocalTool(in)

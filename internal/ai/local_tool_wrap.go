@@ -3,13 +3,22 @@ package ai
 import "github.com/cago-frame/agents/tool"
 
 // localRenames 把 cago 默认本地工具改名 + 描述前置警示。
-// 仅覆盖三件"动作类"工具：bash_output / kill_shell 不改名（cago tool/bash/background.go
-// 的 runtime 返回文案写死了这两个名字），read/grep/find/ls/task_* 是惰性查询，
-// LLM 不会拿它们误操作远程资产，无需改名。
+// 覆盖 7 件套：bash/write/edit/read/grep/find/ls —— 但凡是操作或查询用户本机文件系统、
+// shell 的工具一律加 local_ 前缀，让 LLM 在工具列表里就一眼区分本地 vs 远程，
+// 杜绝"用户说服务器 /etc/nginx 而 LLM 调 read /etc/nginx"这类误用。
+//
+// 不在列表里的工具：
+//   - bash_output / kill_shell：cago tool/bash/background.go 的 runtime 返回文案
+//     写死了这两个名字（"Use bash_output with shell_id=..."），改名会让 LLM 困惑。
+//   - task_*：任务管理，与文件/shell 操作正交，不会被 LLM 用错。
 var localRenames = map[string]string{
 	"bash":  "local_bash",
 	"write": "local_write",
 	"edit":  "local_edit",
+	"read":  "local_read",
+	"grep":  "local_grep",
+	"find":  "local_find",
+	"ls":    "local_ls",
 }
 
 // localWarning 前置到被重命名工具的 Description 前面，提醒 LLM 这些是本机工具，
