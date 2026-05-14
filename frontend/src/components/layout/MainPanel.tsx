@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
 import logoLight from "@/assets/images/logo.png";
 import logoDark from "@/assets/images/logo-dark.png";
-import { useFullscreen } from "@/hooks/useFullscreen";
 import { K8sClusterPage } from "@/components/k8s/K8sClusterPage";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useAssetStore } from "@/stores/assetStore";
@@ -66,7 +65,6 @@ function LazySurface({ children }: { children: ReactNode }) {
 
 export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPanelProps) {
   const { t } = useTranslation();
-  const isFullscreen = useFullscreen();
 
   const tabs = useTabStore((s) => s.tabs);
   const activeTabId = useTabStore((s) => s.activeTabId);
@@ -213,14 +211,6 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPa
 
   return (
     <div className="flex flex-1 flex-col min-w-0">
-      {/* When no tabs, show standalone drag region; also always shown in left layout (TopTabBar absent) */}
-      {(!hasTabs || tabBarLayout === "left") && (
-        <div
-          className={`${isFullscreen ? "h-0" : "h-8"} w-full shrink-0`}
-          style={{ "--wails-draggable": "drag" } as React.CSSProperties}
-        />
-      )}
-
       {/* Tab bar with integrated drag region (top layout only) */}
       {hasTabs && tabBarLayout === "top" && <TopTabBar />}
 
