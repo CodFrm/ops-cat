@@ -4,6 +4,11 @@ export interface TerminalFontPreset {
   fontFamily: string;
 }
 
+export interface TerminalFontOption {
+  value: string;
+  name: string;
+}
+
 export const DEFAULT_TERMINAL_FONT_PRESET_ID = "default";
 export const CUSTOM_TERMINAL_FONT_PRESET_ID = "custom";
 // Nerd Font families come first so per-glyph CSS font fallback supplies icons
@@ -204,15 +209,66 @@ export const RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES: string[] = [
   "Iosevka",
 ];
 
+const terminalFontPresetByName = new Map(
+  terminalFontPresets
+    .filter((preset) => preset.id !== DEFAULT_TERMINAL_FONT_PRESET_ID && preset.id !== CUSTOM_TERMINAL_FONT_PRESET_ID)
+    .map((preset) => [preset.name, preset])
+);
+
+const staticTerminalFontOptions: TerminalFontOption[] = RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES.flatMap((name) => {
+  const preset = terminalFontPresetByName.get(name);
+  return preset ? [{ value: preset.id, name: preset.name }] : [];
+});
+
+function terminalFontOptionForFamily(name: string): TerminalFontOption {
+  const preset = terminalFontPresetByName.get(name);
+  return {
+    value: preset?.id ?? name,
+    name,
+  };
+}
+
+export function buildTerminalFontGroups(installedFonts: string[] | null | undefined): {
+  recommendedFonts: TerminalFontOption[];
+  otherFonts: TerminalFontOption[];
+} {
+  if (installedFonts === undefined) return { recommendedFonts: [], otherFonts: [] };
+
+  // Local Font Access is Chromium-only and may be unavailable in desktop
+  // webviews. Keep the settings useful by falling back to the curated list.
+  if (installedFonts === null) return { recommendedFonts: staticTerminalFontOptions, otherFonts: [] };
+
+  const installedFontNames = Array.from(new Set(installedFonts.filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const installed = new Set(installedFontNames);
+  const recommendedSet = new Set(RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES);
+  const recommendedFonts = RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES.filter((name) => installed.has(name)).map(
+    terminalFontOptionForFamily
+  );
+  const otherFonts = installedFontNames.filter((name) => !recommendedSet.has(name)).map(terminalFontOptionForFamily);
+  return { recommendedFonts, otherFonts };
+}
+
 // Quote a family name for use in CSS font-family. Pure identifiers can be
 // passed unquoted; anything with spaces, dots, or apostrophes is single-quoted.
+// Backslashes must be escaped before apostrophes — otherwise a trailing `\`
+// would escape the closing quote and break the declaration.
 export function quoteFamilyName(name: string): string {
   if (/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(name)) return name;
-  return `'${name.replace(/'/g, "\\'")}'`;
+  return `'${name.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 }
 
 interface QueryLocalFontsApi {
   queryLocalFonts?: () => Promise<Array<{ family: string }>>;
+}
+
+interface WailsSystemFontsApi {
+  go?: {
+    app?: {
+      App?: {
+        ListSystemFonts?: () => Promise<string[]>;
+      };
+    };
+  };
 }
 
 // Returns the first family in the default fallback chain that is installed on
@@ -230,19 +286,45 @@ export function resolveDefaultFontPrimary(installedFonts: string[] | null): stri
   return null;
 }
 
-// Returns deduplicated installed font family names, sorted alphabetically.
-// Resolves to null when the Local Font Access API is unavailable or denied —
-// caller is expected to fall back to a curated static list.
-export async function loadInstalledFonts(): Promise<string[] | null> {
-  if (typeof window === "undefined") return null;
+function normalizeInstalledFontFamilies(fonts: string[]): string[] {
+  const families = new Set<string>();
+  for (const font of fonts) {
+    const family = font.trim();
+    if (family) families.add(family);
+  }
+  return Array.from(families).sort((a, b) => a.localeCompare(b));
+}
+
+async function loadInstalledFontsFromBrowser(): Promise<string[] | null> {
   const api = window as unknown as QueryLocalFontsApi;
   if (typeof api.queryLocalFonts !== "function") return null;
   try {
     const fonts = await api.queryLocalFonts();
-    const families = new Set<string>();
-    for (const font of fonts) families.add(font.family);
-    return Array.from(families).sort((a, b) => a.localeCompare(b));
+    if (!Array.isArray(fonts)) return null;
+    return normalizeInstalledFontFamilies(fonts.map((font) => font.family));
   } catch {
     return null;
   }
+}
+
+async function loadInstalledFontsFromWails(): Promise<string[] | null> {
+  const api = window as unknown as WailsSystemFontsApi;
+  const listSystemFonts = api.go?.app?.App?.ListSystemFonts;
+  if (typeof listSystemFonts !== "function") return null;
+  try {
+    const fonts = await listSystemFonts();
+    if (!Array.isArray(fonts)) return null;
+    return normalizeInstalledFontFamilies(fonts);
+  } catch {
+    return null;
+  }
+}
+
+// Returns deduplicated installed font family names, sorted alphabetically. In a
+// Chromium browser it uses Local Font Access; in Wails desktop webviews it
+// falls back to the Go backend. Resolves to null when both sources are
+// unavailable or denied, and callers should fall back to the curated list.
+export async function loadInstalledFonts(): Promise<string[] | null> {
+  if (typeof window === "undefined") return null;
+  return (await loadInstalledFontsFromBrowser()) ?? (await loadInstalledFontsFromWails());
 }

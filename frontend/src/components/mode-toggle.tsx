@@ -1,12 +1,6 @@
 import { Check, Moon, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import {
-  Button,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@opskat/ui";
+import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@opskat/ui";
 import { useTheme, type Theme } from "@/components/theme-provider";
 
 const THEME_OPTIONS: Theme[] = ["light", "dark", "system"];

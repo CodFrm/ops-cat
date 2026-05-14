@@ -70,12 +70,18 @@ export function getOrCreateTerminal(
   // is drawn by xterm instead of the system font — fixes tofu boxes from terminal
   // prompts (oh-my-zsh powerlevel10k, starship, etc.). Falls back to DOM renderer
   // automatically on context loss or if WebGL initialization throws.
+  // 持有引用 + onContextLoss 订阅，instance.dispose 时显式释放 —— term.dispose
+  // 虽然会级联 addon，但订阅本身是独立 IDisposable，不主动 dispose 会泄漏。
+  let webglAddon: WebglAddon | null = null;
+  let webglContextLossSub: { dispose: () => void } | null = null;
   try {
-    const webglAddon = new WebglAddon();
-    webglAddon.onContextLoss(() => {
-      webglAddon.dispose();
+    const addon = new WebglAddon();
+    webglContextLossSub = addon.onContextLoss(() => {
+      addon.dispose();
+      webglAddon = null;
     });
-    term.loadAddon(webglAddon);
+    term.loadAddon(addon);
+    webglAddon = addon;
   } catch (err) {
     console.warn("WebGL renderer unavailable, falling back to DOM renderer", err);
   }
@@ -144,6 +150,10 @@ export function getOrCreateTerminal(
       onKeyDispose.dispose();
       EventsOff(dataEvent);
       EventsOff(closedEvent);
+      webglContextLossSub?.dispose();
+      webglContextLossSub = null;
+      webglAddon?.dispose();
+      webglAddon = null;
       term.dispose();
       registry.delete(sessionId);
     },

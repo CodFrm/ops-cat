@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildTerminalFontGroups,
   loadInstalledFonts,
   quoteFamilyName,
   RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES,
@@ -64,6 +65,14 @@ describe("terminalFonts", () => {
     it("escapes embedded apostrophes", () => {
       expect(quoteFamilyName("Foo's Font")).toBe("'Foo\\'s Font'");
     });
+
+    // A trailing backslash would otherwise escape the closing quote and break
+    // the CSS string, so backslashes must be escaped before apostrophes are.
+    it("escapes embedded backslashes before apostrophes", () => {
+      expect(quoteFamilyName("Foo\\Bar")).toBe("'Foo\\\\Bar'");
+      expect(quoteFamilyName("Trailing\\")).toBe("'Trailing\\\\'");
+      expect(quoteFamilyName("Mix\\'s")).toBe("'Mix\\\\\\'s'");
+    });
   });
 
   describe("RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES", () => {
@@ -108,6 +117,49 @@ describe("terminalFonts", () => {
           ]),
       });
       expect(await loadInstalledFonts()).toEqual(["JetBrains Mono", "Menlo", "Zed Mono"]);
+    });
+
+    it("falls back to the Wails backend when queryLocalFonts is unavailable", async () => {
+      vi.stubGlobal("window", {
+        go: {
+          app: {
+            App: {
+              ListSystemFonts: () => Promise.resolve(["Zed Mono", "Menlo", "Zed Mono"]),
+            },
+          },
+        },
+      });
+      expect(await loadInstalledFonts()).toEqual(["Menlo", "Zed Mono"]);
+    });
+
+    it("falls back to the Wails backend when queryLocalFonts rejects", async () => {
+      vi.stubGlobal("window", {
+        queryLocalFonts: () => Promise.reject(new Error("denied")),
+        go: {
+          app: {
+            App: {
+              ListSystemFonts: () => Promise.resolve(["Backend Mono"]),
+            },
+          },
+        },
+      });
+      expect(await loadInstalledFonts()).toEqual(["Backend Mono"]);
+    });
+  });
+
+  describe("buildTerminalFontGroups", () => {
+    it("uses the curated static recommendations when installed fonts are unavailable", () => {
+      const groups = buildTerminalFontGroups(null);
+      expect(groups.otherFonts).toEqual([]);
+      expect(groups.recommendedFonts.map((font) => font.name)).toContain("JetBrains Mono");
+      expect(groups.recommendedFonts.find((font) => font.name === "Fira Code")?.value).toBe("fira-code");
+    });
+
+    it("keeps recommended fonts in curated order and other fonts alphabetically sorted", () => {
+      const groups = buildTerminalFontGroups(["Zed Mono", "Menlo", "Fira Code", "JetBrains Mono"]);
+      expect(groups.recommendedFonts.map((font) => font.name)).toEqual(["JetBrains Mono", "Fira Code", "Menlo"]);
+      expect(groups.recommendedFonts.map((font) => font.value)).toEqual(["jetbrains-mono", "fira-code", "menlo"]);
+      expect(groups.otherFonts.map((font) => font.name)).toEqual(["Zed Mono"]);
     });
   });
 

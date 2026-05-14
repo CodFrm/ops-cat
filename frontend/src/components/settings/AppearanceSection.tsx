@@ -26,7 +26,7 @@ import { builtinThemes, defaultLightTheme, defaultDarkTheme, TerminalTheme } fro
 import {
   CUSTOM_TERMINAL_FONT_PRESET_ID,
   DEFAULT_TERMINAL_FONT_PRESET_ID,
-  RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES,
+  buildTerminalFontGroups,
   loadInstalledFonts,
   quoteFamilyName,
   resolveDefaultFontPrimary,
@@ -122,7 +122,7 @@ export function TerminalSection() {
   const resolvedTheme = useResolvedTheme();
   const [themeEditorOpen, setThemeEditorOpen] = useState(false);
   const [editingTheme, setEditingTheme] = useState<TerminalTheme | undefined>(undefined);
-  const [installedFonts, setInstalledFonts] = useState<string[] | null>(null);
+  const [installedFonts, setInstalledFonts] = useState<string[] | null | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,28 +134,26 @@ export function TerminalSection() {
     };
   }, []);
 
-  const { recommendedFonts, otherFonts } = useMemo(() => {
-    if (!installedFonts) return { recommendedFonts: [] as string[], otherFonts: [] as string[] };
-    const installed = new Set(installedFonts);
-    const recommendedSet = new Set(RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES);
-    const recommendedFonts = RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES.filter((name) => installed.has(name));
-    const otherFonts = installedFonts.filter((name) => !recommendedSet.has(name));
-    return { recommendedFonts, otherFonts };
-  }, [installedFonts]);
+  const { recommendedFonts, otherFonts } = useMemo(() => buildTerminalFontGroups(installedFonts), [installedFonts]);
+  const fontOptions = useMemo(() => [...recommendedFonts, ...otherFonts], [recommendedFonts, otherFonts]);
 
-  const defaultResolvedName = useMemo(() => resolveDefaultFontPrimary(installedFonts), [installedFonts]);
+  const defaultResolvedName = useMemo(() => resolveDefaultFontPrimary(installedFonts ?? null), [installedFonts]);
 
   // Validity check: keep the currently-stored id as the select value as long
   // as it resolves to something — either a hardcoded preset, the custom mode,
   // or a system family we just loaded. Unknown values during initial load are
   // optimistically preserved so the dropdown doesn't flash "Default".
-  const fontSelectValue =
-    fontPresetId === CUSTOM_TERMINAL_FONT_PRESET_ID ||
-    terminalFontPresets.some((preset) => preset.id === fontPresetId) ||
-    installedFonts === null ||
-    installedFonts.includes(fontPresetId)
+  const fontSelectValue = useMemo(() => {
+    if (fontPresetId === CUSTOM_TERMINAL_FONT_PRESET_ID || fontPresetId === DEFAULT_TERMINAL_FONT_PRESET_ID) {
+      return fontPresetId;
+    }
+    const selectedOption = fontOptions.find((option) => option.value === fontPresetId || option.name === fontPresetId);
+    if (selectedOption) return selectedOption.value;
+    if (installedFonts === undefined) return fontPresetId;
+    return terminalFontPresets.some((preset) => preset.id === fontPresetId)
       ? fontPresetId
       : DEFAULT_TERMINAL_FONT_PRESET_ID;
+  }, [fontOptions, fontPresetId, installedFonts]);
 
   return (
     <>
@@ -176,7 +174,10 @@ export function TerminalSection() {
                   <span className="min-w-0 flex-1 truncate">
                     {t("terminal.defaultFont")}
                     {defaultResolvedName && (
-                      <span className="text-muted-foreground ml-2" style={{ fontFamily: quoteFamilyName(defaultResolvedName) }}>
+                      <span
+                        className="text-muted-foreground ml-2"
+                        style={{ fontFamily: quoteFamilyName(defaultResolvedName) }}
+                      >
                         ({defaultResolvedName})
                       </span>
                     )}
@@ -188,10 +189,10 @@ export function TerminalSection() {
                     <SelectSeparator />
                     <SelectGroup>
                       <SelectLabel>{t("terminal.fontRecommended")}</SelectLabel>
-                      {recommendedFonts.map((name) => (
-                        <SelectItem key={`rec-${name}`} value={name}>
-                          <span className="min-w-0 flex-1 truncate" style={{ fontFamily: quoteFamilyName(name) }}>
-                            {name}
+                      {recommendedFonts.map((font) => (
+                        <SelectItem key={`rec-${font.value}`} value={font.value}>
+                          <span className="min-w-0 flex-1 truncate" style={{ fontFamily: quoteFamilyName(font.name) }}>
+                            {font.name}
                           </span>
                         </SelectItem>
                       ))}
@@ -203,10 +204,10 @@ export function TerminalSection() {
                     <SelectSeparator />
                     <SelectGroup>
                       <SelectLabel>{t("terminal.fontOther")}</SelectLabel>
-                      {otherFonts.map((name) => (
-                        <SelectItem key={`oth-${name}`} value={name}>
-                          <span className="min-w-0 flex-1 truncate" style={{ fontFamily: quoteFamilyName(name) }}>
-                            {name}
+                      {otherFonts.map((font) => (
+                        <SelectItem key={`oth-${font.value}`} value={font.value}>
+                          <span className="min-w-0 flex-1 truncate" style={{ fontFamily: quoteFamilyName(font.name) }}>
+                            {font.name}
                           </span>
                         </SelectItem>
                       ))}

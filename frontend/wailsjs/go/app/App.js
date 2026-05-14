@@ -650,6 +650,10 @@ export function ListSnippets(arg1) {
   return window['go']['app']['App']['ListSnippets'](arg1);
 }
 
+export function ListSystemFonts() {
+  return window['go']['app']['App']['ListSystemFonts']();
+}
+
 export function ListWebDAVBackups() {
   return window['go']['app']['App']['ListWebDAVBackups']();
 }
