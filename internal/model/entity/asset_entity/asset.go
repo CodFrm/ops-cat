@@ -19,6 +19,7 @@ const (
 	AssetTypeMongoDB  = "mongodb"
 	AssetTypeKafka    = "kafka"
 	AssetTypeK8s      = "k8s"
+	AssetTypeSerial   = "serial"
 )
 
 // DatabaseDriver 数据库驱动类型
@@ -236,6 +237,16 @@ type K8sConfig struct {
 func (c *K8sConfig) GetCredentialID() int64 { return 0 }
 func (c *K8sConfig) GetPassword() string    { return c.Kubeconfig }
 
+// SerialConfig 串口（COM/TTY）类型的特定配置
+type SerialConfig struct {
+	PortPath    string `json:"port_path"`              // 串口路径，如 COM3, /dev/ttyUSB0
+	BaudRate    int    `json:"baud_rate"`              // 波特率，如 9600, 115200
+	DataBits    int    `json:"data_bits"`              // 数据位: 5, 6, 7, 8
+	StopBits    string `json:"stop_bits"`              // 停止位: "1", "1.5", "2"
+	Parity      string `json:"parity"`                 // 校验位: "none", "odd", "even", "mark", "space"
+	FlowControl string `json:"flow_control,omitempty"` // 流控制: "none", "hardware"（"software" / XON-XOFF 暂未支持）
+}
+
 // DatabaseConfig PasswordSource implementation
 func (c *DatabaseConfig) GetCredentialID() int64 { return c.CredentialID }
 func (c *DatabaseConfig) GetPassword() string    { return c.Password }
@@ -290,6 +301,10 @@ type K8sPolicy = policy.K8sPolicy
 // DefaultK8sPolicy 返回默认 K8S 权限策略
 var DefaultK8sPolicy = policy.DefaultK8sPolicy
 
+// SerialConfig PasswordSource implementation（串口无密码，返回空）
+func (c *SerialConfig) GetCredentialID() int64 { return 0 }
+func (c *SerialConfig) GetPassword() string    { return "" }
+
 // --- 充血模型方法 ---
 
 // IsSSH 判断是否SSH类型
@@ -320,6 +335,11 @@ func (a *Asset) IsKafka() bool {
 // IsK8s 判断是否K8S集群类型
 func (a *Asset) IsK8s() bool {
 	return a.Type == AssetTypeK8s
+}
+
+// IsSerial 判断是否串口类型
+func (a *Asset) IsSerial() bool {
+	return a.Type == AssetTypeSerial
 }
 
 // GetSSHConfig 解析SSH配置
@@ -423,6 +443,24 @@ func (a *Asset) GetK8sConfig() (*K8sConfig, error) {
 // SetK8sConfig 序列化K8S配置到Config字段
 func (a *Asset) SetK8sConfig(cfg *K8sConfig) error {
 	s, err := jsonfield.Marshal(cfg, "K8S配置")
+	if err != nil {
+		return err
+	}
+	a.Config = s
+	return nil
+}
+
+// GetSerialConfig 解析串口配置
+func (a *Asset) GetSerialConfig() (*SerialConfig, error) {
+	if !a.IsSerial() {
+		return nil, errors.New("资产不是串口类型")
+	}
+	return jsonfield.Unmarshal[SerialConfig](a.Config, "串口配置")
+}
+
+// SetSerialConfig 序列化串口配置到Config字段
+func (a *Asset) SetSerialConfig(cfg *SerialConfig) error {
+	s, err := jsonfield.Marshal(cfg, "串口配置")
 	if err != nil {
 		return err
 	}
@@ -538,6 +576,8 @@ func (a *Asset) Validate() error {
 		return a.validateKafka()
 	case AssetTypeK8s:
 		return a.validateK8s()
+	case AssetTypeSerial:
+		return a.validateSerial()
 	default:
 		// 扩展资产类型由扩展自行校验
 		return nil
@@ -679,6 +719,39 @@ func (a *Asset) validateK8s() error {
 	return nil
 }
 
+// validateSerial 校验串口类型特定配置
+func (a *Asset) validateSerial() error {
+	cfg, err := a.GetSerialConfig()
+	if err != nil {
+		return fmt.Errorf("串口配置无效: %w", err)
+	}
+	if cfg.PortPath == "" {
+		return errors.New("串口路径不能为空")
+	}
+	if cfg.BaudRate <= 0 {
+		return errors.New("串口波特率无效")
+	}
+	if cfg.DataBits < 5 || cfg.DataBits > 8 {
+		return errors.New("串口数据位必须在5-8之间")
+	}
+	switch cfg.StopBits {
+	case "1", "1.5", "2":
+	default:
+		return fmt.Errorf("不支持的串口停止位: %q", cfg.StopBits)
+	}
+	switch cfg.Parity {
+	case "none", "odd", "even", "mark", "space":
+	default:
+		return fmt.Errorf("不支持的串口校验位: %q", cfg.Parity)
+	}
+	switch cfg.FlowControl {
+	case "", "none", "hardware":
+	default:
+		return fmt.Errorf("不支持的串口流控模式: %q", cfg.FlowControl)
+	}
+	return nil
+}
+
 func validateKafkaBroker(broker string) error {
 	broker = strings.TrimSpace(broker)
 	if broker == "" {
@@ -748,6 +821,12 @@ func (a *Asset) CanConnect() bool {
 			return false
 		}
 		return cfg.Kubeconfig != ""
+	case AssetTypeSerial:
+		cfg, err := a.GetSerialConfig()
+		if err != nil {
+			return false
+		}
+		return cfg.PortPath != ""
 	}
 	return false
 }

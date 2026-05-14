@@ -17,7 +17,8 @@ import (
 
 // CheckPermission 统一权限检查（策略 + DB Grant 匹配）。
 // 不包含用户确认逻辑 — NeedConfirm 时由调用方处理。
-// assetType: "ssh" | "database" | "redis" | "mongodb" | "kafka" | "k8s" | "exec"（exec 等同于 ssh）| "sql"（sql 等同于 database）| "mongo"（mongo 等同于 mongodb）
+// assetType: "ssh" | "serial" | "database" | "redis" | "mongodb" | "kafka" | "k8s" |
+// "exec"（exec 等同于 ssh）| "sql"（sql 等同于 database）| "mongo"（mongo 等同于 mongodb）
 func CheckPermission(ctx context.Context, assetType string, assetID int64, command string) CheckResult {
 	// opsctl 使用的类型名映射到内部类型
 	switch assetType {
@@ -30,8 +31,9 @@ func CheckPermission(ctx context.Context, assetType string, assetID int64, comma
 	}
 
 	switch assetType {
-	case asset_entity.AssetTypeSSH:
-		return checkSSHPermission(ctx, assetID, command)
+	case asset_entity.AssetTypeSSH, asset_entity.AssetTypeSerial:
+		// SSH 与串口共用同一份命令策略（CommandPolicy + grant）。
+		return checkCommandPolicyPermission(ctx, assetID, command)
 	case asset_entity.AssetTypeDatabase:
 		return checkDatabasePermission(ctx, assetID, command)
 	case asset_entity.AssetTypeRedis:
@@ -47,9 +49,11 @@ func CheckPermission(ctx context.Context, assetType string, assetID int64, comma
 	}
 }
 
-// --- SSH ---
+// --- SSH / Serial（共用 shell 命令策略） ---
 
-func checkSSHPermission(ctx context.Context, assetID int64, command string) CheckResult {
+// checkCommandPolicyPermission 走 CommandPolicy + grant 的命令策略校验，
+// 适用于所有把"命令文本"作为执行单元的资产类型（目前是 SSH 和串口）。
+func checkCommandPolicyPermission(ctx context.Context, assetID int64, command string) CheckResult {
 	// 解析失败或没有可枚举的执行单元（注释/空白等）都退回 NeedConfirm，
 	// 不能整串匹配，否则 `allow *` 会误放行 parser 失败或仅注释的输入。
 	subCmds, err := ExtractSubCommands(command)

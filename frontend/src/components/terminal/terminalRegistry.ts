@@ -2,7 +2,7 @@ import { Terminal as XTerminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
-import { WriteSSH } from "../../../wailsjs/go/app/App";
+import { WriteSSH, WriteSerial } from "../../../wailsjs/go/app/App";
 import { EventsOn, EventsOff } from "../../../wailsjs/runtime/runtime";
 import { bytesToBase64 } from "@/lib/terminalEncode";
 import { useTerminalStore } from "@/stores/terminalStore";
@@ -28,7 +28,7 @@ const registry = new Map<string, InternalInstance>();
 
 export function getOrCreateTerminal(
   sessionId: string,
-  init: { fontSize: number; fontFamily: string; theme?: ITheme; scrollback: number }
+  init: { fontSize: number; fontFamily: string; theme?: ITheme; scrollback: number; transport?: "ssh" | "serial" }
 ): TerminalInstance {
   const cached = registry.get(sessionId);
   if (cached) return cached;
@@ -51,6 +51,11 @@ export function getOrCreateTerminal(
   term.loadAddon(searchAddon);
   term.open(container);
 
+  // 优先用调用方传入的 transport；首次挂载若没拿到（罕见），退回 session id 前缀。
+  const isSerial = init.transport ? init.transport === "serial" : sessionId.startsWith("serial-");
+  const writeFn = isSerial ? WriteSerial : WriteSSH;
+  const eventPrefix = isSerial ? "serial" : "ssh";
+
   // 单一 keyboard 处理入口：IME 守卫 + shortcut 拦截 + Cmd+C 选区复制。
   // 占位回调由 Terminal.tsx 在挂载时通过 setOnFilter/setOnCopy 注入。
   const bridge = createTerminalInputBridge({
@@ -60,17 +65,17 @@ export function getOrCreateTerminal(
     onCopy: () => false,
   });
 
-  const writeSSHData = (data: string) =>
-    WriteSSH(sessionId, bytesToBase64(new TextEncoder().encode(data))).catch(console.error);
+  const writeData = (data: string) =>
+    writeFn(sessionId, bytesToBase64(new TextEncoder().encode(data))).catch(console.error);
 
-  const onDataDispose = term.onData(writeSSHData);
+  const onDataDispose = term.onData(writeData);
 
   // 上游 bug 旁路（xterm v6.0.0，CoreBrowserTerminal._inputEvent）：
   // xterm 用全局 _keyDownSeen 给 IME composed insertText 做去重，假定一次只按一个键。
   // 百度五笔等输入法在「英文模式」下把每个按键都伪装成 keyCode=229，加上用户快速
   // 输入造成 key-rollover（前一键 keyup 之前下一键 input 已触发），xterm 误判
   // 「_keyDownSeen=true => 重复输入」把中间字符丢弃。这里精确匹配 xterm 的跳过条件，
-  // 在它跳过时补一次 WriteSSH。screenReaderMode 下 xterm 走另一条路径会自己发，
+  // 在它跳过时补一次 write。screenReaderMode 下 xterm 走另一条路径会自己发，
   // 所以同步加守卫避免双发。
   let detachRolloverPatch: () => void = () => {};
   const ta = term.textarea;
@@ -86,14 +91,14 @@ export function getOrCreateTerminal(
         coreRef?._keyDownSeen === true &&
         !term.options.screenReaderMode
       ) {
-        writeSSHData(ie.data);
+        writeData(ie.data);
       }
     };
     ta.addEventListener("input", rolloverHandler, true);
     detachRolloverPatch = () => ta.removeEventListener("input", rolloverHandler, true);
   }
 
-  const dataEvent = "ssh:data:" + sessionId;
+  const dataEvent = `${eventPrefix}:data:${sessionId}`;
   EventsOn(dataEvent, (dataB64: string) => {
     const binary = atob(dataB64);
     const bytes = new Uint8Array(binary.length);
@@ -101,7 +106,7 @@ export function getOrCreateTerminal(
     term.write(bytes);
   });
 
-  const closedEvent = "ssh:closed:" + sessionId;
+  const closedEvent = `${eventPrefix}:closed:${sessionId}`;
 
   // 先声明再赋值,以便 instance.dispose 闭包可以引用 onKeyDispose
   // 而不依赖前向引用 const(可读性更好)。

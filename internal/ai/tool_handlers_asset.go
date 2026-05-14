@@ -43,6 +43,13 @@ type safeAssetView struct {
 	Namespace   string `json:"namespace,omitempty"`
 	K8sContext  string `json:"context,omitempty"`
 	SSHTunnelID int64  `json:"ssh_tunnel_id,omitempty"`
+	// Serial 专属（COM/TTY 类设备，没有 host/port 概念）
+	PortPath    string `json:"port_path,omitempty"`
+	BaudRate    int    `json:"baud_rate,omitempty"`
+	DataBits    int    `json:"data_bits,omitempty"`
+	StopBits    string `json:"stop_bits,omitempty"`
+	Parity      string `json:"parity,omitempty"`
+	FlowControl string `json:"flow_control,omitempty"`
 }
 
 // safeGroupListView 列表视图（不含描述）
@@ -105,6 +112,24 @@ func toSafeView(a *asset_entity.Asset) safeAssetView {
 			}
 			if val, ok := fields["ssh_tunnel_id"].(int64); ok {
 				v.SSHTunnelID = val
+			}
+			if val, ok := fields["port_path"].(string); ok {
+				v.PortPath = val
+			}
+			if val, ok := fields["baud_rate"].(int); ok {
+				v.BaudRate = val
+			}
+			if val, ok := fields["data_bits"].(int); ok {
+				v.DataBits = val
+			}
+			if val, ok := fields["stop_bits"].(string); ok {
+				v.StopBits = val
+			}
+			if val, ok := fields["parity"].(string); ok {
+				v.Parity = val
+			}
+			if val, ok := fields["flow_control"].(string); ok {
+				v.FlowControl = val
 			}
 		}
 	}

@@ -102,7 +102,9 @@ describe("terminalStore.connect", () => {
         "session-abc": {
           splitTree: { type: "terminal", sessionId: "session-abc" },
           activePaneId: "session-abc",
-          panes: { "session-abc": { sessionId: "session-abc", connected: true, connectedAt: Date.now() } },
+          panes: {
+            "session-abc": { sessionId: "session-abc", transport: "ssh", connected: true, connectedAt: Date.now() },
+          },
           directoryFollowMode: "off",
         },
       },
@@ -146,6 +148,7 @@ describe("terminalStore.connect", () => {
           connectionId: "conn-pending",
           assetId: 2,
           assetName: "Server 2",
+          transport: "ssh",
           password: "",
           logs: [],
           status: "connecting",
@@ -201,7 +204,9 @@ describe("terminalStore.connect", () => {
         "session-abc": {
           splitTree: { type: "terminal", sessionId: "session-abc" },
           activePaneId: "session-abc",
-          panes: { "session-abc": { sessionId: "session-abc", connected: true, connectedAt: Date.now() } },
+          panes: {
+            "session-abc": { sessionId: "session-abc", transport: "ssh", connected: true, connectedAt: Date.now() },
+          },
           directoryFollowMode: "off",
         },
       },
@@ -292,7 +297,7 @@ describe("terminalStore directory sync", () => {
         tab1: {
           splitTree: { type: "terminal", sessionId: "s1" },
           activePaneId: "s1",
-          panes: { s1: { sessionId: "s1", connected: true, connectedAt: Date.now() } },
+          panes: { s1: { sessionId: "s1", transport: "ssh", connected: true, connectedAt: Date.now() } },
           directoryFollowMode: "off",
         },
       },

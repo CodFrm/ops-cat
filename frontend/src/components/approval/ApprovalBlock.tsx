@@ -1,6 +1,6 @@
 import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ShieldAlert, Terminal, Database, Server, Globe, FolderOpen, FileEdit, FilePlus } from "lucide-react";
+import { ShieldAlert, Terminal, Database, Server, Globe, FolderOpen, FileEdit, FilePlus, Usb } from "lucide-react";
 import { Button, Input, Textarea } from "@opskat/ui";
 import { RespondAIApproval } from "../../../wailsjs/go/app/App";
 import { ai } from "../../../wailsjs/go/models";
@@ -269,6 +269,7 @@ export const ApprovalBlock = memo(function ApprovalBlock({ block }: ApprovalBloc
 function TypeBadge({ type, compact }: { type: string; compact?: boolean }) {
   const icons: Record<string, typeof Terminal> = {
     exec: Terminal,
+    serial: Usb,
     sql: Database,
     redis: Server,
     mongo: Database,
