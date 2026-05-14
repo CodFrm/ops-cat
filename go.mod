@@ -182,3 +182,6 @@ require (
 )
 
 // replace github.com/wailsapp/wails/v2 v2.10.2 => /Users/codfrm/go/pkg/mod
+
+// 本地联调 cago WithToolDecorator（feat/with-tool-decorator 分支）；cago 发版后改回版本号并删除本行
+replace github.com/cago-frame/agents => /Users/codfrm/Code/cago/agents

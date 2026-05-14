@@ -94,6 +94,9 @@ func BuildSystem(ctx context.Context, cfg SystemConfig) (*coding.System, error) 
 		coding.WithoutSkills(),
 		coding.WithoutSlashCommands(),
 		coding.WithSystemTemplate(opskatSystemTemplate),
+		// 把 bash/write/edit 重命名为 local_*，LLM 在工具列表里就能一眼区分本地 vs 远程。
+		// 见 internal/ai/local_tool_wrap.go。
+		coding.WithToolDecorator(WrapLocalTool),
 		coding.WithAgentOpts(agent.Use(".*", auditMiddleware)),
 		// Provider/网络瞬态错误自动重试：429/5xx/timeout/EOF 等命中 cago 默认 ShouldRetry。
 		// MaxAttempts=6 = 1 次原始 + 5 次重试；指数退避序列 5s → 10s → 20s → 40s → 60s
@@ -123,7 +126,7 @@ func BuildSystem(ctx context.Context, cfg SystemConfig) (*coding.System, error) 
 	}
 	if cfg.LocalToolGate != nil {
 		opts = append(opts, coding.WithAgentOpts(
-			agent.Use(`^(bash|write|edit)$`, cfg.LocalToolGate.Middleware()),
+			agent.Use(`^local_(bash|write|edit)$`, cfg.LocalToolGate.Middleware()),
 		))
 	}
 	opts = append(opts, coding.WithExtraSubagents(
@@ -133,21 +136,26 @@ func BuildSystem(ctx context.Context, cfg SystemConfig) (*coding.System, error) 
 }
 
 // buildGeneralPurposeEntry 构造一个替换 coding 默认 GeneralPurpose 子 agent 的 Entry。
-// 工具集 = cago GP 默认（read/write/edit/bash 三件套 + grep/find/ls）+ opskat 全部业务工具
+// 工具集 = cago GP 默认（read/write/edit/bash 三件套 + grep/find/ls，经 WrapLocalTool 改名
+// 为 local_bash/local_write/local_edit）+ opskat 全部业务工具
 // （SSH/SQL/Redis/Mongo/K8s/Kafka/资产管理/审批 等，见 Tools()）。
-// 替代 main 的 spawn_agent：子 agent 同样能远程执行命令、查询数据库、操作资产。
 //
 // middleware 把父 agent 同款 middleware 显式注入到 child：
-//   - auditMiddleware 无条件挂，保证子代理触发的 bash/write/edit 也落审计；
-//   - LocalToolGate 非 nil 时挂 bash|write|edit 审批 gate，与父保持同一份白名单
+//   - auditMiddleware 无条件挂，保证子代理触发的 local_bash/local_write/local_edit 也落审计；
+//   - LocalToolGate 非 nil 时挂 local_(bash|write|edit) 审批 gate，与父保持同一份白名单
 //     （以 conversationID 索引）—— 用户在父 agent 里 allowAll 过的 pattern，
 //     子 agent 调同样命令时复用，符合直觉。
 //
 // 注：SubagentWithTools 是"完全替换"（cago 文档明示），所以这里要手工复刻
-// generalPurposeTools 默认集（Session.Coding + grep/find/ls）再追加业务工具。
+// generalPurposeTools 默认集（Session.Coding + grep/find/ls）再追加业务工具，
+// 并且需要对 Session.Coding() 的本地工具显式跑一遍 WrapLocalTool，
+// 否则子 agent 那里 LLM 看到的还是 bash/write/edit。
 func buildGeneralPurposeEntry(prov cagoProvider.Provider, cwd string, gate *LocalToolGate) subagent.Entry {
 	sess := coding.NewSession(cwd)
 	gpTools := append([]tool.Tool{}, sess.Coding()...)
+	for i, t := range gpTools {
+		gpTools[i] = WrapLocalTool(t)
+	}
 	gpTools = append(gpTools,
 		grep.New(grep.Cwd(cwd)),
 		find.New(find.Cwd(cwd)),
@@ -161,7 +169,7 @@ func buildGeneralPurposeEntry(prov cagoProvider.Provider, cwd string, gate *Loca
 	}
 	if gate != nil {
 		subOpts = append(subOpts, coding.SubagentWithAgentOpts(
-			agent.Use(`^(bash|write|edit)$`, gate.Middleware()),
+			agent.Use(`^local_(bash|write|edit)$`, gate.Middleware()),
 		))
 	}
 	return coding.GeneralPurpose(prov, cwd, subOpts...)

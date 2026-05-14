@@ -2045,7 +2045,7 @@ describe("retry/error handling", () => {
     const cbs = await startStreamingConv(402);
     cbs[0]?.({ type: "retry", content: "1", retryDelayMs: 2000, error: "timeout" });
     expect(useAIStore.getState().conversationMessages[402].at(-1)?.retryStatus).toBeTruthy();
-    cbs[0]?.({ type: "tool_start", tool_name: "bash", tool_input: "{}", tool_call_id: "t1" });
+    cbs[0]?.({ type: "tool_start", tool_name: "local_bash", tool_input: "{}", tool_call_id: "t1" });
     expect(useAIStore.getState().conversationMessages[402].at(-1)?.retryStatus).toBeUndefined();
   });
 

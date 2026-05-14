@@ -15,7 +15,7 @@ import (
 // 与 ApprovalItem 不同：本地工具没有 asset/group 概念，只有命令/路径本体；
 // SubCommands 用于 bash 复合命令的展示与默认 pattern 生成。
 type LocalToolApprovalRequest struct {
-	ToolName        string   // "bash" | "write" | "edit"
+	ToolName        string   // "local_bash" | "local_write" | "local_edit"
 	Command         string   // bash: 原始 command；write/edit: path
 	Detail          string   // write 内容预览 / edit 改动预览，bash 留空
 	SubCommands     []string // bash 按 mvdan.cc/sh 拆分的子命令；write/edit 为单条 = path
@@ -25,9 +25,10 @@ type LocalToolApprovalRequest struct {
 // LocalToolConfirmFunc 由上层（App）注入，发起 Wails 事件并阻塞等待用户响应。
 type LocalToolConfirmFunc func(ctx context.Context, req LocalToolApprovalRequest) ApprovalResponse
 
-// LocalToolGate 拦截 coding system 的 bash/write/edit 工具调用。
+// LocalToolGate 拦截 coding system 的 local_bash/local_write/local_edit 工具调用
+// （即经 WrapLocalTool 重命名后的本地工具——见 internal/ai/local_tool_wrap.go）。
 //
-// 行为对齐 run_command：bash 按 && / || / ; / | 拆出子命令，全部命中已存 pattern
+// 行为对齐 run_command：local_bash 按 && / || / ; / | 拆出子命令，全部命中已存 pattern
 // （* 通配，path.Match 语义）才放行；否则发起审批。"本次会话允许" 把用户编辑后的
 // pattern 写入会话内存白名单，键为 conversationID。
 type LocalToolGate struct {
@@ -47,6 +48,8 @@ func NewLocalToolGate(confirm LocalToolConfirmFunc) *LocalToolGate {
 }
 
 // Middleware 返回挂到 coding system 的 cago tool middleware。
+// 仅与 local_(bash|write|edit) 这三件本地工具配套；调用方在 runner.go 用
+// agent.Use(`^local_(bash|write|edit)$`, gate.Middleware()) 挂载。
 //
 // 行为：subjects 缺失或全部命中已存 pattern 时直接 Next 放行；无 confirm 回调
 // 时 AbortWithDeny；用户 deny → AbortWithDeny；allowAll → 写白名单后 Next；
@@ -155,7 +158,7 @@ func matchLocalPattern(tool, pattern, subject string) bool {
 		return true
 	}
 	switch tool {
-	case "bash":
+	case "local_bash":
 		return MatchCommandRule(pattern, subject)
 	default:
 		ok, _ := path.Match(pattern, subject)
@@ -166,7 +169,7 @@ func matchLocalPattern(tool, pattern, subject string) bool {
 // extractSubjects 解析工具输入得到需要审批的主体列表。
 func extractSubjects(tool string, in map[string]any) []string {
 	switch tool {
-	case "bash":
+	case "local_bash":
 		cmd, _ := in["command"].(string)
 		cmd = strings.TrimSpace(cmd)
 		if cmd == "" {
@@ -177,7 +180,7 @@ func extractSubjects(tool string, in map[string]any) []string {
 			return []string{cmd}
 		}
 		return subs
-	case "write", "edit":
+	case "local_write", "local_edit":
 		p, _ := in["path"].(string)
 		p = strings.TrimSpace(p)
 		if p == "" {
@@ -190,10 +193,10 @@ func extractSubjects(tool string, in map[string]any) []string {
 
 func primaryCommand(tool string, in map[string]any) string {
 	switch tool {
-	case "bash":
+	case "local_bash":
 		cmd, _ := in["command"].(string)
 		return cmd
-	case "write", "edit":
+	case "local_write", "local_edit":
 		p, _ := in["path"].(string)
 		return p
 	}
@@ -203,10 +206,10 @@ func primaryCommand(tool string, in map[string]any) string {
 // detailOf 给前端展示用的补充内容：write 显示前若干内容，edit 显示 diff 摘要。
 func detailOf(tool string, in map[string]any) string {
 	switch tool {
-	case "write":
+	case "local_write":
 		c, _ := in["content"].(string)
 		return truncatePreview(c, 800)
-	case "edit":
+	case "local_edit":
 		edits, ok := in["edits"].([]any)
 		if !ok {
 			return ""
@@ -235,11 +238,11 @@ func truncatePreview(s string, maxLen int) string {
 }
 
 // defaultPatterns 为每条 subject 生成默认 pattern。
-// bash: 取第一个 token + " *"；write/edit: 原 path（用户再编辑加 * 或 **）。
+// local_bash: 取第一个 token + " *"；local_write/local_edit: 原 path（用户再编辑加 * 或 **）。
 func defaultPatterns(tool string, subjects []string) []string {
 	out := make([]string, 0, len(subjects))
 	for _, s := range subjects {
-		if tool == "bash" {
+		if tool == "local_bash" {
 			out = append(out, defaultBashPattern(s))
 		} else {
 			out = append(out, s)
