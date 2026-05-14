@@ -36,6 +36,8 @@ export function CancelGitHubAuth():Promise<void>;
 
 export function CancelSSHConnect(arg1:string):Promise<void>;
 
+export function CancelTest(arg1:string):Promise<void>;
+
 export function ChangeSSHDirectory(arg1:string,arg2:string):Promise<void>;
 
 export function CheckForUpdate():Promise<update_svc.UpdateInfo>;
@@ -508,19 +510,19 @@ export function StopK8sPodLogs(arg1:string):Promise<void>;
 
 export function SwitchConversation(arg1:number):Promise<Array<app.ConversationDisplayMessage>>;
 
-export function TestDatabaseConnection(arg1:string,arg2:string):Promise<void>;
+export function TestDatabaseConnection(arg1:string,arg2:string,arg3:string):Promise<void>;
 
-export function TestKafkaConnection(arg1:string,arg2:string):Promise<void>;
+export function TestKafkaConnection(arg1:string,arg2:string,arg3:string):Promise<void>;
 
-export function TestMongoDBConnection(arg1:string,arg2:string):Promise<void>;
+export function TestMongoDBConnection(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function TestPolicyRule(arg1:app.PolicyTestRequest):Promise<app.PolicyTestResult>;
 
-export function TestRedisConnection(arg1:string,arg2:string):Promise<void>;
+export function TestRedisConnection(arg1:string,arg2:string,arg3:string):Promise<void>;
 
-export function TestSSHConnection(arg1:string,arg2:string):Promise<void>;
+export function TestSSHConnection(arg1:string,arg2:string,arg3:string):Promise<void>;
 
-export function TestSerialConnection(arg1:string):Promise<void>;
+export function TestSerialConnection(arg1:string,arg2:string):Promise<void>;
 
 export function TestWebDAVConfig(arg1:app.WebDAVSaveInput):Promise<void>;
 

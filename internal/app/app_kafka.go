@@ -1,11 +1,14 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/service/kafka_svc"
+	"github.com/opskat/opskat/internal/service/testreg"
 )
 
 func (a *App) kafkaSvc() *kafka_svc.Service {
@@ -16,13 +19,18 @@ func (a *App) kafkaSvc() *kafka_svc.Service {
 }
 
 // TestKafkaConnection 测试 Kafka 连接
+// testID: 前端生成的本次测试唯一标识，用于配合 CancelTest 中断
 // configJSON: KafkaConfig JSON，plainPassword: 明文密码
-func (a *App) TestKafkaConnection(configJSON string, plainPassword string) error {
+func (a *App) TestKafkaConnection(testID string, configJSON string, plainPassword string) error {
 	var cfg asset_entity.KafkaConfig
 	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
 		return fmt.Errorf("配置解析失败: %w", err)
 	}
-	return a.kafkaSvc().TestConnection(a.langCtx(), &cfg, plainPassword, 0)
+	parent, parentCancel := context.WithTimeout(a.langCtx(), 10*time.Second)
+	defer parentCancel()
+	ctx, release := testreg.Begin(parent, testID)
+	defer release()
+	return a.kafkaSvc().TestConnection(ctx, &cfg, plainPassword, 0)
 }
 
 func (a *App) KafkaClusterOverview(assetID int64) (kafka_svc.ClusterOverview, error) {

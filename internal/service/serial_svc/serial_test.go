@@ -1,6 +1,7 @@
 package serial_svc
 
 import (
+	"context"
 	"errors"
 	"io"
 	"sync"
@@ -451,6 +452,66 @@ func TestManagerWatchCallbackSetupKeepsSessionAfterCallbacks(t *testing.T) {
 	require.Eventually(t, func() bool {
 		_, ok := mgr.GetSession(sess.ID)
 		return !ok
+	}, time.Second, 5*time.Millisecond)
+}
+
+func TestManagerTestConnectionReturnsCanceledBeforeOpen(t *testing.T) {
+	originalOpen := openSerialPort
+	openCalled := false
+	openSerialPort = func(string, *serial.Mode) (serial.Port, error) {
+		openCalled = true
+		return &fakePort{}, nil
+	}
+	t.Cleanup(func() {
+		openSerialPort = originalOpen
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := NewManager().TestConnection(ctx, ConnectConfig{PortPath: "loopback"})
+	require.ErrorIs(t, err, context.Canceled)
+	assert.False(t, openCalled)
+}
+
+func TestManagerTestConnectionCleansUpWhenCanceledDuringOpen(t *testing.T) {
+	originalOpen := openSerialPort
+	openCalled := make(chan struct{})
+	releaseOpen := make(chan struct{})
+	port := &fakePort{}
+	openSerialPort = func(string, *serial.Mode) (serial.Port, error) {
+		close(openCalled)
+		<-releaseOpen
+		return port, nil
+	}
+	t.Cleanup(func() {
+		openSerialPort = originalOpen
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	mgr := NewManager()
+	go func() {
+		errCh <- mgr.TestConnection(ctx, ConnectConfig{PortPath: "loopback"})
+	}()
+
+	select {
+	case <-openCalled:
+	case <-time.After(time.Second):
+		t.Fatal("serial open was not called")
+	}
+	cancel()
+
+	select {
+	case err := <-errCh:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("TestConnection did not return after cancellation")
+	}
+
+	close(releaseOpen)
+	require.Eventually(t, func() bool {
+		return port.getCloseCount() == 1
 	}, time.Second, 5*time.Millisecond)
 }
 

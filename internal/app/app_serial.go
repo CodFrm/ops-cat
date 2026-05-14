@@ -5,10 +5,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/service/asset_svc"
 	"github.com/opskat/opskat/internal/service/serial_svc"
+	"github.com/opskat/opskat/internal/service/testreg"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -106,13 +108,19 @@ func (a *App) ConnectSerialAsync(req SerialConnectRequest) (string, error) {
 }
 
 // TestSerialConnection 测试串口连接（打开后立即关闭）
-func (a *App) TestSerialConnection(configJSON string) error {
+// testID: 前端生成的本次测试唯一标识，用于配合 CancelTest 中断。
+func (a *App) TestSerialConnection(testID string, configJSON string) error {
 	var cfg asset_entity.SerialConfig
 	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
 		return fmt.Errorf("%s: %w", a.pickMsg("配置解析失败", "parse config failed"), err)
 	}
 
-	sessionID, err := a.serialManager.Connect(serial_svc.ConnectConfig{
+	parent, parentCancel := context.WithTimeout(a.langCtx(), 10*time.Second)
+	defer parentCancel()
+	ctx, release := testreg.Begin(parent, testID)
+	defer release()
+
+	return a.serialManager.TestConnection(ctx, serial_svc.ConnectConfig{
 		PortPath:    cfg.PortPath,
 		BaudRate:    cfg.BaudRate,
 		DataBits:    cfg.DataBits,
@@ -120,14 +128,6 @@ func (a *App) TestSerialConnection(configJSON string) error {
 		Parity:      cfg.Parity,
 		FlowControl: cfg.FlowControl,
 	})
-	if err != nil {
-		return err
-	}
-
-	// 立即断开测试连接
-	a.serialManager.Disconnect(sessionID)
-
-	return nil
 }
 
 // WriteSerial 向串口终端写入数据（base64 编码）
