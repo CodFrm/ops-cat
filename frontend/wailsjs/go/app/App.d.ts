@@ -431,6 +431,8 @@ export function RespondOpsctlApproval(arg1:string,arg2:ai.ApprovalResponse):Prom
 
 export function RespondPermission(arg1:string,arg2:string):Promise<void>;
 
+export function RestartApp():Promise<void>;
+
 export function SFTPCancelTransfer(arg1:string):Promise<void>;
 
 export function SFTPDelete(arg1:string,arg2:string,arg3:boolean):Promise<void>;
