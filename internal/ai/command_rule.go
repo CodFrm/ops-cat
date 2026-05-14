@@ -55,9 +55,10 @@ func ParseCommandRule(rule string) *ParsedCommand {
 	return result
 }
 
-// ParseActualCommand 解析实际命令，用规则的 flag 列表作为参照判断哪些 flag 带值
-func ParseActualCommand(command string, rule *ParsedCommand) *ParsedCommand {
-	tokens := tokenize(command)
+// ParseActualCommand 解析实际命令。rule 参数当前未参与判定（保留以备未来按规则提示
+// 区分 flag 是否带值），现行规则是：下一个 token 不是 flag 就视为该 flag 的值。
+func ParseActualCommand(command string, _ *ParsedCommand) *ParsedCommand {
+	tokens := stripLeadingAssigns(tokenize(command))
 	if len(tokens) == 0 {
 		return &ParsedCommand{}
 	}
@@ -71,21 +72,16 @@ func ParseActualCommand(command string, rule *ParsedCommand) *ParsedCommand {
 	for i < len(tokens) {
 		t := tokens[i]
 		if isFlag(t) {
-			if strings.Contains(t, "=") {
+			switch {
+			case strings.Contains(t, "="):
 				parts := strings.SplitN(t, "=", 2)
 				result.Flags[parts[0]] = parts[1]
-			} else if i+1 < len(tokens) && !isFlag(tokens[i+1]) {
-				// 用规则判断：如果规则中该 flag 带值，则实际命令中也视为带值
-				if _, hasValue := rule.Flags[t]; hasValue || rule.Flags[t] != "" {
-					result.Flags[t] = tokens[i+1]
-					i++
-				} else {
-					// 规则中没有该 flag，按启发式处理：
-					// 如果下一个 token 不是 flag 且不以 - 开头，视为带值
-					result.Flags[t] = tokens[i+1]
-					i++
-				}
-			} else {
+			case i+1 < len(tokens) && !isFlag(tokens[i+1]):
+				// 下一个 token 不是 flag，视为带值
+				result.Flags[t] = tokens[i+1]
+				i++
+			default:
+				// 布尔 flag
 				result.Flags[t] = ""
 			}
 		} else {
@@ -99,6 +95,11 @@ func ParseActualCommand(command string, rule *ParsedCommand) *ParsedCommand {
 
 // MatchCommandRule 检查实际命令是否匹配规则字符串
 func MatchCommandRule(rule, command string) bool {
+	// 单独 "*" 作为规则匹配任意非空命令（含带环境变量前缀的命令）
+	if isWildcardAll(rule) {
+		return strings.TrimSpace(command) != ""
+	}
+
 	parsedRule := ParseCommandRule(rule)
 	if parsedRule.Program == "" {
 		return false
@@ -180,6 +181,82 @@ func isFlag(s string) bool {
 	return strings.HasPrefix(s, "-")
 }
 
+// dangerousEnvAssigns 列出会改变命令解析或解释器行为的环境变量。
+// 这些变量出现在命令头部时，绝不能像 DEBIAN_FRONTEND 那样被静默剥离 ——
+// 否则 `PATH=/tmp/evil ls` 这种攻击载荷会被 `ls *` 规则放行。
+var dangerousEnvAssigns = map[string]struct{}{
+	"PATH":                       {},
+	"LD_PRELOAD":                 {},
+	"LD_LIBRARY_PATH":            {},
+	"LD_AUDIT":                   {},
+	"LD_DEBUG":                   {},
+	"DYLD_INSERT_LIBRARIES":      {}, // macOS 等价 LD_PRELOAD
+	"DYLD_LIBRARY_PATH":          {},
+	"DYLD_FALLBACK_LIBRARY_PATH": {},
+	"IFS":                        {},
+	"BASH_ENV":                   {},
+	"ENV":                        {},
+	"SHELLOPTS":                  {},
+	"BASHOPTS":                   {},
+	"BASH_FUNC":                  {}, // shellshock 类
+	"PROMPT_COMMAND":             {},
+	"PS4":                        {},
+	"GIT_CONFIG_GLOBAL":          {},
+	"GIT_CONFIG_SYSTEM":          {},
+	"NIX_PATH":                   {},
+	"PYTHONPATH":                 {},
+	"PERL5LIB":                   {},
+	"RUBYLIB":                    {},
+	"NODE_OPTIONS":               {},
+}
+
+// stripLeadingAssigns 剥掉实际命令头部的 NAME=VALUE 环境变量赋值，
+// 让 `DEBIAN_FRONTEND=noninteractive apt-get update` 与规则 `apt-get *` 匹配。
+// 遇到危险变量（PATH、LD_PRELOAD 等）立刻停止剥离，保留前缀让 Program 比较失败，
+// 上层会落到 NeedConfirm，迫使用户明确审批一次。
+func stripLeadingAssigns(tokens []string) []string {
+	i := 0
+	for i < len(tokens) && looksLikeEnvAssign(tokens[i]) {
+		if isDangerousEnvAssign(tokens[i]) {
+			return tokens[i:]
+		}
+		i++
+	}
+	return tokens[i:]
+}
+
+// isDangerousEnvAssign 判断 token 是否是危险环境变量赋值（NAME 在黑名单）。
+func isDangerousEnvAssign(t string) bool {
+	eq := strings.IndexByte(t, '=')
+	if eq <= 0 {
+		return false
+	}
+	if _, ok := dangerousEnvAssigns[t[:eq]]; ok {
+		return true
+	}
+	return false
+}
+
+func looksLikeEnvAssign(t string) bool {
+	eq := strings.IndexByte(t, '=')
+	if eq <= 0 {
+		return false
+	}
+	for i := range eq {
+		c := t[i]
+		if i == 0 {
+			if c != '_' && (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
+				return false
+			}
+		} else {
+			if c != '_' && (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func matchSubCommand(pattern string, subs []string) bool {
 	for _, sub := range subs {
 		if matchGlobPattern(pattern, sub) {
@@ -227,7 +304,7 @@ func allSubCommandsAllowed(subCmds []string, allowRules []string) (bool, string)
 
 // findHintRules 从 allow 规则中找同程序名的规则作为提示
 func findHintRules(command string, allowRules []string) []string {
-	tokens := tokenize(command)
+	tokens := stripLeadingAssigns(tokenize(command))
 	if len(tokens) == 0 {
 		return nil
 	}

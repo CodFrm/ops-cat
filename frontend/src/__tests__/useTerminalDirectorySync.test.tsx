@@ -11,7 +11,7 @@ function buildTabData(): TerminalTabData {
   return {
     splitTree: { type: "terminal", sessionId },
     activePaneId: sessionId,
-    panes: { [sessionId]: { sessionId, connected: true, connectedAt: 0 } },
+    panes: { [sessionId]: { sessionId, transport: "ssh" as const, connected: true, connectedAt: 0 } },
     directoryFollowMode: "off",
   };
 }

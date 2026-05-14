@@ -4,7 +4,7 @@ import { Button, ScrollArea } from "@opskat/ui";
 import { type SFTPTransfer, useSFTPStore } from "@/stores/sftpStore";
 
 interface TransferSectionProps {
-  sessionId: string;
+  tabId: string;
   transfers: SFTPTransfer[];
 }
 
@@ -64,9 +64,9 @@ function TransferRow({ transfer }: { transfer: SFTPTransfer }) {
   );
 }
 
-export function TransferSection({ sessionId, transfers }: TransferSectionProps) {
+export function TransferSection({ tabId, transfers }: TransferSectionProps) {
   const { t } = useTranslation();
-  const clearCompletedForSession = useSFTPStore((s) => s.clearCompletedForSession);
+  const clearCompletedForTab = useSFTPStore((s) => s.clearCompletedForTab);
 
   if (transfers.length === 0) {
     return null;
@@ -80,7 +80,7 @@ export function TransferSection({ sessionId, transfers }: TransferSectionProps) 
           variant="ghost"
           size="icon-xs"
           className="h-4 w-4"
-          onClick={() => clearCompletedForSession(sessionId)}
+          onClick={() => clearCompletedForTab(tabId)}
           title={t("sftp.clear")}
         >
           <X className="h-2.5 w-2.5" />

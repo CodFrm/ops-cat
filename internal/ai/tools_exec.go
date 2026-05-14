@@ -7,8 +7,8 @@ import (
 	"github.com/cago-frame/agents/tool"
 )
 
-// execTools SSH / 文件传输 / grant 申请 共 4 个工具。
-// 命令类工具（run_command / upload_file / download_file）标 Serial：跟原"整轮串行"语义对齐，
+// execTools SSH / 串口 / 文件传输 / grant 申请。
+// 命令类工具（run_command / run_serial_command / upload_file / download_file）标 Serial：跟原"整轮串行"语义对齐，
 // 防止同会话内并发产生不可预期的资源争用（同一 SSH 连接复用、SFTP 句柄、审计排序等）。
 // request_permission 不直接执行命令，但语义上属于"重操作触发面板"，沿用 Serial 以保证审批弹窗串行可控。
 func execTools() []tool.Tool {
@@ -27,6 +27,26 @@ func execTools() []tool.Tool {
 			IsSerial: true,
 			Handler: func(ctx context.Context, in map[string]any) (*agent.ToolResultBlock, error) {
 				out, err := handleRunCommand(ctx, in)
+				if err != nil {
+					return nil, err
+				}
+				return &agent.ToolResultBlock{Content: []agent.ContentBlock{agent.TextBlock{Text: out}}}, nil
+			},
+		},
+		&tool.RawTool{
+			NameStr: "run_serial_command",
+			DescStr: "Send a command to a serial port device (e.g. network switch, firewall console) and return the output. The serial session must already be connected by the user in the terminal tab. The command is sent over the existing serial connection and output is collected until silence (2s) or max timeout (15s). Use this for H3C, Huawei, Cisco and other console-connected devices.",
+			SchemaVal: agent.Schema{
+				Type: "object",
+				Properties: map[string]*agent.Property{
+					"asset_id": {Type: "number", Description: "Target serial asset ID. Use list_assets with asset_type='serial' to find it."},
+					"command":  {Type: "string", Description: "Command to send to the serial device (e.g. 'display version', 'show ip interface brief')."},
+				},
+				Required: []string{"asset_id", "command"},
+			},
+			IsSerial: true,
+			Handler: func(ctx context.Context, in map[string]any) (*agent.ToolResultBlock, error) {
+				out, err := handleRunSerialCommand(ctx, in)
 				if err != nil {
 					return nil, err
 				}

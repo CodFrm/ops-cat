@@ -16,6 +16,12 @@ func TestDefaultPolicyRegistry(t *testing.T) {
 			So(ok, ShouldBeTrue)
 			So(cp.Groups, ShouldContain, BuiltinLinuxReadOnly)
 
+			p, ok = GetDefaultPolicyOf("serial")
+			So(ok, ShouldBeTrue)
+			cp, ok = p.(*CommandPolicy)
+			So(ok, ShouldBeTrue)
+			So(cp.Groups, ShouldContain, BuiltinLinuxReadOnly)
+
 			p, ok = GetDefaultPolicyOf("database")
 			So(ok, ShouldBeTrue)
 			qp, ok := p.(*QueryPolicy)
