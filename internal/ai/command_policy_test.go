@@ -315,6 +315,24 @@ func TestExtractSubCommands(t *testing.T) {
 				"git clone --depth 1 https://example.com/x.git x",
 			})
 		})
+
+		Convey("$$ 是 PID 展开，不是命令分隔符", func() {
+			// `$$` 是 ParamExp（shell 进程 PID），不应被当作 && 之类的执行分隔符
+			cmds, err := ExtractSubCommands("echo $$")
+			So(err, ShouldBeNil)
+			So(cmds, ShouldHaveLength, 1)
+			So(cmds[0], ShouldEqual, "echo $$")
+
+			cmds, err = ExtractSubCommands("kill -9 $$ && echo done")
+			So(err, ShouldBeNil)
+			So(cmds, ShouldResemble, []string{"kill -9 $$", "echo done"})
+		})
+
+		Convey("解析失败返回错误", func() {
+			// 未闭合的命令替换：parser 应当报错，让上层走 NeedConfirm 兜底
+			_, err := ExtractSubCommands("echo $(")
+			So(err, ShouldNotBeNil)
+		})
 	})
 }
 

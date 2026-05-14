@@ -1030,3 +1030,111 @@ func TestCheckPermission_SQLGrantWithTypeAlias(t *testing.T) {
 		So(result.DecisionSource, ShouldEqual, SourceGrantAllow)
 	})
 }
+
+// TestCheckPermission_GrantSaveReuseRoundTrip 覆盖 allowAll 拆分保存 → 后续 Check
+// 命中复用的端到端闭环。验证 EditedItems 中的通配 pattern 拆条后能让不同的
+// 组合命令复用。
+func TestCheckPermission_GrantSaveReuseRoundTrip(t *testing.T) {
+	Convey("allowAll 保存的 grant 在后续 Check 中能命中复用", t, func() {
+		ctx, mockAsset, _ := setupPolicyTest(t)
+		stubGrant := newStubGrantRepo()
+		origGrant := grant_repo.Grant()
+		grant_repo.RegisterGrant(stubGrant)
+		t.Cleanup(func() {
+			if origGrant != nil {
+				grant_repo.RegisterGrant(origGrant)
+			}
+		})
+
+		asset := &asset_entity.Asset{ID: 1, Name: "web-01", Type: asset_entity.AssetTypeSSH}
+		mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+		confirmCalls := 0
+		checker := NewCommandPolicyChecker(func(_ context.Context, _ string, _ []ApprovalItem) ApprovalResponse {
+			confirmCalls++
+			return ApprovalResponse{
+				Decision: "allowAll",
+				EditedItems: []ApprovalItem{
+					{Type: "exec", Command: "ls *\ncat *"},
+				},
+			}
+		})
+
+		sessCtx := WithSessionID(ctx, "sess-roundtrip")
+
+		// 第一次：触发 allowAll，按行 + ExtractSubCommands 拆成 "ls *" + "cat *" 两条 grant
+		result := checker.Check(sessCtx, 1, "ls /tmp && cat /etc/hosts")
+		So(result.Decision, ShouldEqual, Allow)
+		So(result.DecisionSource, ShouldEqual, SourceUserAllow)
+		So(confirmCalls, ShouldEqual, 1)
+		So(stubGrant.items["sess-roundtrip"], ShouldHaveLength, 2)
+		So(stubGrant.items["sess-roundtrip"][0].Command, ShouldEqual, "ls *")
+		So(stubGrant.items["sess-roundtrip"][1].Command, ShouldEqual, "cat *")
+
+		// 第二次：不同的组合命令，每个子命令都能被已存 grant 命中 → SourceGrantAllow
+		result2 := CheckPermission(sessCtx, "ssh", 1, "ls /var/log && cat /etc/passwd")
+		So(result2.Decision, ShouldEqual, Allow)
+		So(result2.DecisionSource, ShouldEqual, SourceGrantAllow)
+
+		// 第三次：未覆盖的 rm 子命令应回到 NeedConfirm（不会偷偷复用 ls / cat grant）
+		result3 := CheckPermission(sessCtx, "ssh", 1, "ls /tmp && rm /tmp/foo")
+		So(result3.Decision, ShouldEqual, NeedConfirm)
+		So(confirmCalls, ShouldEqual, 1) // 第二、第三次没有再次触发 confirm 回调
+	})
+}
+
+// TestCheckPermission_SSHAstParseError 覆盖 #1：AST 解析失败时不能退回到整串 allow 匹配。
+func TestCheckPermission_SSHAstParseError(t *testing.T) {
+	Convey("shell AST 解析失败时即便有 allow * 也只能 NeedConfirm", t, func() {
+		ctx, mockAsset, _ := setupPolicyTest(t)
+		asset := &asset_entity.Asset{
+			ID:   1,
+			Type: asset_entity.AssetTypeSSH,
+			CmdPolicy: mustJSON(asset_entity.CommandPolicy{
+				AllowList: []string{"*"},
+			}),
+		}
+		mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+		// 未闭合的命令替换，mvdan.cc/sh parser 会报错
+		result := CheckPermission(ctx, "ssh", 1, "echo $(")
+		So(result.Decision, ShouldEqual, NeedConfirm)
+	})
+}
+
+// TestCheckPermission_K8sAstParseError 覆盖 #1（K8s 路径同样不能整串放行）。
+func TestCheckPermission_K8sAstParseError(t *testing.T) {
+	Convey("K8s shell AST 解析失败时即便 allow * 也只能 NeedConfirm", t, func() {
+		ctx, mockAsset, _ := setupPolicyTest(t)
+		asset := &asset_entity.Asset{
+			ID:   1,
+			Type: asset_entity.AssetTypeK8s,
+			CmdPolicy: mustJSON(asset_entity.K8sPolicy{
+				AllowList: []string{"*"},
+			}),
+		}
+		mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+		result := CheckPermission(ctx, asset_entity.AssetTypeK8s, 1, "kubectl get $(")
+		So(result.Decision, ShouldEqual, NeedConfirm)
+	})
+}
+
+// TestCheckPermission_K8sGroupGenericBypass 覆盖 #2：组通用 allow 不能用整串匹配绕过子命令检查。
+func TestCheckPermission_K8sGroupGenericBypass(t *testing.T) {
+	Convey("组通用 CmdPolicy allow 必须按子命令逐条命中", t, func() {
+		ctx, mockAsset, stubGrp := setupPolicyTest(t)
+		stubGrp.groups[10] = &group_entity.Group{
+			ID: 10, Name: "k8s-team",
+			CmdPolicy: `{"allow_list":["kubectl *"]}`,
+		}
+		asset := &asset_entity.Asset{
+			ID: 1, Type: asset_entity.AssetTypeK8s, GroupID: 10,
+		}
+		mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+		// 前段被 kubectl * 命中，后段是非 kubectl 命令；组层整串匹配会误放行
+		result := CheckPermission(ctx, asset_entity.AssetTypeK8s, 1, "kubectl get pods && curl http://evil.com")
+		So(result.Decision, ShouldNotEqual, Allow)
+	})
+}

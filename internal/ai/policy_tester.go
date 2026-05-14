@@ -117,7 +117,10 @@ func checkGenericAllow(rules []taggedRule, command string, matchFn MatchFunc) *P
 
 func testSSHPolicy(ctx context.Context, current *asset_entity.CommandPolicy, groups []*group_entity.Group, command string) PolicyTestOutput {
 	subCmds, err := ExtractSubCommands(command)
-	if err != nil || len(subCmds) == 0 {
+	if err != nil {
+		return PolicyTestOutput{Decision: NeedConfirm}
+	}
+	if len(subCmds) == 0 {
 		subCmds = []string{command}
 	}
 
@@ -390,62 +393,83 @@ func resolveGroupChainForTest(ctx context.Context, assetID, groupID int64) []*gr
 }
 
 // CheckGroupGenericPolicy 在真实执行路径中检查组的通用策略（CmdPolicy）。
-// 对 Redis/Database 资产，在类型专用策略检查之外额外检查组通用规则。
-func CheckGroupGenericPolicy(ctx context.Context, assetID int64, command string, matchFn MatchFunc) CheckResult {
+// subCmds 是已经按资产语义拆好的执行单元：对 K8s/SSH 这类 shell 类资产应传入
+// ExtractSubCommands 的结果；对 Database/Redis/Mongo/Kafka 等单语句类资产传入
+// 单元素切片即可。Deny 优先：任一子命令命中即拒绝；Allow 必须所有子命令都命中。
+func CheckGroupGenericPolicy(ctx context.Context, assetID int64, subCmds []string, matchFn MatchFunc) CheckResult {
+	if len(subCmds) == 0 {
+		return CheckResult{Decision: NeedConfirm}
+	}
 	asset, err := asset_svc.Asset().Get(ctx, assetID)
 	if err != nil || asset == nil || asset.GroupID == 0 {
 		return CheckResult{Decision: NeedConfirm}
 	}
 
 	groups := resolveGroupChain(ctx, asset.GroupID)
+
+	type taggedGroupRule struct {
+		Rule, GroupName string
+	}
+	var allDeny, allAllow []taggedGroupRule
 	for _, g := range groups {
 		p, err := g.GetCommandPolicy()
 		if err != nil || p == nil {
 			continue
 		}
-		// 解析引用的权限组
-		var allDeny []string
 		if len(p.Groups) > 0 {
-			_, grpDeny := resolveCommandGroups(ctx, p.Groups)
-			allDeny = append(allDeny, grpDeny...)
+			grpAllow, grpDeny := resolveCommandGroups(ctx, p.Groups)
+			for _, r := range grpDeny {
+				allDeny = append(allDeny, taggedGroupRule{r, g.Name})
+			}
+			for _, r := range grpAllow {
+				allAllow = append(allAllow, taggedGroupRule{r, g.Name})
+			}
 		}
-		allDeny = append(allDeny, p.DenyList...)
+		for _, r := range p.DenyList {
+			allDeny = append(allDeny, taggedGroupRule{r, g.Name})
+		}
+		for _, r := range p.AllowList {
+			allAllow = append(allAllow, taggedGroupRule{r, g.Name})
+		}
+	}
 
-		// deny 检查
-		for _, rule := range allDeny {
-			if matchFn(rule, command) {
+	// deny：任一子命令被命中即拒绝
+	for _, sub := range subCmds {
+		for _, tr := range allDeny {
+			if matchFn(tr.Rule, sub) {
 				return CheckResult{
 					Decision:       Deny,
-					Message:        policyFmt(ctx, "command denied by group [%s] policy: %s", "命令被组 [%s] 策略禁止: %s", g.Name, command),
+					Message:        policyFmt(ctx, "command denied by group [%s] policy: %s", "命令被组 [%s] 策略禁止: %s", tr.GroupName, sub),
 					DecisionSource: SourcePolicyDeny,
-					MatchedPattern: rule,
+					MatchedPattern: tr.Rule,
 				}
 			}
 		}
 	}
 
-	// allow 检查
-	for _, g := range groups {
-		p, err := g.GetCommandPolicy()
-		if err != nil || p == nil {
-			continue
-		}
-		var allAllow []string
-		if len(p.Groups) > 0 {
-			grpAllow, _ := resolveCommandGroups(ctx, p.Groups)
-			allAllow = append(allAllow, grpAllow...)
-		}
-		allAllow = append(allAllow, p.AllowList...)
-		for _, rule := range allAllow {
-			if matchFn(rule, command) {
-				return CheckResult{
-					Decision:       Allow,
-					DecisionSource: SourcePolicyAllow,
-					MatchedPattern: rule,
+	// allow：每个子命令都必须命中某条 allow 规则
+	if len(allAllow) == 0 {
+		return CheckResult{Decision: NeedConfirm}
+	}
+	var firstMatched string
+	for _, sub := range subCmds {
+		matched := false
+		for _, tr := range allAllow {
+			if matchFn(tr.Rule, sub) {
+				matched = true
+				if firstMatched == "" {
+					firstMatched = tr.Rule
 				}
+				break
 			}
 		}
+		if !matched {
+			return CheckResult{Decision: NeedConfirm}
+		}
 	}
-
-	return CheckResult{Decision: NeedConfirm}
+	return CheckResult{
+		Decision:       Allow,
+		DecisionSource: SourcePolicyAllow,
+		MatchedPattern: firstMatched,
+	}
 }

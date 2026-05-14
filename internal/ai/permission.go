@@ -50,7 +50,12 @@ func CheckPermission(ctx context.Context, assetType string, assetID int64, comma
 
 func checkSSHPermission(ctx context.Context, assetID int64, command string) CheckResult {
 	subCmds, err := ExtractSubCommands(command)
-	if err != nil || len(subCmds) == 0 {
+	if err != nil {
+		// 无法完整枚举子命令时不能退回整串匹配，否则 `echo "$(rm -rf /)"` 这类
+		// parser 失败的输入会被 `allow *` 误放行。
+		return CheckResult{Decision: NeedConfirm}
+	}
+	if len(subCmds) == 0 {
 		subCmds = []string{command}
 	}
 
@@ -113,8 +118,8 @@ func checkSSHPermission(ctx context.Context, assetID int64, command string) Chec
 // --- Database ---
 
 func checkDatabasePermission(ctx context.Context, assetID int64, sqlText string) CheckResult {
-	// 组通用策略
-	groupResult := CheckGroupGenericPolicy(ctx, assetID, sqlText, MatchCommandRule)
+	// 组通用策略（SQL 不做 shell 拆分，整条语句交给 MatchCommandRule）
+	groupResult := CheckGroupGenericPolicy(ctx, assetID, []string{sqlText}, MatchCommandRule)
 	if groupResult.Decision == Deny {
 		return groupResult
 	}
@@ -154,8 +159,8 @@ func checkDatabasePermission(ctx context.Context, assetID int64, sqlText string)
 // --- Redis ---
 
 func checkRedisPermission(ctx context.Context, assetID int64, command string) CheckResult {
-	// 组通用策略
-	groupResult := CheckGroupGenericPolicy(ctx, assetID, command, MatchRedisRule)
+	// 组通用策略（Redis 单语句，单元素切片）
+	groupResult := CheckGroupGenericPolicy(ctx, assetID, []string{command}, MatchRedisRule)
 	if groupResult.Decision == Deny {
 		return groupResult
 	}
@@ -190,7 +195,17 @@ func checkRedisPermission(ctx context.Context, assetID int64, command string) Ch
 // --- K8s ---
 
 func checkK8sPermission(ctx context.Context, assetID int64, command string) CheckResult {
-	groupResult := CheckGroupGenericPolicy(ctx, assetID, command, MatchCommandRule)
+	// K8s 也是 shell 类，组通用策略要按 AST 子命令逐条比对，避免整串匹配把
+	// `kubectl get pods && curl evil` 这类组合命令误放行。
+	subCmds, err := ExtractSubCommands(command)
+	if err != nil {
+		return CheckResult{Decision: NeedConfirm}
+	}
+	if len(subCmds) == 0 {
+		subCmds = []string{command}
+	}
+
+	groupResult := CheckGroupGenericPolicy(ctx, assetID, subCmds, MatchCommandRule)
 	if groupResult.Decision == Deny {
 		return groupResult
 	}
@@ -221,8 +236,8 @@ func checkK8sPermission(ctx context.Context, assetID int64, command string) Chec
 // --- MongoDB ---
 
 func checkMongoDBPermission(ctx context.Context, assetID int64, operation string) CheckResult {
-	// 组通用策略
-	groupResult := CheckGroupGenericPolicy(ctx, assetID, operation, MatchCommandRule)
+	// 组通用策略（Mongo 操作是单 token，单元素切片）
+	groupResult := CheckGroupGenericPolicy(ctx, assetID, []string{operation}, MatchCommandRule)
 	if groupResult.Decision == Deny {
 		return groupResult
 	}
@@ -259,7 +274,7 @@ func checkMongoDBPermission(ctx context.Context, assetID int64, operation string
 func checkKafkaPermission(ctx context.Context, assetID int64, command string) CheckResult {
 	// 组通用策略：使用通用 shell-glob 匹配，与 Database/MongoDB 一致；
 	// MatchKafkaRule 仅适用于 "<action> <resource>" 格式，不能用于通用 CommandPolicy。
-	groupResult := CheckGroupGenericPolicy(ctx, assetID, command, MatchCommandRule)
+	groupResult := CheckGroupGenericPolicy(ctx, assetID, []string{command}, MatchCommandRule)
 	if groupResult.Decision == Deny {
 		return groupResult
 	}

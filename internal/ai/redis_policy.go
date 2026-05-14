@@ -125,24 +125,3 @@ func checkRedisPolicyRules(ctx context.Context, policy *asset_entity.RedisPolicy
 	}
 	return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
 }
-
-func mergeRedisPolicy(custom, defaults *asset_entity.RedisPolicy) *asset_entity.RedisPolicy {
-	result := &asset_entity.RedisPolicy{}
-	if custom != nil {
-		result.AllowList = custom.AllowList
-		result.DenyList = append(result.DenyList, custom.DenyList...)
-	}
-	if defaults != nil {
-		// 去重追加默认 deny
-		seen := make(map[string]bool, len(result.DenyList))
-		for _, r := range result.DenyList {
-			seen[strings.ToUpper(r)] = true
-		}
-		for _, r := range defaults.DenyList {
-			if !seen[strings.ToUpper(r)] {
-				result.DenyList = append(result.DenyList, r)
-			}
-		}
-	}
-	return result
-}

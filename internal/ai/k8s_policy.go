@@ -18,7 +18,10 @@ func checkK8sPolicyRules(ctx context.Context, policy *asset_entity.K8sPolicy, co
 
 	// 拆 shell 执行单元，避免组合命令绕过策略
 	subCmds, err := ExtractSubCommands(command)
-	if err != nil || len(subCmds) == 0 {
+	if err != nil {
+		return CheckResult{Decision: NeedConfirm}
+	}
+	if len(subCmds) == 0 {
 		subCmds = []string{command}
 	}
 

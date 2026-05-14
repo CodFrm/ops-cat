@@ -55,8 +55,9 @@ func ParseCommandRule(rule string) *ParsedCommand {
 	return result
 }
 
-// ParseActualCommand 解析实际命令，用规则的 flag 列表作为参照判断哪些 flag 带值
-func ParseActualCommand(command string, rule *ParsedCommand) *ParsedCommand {
+// ParseActualCommand 解析实际命令。rule 参数当前未参与判定（保留以备未来按规则提示
+// 区分 flag 是否带值），现行规则是：下一个 token 不是 flag 就视为该 flag 的值。
+func ParseActualCommand(command string, _ *ParsedCommand) *ParsedCommand {
 	tokens := stripLeadingAssigns(tokenize(command))
 	if len(tokens) == 0 {
 		return &ParsedCommand{}
@@ -71,21 +72,16 @@ func ParseActualCommand(command string, rule *ParsedCommand) *ParsedCommand {
 	for i < len(tokens) {
 		t := tokens[i]
 		if isFlag(t) {
-			if strings.Contains(t, "=") {
+			switch {
+			case strings.Contains(t, "="):
 				parts := strings.SplitN(t, "=", 2)
 				result.Flags[parts[0]] = parts[1]
-			} else if i+1 < len(tokens) && !isFlag(tokens[i+1]) {
-				// 用规则判断：如果规则中该 flag 带值，则实际命令中也视为带值
-				if _, hasValue := rule.Flags[t]; hasValue || rule.Flags[t] != "" {
-					result.Flags[t] = tokens[i+1]
-					i++
-				} else {
-					// 规则中没有该 flag，按启发式处理：
-					// 如果下一个 token 不是 flag 且不以 - 开头，视为带值
-					result.Flags[t] = tokens[i+1]
-					i++
-				}
-			} else {
+			case i+1 < len(tokens) && !isFlag(tokens[i+1]):
+				// 下一个 token 不是 flag，视为带值
+				result.Flags[t] = tokens[i+1]
+				i++
+			default:
+				// 布尔 flag
 				result.Flags[t] = ""
 			}
 		} else {
