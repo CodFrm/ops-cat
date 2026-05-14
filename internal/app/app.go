@@ -2,17 +2,20 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/opskat/opskat/internal/ai"
 	"github.com/opskat/opskat/internal/approval"
 	_ "github.com/opskat/opskat/internal/assettype"
 	"github.com/opskat/opskat/internal/bootstrap"
+	"github.com/opskat/opskat/internal/connpool"
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/repository/asset_repo"
 	"github.com/opskat/opskat/internal/repository/extension_data_repo"
@@ -30,9 +33,17 @@ import (
 
 	"github.com/cago-frame/cago/pkg/i18n"
 	"github.com/cago-frame/cago/pkg/logger"
+	"github.com/redis/go-redis/v9"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
+)
+
+// panelConnIdleTTL 控制 query 面板连接缓存的空闲驱逐阈值。
+// 5 分钟与 sshpool.Pool 的 idle timeout 对齐;evictor 30s 扫一次。
+const (
+	panelConnIdleTTL       = 5 * time.Minute
+	panelConnEvictInterval = 30 * time.Second
 )
 
 // SkillContent 内嵌的 skill/plugin 文件内容（由 main.go 通过 go:embed 注入）
@@ -93,6 +104,13 @@ type App struct {
 	flushAckCh              chan struct{} // OnBeforeClose 等待前端确认 flush 完成
 	k8sLogStreams           sync.Map      // map[string]context.CancelFunc — pod log stream cancellations
 	k8sLogStreamCounter     int64         // pod log stream ID counter
+
+	// query 面板的持久连接缓存(按 assetID:database 维度复用 *sql.DB / *redis.Client / *mongo 客户端)
+	dbPanelCache       *panelConnCache[*sql.DB]
+	redisPanelCache    *panelConnCache[*redis.Client]
+	mongoPanelCache    *panelConnCache[*connpool.MongoClientCloser]
+	panelCacheEvictCtx context.Context
+	panelCacheEvictCxl context.CancelFunc
 }
 
 // NewApp 创建App实例
@@ -127,6 +145,7 @@ func (a *App) Startup(ctx context.Context) {
 	a.startSSHPoolServer(authToken)
 	a.redisService = redis_svc.New(a.sshPool)
 	a.kafkaService = kafka_svc.New(a.sshPool)
+	a.initPanelConnCaches(ctx)
 	a.startAutoUpdateCheck()
 	a.InitAIProvider()
 	a.subscribeAIFlushAck()
@@ -206,6 +225,7 @@ func (a *App) Cleanup() {
 	if a.sshProxyServer != nil {
 		a.sshProxyServer.Stop()
 	}
+	a.closePanelConnCaches()
 	if a.sshPool != nil {
 		a.sshPool.Close()
 	}
@@ -214,6 +234,35 @@ func (a *App) Cleanup() {
 	}
 	if a.extSvc != nil {
 		a.extSvc.Close(context.Background())
+	}
+}
+
+// initPanelConnCaches 初始化 query 面板的三个连接缓存,并启动各自的空闲驱逐协程。
+// 必须在 sshPool 创建之后调用(panel 缓存的 dial 回调通过 sshPool 走 SSH 隧道)。
+func (a *App) initPanelConnCaches(ctx context.Context) {
+	a.dbPanelCache = newPanelConnCache[*sql.DB]("database", panelConnIdleTTL)
+	a.redisPanelCache = newPanelConnCache[*redis.Client]("redis", panelConnIdleTTL)
+	a.mongoPanelCache = newPanelConnCache[*connpool.MongoClientCloser]("mongodb", panelConnIdleTTL)
+	a.panelCacheEvictCtx, a.panelCacheEvictCxl = context.WithCancel(ctx)
+	go a.dbPanelCache.startEvictor(a.panelCacheEvictCtx, panelConnEvictInterval)
+	go a.redisPanelCache.startEvictor(a.panelCacheEvictCtx, panelConnEvictInterval)
+	go a.mongoPanelCache.startEvictor(a.panelCacheEvictCtx, panelConnEvictInterval)
+}
+
+// closePanelConnCaches 关闭 evictor 并释放所有缓存连接。Cleanup 调用,顺序在
+// sshPool.Close 之前以便先把上层应用连接清掉,再回收底层 SSH 传输。
+func (a *App) closePanelConnCaches() {
+	if a.panelCacheEvictCxl != nil {
+		a.panelCacheEvictCxl()
+	}
+	if a.dbPanelCache != nil {
+		_ = a.dbPanelCache.Close()
+	}
+	if a.redisPanelCache != nil {
+		_ = a.redisPanelCache.Close()
+	}
+	if a.mongoPanelCache != nil {
+		_ = a.mongoPanelCache.Close()
 	}
 }
 

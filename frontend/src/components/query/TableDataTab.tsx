@@ -15,7 +15,7 @@ import {
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { isMac, formatModKey } from "@/stores/shortcutStore";
-import { ExecuteSQL } from "../../../wailsjs/go/app/App";
+import { ExecuteSQL, OpenTable } from "../../../wailsjs/go/app/App";
 import {
   QueryResultTable,
   CellEdit,
@@ -65,6 +65,17 @@ interface SQLResult {
   rows?: Record<string, unknown>[];
   count?: number;
   affected_rows?: number;
+}
+
+// 与后端 query_svc.OpenTableResult 对齐
+interface OpenTableResult {
+  columns: string[];
+  columnTypes: Record<string, string>;
+  columnRules: TableColumnRule[];
+  primaryKeys: string[];
+  totalCount: number;
+  firstPage: Record<string, unknown>[];
+  pageSize: number;
 }
 
 const REFRESH_SHORTCUT_LABEL = formatModKey("KeyR");
@@ -167,6 +178,9 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   const latestCountRequest = useRef(0);
   const latestImportRequest = useRef(0);
   const cancelledRequests = useRef(new Set<number>());
+  // openTable 完成后置 true,作为 fetchCount/fetchData 在初次挂载时的跳过门闩
+  // —— 防止 OpenTable 已经一次拿全首屏数据后,后续 effect 仍重复请求 count + page 0。
+  const openedRef = useRef(false);
 
   const driver = queryMeta?.driver;
   const assetId = queryMeta?.assetId ?? 0;
@@ -178,77 +192,52 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   }, []);
   const isCancelled = useCallback((requestId: number) => cancelledRequests.current.has(requestId), []);
 
-  // Fetch primary key column names for the current table. Used to build a
-  // concise UPDATE WHERE clause instead of matching every column.
-  const fetchPrimaryKeys = useCallback(async () => {
-    if (!assetId) return;
-    try {
-      let sql: string;
-      if (driver === "postgresql") {
-        const tableLiteral = sqlQuote(table);
-        sql = `SELECT kcu.column_name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema WHERE tc.table_schema = 'public' AND tc.table_name = ${tableLiteral} AND tc.constraint_type = 'PRIMARY KEY' ORDER BY kcu.ordinal_position`;
-      } else {
-        sql = `SHOW KEYS FROM ${quoteIdent(database, driver)}.${quoteIdent(table, driver)} WHERE Key_name = 'PRIMARY'`;
-      }
-      const result = await ExecuteSQL(assetId, sql, database);
-      const parsed: SQLResult = JSON.parse(result);
-      const cols = (parsed.rows ?? []).map((r) => String(r["Column_name"] ?? r["column_name"] ?? "")).filter(Boolean);
-      setPrimaryKeys(cols);
-    } catch {
-      setPrimaryKeys([]);
-    } finally {
-      setPkLoaded(true);
-    }
-  }, [assetId, database, table, driver]);
-
-  const fetchColumnTypes = useCallback(async () => {
-    if (!assetId) return;
-    try {
-      let sql: string;
-      if (driver === "postgresql") {
-        const tableLiteral = sqlQuote(table);
-        sql =
-          `SELECT column_name, data_type, udt_name, is_nullable, column_default FROM information_schema.columns ` +
-          `WHERE table_schema = 'public' AND table_name = ${tableLiteral} ORDER BY ordinal_position`;
-      } else {
-        sql = `SHOW COLUMNS FROM ${quoteIdent(database, driver)}.${quoteIdent(table, driver)}`;
-      }
-      const result = await ExecuteSQL(assetId, sql, database);
-      const parsed: SQLResult = JSON.parse(result);
-      const next: Record<string, string> = {};
-      const nextRules: TableColumnRule[] = [];
-      for (const row of parsed.rows ?? []) {
-        const name = String(row["column_name"] ?? row["Field"] ?? row["field"] ?? "");
-        const type = String(row["data_type"] ?? row["Type"] ?? row["type"] ?? row["udt_name"] ?? "");
-        if (name && type) next[name] = type;
-        if (name) {
-          const nullableRaw = String(row["is_nullable"] ?? row["Null"] ?? row["null"] ?? "").toUpperCase();
-          const defaultValue = row["column_default"] ?? row["Default"] ?? row["default"];
-          const extra = String(row["Extra"] ?? row["extra"] ?? "").toLowerCase();
-          nextRules.push({
-            name,
-            nullable: nullableRaw === "YES",
-            hasDefault: defaultValue != null,
-            autoIncrement: extra.includes("auto_increment"),
-          });
-        }
-      }
-      setColumnTypes(next);
-      setColumnRules(nextRules);
-    } catch {
-      setColumnTypes({});
-      setColumnRules([]);
-    }
-  }, [assetId, database, table, driver]);
-
+  // 打开表时一次性拉取主键 / 列类型 / 总行数 / 首页数据,替代原来 4 次独立的
+  // ExecuteSQL。后续 fetchCount/fetchData 仍按需触发(filter apply / 翻页 / 排序),
+  // openedRef 作为初次挂载时的门闩,避免和 OpenTable 重复请求。
+  // 用 requestId 接入现有取消系统,让"停止加载"按钮也能丢弃首次加载的结果。
   useEffect(() => {
+    if (!assetId) return;
+    const requestId = nextRequestId();
+    latestDataRequest.current = requestId;
+    latestCountRequest.current = requestId;
+    openedRef.current = false;
     setPrimaryKeys([]);
-    setPkLoaded(false);
-    fetchPrimaryKeys();
     setColumnTypes({});
     setColumnRules([]);
-    fetchColumnTypes();
-  }, [fetchPrimaryKeys, fetchColumnTypes]);
+    setColumns([]);
+    setRows([]);
+    setTotalRows(null);
+    setPkLoaded(false);
+    setLoading(true);
+    setError(null);
+    (async () => {
+      try {
+        const raw = await OpenTable(assetId, database, table, pageSize);
+        if (isCancelled(requestId) || latestDataRequest.current !== requestId) return;
+        const parsed = JSON.parse(raw) as OpenTableResult;
+        setPrimaryKeys(parsed.primaryKeys ?? []);
+        setColumnTypes(parsed.columnTypes ?? {});
+        setColumnRules(parsed.columnRules ?? []);
+        setColumns(parsed.columns ?? []);
+        setRows(parsed.firstPage ?? []);
+        setTotalRows(typeof parsed.totalCount === "number" ? parsed.totalCount : null);
+        openedRef.current = true;
+      } catch (e) {
+        if (isCancelled(requestId) || latestDataRequest.current !== requestId) return;
+        setError(String(e));
+      } finally {
+        if (!isCancelled(requestId) && latestDataRequest.current === requestId) {
+          setPkLoaded(true);
+          setLoading(false);
+        }
+        cancelledRequests.current.delete(requestId);
+      }
+    })();
+    // pageSize 故意不在 deps 里:OpenTable 只在切换表时跑一次,
+    // 用户改 pageSize 由下方 fetchData 的 useEffect 处理。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assetId, database, table, nextRequestId, isCancelled]);
 
   // Fetch total count
   const fetchCount = useCallback(async () => {
@@ -329,10 +318,14 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
   );
 
   useEffect(() => {
+    // OpenTable 已经在初次挂载时填好 totalRows;此处只在 filter apply / 表名变更后
+    // openedRef 仍为 true 时跑(切表会先把 openedRef 重置为 false)。
+    if (!openedRef.current) return;
     fetchCount();
   }, [fetchCount, applyVersion]);
 
   useEffect(() => {
+    if (!openedRef.current) return;
     fetchData(page);
   }, [fetchData, page, applyVersion]);
 

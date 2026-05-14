@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, useTransition } from "react";
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import {
@@ -330,14 +330,25 @@ export function QueryResultTable({
     return out;
   }, [rows, columnFilters]);
 
-  const setColumnFilterForCol = useCallback((col: string, allowed: Set<string> | null) => {
-    setColumnFilters((prev) => {
-      const next = new Map(prev);
-      if (allowed === null) next.delete(col);
-      else next.set(col, allowed);
-      return next;
-    });
-  }, []);
+  // setColumnFilters 触发 filteredIndices/sortedIndices 重算 + 整表 reconcile,
+  // 在大表(>500 行)上会阻塞主线程几百 ms 让复选框勾选感觉延迟。
+  // 用 startTransition 把过滤状态变更标为低优先级,React 先把 ColumnValuePanel 的
+  // 复选框 checked 状态(也是受控,但依赖同一个 state)合并到下一个 commit,
+  // 单次离散点击场景下不会触发 [[feedback_use_deferred_value_starvation]] 的重启循环。
+  const [, startFilterTransition] = useTransition();
+  const setColumnFilterForCol = useCallback(
+    (col: string, allowed: Set<string> | null) => {
+      startFilterTransition(() => {
+        setColumnFilters((prev) => {
+          const next = new Map(prev);
+          if (allowed === null) next.delete(col);
+          else next.set(col, allowed);
+          return next;
+        });
+      });
+    },
+    [startFilterTransition]
+  );
 
   // Selected cell state — click-to-focus + arrow key navigation
   const [selectedCell, setSelectedCell] = useState<{ origIdx: number; col: string } | null>(null);
@@ -1833,7 +1844,16 @@ function ColumnValuePanel({ col, entries, selected, onChange }: ColumnValuePanel
   // user has not touched this column yet — every checkbox renders empty and all
   // rows pass the filter. Once the user checks any value, `selected` becomes a
   // whitelist Set; only rows whose value is in the Set survive.
-  const selectedSet = useMemo(() => selected ?? new Set<string>(), [selected]);
+  //
+  // 父级的 setColumnFilterForCol 包了 startTransition,父 state 更新会被延迟
+  // (避免大表 reconcile 阻塞点击反馈),所以这里用本地 `localSelected` 做乐观更新
+  // 让复选框的勾选状态在主线程上立即可见。父 prop 通过 useEffect 重新同步,
+  // 当 transition commit 时两者归一。
+  const [localSelected, setLocalSelected] = useState<Set<string> | null>(() => selected);
+  useEffect(() => {
+    setLocalSelected(selected);
+  }, [selected]);
+  const selectedSet = useMemo(() => localSelected ?? new Set<string>(), [localSelected]);
   const allKeys = useMemo(() => entries.map((e) => e.key), [entries]);
   const allChecked = allKeys.length > 0 && selectedSet.size === allKeys.length;
 
@@ -1850,10 +1870,12 @@ function ColumnValuePanel({ col, entries, selected, onChange }: ColumnValuePanel
 
   // Commit helper: an empty Set is normalized to `null` so the header Filter
   // icon drops its active indicator and we stop hiding every row.
+  // 先 setLocalSelected 让 UI 立即响应,再把变更冒泡到父级(父级走 startTransition)。
   const commit = useCallback(
     (next: Set<string>) => {
-      if (next.size === 0) onChange(null);
-      else onChange(next);
+      const normalized = next.size === 0 ? null : next;
+      setLocalSelected(normalized);
+      onChange(normalized);
     },
     [onChange]
   );
@@ -1868,8 +1890,15 @@ function ColumnValuePanel({ col, entries, selected, onChange }: ColumnValuePanel
     [selectedSet, commit]
   );
 
-  const handleSelectAll = useCallback(() => onChange(new Set(allKeys)), [onChange, allKeys]);
-  const handleClearAll = useCallback(() => onChange(null), [onChange]);
+  const handleSelectAll = useCallback(() => {
+    const all = new Set(allKeys);
+    setLocalSelected(all);
+    onChange(all);
+  }, [onChange, allKeys]);
+  const handleClearAll = useCallback(() => {
+    setLocalSelected(null);
+    onChange(null);
+  }, [onChange]);
 
   if (entries.length === 0) {
     return <div className="px-3 py-6 text-xs text-muted-foreground text-center">{t("query.noResult")}</div>;

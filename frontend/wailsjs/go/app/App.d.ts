@@ -366,6 +366,8 @@ export function OpenDirectory(arg1:string):Promise<void>;
 
 export function OpenLogsDir():Promise<void>;
 
+export function OpenTable(arg1:number,arg2:string,arg3:string,arg4:number):Promise<string>;
+
 export function PreviewGistBackup(arg1:string,arg2:string,arg3:string):Promise<backup_svc.BackupSummary>;
 
 export function PreviewImportFile(arg1:string,arg2:string):Promise<backup_svc.BackupSummary>;
