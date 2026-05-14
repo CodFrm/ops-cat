@@ -2,8 +2,8 @@ import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState,
 import type { Terminal as XTerminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { SearchAddon } from "@xterm/addon-search";
-import { WriteSSH, ResizeSSH } from "../../../wailsjs/go/app/App";
-import { useShortcutStore, matchShortcut, formatBinding, formatModKey } from "@/stores/shortcutStore";
+import { WriteSSH, WriteSerial, ResizeSSH, ResizeSerialTerminal } from "../../../wailsjs/go/app/App";
+import { useShortcutStore, formatBinding, formatModKey } from "@/stores/shortcutStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useTerminalThemeStore, toXtermTheme } from "@/stores/terminalThemeStore";
 import { builtinThemes, defaultLightTheme, defaultDarkTheme } from "@/data/terminalThemes";
@@ -59,6 +59,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       builtinThemes.find((t) => t.id === selectedThemeId) || customThemes.find((t) => t.id === selectedThemeId);
     return theme ? toXtermTheme(theme) : undefined;
   }, [selectedThemeId, customThemes, resolvedTheme]);
+  const transport = useTerminalStore((s) => s.tabData[tabId]?.panes[sessionId]?.transport ?? "ssh");
+  const isSerial = transport === "serial";
 
   useImperativeHandle(ref, () => ({
     toggleSearch: () => setShowSearch((v) => !v),
@@ -75,10 +77,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const handlePaste = useCallback(() => {
     navigator.clipboard.readText().then((text) => {
       if (text && termRef.current) {
-        WriteSSH(sessionId, bytesToBase64(new TextEncoder().encode(text))).catch(console.error);
+        const writeFn = isSerial ? WriteSerial : WriteSSH;
+        writeFn(sessionId, bytesToBase64(new TextEncoder().encode(text))).catch(console.error);
       }
     });
-  }, [sessionId]);
+  }, [isSerial, sessionId]);
 
   const handleSelectAll = useCallback(() => {
     termRef.current?.selectAll();
@@ -88,7 +91,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
 
-    const inst = getOrCreateTerminal(sessionId, { fontSize, fontFamily, theme: xtermTheme, scrollback });
+    const inst = getOrCreateTerminal(sessionId, { fontSize, fontFamily, theme: xtermTheme, scrollback, transport });
     termRef.current = inst.term;
     fitAddonRef.current = inst.fitAddon;
     searchAddonRef.current = inst.searchAddon;
@@ -103,21 +106,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       inst.fitAddon.fit();
     });
 
-    inst.term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-      const action = matchShortcut(e, useShortcutStore.getState().shortcuts);
-      if (action === "panel.filter" && e.type === "keydown") {
-        setShowSearch((v) => !v);
-        return false;
+    inst.bridge.setOnFilter(() => setShowSearch((v) => !v));
+    inst.bridge.setOnCopy(() => {
+      const selection = inst.term.getSelection();
+      if (selection) {
+        navigator.clipboard.writeText(selection);
+        toast.success(t("ssh.contextMenu.copied"), { duration: 1500 });
+        return true;
       }
-      if (e.key === "c" && (e.ctrlKey || e.metaKey) && e.type === "keydown") {
-        const selection = inst.term.getSelection();
-        if (selection) {
-          navigator.clipboard.writeText(selection);
-          toast.success(t("ssh.contextMenu.copied"), { duration: 1500 });
-          return false;
-        }
-      }
-      return !action;
+      return false;
     });
 
     const selDispose = inst.term.onSelectionChange(() => {
@@ -134,7 +131,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         inst.fitAddon.fit();
         const dims = inst.fitAddon.proposeDimensions();
         if (dims) {
-          ResizeSSH(sessionId, dims.cols, dims.rows).catch(console.error);
+          const resizeFn = isSerial ? ResizeSerialTerminal : ResizeSSH;
+          resizeFn(sessionId, dims.cols, dims.rows).catch(console.error);
         }
       }, 50);
     });
@@ -149,8 +147,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // skip any term operations and just detach.
       const stillAlive = getTerminalInstance(sessionId) === inst;
       if (stillAlive) {
-        // Drop key handler so its closures can be GC'd; xterm only stores one slot.
-        inst.term.attachCustomKeyEventHandler(() => true);
+        // Drop callback closures so toast/setShowSearch can be GC'd;
+        // bridge keeps a single handler slot, just reset to no-ops.
+        inst.bridge.setOnFilter(() => {});
+        inst.bridge.setOnCopy(() => false);
       }
       if (inst.container.parentElement === wrapper) {
         wrapper.removeChild(inst.container);
@@ -170,6 +170,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     termRef.current.options.scrollback = scrollback;
     fitAddonRef.current?.fit();
   }, [xtermTheme, fontSize, fontFamily, scrollback]);
+
+  useEffect(() => {
+    const inst = getTerminalInstance(sessionId);
+    if (inst) inst.bridge.setShortcuts(shortcuts);
+  }, [sessionId, shortcuts]);
 
   useEffect(() => {
     activeRef.current = active;
@@ -230,16 +235,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
             <ContextMenuShortcut>{formatBinding(shortcuts["panel.filter"])}</ContextMenuShortcut>
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => splitPane(tabId, "horizontal")} disabled={!paneConnected}>
+          <ContextMenuItem onClick={() => splitPane(tabId, "horizontal")} disabled={!paneConnected || isSerial}>
             {t("ssh.session.splitH")}
             <ContextMenuShortcut>{formatBinding(shortcuts["split.horizontal"])}</ContextMenuShortcut>
           </ContextMenuItem>
-          <ContextMenuItem onClick={() => splitPane(tabId, "vertical")} disabled={!paneConnected}>
+          <ContextMenuItem onClick={() => splitPane(tabId, "vertical")} disabled={!paneConnected || isSerial}>
             {t("ssh.session.splitV")}
             <ContextMenuShortcut>{formatBinding(shortcuts["split.vertical"])}</ContextMenuShortcut>
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => toggleFileManager(tabId)}>{t("ssh.contextMenu.sftp")}</ContextMenuItem>
+          {!isSerial && (
+            <ContextMenuItem onClick={() => toggleFileManager(tabId)}>{t("ssh.contextMenu.sftp")}</ContextMenuItem>
+          )}
           <ContextMenuItem onClick={() => reconnect(tabId)}>{t("ssh.session.reconnect")}</ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem onClick={() => closePane(tabId, sessionId)}>

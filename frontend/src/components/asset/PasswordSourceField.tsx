@@ -23,6 +23,8 @@ interface PasswordSourceFieldProps {
   secretLabel?: string;
   /** Override label for managed secret selector. */
   selectSecretLabel?: string;
+  /** Fires when the selected credential has a non-empty username; passes it to the parent. */
+  onUsernameChange?: (username: string) => void;
 }
 
 export function PasswordSourceField({
@@ -38,6 +40,7 @@ export function PasswordSourceField({
   editAssetId,
   secretLabel,
   selectSecretLabel,
+  onUsernameChange,
 }: PasswordSourceFieldProps) {
   const { t } = useTranslation();
   const [showPassword, setShowPassword] = useState(false);
@@ -110,7 +113,19 @@ export function PasswordSourceField({
         <div className="grid gap-2">
           <Label>{selectSecretLabel || t("asset.selectPassword")}</Label>
           {managedPasswords.length > 0 ? (
-            <Select value={String(credentialId)} onValueChange={(v) => onCredentialIdChange(Number(v))}>
+            <Select
+              value={String(credentialId)}
+              onValueChange={(v) => {
+                const id = Number(v);
+                onCredentialIdChange(id);
+                if (id !== 0 && onUsernameChange) {
+                  const cred = managedPasswords.find((p) => p.id === id);
+                  if (cred && cred.username) {
+                    onUsernameChange(cred.username);
+                  }
+                }
+              }}
+            >
               <SelectTrigger>
                 <SelectValue placeholder={t("asset.selectPasswordPlaceholder")} />
               </SelectTrigger>

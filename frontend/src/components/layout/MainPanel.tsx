@@ -262,6 +262,7 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset, commandO
                       assetId={tab.meta.type === "terminal" ? tab.meta.assetId : 0}
                       tabId={tab.id}
                       sessionId={data.activePaneId}
+                      isActive={isActive}
                       isOpen={!!fileManagerOpenTabs[tab.id]}
                       width={fileManagerWidth}
                       onWidthChange={setFileManagerWidth}

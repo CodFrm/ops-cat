@@ -1,11 +1,51 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import i18n from "../i18n";
-import { useAIStore, type MentionRef } from "../stores/aiStore";
+import { useAIStore } from "../stores/aiStore";
 import { useTabStore } from "../stores/tabStore";
 import { AIChatContent } from "../components/ai/AIChatContent";
+import {
+  CreateConversation,
+  ListConversations,
+  SendAIMessage,
+  UpdateConversationTitle,
+} from "../../wailsjs/go/app/App";
+
+const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+  callback(0);
+  return 1;
+});
+const cancelAnimationFrameMock = vi.fn();
+vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
+vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrameMock);
+
+// happy-dom 不会因为状态变化自然触发 ResizeObserver，测试需要手动调用回调来模拟
+// "deferred markdown commit 撑高内容容器"这一拍，从而验证 AIChatContent 的滚动跟随行为。
+const resizeObservers: Array<{ cb: ResizeObserverCallback }> = [];
+class MockResizeObserver {
+  private entry: { cb: ResizeObserverCallback };
+  constructor(cb: ResizeObserverCallback) {
+    this.entry = { cb };
+    resizeObservers.push(this.entry);
+  }
+  observe() {}
+  unobserve() {}
+  disconnect() {
+    const idx = resizeObservers.indexOf(this.entry);
+    if (idx >= 0) resizeObservers.splice(idx, 1);
+  }
+}
+vi.stubGlobal("ResizeObserver", MockResizeObserver);
+
+function triggerResizeObservers() {
+  // 快照防止 callback 触发 disconnect 后迭代失效
+  const snapshot = [...resizeObservers];
+  for (const entry of snapshot) {
+    entry.cb([], {} as ResizeObserver);
+  }
+}
 
 const mockInputSpies = vi.hoisted(() => ({
   loadDraft: vi.fn(),
@@ -26,6 +66,32 @@ const editButtonName = /ai\.editMessage|编辑消息|Edit message/i;
 const editingBannerName = /ai\.editingMessage|正在编辑消息|Editing message/i;
 const cancelEditName = /ai\.cancelEdit|取消编辑|Cancel edit/i;
 
+function setupScrollableElement(
+  element: HTMLElement,
+  geometry: { scrollHeight: number; clientHeight: number; scrollTop: number }
+) {
+  let scrollHeight = geometry.scrollHeight;
+  let clientHeight = geometry.clientHeight;
+  Object.defineProperty(element, "scrollHeight", { configurable: true, get: () => scrollHeight });
+  Object.defineProperty(element, "clientHeight", { configurable: true, get: () => clientHeight });
+  element.scrollTop = geometry.scrollTop;
+
+  return {
+    setScrollHeight: (next: number) => {
+      scrollHeight = next;
+    },
+    setClientHeight: (next: number) => {
+      clientHeight = next;
+    },
+  };
+}
+
+function dispatchScroll(viewport: HTMLElement) {
+  act(() => {
+    viewport.dispatchEvent(new Event("scroll"));
+  });
+}
+
 vi.mock("@/components/ai/AIChatInput", () => ({
   AIChatInput: forwardRef(function MockAIChatInput(
     {
@@ -33,19 +99,18 @@ vi.mock("@/components/ai/AIChatInput", () => ({
       onEmptyChange,
       onDraftChange,
     }: {
-      onSubmit: (text: string, mentions: MentionRef[]) => void;
+      onSubmit: (content: string) => void;
       onEmptyChange?: (empty: boolean) => void;
-      onDraftChange?: (draft: { content: string; mentions?: MentionRef[] }) => void;
+      onDraftChange?: (draft: { content: string }) => void;
     },
     ref
   ) {
     const [value, setValue] = useState("");
-    const [mentions, setMentions] = useState<MentionRef[]>([]);
 
     useEffect(() => {
-      onEmptyChange?.(value.trim().length === 0 && mentions.length === 0);
-      onDraftChange?.({ content: value, mentions });
-    }, [mentions, onDraftChange, onEmptyChange, value]);
+      onEmptyChange?.(value.trim().length === 0);
+      onDraftChange?.({ content: value });
+    }, [onDraftChange, onEmptyChange, value]);
 
     useImperativeHandle(
       ref,
@@ -54,28 +119,25 @@ vi.mock("@/components/ai/AIChatInput", () => ({
         clear: () => {
           mockInputSpies.clear();
           setValue("");
-          setMentions([]);
         },
-        isEmpty: () => value.trim().length === 0 && mentions.length === 0,
-        submit: () => onSubmit(value, mentions),
-        loadDraft: (draft: string | { content: string; mentions?: MentionRef[] }) => {
+        isEmpty: () => value.trim().length === 0,
+        submit: () => onSubmit(value),
+        loadDraft: (draft: string | { content: string }) => {
           mockInputSpies.loadDraft(draft);
           if (typeof draft === "string") {
             setValue(draft);
-            setMentions([]);
             return;
           }
           setValue(draft.content);
-          setMentions(draft.mentions ?? []);
         },
       }),
-      [mentions, onSubmit, value]
+      [onSubmit, value]
     );
 
     return (
       <div>
         <input aria-label="mock-ai-input" value={value} onChange={(event) => setValue(event.target.value)} />
-        <button type="button" onClick={() => onSubmit(value, mentions)}>
+        <button type="button" onClick={() => onSubmit(value)}>
           mock-submit
         </button>
       </div>
@@ -89,6 +151,9 @@ describe("AIChatContent", () => {
     localStorage.setItem("language", "zh-CN");
     mockInputSpies.loadDraft.mockReset();
     mockInputSpies.clear.mockReset();
+    requestAnimationFrameMock.mockClear();
+    cancelAnimationFrameMock.mockClear();
+    resizeObservers.length = 0;
 
     useTabStore.setState({ tabs: [], activeTabId: null });
     useAIStore.setState({
@@ -120,7 +185,7 @@ describe("AIChatContent", () => {
       conversationStreaming: {
         5: { sending: false, pendingQueue: [] },
       },
-      tabStates: { [tabId]: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null } },
+      tabStates: { [tabId]: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null } },
     });
 
     render(<AIChatContent tabId={tabId} />);
@@ -151,7 +216,8 @@ describe("AIChatContent", () => {
     const user = userEvent.setup();
     const sendToTab = vi.fn();
     const editAndResendConversation = vi.fn().mockResolvedValue(undefined);
-    const mentions: MentionRef[] = [{ assetId: 42, name: "prod-db", start: 6, end: 14 }];
+    // content 已经携带内联 <mention> XML，编辑链路只传 content，不再有 mentions 数组。
+    const content = 'check <mention asset-id="42" type="mysql">@prod-db</mention>';
     const tabId = "ai-5";
 
     useTabStore.setState({
@@ -159,9 +225,9 @@ describe("AIChatContent", () => {
       activeTabId: tabId,
     });
     useAIStore.setState({
-      tabStates: { [tabId]: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null } },
+      tabStates: { [tabId]: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null } },
       conversationMessages: {
-        5: [{ role: "user", content: "check @prod-db", mentions, blocks: [] }],
+        5: [{ role: "user", content, blocks: [] }],
       },
       conversationStreaming: {
         5: { sending: false, pendingQueue: [] },
@@ -174,12 +240,12 @@ describe("AIChatContent", () => {
 
     await user.click(screen.getByRole("button", { name: editButtonName }));
 
-    expect(mockInputSpies.loadDraft).toHaveBeenCalledWith({ content: "check @prod-db", mentions });
+    expect(mockInputSpies.loadDraft).toHaveBeenCalledWith({ content });
     expect(screen.getByText(editingBannerName)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "mock-submit" }));
 
-    await waitFor(() => expect(editAndResendConversation).toHaveBeenCalledWith(5, 0, "check @prod-db", mentions));
+    await waitFor(() => expect(editAndResendConversation).toHaveBeenCalledWith(5, 0, content));
     expect(sendToTab).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByText(editingBannerName)).not.toBeInTheDocument());
   });
@@ -248,8 +314,54 @@ describe("AIChatContent", () => {
     await user.type(screen.getByRole("textbox", { name: "mock-ai-input" }), "sidebar send");
     await user.click(screen.getByRole("button", { name: "mock-submit" }));
 
-    await waitFor(() => expect(onSendOverride).toHaveBeenCalledWith("sidebar send", undefined));
+    await waitFor(() => expect(onSendOverride).toHaveBeenCalledWith("sidebar send"));
     expect(editAndResendConversation).not.toHaveBeenCalled();
+  });
+
+  it("side-tab first send reloads an empty draft after binding the conversation", async () => {
+    const user = userEvent.setup();
+    const sideTabId = "sidebar-901";
+    vi.mocked(CreateConversation).mockResolvedValue({
+      ID: 901,
+      Title: "新对话",
+      Updatetime: 0,
+    } as Awaited<ReturnType<typeof CreateConversation>>);
+    vi.mocked(UpdateConversationTitle).mockResolvedValue(
+      undefined as Awaited<ReturnType<typeof UpdateConversationTitle>>
+    );
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as Awaited<ReturnType<typeof SendAIMessage>>);
+    vi.mocked(ListConversations).mockResolvedValue([{ ID: 901, Title: "hello", Updatetime: 0 }] as Awaited<
+      ReturnType<typeof ListConversations>
+    >);
+    useAIStore.setState({
+      sidebarTabs: [
+        {
+          id: sideTabId,
+          conversationId: null,
+          title: "新对话",
+          createdAt: 1,
+          uiState: { inputDraft: { content: "hello" }, scrollTop: 24, editTarget: null },
+        },
+      ],
+      activeSidebarTabId: sideTabId,
+      conversationMessages: {},
+      conversationStreaming: {},
+    });
+
+    const onSendOverride = (content: string) => useAIStore.getState().sendFromSidebarTab(sideTabId, content);
+    const { rerender } = render(
+      <AIChatContent sideTabId={sideTabId} conversationId={null} onSendOverride={onSendOverride} />
+    );
+    await user.type(screen.getByRole("textbox", { name: "mock-ai-input" }), "hello");
+    mockInputSpies.loadDraft.mockClear();
+
+    await user.click(screen.getByRole("button", { name: "mock-submit" }));
+    await waitFor(() => expect(useAIStore.getState().sidebarTabs[0].conversationId).toBe(901));
+
+    rerender(<AIChatContent sideTabId={sideTabId} conversationId={901} onSendOverride={onSendOverride} />);
+
+    await waitFor(() => expect(mockInputSpies.loadDraft).toHaveBeenLastCalledWith({ content: "" }));
+    expect(screen.getByRole("textbox", { name: "mock-ai-input" })).toHaveValue("");
   });
 
   it("conversationId regenerate routes through direct mode", async () => {
@@ -272,5 +384,330 @@ describe("AIChatContent", () => {
     await user.click(await screen.findByRole("button", { name: /common\.confirm|确定|Confirm/i }));
 
     await waitFor(() => expect(regenerateConversation).toHaveBeenCalledWith(31, 0));
+  });
+
+  it("assistant usage badge shows uncached input rather than input plus cache", () => {
+    useAIStore.setState({
+      conversationMessages: {
+        41: [
+          {
+            role: "assistant",
+            content: "usage ready",
+            blocks: [],
+            tokenUsage: {
+              inputTokens: 80,
+              outputTokens: 5,
+              cacheCreationTokens: 10,
+              cacheReadTokens: 20,
+            },
+          },
+        ],
+      },
+      conversationStreaming: {
+        41: { sending: false, pendingQueue: [] },
+      },
+    });
+
+    render(<AIChatContent conversationId={41} />);
+
+    expect(screen.getByText("80")).toBeInTheDocument();
+    expect(screen.getByText("5")).toBeInTheDocument();
+    expect(screen.queryByText("110")).not.toBeInTheDocument();
+  });
+
+  it("auto-follows the bottom inside a streaming thinking block after its internal content overflows", () => {
+    useAIStore.setState({
+      conversationMessages: {
+        81: [
+          { role: "user", content: "hi", blocks: [] },
+          {
+            role: "assistant",
+            content: "thinking",
+            blocks: [{ type: "thinking", content: "step 1", status: "running" }],
+            streaming: true,
+          },
+        ],
+      },
+      conversationStreaming: {
+        81: { sending: true, pendingQueue: [] },
+      },
+    });
+
+    const { container } = render(<AIChatContent conversationId={81} />);
+    const thinkingScroll = container.querySelector<HTMLElement>("[data-thinking-scroll]");
+    expect(thinkingScroll).toBeTruthy();
+    const { setScrollHeight } = setupScrollableElement(thinkingScroll!, {
+      scrollHeight: 240,
+      clientHeight: 100,
+      scrollTop: 140,
+    });
+    dispatchScroll(thinkingScroll!);
+
+    setScrollHeight(500);
+    act(() => {
+      useAIStore.setState({
+        conversationMessages: {
+          81: [
+            { role: "user", content: "hi", blocks: [] },
+            {
+              role: "assistant",
+              content: "thinking",
+              blocks: [{ type: "thinking", content: "step 1\nstep 2", status: "running" }],
+              streaming: true,
+            },
+          ],
+        },
+      });
+    });
+
+    expect(thinkingScroll!.scrollTop).toBe(500);
+  });
+
+  it("does not auto-follow streaming thinking growth after the user scrolls up inside the thinking block", () => {
+    useAIStore.setState({
+      conversationMessages: {
+        82: [
+          { role: "user", content: "hi", blocks: [] },
+          {
+            role: "assistant",
+            content: "thinking",
+            blocks: [{ type: "thinking", content: "step 1", status: "running" }],
+            streaming: true,
+          },
+        ],
+      },
+      conversationStreaming: {
+        82: { sending: true, pendingQueue: [] },
+      },
+    });
+
+    const { container } = render(<AIChatContent conversationId={82} />);
+    const thinkingScroll = container.querySelector<HTMLElement>("[data-thinking-scroll]");
+    expect(thinkingScroll).toBeTruthy();
+    const { setScrollHeight } = setupScrollableElement(thinkingScroll!, {
+      scrollHeight: 240,
+      clientHeight: 100,
+      scrollTop: 140,
+    });
+    dispatchScroll(thinkingScroll!);
+    thinkingScroll!.scrollTop = 60;
+    dispatchScroll(thinkingScroll!);
+
+    setScrollHeight(500);
+    act(() => {
+      useAIStore.setState({
+        conversationMessages: {
+          82: [
+            { role: "user", content: "hi", blocks: [] },
+            {
+              role: "assistant",
+              content: "thinking",
+              blocks: [{ type: "thinking", content: "step 1\nstep 2", status: "running" }],
+              streaming: true,
+            },
+          ],
+        },
+      });
+    });
+
+    expect(thinkingScroll!.scrollTop).toBe(60);
+  });
+
+  it("auto-follows the outer viewport when the messages container grows after a deferred markdown commit", () => {
+    useAIStore.setState({
+      conversationMessages: {
+        91: [
+          { role: "user", content: "hi", blocks: [] },
+          {
+            role: "assistant",
+            content: "first chunk",
+            blocks: [{ type: "text", content: "first chunk" }],
+            streaming: true,
+          },
+        ],
+      },
+      conversationStreaming: {
+        91: { sending: true, pendingQueue: [] },
+      },
+    });
+
+    const { container } = render(<AIChatContent conversationId={91} />);
+    const viewport = container.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
+    expect(viewport).toBeTruthy();
+    const { setScrollHeight } = setupScrollableElement(viewport!, {
+      scrollHeight: 300,
+      clientHeight: 200,
+      scrollTop: 100,
+    });
+    // 初始在底部：scrollHeight - scrollTop - clientHeight === 0
+    dispatchScroll(viewport!);
+
+    // 模拟 deferred markdown commit 撑高容器，由 ResizeObserver 把 viewport 拉到新底部
+    setScrollHeight(500);
+    act(() => {
+      triggerResizeObservers();
+    });
+
+    // 到底部的 scrollTop 上限是 scrollHeight - clientHeight = 500 - 200 = 300
+    expect(viewport!.scrollTop).toBe(300);
+  });
+
+  it("does not drop follow when content shrinks (e.g. ThinkingBlock collapses) and the browser clamps scrollTop", () => {
+    useAIStore.setState({
+      conversationMessages: {
+        93: [
+          { role: "user", content: "hi", blocks: [] },
+          {
+            role: "assistant",
+            content: "x",
+            blocks: [{ type: "text", content: "x" }],
+            streaming: true,
+          },
+        ],
+      },
+      conversationStreaming: {
+        93: { sending: true, pendingQueue: [] },
+      },
+    });
+
+    const { container } = render(<AIChatContent conversationId={93} />);
+    const viewport = container.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
+    expect(viewport).toBeTruthy();
+    const { setScrollHeight } = setupScrollableElement(viewport!, {
+      scrollHeight: 600,
+      clientHeight: 200,
+      scrollTop: 400,
+    });
+    // 初始在底部，distance = 0
+    dispatchScroll(viewport!);
+
+    // 内容缩水（典型：ThinkingBlock 完成自动 collapse 把 max-h-64 展开内容收掉），
+    // 浏览器把 scrollTop 钳到新 max（这里手动模拟那一拍）
+    setScrollHeight(400);
+    viewport!.scrollTop = 200;
+    dispatchScroll(viewport!);
+
+    // 跟随不应该被关掉：scrollTop 减小是钳位结果，scrollHeight 同时缩了，不是用户上滑
+    setScrollHeight(700);
+    act(() => {
+      triggerResizeObservers();
+    });
+    // 到底部的 scrollTop 上限是 scrollHeight - clientHeight = 700 - 200 = 500
+    expect(viewport!.scrollTop).toBe(500);
+  });
+
+  it("does not pull the outer viewport back to bottom after the user scrolled up", () => {
+    useAIStore.setState({
+      conversationMessages: {
+        92: [
+          { role: "user", content: "hi", blocks: [] },
+          {
+            role: "assistant",
+            content: "first chunk",
+            blocks: [{ type: "text", content: "first chunk" }],
+            streaming: true,
+          },
+        ],
+      },
+      conversationStreaming: {
+        92: { sending: true, pendingQueue: [] },
+      },
+    });
+
+    const { container } = render(<AIChatContent conversationId={92} />);
+    const viewport = container.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
+    expect(viewport).toBeTruthy();
+    const { setScrollHeight } = setupScrollableElement(viewport!, {
+      scrollHeight: 300,
+      clientHeight: 200,
+      scrollTop: 100,
+    });
+    // 初始进入 isAtBottom = true
+    dispatchScroll(viewport!);
+    // 用户上滑：scrollTop 减小触发 handler 把 isAtBottomRef 设为 false
+    viewport!.scrollTop = 30;
+    dispatchScroll(viewport!);
+
+    setScrollHeight(500);
+    act(() => {
+      triggerResizeObservers();
+    });
+
+    expect(viewport!.scrollTop).toBe(30);
+  });
+
+  it("re-enables outer viewport follow when the user sends a new idle message", async () => {
+    const user = userEvent.setup();
+    const onSendOverride = vi.fn().mockResolvedValue(undefined);
+
+    useAIStore.setState({
+      conversationMessages: {
+        94: [
+          { role: "user", content: "hi", blocks: [] },
+          { role: "assistant", content: "old answer", blocks: [{ type: "text", content: "old answer" }] },
+        ],
+      },
+      conversationStreaming: {
+        94: { sending: false, pendingQueue: [] },
+      },
+    });
+
+    const { container } = render(<AIChatContent conversationId={94} onSendOverride={onSendOverride} />);
+    const viewport = container.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
+    expect(viewport).toBeTruthy();
+    setupScrollableElement(viewport!, {
+      scrollHeight: 500,
+      clientHeight: 200,
+      scrollTop: 300,
+    });
+    dispatchScroll(viewport!);
+    viewport!.scrollTop = 120;
+    dispatchScroll(viewport!);
+
+    await user.type(screen.getByRole("textbox", { name: "mock-ai-input" }), "new question");
+    await user.click(screen.getByRole("button", { name: "mock-submit" }));
+
+    await waitFor(() => expect(onSendOverride).toHaveBeenCalledWith("new question"));
+    expect(viewport!.scrollTop).toBe(500);
+  });
+
+  it("keeps the user's scroll position when sending only queues during active output", async () => {
+    const user = userEvent.setup();
+    const onSendOverride = vi.fn().mockResolvedValue(undefined);
+
+    useAIStore.setState({
+      conversationMessages: {
+        95: [
+          { role: "user", content: "hi", blocks: [] },
+          {
+            role: "assistant",
+            content: "streaming answer",
+            blocks: [{ type: "text", content: "streaming answer" }],
+            streaming: true,
+          },
+        ],
+      },
+      conversationStreaming: {
+        95: { sending: true, pendingQueue: [] },
+      },
+    });
+
+    const { container } = render(<AIChatContent conversationId={95} onSendOverride={onSendOverride} />);
+    const viewport = container.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
+    expect(viewport).toBeTruthy();
+    setupScrollableElement(viewport!, {
+      scrollHeight: 500,
+      clientHeight: 200,
+      scrollTop: 300,
+    });
+    dispatchScroll(viewport!);
+    viewport!.scrollTop = 120;
+    dispatchScroll(viewport!);
+
+    await user.type(screen.getByRole("textbox", { name: "mock-ai-input" }), "queued question");
+    await user.click(screen.getByRole("button", { name: "mock-submit" }));
+
+    await waitFor(() => expect(onSendOverride).toHaveBeenCalledWith("queued question"));
+    expect(viewport!.scrollTop).toBe(120);
   });
 });

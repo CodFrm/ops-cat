@@ -1,0 +1,360 @@
+name: Manual Build
+run-name: Manual build ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      darwin_arm64:
+        description: "Build darwin-arm64"
+        required: false
+        default: true
+        type: boolean
+      darwin_amd64:
+        description: "Build darwin-amd64"
+        required: false
+        default: true
+        type: boolean
+      linux_amd64:
+        description: "Build linux-amd64"
+        required: false
+        default: true
+        type: boolean
+      linux_arm64:
+        description: "Build linux-arm64"
+        required: false
+        default: true
+        type: boolean
+      windows_amd64:
+        description: "Build windows-amd64"
+        required: false
+        default: true
+        type: boolean
+      windows_arm64:
+        description: "Build windows-arm64"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  NODE_OPTIONS: --max-old-space-size=4096
+
+jobs:
+  prepare:
+    name: Prepare manual build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.version.outputs.sha }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      platforms: ${{ steps.matrix.outputs.platforms }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Compute version
+        id: version
+        run: |
+          set -euo pipefail
+
+          SHA=$(git rev-parse HEAD)
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          LATEST_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]' | head -1 || true)
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="v0.0.0"
+          fi
+
+          BASE_VERSION="${LATEST_TAG#v}"
+          DATE=$(date -u +%Y%m%d)
+          BUILD_META="manual.${DATE}.${GITHUB_RUN_NUMBER}.${SHORT_SHA}"
+          if [[ "$BASE_VERSION" == *-* ]]; then
+            VERSION="v${BASE_VERSION}.${BUILD_META}"
+          else
+            VERSION="v${BASE_VERSION}-${BUILD_META}"
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build platform matrix
+        id: matrix
+        env:
+          BUILD_DARWIN_ARM64: ${{ inputs.darwin_arm64 }}
+          BUILD_DARWIN_AMD64: ${{ inputs.darwin_amd64 }}
+          BUILD_LINUX_AMD64: ${{ inputs.linux_amd64 }}
+          BUILD_LINUX_ARM64: ${{ inputs.linux_arm64 }}
+          BUILD_WINDOWS_AMD64: ${{ inputs.windows_amd64 }}
+          BUILD_WINDOWS_ARM64: ${{ inputs.windows_arm64 }}
+        run: |
+          set -euo pipefail
+
+          cat > platforms.json <<'JSON'
+          [
+            {
+              "os": "macos-latest",
+              "goos": "darwin",
+              "goarch": "arm64",
+              "platform": "darwin-arm64"
+            },
+            {
+              "os": "macos-latest",
+              "goos": "darwin",
+              "goarch": "amd64",
+              "platform": "darwin-amd64"
+            },
+            {
+              "os": "ubuntu-22.04",
+              "goos": "linux",
+              "goarch": "amd64",
+              "platform": "linux-amd64",
+              "webkit_pkg": "libwebkit2gtk-4.0-dev"
+            },
+            {
+              "os": "ubuntu-24.04-arm",
+              "goos": "linux",
+              "goarch": "arm64",
+              "platform": "linux-arm64",
+              "webkit_pkg": "libwebkit2gtk-4.1-dev",
+              "extra_tags": ",webkit2_41"
+            },
+            {
+              "os": "windows-latest",
+              "goos": "windows",
+              "goarch": "amd64",
+              "platform": "windows-amd64"
+            },
+            {
+              "os": "windows-latest",
+              "goos": "windows",
+              "goarch": "arm64",
+              "platform": "windows-arm64"
+            }
+          ]
+          JSON
+
+          SELECTED=()
+          if [ "$BUILD_DARWIN_ARM64" = "true" ]; then
+            SELECTED+=("darwin-arm64")
+          fi
+          if [ "$BUILD_DARWIN_AMD64" = "true" ]; then
+            SELECTED+=("darwin-amd64")
+          fi
+          if [ "$BUILD_LINUX_AMD64" = "true" ]; then
+            SELECTED+=("linux-amd64")
+          fi
+          if [ "$BUILD_LINUX_ARM64" = "true" ]; then
+            SELECTED+=("linux-arm64")
+          fi
+          if [ "$BUILD_WINDOWS_AMD64" = "true" ]; then
+            SELECTED+=("windows-amd64")
+          fi
+          if [ "$BUILD_WINDOWS_ARM64" = "true" ]; then
+            SELECTED+=("windows-arm64")
+          fi
+
+          if [ "${#SELECTED[@]}" -eq 0 ]; then
+            echo "::error::Select at least one platform to build."
+            exit 1
+          fi
+
+          SELECTED_JSON=$(printf '%s\n' "${SELECTED[@]}" | jq -R . | jq -s .)
+          MATRIX=$(jq -c --argjson requested "$SELECTED_JSON" '{include: [$requested[] as $platform | .[] | select(.platform == $platform)]}' platforms.json)
+
+          PLATFORM_LIST=$(jq -r '.include[].platform' <<< "$MATRIX" | paste -sd ',' -)
+          echo "Selected platforms: ${PLATFORM_LIST}"
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+          echo "platforms=${PLATFORM_LIST}" >> "$GITHUB_OUTPUT"
+
+  build-desktop:
+    name: Desktop (${{ matrix.platform }})
+    needs: [prepare]
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      COMMIT_ID: ${{ needs.prepare.outputs.sha }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Free disk space (macOS)
+        if: matrix.goos == 'darwin'
+        run: |
+          rm -rf ~/Library/Android/sdk || true
+          rm -rf ~/Library/Developer/CoreSimulator || true
+          rm -rf ~/Library/Caches/Homebrew || true
+          rm -rf /Users/runner/hostedtoolcache || true
+          sudo rm -rf /usr/local/share/powershell || true
+          sudo rm -rf /usr/local/lib/node_modules || true
+          sudo rm -rf /usr/local/share/chromium || true
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: cd frontend && pnpm install --frozen-lockfile
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install Linux dependencies
+        if: matrix.goos == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev ${{ matrix.webkit_pkg || 'libwebkit2gtk-4.0-dev' }}
+
+      - name: Install NSIS
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          echo "${env:ProgramFiles(x86)}\NSIS" >> $env:GITHUB_PATH
+
+      - name: Build embedded opsctl
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -ldflags="-s -w -X github.com/cago-frame/cago/configs.Version=${{ env.VERSION }} -X github.com/opskat/opskat/internal/buildinfo.CommitID=${{ env.COMMIT_ID }}" -o ./internal/embedded/opsctl_bin ./cmd/opsctl/
+
+      - name: Build desktop app
+        if: matrix.goos != 'windows'
+        run: wails build -platform ${{ matrix.goos }}/${{ matrix.goarch }} -ldflags="-s -w -X github.com/cago-frame/cago/configs.Version=${{ env.VERSION }} -X github.com/opskat/opskat/internal/buildinfo.CommitID=${{ env.COMMIT_ID }}" -tags "embed_opsctl${{ matrix.extra_tags }}"
+
+      - name: Build desktop app (Windows)
+        if: matrix.goos == 'windows'
+        run: wails build -nsis -platform ${{ matrix.goos }}/${{ matrix.goarch }} -ldflags="-s -w -X github.com/cago-frame/cago/configs.Version=${{ env.VERSION }} -X github.com/opskat/opskat/internal/buildinfo.CommitID=${{ env.COMMIT_ID }}" -tags embed_opsctl
+
+      - name: Import Apple certificate
+        if: matrix.goos == 'darwin'
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE_P12" ]; then
+            echo "No Apple certificate configured, skipping"
+            exit 0
+          fi
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "SIGNING_IDENTITY=$IDENTITY" >> $GITHUB_ENV
+
+      - name: Sign macOS app
+        if: matrix.goos == 'darwin'
+        run: |
+          if [ -n "$SIGNING_IDENTITY" ]; then
+            codesign --force --deep --sign "$SIGNING_IDENTITY" --options runtime --entitlements build/darwin/entitlements.plist build/bin/opskat.app
+          else
+            codesign --force --deep --sign - build/bin/opskat.app
+          fi
+
+      - name: Package (macOS dmg)
+        if: matrix.goos == 'darwin'
+        run: |
+          DMG_SRC=$(mktemp -d)
+          cp -R build/bin/opskat.app "$DMG_SRC/"
+          ln -s /Applications "$DMG_SRC/Applications"
+          hdiutil create -volname "Opskat" -srcfolder "$DMG_SRC" -ov -format UDZO opskat-${VERSION}-${{ matrix.platform }}.dmg
+          rm -rf "$DMG_SRC"
+
+      - name: Notarize macOS DMG
+        if: matrix.goos == 'darwin'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$SIGNING_IDENTITY" ]; then
+            echo "No signing identity, skipping notarization"
+            exit 0
+          fi
+          xcrun notarytool submit opskat-${VERSION}-${{ matrix.platform }}.dmg \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple opskat-${VERSION}-${{ matrix.platform }}.dmg
+
+      - name: Package (Linux deb)
+        if: matrix.goos == 'linux'
+        run: |
+          PKG_ROOT=pkg-deb
+          mkdir -p ${PKG_ROOT}/DEBIAN
+          mkdir -p ${PKG_ROOT}/usr/bin
+          mkdir -p ${PKG_ROOT}/usr/share/applications
+          mkdir -p ${PKG_ROOT}/usr/share/icons/hicolor/256x256/apps
+          cp build/bin/opskat ${PKG_ROOT}/usr/bin/opskat
+          cp build/appicon.png ${PKG_ROOT}/usr/share/icons/hicolor/256x256/apps/opskat.png
+          cat > ${PKG_ROOT}/DEBIAN/control << CTRL
+          Package: opskat
+          Version: $(echo "${VERSION#v}" | tr '-' '~')
+          Section: utils
+          Priority: optional
+          Architecture: ${{ matrix.goarch }}
+          Maintainer: opskat
+          Description: Opskat desktop application
+          CTRL
+          sed -i 's/^          //' ${PKG_ROOT}/DEBIAN/control
+          cat > ${PKG_ROOT}/usr/share/applications/opskat.desktop << DESK
+          [Desktop Entry]
+          Name=Opskat
+          Exec=/usr/bin/opskat
+          Icon=opskat
+          Type=Application
+          Categories=Utility;
+          DESK
+          sed -i 's/^          //' ${PKG_ROOT}/usr/share/applications/opskat.desktop
+          dpkg-deb --build ${PKG_ROOT} opskat-${VERSION}-${{ matrix.platform }}.deb
+
+      - name: Package (Windows installer)
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: Move-Item "build\bin\opskat-${{ matrix.goarch }}-installer.exe" "opskat-$($env:VERSION)-${{ matrix.platform }}-installer.exe"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: manual-opskat-${{ matrix.platform }}
+          path: opskat-${{ env.VERSION }}-${{ matrix.platform }}*
+          if-no-files-found: error
+
+  checksums:
+    name: Generate checksums
+    needs: [prepare, build-desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          pattern: manual-opskat-*
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS
+        run: cd artifacts && sha256sum * > SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: manual-checksums
+          path: artifacts/SHA256SUMS.txt
+          if-no-files-found: error

@@ -17,7 +17,7 @@ function buildSidebarTab(id: string, conversationId: number | null, title = "New
     title,
     createdAt: 1,
     uiState: {
-      inputDraft: { content: "", mentions: [] },
+      inputDraft: { content: "" },
       scrollTop: 0,
       editTarget: null,
     },

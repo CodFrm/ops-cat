@@ -57,10 +57,11 @@ func (a *App) CreatePasswordCredential(name, username, password, description str
 }
 
 // GenerateSSHKey 生成新的 SSH 密钥对
-func (a *App) GenerateSSHKey(name, comment, keyType string, keySize int, passphrase string) (*credential_entity.Credential, error) {
+func (a *App) GenerateSSHKey(name, comment, keyType string, keySize int, passphrase, username string) (*credential_entity.Credential, error) {
 	return credential_mgr_svc.GenerateSSHKey(a.langCtx(), credential_mgr_svc.GenerateKeyRequest{
 		Name:       name,
 		Comment:    comment,
+		Username:   username,
 		KeyType:    keyType,
 		KeySize:    keySize,
 		Passphrase: passphrase,
@@ -68,7 +69,7 @@ func (a *App) GenerateSSHKey(name, comment, keyType string, keySize int, passphr
 }
 
 // ImportSSHKeyFile 通过文件选择框导入 SSH 密钥
-func (a *App) ImportSSHKeyFile(name, comment, passphrase string) (*credential_entity.Credential, error) {
+func (a *App) ImportSSHKeyFile(name, comment, passphrase, username string) (*credential_entity.Credential, error) {
 	filePath, err := wailsRuntime.OpenFileDialog(a.ctx, wailsRuntime.OpenDialogOptions{
 		Title: "选择 SSH 私钥文件",
 	})
@@ -78,12 +79,12 @@ func (a *App) ImportSSHKeyFile(name, comment, passphrase string) (*credential_en
 	if filePath == "" {
 		return nil, nil
 	}
-	return credential_mgr_svc.ImportSSHKeyFromFile(a.langCtx(), name, comment, filePath, passphrase)
+	return credential_mgr_svc.ImportSSHKeyFromFile(a.langCtx(), name, comment, filePath, passphrase, username)
 }
 
 // ImportSSHKeyPEM 通过粘贴 PEM 内容导入 SSH 密钥
-func (a *App) ImportSSHKeyPEM(name, comment, pemData, passphrase string) (*credential_entity.Credential, error) {
-	return credential_mgr_svc.ImportSSHKeyFromPEM(a.langCtx(), name, comment, pemData, passphrase)
+func (a *App) ImportSSHKeyPEM(name, comment, pemData, passphrase, username string) (*credential_entity.Credential, error) {
+	return credential_mgr_svc.ImportSSHKeyFromPEM(a.langCtx(), name, comment, pemData, passphrase, username)
 }
 
 // UpdateCredential 更新凭证

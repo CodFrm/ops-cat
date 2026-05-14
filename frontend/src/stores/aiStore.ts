@@ -4,6 +4,8 @@ import {
   SendAIMessage,
   StopAIGeneration,
   QueueAIMessage,
+  RemoveQueuedAIMessage,
+  ClearQueuedAIMessages,
   GetActiveAIProvider,
   CreateConversation,
   ListConversations,
@@ -16,20 +18,14 @@ import { ai, conversation_entity, app } from "../../wailsjs/go/models";
 import { EventsOn, EventsEmit } from "../../wailsjs/runtime/runtime";
 import i18n from "../i18n";
 import { useTabStore, registerTabCloseHook, registerTabRestoreHook, type AITabMeta, type Tab } from "./tabStore";
-import { useAssetStore } from "./assetStore";
-import { buildGroupPathMap } from "@/lib/assetSearch";
+import { stripMentionTags } from "@/lib/mentionXml";
+import { classifyError, type ErrorKind } from "@/lib/aiError";
 
-// 用户消息中的资产引用（对应前端 @ 提及）
-export interface MentionRef {
-  assetId: number;
-  name: string; // 发送时刻的资产名快照
-  start: number; // content 中字符起始索引（含 @ 符号，JS 字符串索引）
-  end: number; // 结束索引（不含）
-}
-
-// 内容块：文本、工具调用、Sub Agent 或审批
+// 内容块：文本、工具调用、Sub Agent、审批、错误（持久化字段）。
+// "error" 块由 EventError 推入，或在 retry 中途退出落盘时由 retryStatus 物化而来。
+// 不会作为历史回放发给 LLM —— ToAgentMessages 后端侧需过滤。
 export interface ContentBlock {
-  type: "text" | "tool" | "agent" | "approval" | "thinking";
+  type: "text" | "tool" | "agent" | "approval" | "thinking" | "error";
   content: string;
   toolName?: string;
   toolInput?: string;
@@ -41,7 +37,7 @@ export interface ContentBlock {
   agentTask?: string;
   childBlocks?: ContentBlock[];
   // approval 块专用
-  approvalKind?: "single" | "batch" | "grant";
+  approvalKind?: "single" | "batch" | "grant" | "local_tool";
   approvalItems?: Array<{
     type: string;
     asset_id: number;
@@ -53,6 +49,13 @@ export interface ContentBlock {
   }>;
   approvalDescription?: string;
   approvalSessionId?: string;
+  approvalToolName?: string; // local_tool: "local_bash" | "local_write" | "local_edit"
+  approvalPatterns?: string[]; // local_tool: 默认 pattern 列表，本次会话允许时预填可编辑
+  // error 块专用：
+  //   kind   — classifyError 输出的归类标签，UI 据此显示标题/图标
+  //   detail — 原始错误正文（content 保留为空或拼接版，前端展示用 detail 优先）
+  errorKind?: ErrorKind;
+  errorDetail?: string;
 }
 
 // Assistant 消息累计 token 使用量；单次用户 turn 可能跨多轮 LLM 调用，前端按 usage 事件累加。
@@ -63,23 +66,39 @@ export interface TokenUsage {
   cacheReadTokens?: number;
 }
 
+// retry 期间的 transient 状态：cago EventRetry 时设置，下一条非 retry 事件到达时清掉。
+// 不持久化到 DB —— toDisplayMessages 序列化时直接 omit。
+// 应用退出 / 关 tab 时若该字段仍存在，会被 materializeRetryStatusAsError 物化成
+// 一个 ErrorBlock(kind=interrupted) 落盘，下次打开仍可见。
+export interface ChatMessageRetryStatus {
+  attempt: number;
+  delayMs: number;
+  startedAt: number; // Date.now()，前端做倒计时 countdown 用
+  cause?: string;
+}
+
 export interface ChatMessage {
+  // 前端会话内稳定 ID（仅前端使用，不随后端持久化往返）。
+  // 用作 React list key，避免编辑重发 / queue_consumed 截断重插时按 index 复用错误的子组件实例
+  // （ToolBlock / ThinkingBlock 的 expanded 等本地 state 串到别的消息）。
+  id?: string;
   role: "user" | "assistant" | "tool";
   content: string;
   blocks: ContentBlock[];
   streaming?: boolean;
-  mentions?: MentionRef[];
   tokenUsage?: TokenUsage;
+  retryStatus?: ChatMessageRetryStatus;
 }
 
 export interface PendingQueueItem {
+  id: string;
   text: string;
-  mentions?: MentionRef[];
 }
 
 interface StreamEventData {
   type: string;
   content?: string;
+  queue_id?: string;
   tool_name?: string;
   tool_input?: string;
   tool_call_id?: string;
@@ -88,7 +107,7 @@ interface StreamEventData {
   agent_role?: string;
   agent_task?: string;
   // approval_request 专用
-  kind?: "single" | "batch" | "grant";
+  kind?: "single" | "batch" | "grant" | "local_tool";
   items?: Array<{
     type: string;
     asset_id: number;
@@ -100,6 +119,7 @@ interface StreamEventData {
   }>;
   description?: string;
   session_id?: string;
+  patterns?: string[]; // local_tool: 默认 pattern 列表，前端在"本次会话允许"时预填到可编辑文本框
   // usage 事件：后端下发每轮 LLM 调用的 token 使用量
   usage?: {
     input_tokens?: number;
@@ -107,6 +127,8 @@ interface StreamEventData {
     cache_creation_tokens?: number;
     cache_read_tokens?: number;
   };
+  // retry 事件：下一次重试前的等待毫秒（Retry-After 头或指数退避）；attempt 序号放在 content 字段
+  retryDelayMs?: number;
 }
 
 // Sidebar 专用 UI 态（inputDraft / scrollTop / editTarget）。workspace tab 不使用这些字段，
@@ -114,7 +136,6 @@ interface StreamEventData {
 interface SidebarTabUIState {
   inputDraft: {
     content: string;
-    mentions?: MentionRef[];
   };
   scrollTop: number;
   editTarget: {
@@ -122,7 +143,6 @@ interface SidebarTabUIState {
     messageIndex: number;
     draft: {
       content: string;
-      mentions?: MentionRef[];
     };
   } | null;
 }
@@ -147,7 +167,6 @@ function createDefaultSidebarUiState(overrides?: Partial<SidebarTabUIState> | nu
   return {
     inputDraft: {
       content: overrides?.inputDraft?.content ?? "",
-      mentions: overrides?.inputDraft?.mentions ?? [],
     },
     scrollTop: typeof overrides?.scrollTop === "number" ? overrides.scrollTop : 0,
     editTarget: overrides?.editTarget
@@ -156,7 +175,6 @@ function createDefaultSidebarUiState(overrides?: Partial<SidebarTabUIState> | nu
           messageIndex: overrides.editTarget.messageIndex,
           draft: {
             content: overrides.editTarget.draft.content ?? "",
-            mentions: overrides.editTarget.draft.mentions ?? [],
           },
         }
       : null,
@@ -191,6 +209,12 @@ function createSidebarTabId() {
   return `sidebar-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function createPendingQueueId() {
+  const randomUUID = globalThis.crypto?.randomUUID?.bind(globalThis.crypto);
+  if (randomUUID) return `queue-${randomUUID()}`;
+  return `queue-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function createSidebarTab(overrides?: Partial<SidebarAITab>): SidebarAITab {
   return {
     id: overrides?.id ?? createSidebarTabId(),
@@ -201,23 +225,23 @@ function createSidebarTab(overrides?: Partial<SidebarAITab>): SidebarAITab {
   };
 }
 
-function stripSidebarMentionsForPersistence(
+// localStorage 是不可信存储，回填草稿时把 <mention> 标签降级为内部纯文本，
+// 防止用户或第三方篡改 storage 后伪造发送时的资产引用。
+function sanitizeSidebarUiStateForPersistence(
   uiState: Partial<SidebarTabUIState> | null | undefined
 ): SidebarTabUIState | undefined {
   if (!uiState) return undefined;
   return createDefaultSidebarUiState({
     ...uiState,
     inputDraft: {
-      content: uiState.inputDraft?.content ?? "",
-      mentions: [],
+      content: stripMentionTags(uiState.inputDraft?.content ?? ""),
     },
     editTarget: uiState.editTarget
       ? {
           conversationId: uiState.editTarget.conversationId,
           messageIndex: uiState.editTarget.messageIndex,
           draft: {
-            content: uiState.editTarget.draft.content ?? "",
-            mentions: [],
+            content: stripMentionTags(uiState.editTarget.draft.content ?? ""),
           },
         }
       : null,
@@ -235,9 +259,7 @@ function sanitizeSidebarTab(raw: unknown): SidebarAITab | null {
     conversationId,
     title: typeof tab.title === "string" && tab.title.length > 0 ? tab.title : undefined,
     createdAt: typeof tab.createdAt === "number" && Number.isFinite(tab.createdAt) ? tab.createdAt : undefined,
-    // 本地存储属于不可信输入，草稿里的 mentions/资产上下文不允许从 localStorage 恢复，
-    // 否则用户或第三方篡改 storage 后可以伪造后续发送时的资产引用。
-    uiState: stripSidebarMentionsForPersistence(tab.uiState),
+    uiState: sanitizeSidebarUiStateForPersistence(tab.uiState),
   });
 }
 
@@ -259,7 +281,7 @@ function persistSidebarTabs(tabs: SidebarAITab[], activeSidebarTabId: string | n
     JSON.stringify(
       tabs.map((tab) => ({
         ...tab,
-        uiState: stripSidebarMentionsForPersistence(tab.uiState),
+        uiState: sanitizeSidebarUiStateForPersistence(tab.uiState),
       }))
     )
   );
@@ -313,7 +335,6 @@ function loadInitialSidebarState() {
     uiState: createDefaultSidebarUiState({
       inputDraft: {
         content: legacyDraft,
-        mentions: [],
       },
     }),
   });
@@ -329,9 +350,6 @@ function loadInitialSidebarState() {
 const conversationListeners = new Map<number, { cancel: (() => void) | null; generation: number }>();
 const conversationStopRequests = new Set<number>();
 
-// 每个 conversation 只保留一个待执行的落盘定时器。
-// 流式输出期间会持续增量更新消息，如果每次都立即保存，磁盘写入会过于频繁。
-const persistTimers = new Map<number, number>();
 const conversationRenameVersions = new Map<number, number>();
 const conversationRenameInFlight = new Set<number>();
 let conversationListBarrier = 0;
@@ -356,7 +374,6 @@ function cleanupConvListener(convId: number) {
   conversationListeners.delete(convId);
   conversationStopRequests.delete(convId);
   cleanupStreamBuffer(convId);
-  cleanupPersistTimer(convId);
 }
 
 function invalidateConvListenerForReplay(convId: number) {
@@ -370,15 +387,6 @@ function invalidateConvListenerForReplay(convId: number) {
   cleanupStreamBuffer(convId);
 }
 
-// cleanupPersistTimer 清理指定 conversation 尚未执行的落盘定时器。
-function cleanupPersistTimer(convId: number) {
-  const timer = persistTimers.get(convId);
-  if (timer !== undefined) {
-    window.clearTimeout(timer);
-    persistTimers.delete(convId);
-  }
-}
-
 // persistConversationSnapshot 将当前 conversation 的消息快照保存到持久化存储。
 function persistConversationSnapshot(convId: number, includeStreaming = false) {
   const msgs = useAIStore.getState().conversationMessages[convId];
@@ -386,34 +394,22 @@ function persistConversationSnapshot(convId: number, includeStreaming = false) {
   SaveConversationMessages(convId, toDisplayMessages(msgs, includeStreaming)).catch(() => {});
 }
 
-// schedulePersist 为 conversation 安排一次短延迟的消息快照保存。
-// 流式输出期间做一次短延迟防抖：
-// 1. 降低高频写入带来的性能开销；
-// 2. 让应用异常退出前，尽量已经落下最近一段对话快照。
-function schedulePersist(convId: number, includeStreaming = false) {
-  cleanupPersistTimer(convId);
-  const timer = window.setTimeout(() => {
-    persistTimers.delete(convId);
-    persistConversationSnapshot(convId, includeStreaming);
-  }, 300);
-  persistTimers.set(convId, timer);
-}
-
-// persistNow 取消 schedulePersist 的防抖定时器，立即落盘一次。
-// 用于低频关键事件（用户发送、工具调用、审批等），避免防抖窗口内崩溃丢数据。
+// persistNow 立即落盘一次。
+// 用于低频关键事件（用户发送、工具调用、审批、终态等）。
 function persistNow(convId: number, includeStreaming = false) {
-  cleanupPersistTimer(convId);
   persistConversationSnapshot(convId, includeStreaming);
 }
 
-// === 流式事件缓冲（性能优化：合并高频 content/thinking 事件，按帧刷新）===
+// === 流式事件缓冲（性能优化：合并高频 content/thinking 事件，降低主线程刷新压力）===
 
-const streamBuffers = new Map<number, { content: string; thinking: string; raf: number | null }>();
+const STREAM_FLUSH_INTERVAL_MS = 50;
+type StreamBuffer = { content: string; thinking: string; timer: ReturnType<typeof setTimeout> | null };
+const streamBuffers = new Map<number, StreamBuffer>();
 
 function getOrCreateStreamBuffer(convId: number) {
   let buf = streamBuffers.get(convId);
   if (!buf) {
-    buf = { content: "", thinking: "", raf: null };
+    buf = { content: "", thinking: "", timer: null };
     streamBuffers.set(convId, buf);
   }
   return buf;
@@ -422,9 +418,9 @@ function getOrCreateStreamBuffer(convId: number) {
 function flushStreamBuffer(convId: number) {
   const buf = streamBuffers.get(convId);
   if (!buf) return;
-  if (buf.raf !== null) {
-    cancelAnimationFrame(buf.raf);
-    buf.raf = null;
+  if (buf.timer !== null) {
+    clearTimeout(buf.timer);
+    buf.timer = null;
   }
   const cd = buf.content;
   const td = buf.thinking;
@@ -459,14 +455,21 @@ function flushStreamBuffer(convId: number) {
       conversationMessages: { ...state.conversationMessages, [convId]: updated },
     };
   });
+}
 
-  // 增量内容刷入消息列表后，同步安排一次防抖落盘。
-  schedulePersist(convId, true);
+function scheduleStreamBufferFlush(convId: number) {
+  const buf = getOrCreateStreamBuffer(convId);
+  if (buf.timer !== null) return;
+  buf.timer = setTimeout(() => {
+    const b = streamBuffers.get(convId);
+    if (b) b.timer = null;
+    flushStreamBuffer(convId);
+  }, STREAM_FLUSH_INTERVAL_MS);
 }
 
 function cleanupStreamBuffer(convId: number) {
   const buf = streamBuffers.get(convId);
-  if (buf?.raf != null) cancelAnimationFrame(buf.raf);
+  if (buf?.timer != null) clearTimeout(buf.timer);
   streamBuffers.delete(convId);
 }
 
@@ -507,8 +510,34 @@ function normalizeSnapshotStatus(status: ContentBlock["status"]): ContentBlock["
   return STREAMING_SNAPSHOT_STATUS_OVERRIDES[status] ?? status;
 }
 
+// materializeRetryStatusAsError 把 retry 进行中的 transient 状态物化成一个
+// kind="interrupted" 的 ErrorBlock。在 includeStreaming=true 的落盘路径调用
+// （关闭 tab / 切会话 / Wails OnBeforeClose 应用退出），保证下次打开仍能看到
+// "重试中被中断"的错误线索，而不是只看到一段灰色 cancelled 文本。
+//
+// 没有 retryStatus 时原样返回，避免无意义的对象拷贝。
+function materializeRetryStatusAsError(msg: ChatMessage): ChatMessage {
+  if (!msg.retryStatus) return msg;
+  const { kind, message } = classifyError(msg.retryStatus.cause, "interrupted");
+  const errBlock: ContentBlock = {
+    type: "error",
+    content: message,
+    errorKind: kind,
+    errorDetail: msg.retryStatus.cause || "",
+  };
+  return {
+    ...msg,
+    blocks: [...msg.blocks, errBlock],
+    retryStatus: undefined,
+  };
+}
+
 function toDisplayMessages(msgs: ChatMessage[], includeStreaming = false): app.ConversationDisplayMessage[] {
-  return msgs
+  // includeStreaming=true 的路径都是"非自然终态落盘"（tab 关闭 / 切会话 / 应用退出），
+  // 在这里把 retryStatus 物化为 interrupted ErrorBlock；其余路径 retryStatus 自动 omit
+  // （ChatMessage 顶层字段不进入 ConversationDisplayMessage）。
+  const prepared = includeStreaming ? msgs.map(materializeRetryStatusAsError) : msgs;
+  return prepared
     .filter((m) => includeStreaming || !m.streaming)
     .map(
       (m) =>
@@ -523,15 +552,8 @@ function toDisplayMessages(msgs: ChatMessage[], includeStreaming = false): app.C
                 toolName: b.toolName,
                 toolInput: b.toolInput,
                 status: includeStreaming ? normalizeSnapshotStatus(b.status) : b.status,
-              })
-          ),
-          mentions: (m.mentions || []).map(
-            (mr) =>
-              new conversation_entity.MentionRef({
-                assetId: mr.assetId,
-                name: mr.name,
-                start: mr.start,
-                end: mr.end,
+                errorKind: b.errorKind,
+                errorDetail: b.errorDetail,
               })
           ),
           tokenUsage: m.tokenUsage ? new conversation_entity.TokenUsage(m.tokenUsage) : undefined,
@@ -541,20 +563,17 @@ function toDisplayMessages(msgs: ChatMessage[], includeStreaming = false): app.C
 
 function convertDisplayMessages(displayMsgs: app.ConversationDisplayMessage[]): ChatMessage[] {
   return (displayMsgs || []).map((dm: app.ConversationDisplayMessage) => ({
+    id: crypto.randomUUID(),
     role: dm.role as "user" | "assistant" | "tool",
     content: dm.content,
     blocks: (dm.blocks || []).map((b: conversation_entity.ContentBlock) => ({
-      type: b.type as "text" | "tool" | "agent",
+      type: b.type as ContentBlock["type"],
       content: b.content,
       toolName: b.toolName,
       toolInput: b.toolInput,
-      status: b.status as "running" | "completed" | "error" | undefined,
-    })),
-    mentions: (dm.mentions || []).map((mr: conversation_entity.MentionRef) => ({
-      assetId: mr.assetId,
-      name: mr.name,
-      start: mr.start,
-      end: mr.end,
+      status: b.status as ContentBlock["status"],
+      errorKind: b.errorKind as ErrorKind | undefined,
+      errorDetail: b.errorDetail,
     })),
     tokenUsage: dm.tokenUsage
       ? {
@@ -877,11 +896,6 @@ function updateConversation(
       conversationStreaming: newConvStreaming,
     };
   });
-
-  if (updates.messages !== undefined) {
-    // 消息列表发生变化后，补一轮防抖持久化。
-    schedulePersist(convId, true);
-  }
 }
 
 function drainQueue(convId: number) {
@@ -897,9 +911,9 @@ function drainQueue(convId: number) {
   const newMsgs = [...currentMsgs];
   for (const item of queue) {
     newMsgs.push({
+      id: crypto.randomUUID(),
       role: "user" as const,
       content: item.text,
-      mentions: item.mentions,
       blocks: [],
       streaming: false,
     });
@@ -916,7 +930,6 @@ function drainQueue(convId: number) {
 function prepareConversationForReplay(convId: number) {
   conversationStopRequests.delete(convId);
   invalidateConvListenerForReplay(convId);
-  cleanupPersistTimer(convId);
   updateConversation(convId, { sending: false, pendingQueue: [] });
 }
 
@@ -926,12 +939,7 @@ function resetConversationForReplay(convId: number, messages: ChatMessage[]) {
 }
 
 // 把“编辑并重发”和“重新生成”统一到一条 replay 流程里，避免两套截断逻辑继续分叉。
-async function replayConversation(
-  convId: number,
-  nextMessages: ChatMessage[],
-  content: string,
-  mentions?: MentionRef[]
-) {
+async function replayConversation(convId: number, nextMessages: ChatMessage[], content: string) {
   const streaming = useAIStore.getState().conversationStreaming[convId] || { sending: false, pendingQueue: [] };
   prepareConversationForReplay(convId);
   if (streaming.sending) {
@@ -941,7 +949,7 @@ async function replayConversation(
   resetConversationForReplay(convId, nextMessages);
 
   if (content.trim()) {
-    await _sendForConversation(convId, content, mentions);
+    await _sendForConversation(convId, content);
     return;
   }
 
@@ -949,12 +957,32 @@ async function replayConversation(
   await _sendForConversation(convId, "");
 }
 
+// 清掉 lastAssistant 上的 retryStatus —— 任何非 retry 事件到达都意味着"流恢复"了
+// （要么是 cago handleRetry 后 ChatStream 重新出 delta，要么是 EventError/stopped/done 终止）。
+// 没有 retryStatus 时不触发额外 setState，避免高频事件产生空 update。
+function clearRetryStatusOnLastAssistant(convId: number) {
+  const msgs = useAIStore.getState().conversationMessages[convId];
+  if (!msgs || msgs.length === 0) return;
+  const lastIdx = msgs.length - 1;
+  const last = msgs[lastIdx];
+  if (last.role !== "assistant" || !last.retryStatus) return;
+  const updated = [...msgs];
+  updated[lastIdx] = { ...last, retryStatus: undefined };
+  updateConversation(convId, { messages: updated });
+}
+
 // 事件处理：核心流式状态机，完全基于 convId
 function handleStreamEvent(convId: number, event: StreamEventData) {
   const currentMsgs = useAIStore.getState().conversationMessages[convId] || [];
   if (!currentMsgs) return;
 
-  // 高频事件缓冲：content/thinking 通过 RAF 合并，每帧最多一次状态更新
+  // 任何非 retry 事件都视为"流恢复"，立即清掉 lastAssistant 上的 retryStatus。
+  // 重试成功后下一帧 content/thinking 一到就把 RetryBanner 关掉，无须 UI 自行判定。
+  if (event.type !== "retry") {
+    clearRetryStatusOnLastAssistant(convId);
+  }
+
+  // 高频事件缓冲：content/thinking 通过固定时间窗合并，避免每帧重解析 Markdown 抢占输入。
   if (event.type === "content" || event.type === "thinking") {
     const buf = getOrCreateStreamBuffer(convId);
     if (event.type === "content") {
@@ -962,13 +990,7 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
     } else {
       buf.thinking += event.content || "";
     }
-    if (buf.raf === null) {
-      buf.raf = requestAnimationFrame(() => {
-        const b = streamBuffers.get(convId);
-        if (b) b.raf = null;
-        flushStreamBuffer(convId);
-      });
-    }
+    scheduleStreamBufferFlush(convId);
     return;
   }
 
@@ -1141,6 +1163,8 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
           approvalItems: event.items,
           approvalDescription: event.description,
           approvalSessionId: event.session_id,
+          approvalToolName: event.tool_name,
+          approvalPatterns: event.patterns,
         });
         return { ...msg, blocks: newBlocks };
       });
@@ -1194,29 +1218,43 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
 
     case "queue_consumed": {
       // 后端在工具调用间隙消费了一条排队消息
-      // 结束当前 assistant 消息，插入 user 消息，开启新 assistant 流
-      // event.content 为后端分离出的展示原文；mentions 从本地队列读取用于高亮 chip
+      // 结束当前 assistant 消息，插入 user 消息（含内联 <mention> XML），开启新 assistant 流
+      //
+      // 注意：cago 一次 drainSteer 可能批量消费多条 Steer，连续 emit N 个
+      // queue_consumed 事件——LLM 此时还没开始新一轮，前一个新开的 assistant
+      // 气泡是空壳。若直接续 streaming:false 留下，UI 会出现 N-1 个空气泡。
+      // 因此遇到"前一个 assistant 没有任何内容"时直接丢弃它再插 user + 新流。
       const curQueue = useAIStore.getState().conversationStreaming[convId]?.pendingQueue || [];
-      const consumedItem = curQueue[0];
-      const nextMsgs = [...msgs];
+      let nextMsgs = [...msgs];
       const lastIdx = nextMsgs.length - 1;
       if (lastIdx >= 0 && nextMsgs[lastIdx].role === "assistant") {
-        nextMsgs[lastIdx] = { ...nextMsgs[lastIdx], streaming: false };
+        const last = nextMsgs[lastIdx];
+        const isEmpty = !last.content && (!last.blocks || last.blocks.length === 0);
+        if (isEmpty) {
+          nextMsgs = nextMsgs.slice(0, lastIdx);
+        } else {
+          nextMsgs[lastIdx] = { ...last, streaming: false };
+        }
       }
       nextMsgs.push({
+        id: crypto.randomUUID(),
         role: "user" as const,
         content: event.content || "",
-        mentions: consumedItem?.mentions,
         blocks: [],
         streaming: false,
       });
       nextMsgs.push({
+        id: crypto.randomUUID(),
         role: "assistant" as const,
         content: "",
         blocks: [],
         streaming: true,
       });
-      const newQueue = curQueue.length > 0 ? curQueue.slice(1) : [];
+      const newQueue = event.queue_id
+        ? curQueue.filter((item) => item.id !== event.queue_id)
+        : curQueue.length > 0
+          ? curQueue.slice(1)
+          : [];
       updateConversation(convId, { messages: nextMsgs, pendingQueue: newQueue });
       // 排队消息被消费（插入新 user + 开启新 assistant）属于低频关键事件，立即落盘。
       persistNow(convId, true);
@@ -1253,7 +1291,6 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       }
 
       // 终态立即落盘
-      cleanupPersistTimer(convId);
       persistConversationSnapshot(convId);
       useAIStore.getState().fetchConversations();
 
@@ -1266,10 +1303,17 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
     }
 
     case "retry": {
-      const reason = event.error ? `: ${event.error}` : "";
+      // Attempt 序号放在 content 字段（后端 strconv.Itoa）；解析失败时退化为 0，
+      // RetryBanner 仍能显示 "正在重试..." 文案。
+      const attempt = parseInt(event.content || "0", 10) || 0;
       const updated = updateLastAssistant(msgs, (msg) => ({
         ...msg,
-        blocks: appendText(msg.blocks, `\n\n*${i18n.t("ai.retrying", "重试中")} (${event.content})${reason}*`),
+        retryStatus: {
+          attempt,
+          delayMs: event.retryDelayMs ?? 0,
+          startedAt: Date.now(),
+          cause: event.error,
+        },
       }));
       if (updated) updateConversation(convId, { messages: updated });
       break;
@@ -1292,7 +1336,6 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       }
 
       // 终态立即落盘，保证标题刷新前后都能恢复到完整会话内容。
-      cleanupPersistTimer(convId);
       persistConversationSnapshot(convId);
       // Refresh conversations (title may have updated); sync any open tab bound to this conv.
       useAIStore
@@ -1325,9 +1368,16 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
 
     case "error": {
       cleanupStreamBuffer(convId);
+      const { kind, message } = classifyError(event.error);
+      const errBlock: ContentBlock = {
+        type: "error",
+        content: message,
+        errorKind: kind,
+        errorDetail: event.error || "",
+      };
       const updated = updateLastAssistant(msgs, (msg) => ({
         ...msg,
-        blocks: appendText(msg.blocks, `\n\n**Error:** ${event.error}`),
+        blocks: [...msg.blocks, errBlock],
         streaming: false,
       }));
       if (updated) {
@@ -1337,44 +1387,11 @@ function handleStreamEvent(convId: number, event: StreamEventData) {
       }
 
       // 错误态同样需要落盘，否则强制重启后会丢掉最后一次失败上下文。
-      cleanupPersistTimer(convId);
       persistConversationSnapshot(convId, true);
       cleanupConversationIfUnused(convId);
       break;
     }
   }
-}
-
-// 将一组 MentionRef 解析为后端使用的 MentionedAsset（查 assetStore，按 assetId 去重，资产已删除跳过）
-function resolveMentionedAssets(mentions: MentionRef[] | undefined): ai.MentionedAsset[] {
-  if (!mentions || mentions.length === 0) return [];
-  const assetStore = useAssetStore.getState();
-  const groupPathMap = buildGroupPathMap(assetStore.groups);
-  const seen = new Set<number>();
-  const out: ai.MentionedAsset[] = [];
-  for (const mr of mentions) {
-    if (seen.has(mr.assetId)) continue;
-    seen.add(mr.assetId);
-    const asset = assetStore.assets.find((a) => a.ID === mr.assetId);
-    if (!asset) continue;
-    let host = "";
-    try {
-      const cfg = JSON.parse(asset.Config || "{}");
-      host = cfg.host || "";
-    } catch {
-      /* ignore */
-    }
-    out.push(
-      new ai.MentionedAsset({
-        assetId: asset.ID,
-        name: asset.Name,
-        type: asset.Type,
-        host,
-        groupPath: asset.GroupID ? groupPathMap.get(asset.GroupID) || "" : "",
-      })
-    );
-  }
-  return out;
 }
 
 // 把前端塌缩的 ChatMessage 还原成 OpenAI/Anthropic 标准的多条 LLM 消息：
@@ -1455,7 +1472,8 @@ function expandToAPIMessages(messages: ChatMessage[]): ai.Message[] {
           })
         );
       }
-      // approval / agent 块不参与 LLM 历史还原，跳过
+      // approval / agent / error 块不参与 LLM 历史还原，跳过。
+      // error 块的归类标签和原始错误正文是 UI 显示用，不应作为历史 prompt 影响 LLM。
     }
     flushAssistant();
   }
@@ -1463,18 +1481,27 @@ function expandToAPIMessages(messages: ChatMessage[]): ai.Message[] {
 }
 
 // 核心发送：完全基于 convId，共享给 sendToTab / sendFromSidebar / regenerate
-async function _sendForConversation(convId: number, content: string, mentions?: MentionRef[]) {
+// content 中可能包含内联 <mention asset-id=...>@name</mention> 标签，前端不再单独维护 mentions 数组。
+async function _sendForConversation(convId: number, content: string) {
   conversationStopRequests.delete(convId);
   const state = useAIStore.getState();
   const streaming = state.conversationStreaming[convId] || { sending: false, pendingQueue: [] };
 
   // 生成中时排队：推送到后端 runner 队列 + 本地队列（用于 UI 显示）
   if (streaming.sending) {
-    if (content.trim()) {
+    const text = content.trim();
+    if (text) {
+      const queueID = createPendingQueueId();
       updateConversation(convId, {
-        pendingQueue: [...streaming.pendingQueue, { text: content.trim(), mentions }],
+        pendingQueue: [...streaming.pendingQueue, { id: queueID, text }],
       });
-      QueueAIMessage(convId, content.trim(), resolveMentionedAssets(mentions)).catch(() => {});
+      QueueAIMessage(convId, queueID, text).catch(() => {
+        const current = useAIStore.getState().conversationStreaming[convId];
+        if (!current?.pendingQueue.some((item) => item.id === queueID)) return;
+        updateConversation(convId, {
+          pendingQueue: current.pendingQueue.filter((item) => item.id !== queueID),
+        });
+      });
     }
     return;
   }
@@ -1489,18 +1516,19 @@ async function _sendForConversation(convId: number, content: string, mentions?: 
     updateConversation(convId, { sending: true });
   } else {
     newMessages.push({
+      id: crypto.randomUUID(),
       role: "user",
       content,
-      mentions,
       blocks: [],
     });
     updateConversation(convId, { messages: newMessages, sending: true });
-    // 用户消息是用户亲手输入的内容，最不应该丢；绕过 300ms 防抖立即落盘。
-    // includeStreaming=true 保留历史未完成 block（如有），与 schedulePersist 的默认行为一致。
+    // 用户消息是用户亲手输入的内容，最不应该丢；发送后立即落盘。
+    // includeStreaming=true 保留历史未完成 block（如有）。
     persistNow(convId, true);
   }
 
   const assistantMsg: ChatMessage = {
+    id: crypto.randomUUID(),
     role: "assistant",
     content: "",
     blocks: [],
@@ -1551,15 +1579,7 @@ async function _sendForConversation(convId: number, content: string, mentions?: 
         })
     );
 
-  // 收集所有 user 消息的 mentions（按 assetId 去重、资产已删除跳过）
-  const allMentions: MentionRef[] = [];
-  for (const m of newMessages) {
-    if (m.role !== "user" || !m.mentions) continue;
-    allMentions.push(...m.mentions);
-  }
-  const mentionedAssets = resolveMentionedAssets(allMentions);
-
-  const aiContext = new ai.AIContext({ openTabs, mentionedAssets });
+  const aiContext = new ai.AIContext({ openTabs });
 
   try {
     await SendAIMessage(convId, apiMessages, aiContext);
@@ -1593,21 +1613,16 @@ interface AIState {
   checkConfigured: () => Promise<void>;
 
   // 发送
-  send: (content: string, mentions?: MentionRef[]) => Promise<void>;
-  sendToTab: (tabId: string, content: string, mentions?: MentionRef[]) => Promise<void>;
-  sendFromSidebarTab: (tabId: string, content: string, mentions?: MentionRef[]) => Promise<void>;
-  editAndResendConversation: (
-    convId: number,
-    messageIndex: number,
-    content: string,
-    mentions?: MentionRef[]
-  ) => Promise<void>;
+  send: (content: string) => Promise<void>;
+  sendToTab: (tabId: string, content: string) => Promise<void>;
+  sendFromSidebarTab: (tabId: string, content: string) => Promise<void>;
+  editAndResendConversation: (convId: number, messageIndex: number, content: string) => Promise<void>;
   stopConversation: (convId: number) => Promise<void>;
   stopGeneration: (tabId: string) => Promise<void>;
   regenerate: (tabId: string, messageIndex: number) => Promise<void>;
   regenerateConversation: (convId: number, messageIndex: number) => Promise<void>;
-  removeFromQueue: (convId: number, index: number) => void;
-  clearQueue: (convId: number) => void;
+  removeFromQueue: (convId: number, index: number) => Promise<void>;
+  clearQueue: (convId: number) => Promise<void>;
 
   // Tab 管理 (delegates to tabStore)
   openConversationTab: (conversationId: number) => Promise<string>;
@@ -1634,14 +1649,14 @@ interface AIState {
   closeSidebarTab: (tabId: string) => void;
   promoteSidebarToTab: (tabId?: string) => Promise<string | null>;
   validateSidebarTabs: () => void;
-  setSidebarTabInputDraft: (tabId: string, draft: { content: string; mentions?: MentionRef[] }) => void;
+  setSidebarTabInputDraft: (tabId: string, draft: { content: string }) => void;
   setSidebarTabScrollTop: (tabId: string, scrollTop: number) => void;
   setSidebarTabEditTarget: (
     tabId: string,
     editTarget: {
       conversationId: number;
       messageIndex: number;
-      draft: { content: string; mentions?: MentionRef[] };
+      draft: { content: string };
     } | null
   ) => void;
   stopSidebarTab: (tabId: string) => Promise<void>;
@@ -1886,8 +1901,7 @@ export const useAIStore = create<AIState>((set, get) => {
       const closingTab = state.sidebarTabs[index];
       if (closingTab.conversationId != null) {
         // 侧边宿主关闭前先把当前会话快照刷盘；
-        // 但真正的 listener / persist timer 回收要等到确认没有其它宿主仍引用该会话。
-        cleanupPersistTimer(closingTab.conversationId);
+        // 但真正的 listener 回收要等到确认没有其它宿主仍引用该会话。
         persistConversationSnapshot(closingTab.conversationId, true);
       }
 
@@ -1952,7 +1966,6 @@ export const useAIStore = create<AIState>((set, get) => {
       patchSidebarTabUiState(tabId, {
         inputDraft: {
           content: draft.content ?? "",
-          mentions: draft.mentions ?? [],
         },
       });
     },
@@ -1969,7 +1982,6 @@ export const useAIStore = create<AIState>((set, get) => {
               messageIndex: editTarget.messageIndex,
               draft: {
                 content: editTarget.draft.content ?? "",
-                mentions: editTarget.draft.mentions ?? [],
               },
             }
           : null,
@@ -2063,15 +2075,15 @@ export const useAIStore = create<AIState>((set, get) => {
 
     // === 向后兼容 ===
 
-    send: async (content: string, mentions?: MentionRef[]) => {
+    send: async (content: string) => {
       const tabStore = useTabStore.getState();
       const activeTab = tabStore.tabs.find((t) => t.id === tabStore.activeTabId && t.type === "ai");
       if (!activeTab) {
         const newTabId = get().openNewConversationTab();
-        await get().sendToTab(newTabId, content, mentions);
+        await get().sendToTab(newTabId, content);
         return;
       }
-      await get().sendToTab(activeTab.id, content, mentions);
+      await get().sendToTab(activeTab.id, content);
     },
 
     clear: () => {
@@ -2084,7 +2096,7 @@ export const useAIStore = create<AIState>((set, get) => {
 
     // === 核心发送 ===
 
-    sendToTab: async (tabId: string, content: string, mentions?: MentionRef[]) => {
+    sendToTab: async (tabId: string, content: string) => {
       const state = get();
       const tabState = state.tabStates[tabId];
       if (!tabState) return;
@@ -2132,10 +2144,10 @@ export const useAIStore = create<AIState>((set, get) => {
         await updateConversationTitleForMessage(convId, content);
       }
 
-      await _sendForConversation(convId, content, mentions);
+      await _sendForConversation(convId, content);
     },
 
-    sendFromSidebarTab: async (tabId: string, content: string, mentions?: MentionRef[]) => {
+    sendFromSidebarTab: async (tabId: string, content: string) => {
       const sidebarTab = get().sidebarTabs.find((tab) => tab.id === tabId);
       if (!sidebarTab) return;
       let convId = sidebarTab.conversationId;
@@ -2158,7 +2170,14 @@ export const useAIStore = create<AIState>((set, get) => {
                   [conv.ID]: { sending: false, pendingQueue: [] },
                 },
             sidebarTabs: state.sidebarTabs.map((tab) =>
-              tab.id === tabId ? { ...tab, conversationId: conv.ID, title: conv.Title || tab.title } : tab
+              tab.id === tabId
+                ? {
+                    ...tab,
+                    conversationId: conv.ID,
+                    title: conv.Title || tab.title,
+                    uiState: createDefaultSidebarUiState(),
+                  }
+                : tab
             ),
           }));
         });
@@ -2169,15 +2188,10 @@ export const useAIStore = create<AIState>((set, get) => {
       if (shouldSyncConversationTitleBeforeSend(convId, content)) {
         await updateConversationTitleForMessage(convId, content);
       }
-      await _sendForConversation(convId, content, mentions);
+      await _sendForConversation(convId, content);
     },
 
-    editAndResendConversation: async (
-      convId: number,
-      messageIndex: number,
-      content: string,
-      mentions?: MentionRef[]
-    ) => {
+    editAndResendConversation: async (convId: number, messageIndex: number, content: string) => {
       if (!content.trim()) return;
 
       const messages = get().conversationMessages[convId] || [];
@@ -2196,7 +2210,7 @@ export const useAIStore = create<AIState>((set, get) => {
 
       const truncated = messages.slice(0, messageIndex);
       // 从被编辑消息之前的稳定历史重新发送，确保后续分支完全替换。
-      await replayConversation(convId, truncated, content, mentions);
+      await replayConversation(convId, truncated, content);
     },
 
     stopConversation: async (convId: number) => {
@@ -2236,15 +2250,37 @@ export const useAIStore = create<AIState>((set, get) => {
       await replayConversation(convId, truncated, "");
     },
 
-    removeFromQueue: (convId: number, index: number) => {
+    removeFromQueue: async (convId: number, index: number) => {
       const streaming = get().conversationStreaming[convId];
       if (!streaming) return;
-      const newQueue = streaming.pendingQueue.filter((_, i) => i !== index);
-      updateConversation(convId, { pendingQueue: newQueue });
+      const item = streaming.pendingQueue[index];
+      if (!item) return;
+      let removed: boolean;
+      try {
+        removed = await RemoveQueuedAIMessage(convId, item.id);
+      } catch {
+        return;
+      }
+      if (!removed) return;
+      const current = get().conversationStreaming[convId];
+      if (!current) return;
+      updateConversation(convId, { pendingQueue: current.pendingQueue.filter((queued) => queued.id !== item.id) });
     },
 
-    clearQueue: (convId: number) => {
-      updateConversation(convId, { pendingQueue: [] });
+    clearQueue: async (convId: number) => {
+      const streaming = get().conversationStreaming[convId];
+      if (!streaming || streaming.pendingQueue.length === 0) return;
+      let removedIDs: string[];
+      try {
+        removedIDs = (await ClearQueuedAIMessages(convId)) ?? [];
+      } catch {
+        return;
+      }
+      if (removedIDs.length === 0) return;
+      const removed = new Set(removedIDs);
+      const current = get().conversationStreaming[convId];
+      if (!current) return;
+      updateConversation(convId, { pendingQueue: current.pendingQueue.filter((item) => !removed.has(item.id)) });
     },
 
     // === 查询 ===
@@ -2336,7 +2372,6 @@ registerTabCloseHook((tab) => {
     // 关闭标签前补一次最终快照，避免最后一段对话未落盘。
     // 关闭时流式输出可能仍在进行（streaming=true），必须传 includeStreaming=true 才能
     // 把最后一段 assistant 消息一起落盘；toDisplayMessages 会把未完结的 block 归一为 cancelled。
-    cleanupPersistTimer(meta.conversationId);
     persistConversationSnapshot(meta.conversationId, true);
     cleanupConversationIfUnused(meta.conversationId, { ignoreMainTabId: tab.id });
   }
@@ -2425,7 +2460,6 @@ async function flushAllConversationsAsync(): Promise<void> {
   for (const convIdStr of Object.keys(allMsgs)) {
     const convId = Number(convIdStr);
     if (!convId) continue;
-    cleanupPersistTimer(convId);
     const msgs = allMsgs[convId];
     if (!msgs) continue;
     promises.push(SaveConversationMessages(convId, toDisplayMessages(msgs, true)).catch(() => {}));

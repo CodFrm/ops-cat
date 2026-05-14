@@ -48,6 +48,7 @@ interface FileManagerPanelProps {
   assetId?: number;
   tabId: string;
   sessionId: string;
+  isActive?: boolean;
   isOpen: boolean;
   width: number;
   onWidthChange: (width: number) => void;
@@ -267,7 +268,15 @@ function ExternalEditIdeaEditorPane({ badge, children, tone, title }: ExternalEd
   );
 }
 
-export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onWidthChange }: FileManagerPanelProps) {
+export function FileManagerPanel({
+  assetId,
+  tabId,
+  sessionId,
+  isActive = true,
+  isOpen,
+  width,
+  onWidthChange,
+}: FileManagerPanelProps) {
   const { t } = useTranslation();
   const continueEditLabel = (() => {
     const label = t("externalEdit.actions.continueEdit");
@@ -355,9 +364,10 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
   const safeMergeResult = safeStoreMergeResult || safePreparedMergeResult;
   const safeSelectedError = isExternalEditClipboardResidueSession(selectedError) ? null : selectedError;
 
-  const sessionTransfers = useMemo(
-    () => Object.values(allTransfers).filter((transfer) => transfer.sessionId === sessionId),
-    [allTransfers, sessionId]
+  const transferTarget = useMemo(() => ({ tabId, sessionId }), [tabId, sessionId]);
+  const tabTransfers = useMemo(
+    () => Object.values(allTransfers).filter((transfer) => transfer.tabId === tabId),
+    [allTransfers, tabId]
   );
   const attentionItems = useMemo(
     () => buildExternalEditAttentionItems(allExternalSessions).filter((entry) => entry.session.assetId === assetId),
@@ -401,10 +411,12 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
 
   const isDragOver = useNativeFileDrop({
     currentPathRef,
+    isActive,
     isOpen,
     panelRef,
     sessionId,
     startUploadFile,
+    tabId,
   });
   const { handleResizeStart, isResizing, outerRef } = useResizeHandle({ onWidthChange, panelRef, width });
 
@@ -467,7 +479,7 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
     }
   }, [safePendingConflict]);
 
-  const doneUploadCount = sessionTransfers.filter((transfer) => {
+  const doneUploadCount = tabTransfers.filter((transfer) => {
     return transfer.status === "done" && transfer.direction === "upload";
   }).length;
   const prevDoneCount = useRef(0);
@@ -708,7 +720,7 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
           if (entry?.isDir) void navigateToPath(getFullPath(entry));
           break;
         case "download":
-          if (entry) startDownload(sessionId, getFullPath(entry));
+          if (entry) startDownload(transferTarget, getFullPath(entry));
           break;
         case "externalEdit":
           if (entry) {
@@ -716,13 +728,13 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
           }
           break;
         case "downloadDir":
-          if (entry) startDownloadDir(sessionId, getFullPath(entry));
+          if (entry) startDownloadDir(transferTarget, getFullPath(entry));
           break;
         case "upload":
-          startUpload(sessionId, currentPath.endsWith("/") ? currentPath : currentPath + "/");
+          startUpload(transferTarget, currentPath.endsWith("/") ? currentPath : currentPath + "/");
           break;
         case "uploadDir":
-          startUploadDir(sessionId, currentPath.endsWith("/") ? currentPath : currentPath + "/");
+          startUploadDir(transferTarget, currentPath.endsWith("/") ? currentPath : currentPath + "/");
           break;
         case "delete":
           if (entry) {
@@ -746,11 +758,11 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
       getFullPath,
       loadDir,
       navigateToPath,
-      sessionId,
       startDownload,
       startDownloadDir,
       startUpload,
       startUploadDir,
+      transferTarget,
     ]
   );
 
@@ -846,8 +858,7 @@ export function FileManagerPanel({ assetId, tabId, sessionId, isOpen, width, onW
               setSelected={setSelected}
             />
 
-
-            <TransferSection sessionId={sessionId} transfers={sessionTransfers} />
+            <TransferSection tabId={tabId} transfers={tabTransfers} />
           </div>
         </div>
       </div>

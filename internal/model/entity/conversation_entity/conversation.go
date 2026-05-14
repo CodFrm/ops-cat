@@ -71,7 +71,6 @@ type Message struct {
 	ToolCalls      string `gorm:"column:tool_calls;type:text"`
 	ToolCallID     string `gorm:"column:tool_call_id;type:varchar(100)"`
 	Blocks         string `gorm:"column:blocks;type:text"`
-	Mentions       string `gorm:"column:mentions;type:text"`
 	TokenUsage     string `gorm:"column:token_usage;type:text"` // JSON: TokenUsage，仅 assistant 消息可能有
 	SortOrder      int    `gorm:"column:sort_order;default:0"`
 	Createtime     int64  `gorm:"column:createtime"`
@@ -83,13 +82,26 @@ func (Message) TableName() string {
 }
 
 // ContentBlock 前端内容块（用于持久化显示状态）
+//
+// "error" 类型的 block 用于持久化对话级错误：
+//   - EventError 命中时由前端推入（含分类标签 + 原始错误正文）
+//   - 重试期间被关闭 tab/切会话/应用退出时，由前端 materializeRetryStatusAsError
+//     把 retryStatus 物化成 kind=interrupted 的 ErrorBlock 落盘
+//
+// 历史回放（internal/ai/message_convert.go ToAgentMessages）必须跳过 type="error"，
+// 否则错误正文会作为 assistant 历史发回给 LLM。
 type ContentBlock struct {
-	Type       string `json:"type"` // "text" | "tool"
+	Type       string `json:"type"` // "text" | "tool" | "agent" | "approval" | "thinking" | "error"
 	Content    string `json:"content"`
 	ToolName   string `json:"toolName,omitempty"`
 	ToolInput  string `json:"toolInput,omitempty"`
 	ToolCallID string `json:"toolCallId,omitempty"` // 跨 turn 还原 tool_calls 历史；老数据无此字段，前端兜底为塌缩消息
-	Status     string `json:"status,omitempty"`     // "running" | "completed" | "error"
+	Status     string `json:"status,omitempty"`     // "running" | "completed" | "error" | "canceled"
+	// error 块字段：
+	//   ErrorKind   — "rate_limit" | "server" | "network" | "auth" | "interrupted" | "unknown"
+	//   ErrorDetail — 原始错误正文，UI 直接展示
+	ErrorKind   string `json:"errorKind,omitempty"`
+	ErrorDetail string `json:"errorDetail,omitempty"`
 }
 
 // GetBlocks 获取前端显示块
@@ -149,39 +161,5 @@ func (m *Message) SetTokenUsage(u *TokenUsage) error {
 		return err
 	}
 	m.TokenUsage = string(data)
-	return nil
-}
-
-// MentionRef 用户消息中引用的资产（@ 提及）
-type MentionRef struct {
-	AssetID int64  `json:"assetId"`
-	Name    string `json:"name"`  // 发送时刻的资产名快照
-	Start   int    `json:"start"` // content 中字符起始索引（含 @ 符号）
-	End     int    `json:"end"`   // 结束索引（不含）
-}
-
-// GetMentions 反序列化 mentions 字段
-func (m *Message) GetMentions() ([]MentionRef, error) {
-	if m.Mentions == "" {
-		return nil, nil
-	}
-	var refs []MentionRef
-	if err := json.Unmarshal([]byte(m.Mentions), &refs); err != nil {
-		return nil, err
-	}
-	return refs, nil
-}
-
-// SetMentions 序列化 mentions 字段
-func (m *Message) SetMentions(refs []MentionRef) error {
-	if len(refs) == 0 {
-		m.Mentions = ""
-		return nil
-	}
-	data, err := json.Marshal(refs)
-	if err != nil {
-		return err
-	}
-	m.Mentions = string(data)
 	return nil
 }

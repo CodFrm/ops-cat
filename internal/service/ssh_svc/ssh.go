@@ -2,6 +2,7 @@ package ssh_svc
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/opskat/opskat/internal/model/entity/asset_entity"
 	"github.com/opskat/opskat/internal/pkg/dirsync"
+	"github.com/opskat/opskat/internal/pkg/sshkeepalive"
 
 	"github.com/cago-frame/cago/pkg/logger"
 	"go.uber.org/zap"
@@ -21,19 +23,22 @@ import (
 
 // sharedClient 封装 SSH 连接，支持引用计数共享
 type sharedClient struct {
-	client   *ssh.Client
-	mu       sync.Mutex
-	refCount int
-	closers  []io.Closer // 跳板机 client 等额外资源
-	closed   bool
+	client        *ssh.Client
+	mu            sync.Mutex
+	refCount      int
+	closers       []io.Closer // 跳板机 client 等额外资源
+	closed        bool
+	stopKeepalive func()
 }
 
 func newSharedClient(client *ssh.Client, closers []io.Closer) *sharedClient {
-	return &sharedClient{
+	sc := &sharedClient{
 		client:   client,
 		refCount: 1,
 		closers:  closers,
 	}
+	sc.stopKeepalive = sshkeepalive.Start(client, sshkeepalive.Interval)
+	return sc
 }
 
 func (sc *sharedClient) acquire() {
@@ -48,6 +53,9 @@ func (sc *sharedClient) release() {
 	sc.refCount--
 	if sc.refCount <= 0 && !sc.closed {
 		sc.closed = true
+		if sc.stopKeepalive != nil {
+			sc.stopKeepalive()
+		}
 		if err := sc.client.Close(); err != nil {
 			logger.Default().Warn("close client", zap.Error(err))
 		}
@@ -629,6 +637,8 @@ func buildAuthMethods(authType, password, key, keyPassphrase string, privateKeyP
 		if len(methods) == 0 {
 			return nil, fmt.Errorf("密钥认证方式需要提供私钥")
 		}
+		// 追加 keyboard-interactive 以支持 publickey + MFA/OTP 链路（JumpServer / 堡垒机场景，issue #77）
+		methods = append(methods, kbInteractive())
 	case "keyboard-interactive":
 		methods = append(methods, kbInteractive())
 	default:
@@ -786,8 +796,9 @@ func (m *Manager) DisconnectAll() {
 	})
 }
 
-// TestConnection 测试 SSH 连接（仅验证连通性，不创建会话）
-func (m *Manager) TestConnection(cfg ConnectConfig) error {
+// TestConnection 测试 SSH 连接（仅验证连通性，不创建会话）。
+// ctx 取消时函数立即返回 ctx.Err()，后台 dial 仍会跑到 10s 兜底超时并自行清理。
+func (m *Manager) TestConnection(ctx context.Context, cfg ConnectConfig) error {
 	authMethods, err := buildAuthMethods(cfg.AuthType, cfg.Password, cfg.Key, cfg.KeyPassphrase, cfg.PrivateKeys, cfg.OnAuthChallenge)
 	if err != nil {
 		return err
@@ -801,19 +812,49 @@ func (m *Manager) TestConnection(cfg ConnectConfig) error {
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-	client, closers, err := m.dial(cfg, sshConfig, addr)
-	if err != nil {
-		return err
+
+	type dialResult struct {
+		client  *ssh.Client
+		closers []io.Closer
+		err     error
 	}
-	if err := client.Close(); err != nil {
-		logger.Default().Warn("close test connection client", zap.Error(err))
-	}
-	for _, c := range closers {
-		if err := c.Close(); err != nil {
-			logger.Default().Warn("close test connection resource", zap.Error(err))
+	done := make(chan dialResult, 1)
+	go func() {
+		c, cl, e := m.dial(cfg, sshConfig, addr)
+		done <- dialResult{c, cl, e}
+	}()
+
+	select {
+	case <-ctx.Done():
+		// dial 还在跑：用单独的 goroutine 等它完成，结果到达后立刻关闭资源，避免泄漏。
+		go func() {
+			r := <-done
+			if r.err == nil && r.client != nil {
+				if cerr := r.client.Close(); cerr != nil {
+					logger.Default().Warn("close orphaned test connection client", zap.Error(cerr))
+				}
+			}
+			for _, c := range r.closers {
+				if cerr := c.Close(); cerr != nil {
+					logger.Default().Warn("close orphaned test connection resource", zap.Error(cerr))
+				}
+			}
+		}()
+		return ctx.Err()
+	case r := <-done:
+		if r.err != nil {
+			return r.err
 		}
+		if err := r.client.Close(); err != nil {
+			logger.Default().Warn("close test connection client", zap.Error(err))
+		}
+		for _, c := range r.closers {
+			if err := c.Close(); err != nil {
+				logger.Default().Warn("close test connection resource", zap.Error(err))
+			}
+		}
+		return nil
 	}
-	return nil
 }
 
 // ActiveSessions 返回活跃会话数

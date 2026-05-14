@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/opskat/opskat/internal/ai"
@@ -21,6 +22,7 @@ import (
 	"github.com/opskat/opskat/internal/service/external_edit_svc"
 	"github.com/opskat/opskat/internal/service/kafka_svc"
 	"github.com/opskat/opskat/internal/service/redis_svc"
+	"github.com/opskat/opskat/internal/service/serial_svc"
 	"github.com/opskat/opskat/internal/service/sftp_svc"
 	"github.com/opskat/opskat/internal/service/snippet_svc"
 	"github.com/opskat/opskat/internal/service/ssh_svc"
@@ -68,7 +70,8 @@ type App struct {
 	sshManager              *ssh_svc.Manager
 	sftpService             *sftp_svc.Service
 	forwardManager          *ForwardManager
-	aiAgent                 *ai.Agent
+	aiSystemCfg             *ai.SystemConfig
+	policyChecker           *ai.CommandPolicyChecker
 	githubAuthCancel        context.CancelFunc
 	permissionChan          chan ai.PermissionResponse // 前端权限响应 channel（CLI 工具用）
 	pendingAIApprovals      sync.Map                   // map[string]chan ai.ApprovalResponse（AI 审批用）
@@ -78,6 +81,7 @@ type App struct {
 	sshProxyServer          *sshpool.Server            // SSH 连接池 Unix socket 服务
 	redisService            *redis_svc.Service         // Redis 浏览/编辑服务
 	kafkaService            *kafka_svc.Service         // Kafka 管理服务
+	serialManager           *serial_svc.Manager        // 串口连接管理器
 	shutdownCh              chan struct{}              // 关闭信号，cleanup 时 close 以解除所有阻塞等待
 	pendingAuthResponses    sync.Map                   // map[string]chan []string（keyboard-interactive 认证响应用）
 	pendingHostKeyResponses sync.Map                   // map[string]chan ssh_svc.HostKeyAction（主机密钥校验响应用）
@@ -85,7 +89,7 @@ type App struct {
 	mu                      sync.Mutex                 // 保护 connCounter
 	connCounter             int64                      // 连接ID计数器
 	currentConversationID   int64                      // 当前活跃会话ID
-	runners                 sync.Map                   // map[int64]*ai.ConversationRunner
+	runners                 sync.Map                   // map[int64]*runnerEntry
 	extSvc                  *extension_svc.Service
 	externalEditSvc         *external_edit_svc.Service
 	flushAckCh              chan struct{} // OnBeforeClose 等待前端确认 flush 完成
@@ -101,6 +105,7 @@ func NewApp(skill SkillContent) *App {
 		skillContent:   skill,
 		sshManager:     mgr,
 		sftpService:    sftp_svc.NewService(mgr),
+		serialManager:  serial_svc.NewManager(),
 		permissionChan: make(chan ai.PermissionResponse, 1),
 		shutdownCh:     make(chan struct{}),
 		flushAckCh:     make(chan struct{}, 1),
@@ -193,6 +198,10 @@ func (a *App) Cleanup() {
 	// 先发送关闭信号，解除所有阻塞等待（审批、权限确认等），避免 wg.Wait 死锁
 	close(a.shutdownCh)
 
+	if a.serialManager != nil {
+		a.serialManager.CloseAll()
+	}
+
 	if a.kafkaService != nil {
 		a.kafkaService.Close()
 		a.kafkaService = nil
@@ -231,6 +240,15 @@ func (a *App) langCtx() context.Context {
 	ctx := i18n.WithLanguage(a.ctx, a.lang)
 	ctx = ai.WithPolicyLang(ctx, a.lang)
 	return ctx
+}
+
+// pickMsg 按当前 App 语言挑选中英文消息。给那些不在 cago i18n 注册表里、
+// 但又会展示给用户的小段文案使用（连接进度、绑定层错误等）。
+func (a *App) pickMsg(zh, en string) string {
+	if strings.HasPrefix(strings.ToLower(a.lang), "zh") {
+		return zh
+	}
+	return en
 }
 
 // activateWindow 激活应用窗口到前台（审批弹窗时调用）

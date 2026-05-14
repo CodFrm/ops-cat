@@ -3,14 +3,13 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { FileManagerPanel } from "../components/terminal/FileManagerPanel";
 import { useTerminalStore, type TerminalDirectorySyncState } from "../stores/terminalStore";
-import { useSFTPStore } from "../stores/sftpStore";
+import { useSFTPStore, type SFTPTransfer } from "../stores/sftpStore";
 import { useExternalEditStore } from "../stores/externalEditStore";
-import type { ExternalEditSession } from "../lib/externalEditApi";
 import {
-  ChangeSSHDirectory,
-  PrepareExternalEditMerge,
-  SFTPListDir,
-} from "../../wailsjs/go/app/App";
+  type ExternalEditMergePrepareResult,
+  type ExternalEditSession,
+} from "../lib/externalEditApi";
+import { ChangeSSHDirectory, SFTPListDir } from "../../wailsjs/go/app/App";
 
 const { toastError } = vi.hoisted(() => ({
   toastError: vi.fn(),
@@ -19,6 +18,9 @@ const { codeDiffViewerMock, codeEditorMountMock } = vi.hoisted(() => ({
   codeDiffViewerMock: vi.fn(),
   codeEditorMountMock: vi.fn(),
 }));
+const { prepareExternalEditMergeMock } = vi.hoisted(() => ({
+  prepareExternalEditMergeMock: vi.fn(),
+}));
 
 vi.mock("sonner", () => ({
   toast: {
@@ -26,6 +28,14 @@ vi.mock("sonner", () => ({
     success: vi.fn(),
   },
 }));
+
+vi.mock("../lib/externalEditApi", async () => {
+  const actual = await vi.importActual<typeof import("../lib/externalEditApi")>("../lib/externalEditApi");
+  return {
+    ...actual,
+    prepareExternalEditMerge: prepareExternalEditMergeMock,
+  };
+});
 
 vi.mock("@/components/CodeDiffViewer", () => ({
   CodeDiffViewer: (props: {
@@ -136,7 +146,21 @@ function makeExternalEditSession(partial: Partial<ExternalEditSession> & { id: s
 }
 
 const realExternalEditPrepareMerge = useExternalEditStore.getState().prepareMerge;
-
+function makeTransfer(
+  partial: Partial<SFTPTransfer> & Pick<SFTPTransfer, "transferId" | "tabId" | "sessionId">
+): SFTPTransfer {
+  return {
+    direction: "upload",
+    currentFile: "test.txt",
+    filesCompleted: 0,
+    filesTotal: 1,
+    bytesDone: 100,
+    bytesTotal: 100,
+    speed: 0,
+    status: "active",
+    ...partial,
+  };
+}
 describe("FileManagerPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -144,27 +168,34 @@ describe("FileManagerPanel", () => {
     window.go.app ??= { App: {} };
     window.go.app.App ??= {};
     Object.assign(window.go.app.App, {
-      PrepareExternalEditMerge,
+      PrepareExternalEditMerge: vi.fn(),
     });
     useTerminalStore.setState({
       tabData: {
         tab1: {
           splitTree: { type: "terminal", sessionId: "s1" },
           activePaneId: "s1",
-          panes: { s1: { sessionId: "s1", connected: true, connectedAt: Date.now() } },
+          panes: { s1: { sessionId: "s1", transport: "ssh", connected: true, connectedAt: Date.now() } },
+          directoryFollowMode: "off",
+        },
+        tab2: {
+          splitTree: { type: "terminal", sessionId: "s2" },
+          activePaneId: "s2",
+          panes: { s2: { sessionId: "s2", transport: "ssh", connected: true, connectedAt: Date.now() } },
           directoryFollowMode: "off",
         },
       },
       sessionSync: {
         s1: makeSyncState(),
+        s2: makeSyncState({ sessionId: "s2", cwd: "/srv/www" }),
       },
       connections: {},
       connectingAssetIds: new Set(),
     });
     useSFTPStore.setState({
       transfers: {},
-      fileManagerOpenTabs: { tab1: true },
-      fileManagerPaths: { tab1: "/srv/app" },
+      fileManagerOpenTabs: { tab1: true, tab2: true },
+      fileManagerPaths: { tab1: "/srv/app", tab2: "/srv/www" },
       fileManagerWidth: 280,
     });
     useExternalEditStore.setState({
@@ -529,6 +560,55 @@ describe("FileManagerPanel", () => {
     expect(await screen.findByText("externalEdit.merge.closeDirtyTitle")).toBeInTheDocument();
   });
 
+  it("renders only transfers owned by the current tab", async () => {
+    useSFTPStore.setState({
+      transfers: {
+        t1: makeTransfer({ transferId: "t1", tabId: "tab1", sessionId: "s1", currentFile: "file-one.txt" }),
+        t2: makeTransfer({ transferId: "t2", tabId: "tab2", sessionId: "s2", currentFile: "file-two.txt" }),
+      },
+    });
+
+    render(<FileManagerPanel tabId="tab2" sessionId="s2" isOpen width={280} onWidthChange={vi.fn()} />);
+
+    expect(screen.queryByText("file-one.txt")).not.toBeInTheDocument();
+    expect(screen.getByText("file-two.txt")).toBeInTheDocument();
+  });
+
+  it("refreshes only when an upload owned by the current tab completes", async () => {
+    render(<FileManagerPanel tabId="tab1" sessionId="s1" isOpen width={280} onWidthChange={vi.fn()} />);
+
+    await waitFor(() => expect(SFTPListDir).toHaveBeenCalledWith("s1", "/srv/app"));
+    vi.clearAllMocks();
+
+    useSFTPStore.setState({
+      transfers: {
+        t2: makeTransfer({
+          transferId: "t2",
+          tabId: "tab2",
+          sessionId: "s2",
+          currentFile: "other-tab.txt",
+          status: "done",
+        }),
+      },
+    });
+    await Promise.resolve();
+    expect(SFTPListDir).not.toHaveBeenCalled();
+
+    useSFTPStore.setState({
+      transfers: {
+        t1: makeTransfer({
+          transferId: "t1",
+          tabId: "tab1",
+          sessionId: "s1",
+          currentFile: "current-tab.txt",
+          status: "done",
+        }),
+      },
+    });
+
+    await waitFor(() => expect(SFTPListDir).toHaveBeenCalledWith("s1", "/srv/app"));
+  });
+
   it("removes the recovery detail dialog shell from the delivery surface", async () => {
     useExternalEditStore.setState({
       sessions: {
@@ -614,7 +694,7 @@ describe("FileManagerPanel", () => {
       recordState: "conflict",
       updatedAt: 30,
     });
-    vi.mocked(PrepareExternalEditMerge).mockResolvedValueOnce({
+    prepareExternalEditMergeMock.mockResolvedValueOnce({
       documentKey: conflict.documentKey,
       primaryDraftSessionId: conflict.id,
       fileName: "ee68_c_conflict.txt",
@@ -623,7 +703,7 @@ describe("FileManagerPanel", () => {
       remoteContent: "CASE68-C-REMOTE-EDIT-1\n",
       finalContent: "CASE68-C-LOCAL-EDIT-1\n",
       remoteHash: "remote-hash",
-    } as Awaited<ReturnType<typeof PrepareExternalEditMerge>>);
+    } as ExternalEditMergePrepareResult);
     useExternalEditStore.setState({ sessions: { conflict } });
 
     render(<FileManagerPanel assetId={101} tabId="tab1" sessionId="s1" isOpen width={280} onWidthChange={vi.fn()} />);
@@ -631,7 +711,7 @@ describe("FileManagerPanel", () => {
     await user.click(await screen.findByTestId("external-edit-pending-entry"));
     await user.click(await screen.findByRole("button", { name: "externalEdit.actions.merge" }));
 
-    expect(PrepareExternalEditMerge).toHaveBeenCalledWith("conflict");
+    expect(prepareExternalEditMergeMock).toHaveBeenCalledWith("conflict");
     const workbench = await screen.findByTestId("external-edit-merge-workbench");
     expect(screen.queryByTestId("external-edit-merge-dialog")).not.toBeInTheDocument();
     expect(screen.getByTestId("external-edit-merge-idea-layout")).toBeInTheDocument();

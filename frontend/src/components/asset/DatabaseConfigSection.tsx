@@ -70,38 +70,46 @@ export function DatabaseConfigSection({
 
   return (
     <>
-      {/* Host + Port */}
-      <div className="grid gap-2">
-        <Label>{t("asset.host")}</Label>
-        <div className="flex gap-2">
-          <Input className="flex-1" value={host} onChange={(e) => setHost(e.target.value)} placeholder="192.168.1.1" />
-          <Input
-            className="w-[80px] shrink-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-            type="number"
-            value={port}
-            onChange={(e) => setPort(Number(e.target.value))}
-          />
+      {/* Connection & Auth (single visual block) */}
+      <div className="grid gap-3 border rounded-lg p-3">
+        {/* Host + Port (each labeled) */}
+        <div className="grid grid-cols-[1fr_120px] gap-3">
+          <div className="grid gap-2">
+            <Label>{t("asset.host")}</Label>
+            <Input value={host} onChange={(e) => setHost(e.target.value)} placeholder="example.com" />
+          </div>
+          <div className="grid gap-2">
+            <Label>{t("asset.port")}</Label>
+            <Input
+              className="[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              type="number"
+              value={port || ""}
+              placeholder={driver === "postgresql" ? "5432" : "3306"}
+              onChange={(e) => setPort(Number(e.target.value))}
+            />
+          </div>
         </div>
-      </div>
 
-      {/* Username */}
-      <div className="grid gap-2">
-        <Label>{t("asset.username")}</Label>
-        <Input value={username} onChange={(e) => setUsername(e.target.value)} />
-      </div>
+        {/* Username */}
+        <div className="grid gap-2">
+          <Label>{t("asset.username")}</Label>
+          <Input value={username} onChange={(e) => setUsername(e.target.value)} />
+        </div>
 
-      {/* Password */}
-      <PasswordSourceField
-        source={passwordSource}
-        onSourceChange={setPasswordSource}
-        password={password}
-        onPasswordChange={setPassword}
-        credentialId={passwordCredentialId}
-        onCredentialIdChange={setPasswordCredentialId}
-        managedPasswords={managedPasswords}
-        hasExistingPassword={!!encryptedPassword}
-        editAssetId={editAssetId}
-      />
+        {/* Password */}
+        <PasswordSourceField
+          source={passwordSource}
+          onSourceChange={setPasswordSource}
+          password={password}
+          onPasswordChange={setPassword}
+          credentialId={passwordCredentialId}
+          onCredentialIdChange={setPasswordCredentialId}
+          managedPasswords={managedPasswords}
+          hasExistingPassword={!!encryptedPassword}
+          editAssetId={editAssetId}
+          onUsernameChange={setUsername}
+        />
+      </div>
 
       {/* Database name */}
       <div className="grid gap-2">

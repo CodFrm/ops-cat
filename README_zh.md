@@ -37,6 +37,10 @@ OpsKat
 
 **如果觉得有用，求个 Star ⭐ 这是对我们最大的支持！**
 
+## 介绍视频
+
+https://github.com/user-attachments/assets/5816f1b1-ba90-4a7c-a5a7-cf4c5d7bbb89
+
 ## 演示
 
 https://github.com/user-attachments/assets/035fc0df-230c-456b-87bd-8a4a125feaec

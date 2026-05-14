@@ -17,6 +17,8 @@ import {
   StopAIGeneration,
   SaveConversationMessages,
   UpdateConversationTitle,
+  RemoveQueuedAIMessage,
+  ClearQueuedAIMessages,
 } from "../../wailsjs/go/app/App";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 
@@ -32,7 +34,7 @@ async function waitForStoreCondition(predicate: () => boolean, timeoutMs = 1000)
 
 function createTabState() {
   return {
-    inputDraft: { content: "", mentions: [] },
+    inputDraft: { content: "" },
     scrollTop: 0,
     editTarget: null,
   };
@@ -162,7 +164,7 @@ describe("aiStore", () => {
             conversationId: 1,
             title: "Chat 1",
             createdAt: 1,
-            uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+            uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
           },
         ],
         activeSidebarTabId: "sidebar-1",
@@ -202,7 +204,7 @@ describe("aiStore", () => {
             conversationId: 9,
             title: "旧标题",
             createdAt: 1,
-            uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+            uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
           },
         ],
         activeSidebarTabId: "sidebar-9",
@@ -233,7 +235,7 @@ describe("aiStore", () => {
             conversationId: 3,
             title: "旧标题",
             createdAt: 1,
-            uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+            uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
           },
         ],
       });
@@ -263,7 +265,7 @@ describe("aiStore", () => {
             conversationId: 5,
             title: "旧标题",
             createdAt: 1,
-            uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+            uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
           },
         ],
       });
@@ -332,7 +334,7 @@ describe("aiStore", () => {
             conversationId: 7,
             title: "旧标题",
             createdAt: 1,
-            uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+            uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
           },
         ],
       });
@@ -401,7 +403,7 @@ describe("aiStore", () => {
           ],
         },
         conversationStreaming: {
-          3: { sending: true, pendingQueue: [{ text: "queued-1" }] },
+          3: { sending: true, pendingQueue: [{ id: "q1", text: "queued-1" }] },
         },
       });
 
@@ -412,7 +414,7 @@ describe("aiStore", () => {
       expect(useAIStore.getState().conversationMessages[3][1].content).toBe("partial");
       expect(useAIStore.getState().conversationStreaming[3]).toEqual({
         sending: true,
-        pendingQueue: [{ text: "queued-1" }],
+        pendingQueue: [{ id: "q1", text: "queued-1" }],
       });
     });
   });
@@ -502,13 +504,84 @@ describe("conversationMessages (Phase 1)", () => {
   it("getStreamingByConversationId reflects streaming state", () => {
     useAIStore.setState({
       conversationStreaming: {
-        42: { sending: true, pendingQueue: [{ text: "q1" }, { text: "q2" }] },
+        42: {
+          sending: true,
+          pendingQueue: [
+            { id: "pq1", text: "q1" },
+            { id: "pq2", text: "q2" },
+          ],
+        },
       },
     });
     expect(useAIStore.getState().getStreamingByConversationId(42)).toEqual({
       sending: true,
-      pendingQueue: [{ text: "q1" }, { text: "q2" }],
+      pendingQueue: [
+        { id: "pq1", text: "q1" },
+        { id: "pq2", text: "q2" },
+      ],
     });
+  });
+
+  it("removeFromQueue removes only backend-confirmed pending steer", async () => {
+    vi.mocked(RemoveQueuedAIMessage).mockResolvedValueOnce(true as any);
+    useAIStore.setState({
+      conversationStreaming: {
+        42: {
+          sending: true,
+          pendingQueue: [
+            { id: "q1", text: "first" },
+            { id: "q2", text: "second" },
+          ],
+        },
+      },
+    });
+
+    await useAIStore.getState().removeFromQueue(42, 1);
+
+    expect(RemoveQueuedAIMessage).toHaveBeenCalledWith(42, "q2");
+    expect(useAIStore.getState().conversationStreaming[42].pendingQueue).toEqual([{ id: "q1", text: "first" }]);
+  });
+
+  it("removeFromQueue keeps local queue when backend says the steer was already consumed", async () => {
+    vi.mocked(RemoveQueuedAIMessage).mockResolvedValueOnce(false as any);
+    useAIStore.setState({
+      conversationStreaming: {
+        42: {
+          sending: true,
+          pendingQueue: [
+            { id: "q1", text: "first" },
+            { id: "q2", text: "second" },
+          ],
+        },
+      },
+    });
+
+    await useAIStore.getState().removeFromQueue(42, 1);
+
+    expect(useAIStore.getState().conversationStreaming[42].pendingQueue).toEqual([
+      { id: "q1", text: "first" },
+      { id: "q2", text: "second" },
+    ]);
+  });
+
+  it("clearQueue removes only ids confirmed by backend", async () => {
+    vi.mocked(ClearQueuedAIMessages).mockResolvedValueOnce(["q1"] as any);
+    useAIStore.setState({
+      conversationStreaming: {
+        42: {
+          sending: true,
+          pendingQueue: [
+            { id: "q1", text: "first" },
+            { id: "q2", text: "second" },
+          ],
+        },
+      },
+    });
+
+    await useAIStore.getState().clearQueue(42);
+
+    expect(ClearQueuedAIMessages).toHaveBeenCalledWith(42);
+    expect(useAIStore.getState().conversationStreaming[42].pendingQueue).toEqual([{ id: "q2", text: "second" }]);
   });
 
   it("sendToTab writes only to conversationMessages for an existing conversation", async () => {
@@ -687,7 +760,7 @@ describe("sidebar state", () => {
     title,
     createdAt: 1,
     uiState: {
-      inputDraft: { content: "", mentions: [] },
+      inputDraft: { content: "" },
       scrollTop: 0,
       editTarget: null,
     },
@@ -810,7 +883,16 @@ describe("sidebar state", () => {
       .mockResolvedValueOnce([{ ID: 89, Title: "sidebar first", Updatetime: 0 }] as any)
       .mockResolvedValue([{ ID: 89, Title: "sidebar first", Updatetime: 1 }] as any);
     useAIStore.setState({
-      sidebarTabs: [buildSidebarTab("sidebar-89", null)],
+      sidebarTabs: [
+        {
+          ...buildSidebarTab("sidebar-89", null),
+          uiState: {
+            inputDraft: { content: "stale draft" },
+            scrollTop: 120,
+            editTarget: null,
+          },
+        },
+      ],
       activeSidebarTabId: "sidebar-89",
     });
 
@@ -819,6 +901,11 @@ describe("sidebar state", () => {
     expect(UpdateConversationTitle).toHaveBeenCalledWith(89, "sidebar first");
     expect(useAIStore.getState().sidebarTabs[0].conversationId).toBe(89);
     expect(useAIStore.getState().sidebarTabs[0].title).toBe("sidebar first");
+    expect(useAIStore.getState().sidebarTabs[0].uiState).toEqual({
+      inputDraft: { content: "" },
+      scrollTop: 0,
+      editTarget: null,
+    });
     expect(vi.mocked(EventsOn).mock.calls.some((c) => c[0] === "ai:event:89")).toBe(true);
   });
 
@@ -860,7 +947,8 @@ describe("sidebar state", () => {
     expect(StopAIGeneration).toHaveBeenCalledWith(123);
   });
 
-  it("sidebar persistence strips mentions before writing to localStorage", () => {
+  it("sidebar persistence strips inline <mention> XML before writing to localStorage", () => {
+    const tagged = '<mention asset-id="42" type="ssh">@prod-db</mention>';
     useAIStore.setState({
       sidebarTabs: [
         {
@@ -869,18 +957,12 @@ describe("sidebar state", () => {
           title: "Secure",
           createdAt: 1,
           uiState: {
-            inputDraft: {
-              content: "@prod-db",
-              mentions: [{ assetId: 42, name: "prod-db", start: 0, end: 8 }],
-            },
+            inputDraft: { content: `before ${tagged} after` },
             scrollTop: 12,
             editTarget: {
               conversationId: 1,
               messageIndex: 0,
-              draft: {
-                content: "@prod-db again",
-                mentions: [{ assetId: 42, name: "prod-db", start: 0, end: 8 }],
-              },
+              draft: { content: `edit ${tagged} again` },
             },
           },
         },
@@ -889,8 +971,9 @@ describe("sidebar state", () => {
     });
 
     const persisted = JSON.parse(localStorage.getItem("ai_sidebar_tabs") || "[]");
-    expect(persisted[0]?.uiState?.inputDraft?.mentions).toEqual([]);
-    expect(persisted[0]?.uiState?.editTarget?.draft?.mentions).toEqual([]);
+    expect(persisted[0]?.uiState?.inputDraft?.content).toBe("before @prod-db after");
+    expect(persisted[0]?.uiState?.editTarget?.draft?.content).toBe("edit @prod-db again");
+    expect(persisted[0]?.uiState?.inputDraft?.content).not.toContain("<mention");
   });
 });
 
@@ -935,7 +1018,7 @@ describe("editAndResendConversation", () => {
           conversationId: 55,
           title: "t",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
         },
       ],
       activeSidebarTabId: "sidebar-55",
@@ -945,7 +1028,15 @@ describe("editAndResendConversation", () => {
 
     await useAIStore.getState().sendFromSidebarTab("sidebar-55", "original");
     useAIStore.setState({
-      conversationStreaming: { 55: { sending: true, pendingQueue: [{ text: "queued-1" }, { text: "queued-2" }] } },
+      conversationStreaming: {
+        55: {
+          sending: true,
+          pendingQueue: [
+            { id: "q1", text: "queued-1" },
+            { id: "q2", text: "queued-2" },
+          ],
+        },
+      },
     });
     vi.mocked(StopAIGeneration).mockImplementation(async () => {
       callbacks[0]?.({ type: "stopped" });
@@ -980,7 +1071,7 @@ describe("editAndResendConversation", () => {
           conversationId: 88,
           title: "t",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
         },
       ],
       activeSidebarTabId: "sidebar-88",
@@ -1122,7 +1213,7 @@ describe("editAndResendConversation", () => {
           conversationId: 94,
           title: "custom title",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
         },
       ],
       activeSidebarTabId: "sidebar-94",
@@ -1179,7 +1270,7 @@ describe("editAndResendConversation", () => {
   });
 });
 
-describe("persistence debounce & streaming snapshot", () => {
+describe("AI conversation persistence", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
@@ -1200,7 +1291,7 @@ describe("persistence debounce & streaming snapshot", () => {
     vi.useRealTimers();
   });
 
-  it("persists user message immediately and debounces follow-up streaming snapshot", async () => {
+  it("persists user message immediately without scheduling an assistant placeholder snapshot", async () => {
     const tabId = "ai-100";
     useTabStore.setState({
       tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 100, title: "t" } }],
@@ -1208,14 +1299,14 @@ describe("persistence debounce & streaming snapshot", () => {
     });
     useAIStore.setState({ tabStates: { [tabId]: createTabState() } });
 
-    // sendToTab 新行为：用户消息立即落盘一次（避免防抖窗口内崩溃丢失用户输入），
-    // 紧接着的 assistant placeholder 更新走 300ms 防抖。
+    // 用户消息立即落盘一次，紧接着的 assistant placeholder 只更新内存，
+    // 等后续关键事件或终态再落盘。
     await useAIStore.getState().sendToTab(tabId, "hi");
     expect(SaveConversationMessages).toHaveBeenCalledTimes(1);
     expect(vi.mocked(SaveConversationMessages).mock.calls[0][0]).toBe(100);
 
     await vi.advanceTimersByTimeAsync(300);
-    expect(SaveConversationMessages).toHaveBeenCalledTimes(2);
+    expect(SaveConversationMessages).toHaveBeenCalledTimes(1);
   });
 
   it("normalizes running/pending_confirm blocks when persisting a streaming snapshot", async () => {
@@ -1245,7 +1336,6 @@ describe("persistence debounce & streaming snapshot", () => {
     });
 
     await useAIStore.getState().sendToTab(tabId, "next");
-    await vi.advanceTimersByTimeAsync(300);
 
     expect(SaveConversationMessages).toHaveBeenCalled();
     const [, displayMsgs] = vi.mocked(SaveConversationMessages).mock.calls[0];
@@ -1254,7 +1344,7 @@ describe("persistence debounce & streaming snapshot", () => {
     expect(assistant.blocks.map((b: any) => b.status)).toEqual(["cancelled", "cancelled", "completed"]);
   });
 
-  it("clears pending persist timer when closing the AI tab", async () => {
+  it("flushes a final snapshot when closing the AI tab", async () => {
     const tabId = "ai-102";
     useTabStore.setState({
       tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 102, title: "t" } }],
@@ -1262,15 +1352,14 @@ describe("persistence debounce & streaming snapshot", () => {
     });
     useAIStore.setState({ tabStates: { [tabId]: createTabState() } });
 
-    // sendToTab 会立即落盘一次（用户消息），后续 assistant placeholder 走 300ms 防抖。
     await useAIStore.getState().sendToTab(tabId, "hi");
     expect(SaveConversationMessages).toHaveBeenCalledTimes(1);
 
-    // 关闭标签要取消待定的防抖定时器，并同步 flush 一次最终快照。
+    // 关闭标签同步 flush 一次最终快照。
     useTabStore.getState().closeTab(tabId);
     expect(SaveConversationMessages).toHaveBeenCalledTimes(2);
 
-    // 定时器已被清理，300ms 后不应再产生额外保存。
+    // 没有会话消息定时落盘，300ms 后不应再产生额外保存。
     await vi.advanceTimersByTimeAsync(300);
     expect(SaveConversationMessages).toHaveBeenCalledTimes(2);
   });
@@ -1328,7 +1417,7 @@ describe("sidebar and main tab multi-host behavior", () => {
           conversationId: 50,
           title: "t",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
         },
       ],
       activeSidebarTabId: "sidebar-50",
@@ -1373,21 +1462,21 @@ describe("sidebar and main tab multi-host behavior", () => {
           conversationId: 51,
           title: "left",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
         },
         {
           id: "sidebar-middle",
           conversationId: 52,
           title: "middle",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
         },
         {
           id: "sidebar-right",
           conversationId: 53,
           title: "right",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
         },
       ],
       activeSidebarTabId: "sidebar-middle",
@@ -1427,7 +1516,7 @@ describe("sidebar and main tab multi-host behavior", () => {
           conversationId: 60,
           title: "Live",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
         },
       ],
       activeSidebarTabId: "sidebar-live",
@@ -1438,7 +1527,13 @@ describe("sidebar and main tab multi-host behavior", () => {
     await useAIStore.getState().sendFromSidebarTab("sidebar-live", "first");
     useAIStore.setState({
       conversationStreaming: {
-        60: { sending: true, pendingQueue: [{ text: "queued-1" }, { text: "queued-2" }] },
+        60: {
+          sending: true,
+          pendingQueue: [
+            { id: "q1", text: "queued-1" },
+            { id: "q2", text: "queued-2" },
+          ],
+        },
       },
     });
 
@@ -1453,7 +1548,10 @@ describe("sidebar and main tab multi-host behavior", () => {
 
     expect(useAIStore.getState().conversationStreaming[60]).toEqual({
       sending: false,
-      pendingQueue: [{ text: "queued-1" }, { text: "queued-2" }],
+      pendingQueue: [
+        { id: "q1", text: "queued-1" },
+        { id: "q2", text: "queued-2" },
+      ],
     });
     expect(vi.mocked(SendAIMessage)).toHaveBeenCalledTimes(1);
   });
@@ -1489,7 +1587,7 @@ describe("DeepSeek-v4 多轮 tool 调用历史展开", () => {
     title: "新对话",
     createdAt: 1,
     uiState: {
-      inputDraft: { content: "", mentions: [] },
+      inputDraft: { content: "" },
       scrollTop: 0,
       editTarget: null,
     },
@@ -1606,5 +1704,390 @@ describe("DeepSeek-v4 多轮 tool 调用历史展开", () => {
     expect(apiMsgs[1].content).toBe("done");
     expect(apiMsgs[1].reasoning_content).toBe("thoughts");
     expect(apiMsgs[1].tool_calls).toBeUndefined();
+  });
+});
+
+describe("stream buffer batching", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useAIStore.setState({
+      tabStates: {},
+      conversations: [],
+      conversationMessages: {},
+      conversationStreaming: {},
+    });
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function startStreamingConversation(convId: number) {
+    const callbacks: Array<(event: any) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((_eventName: string, handler: (event: any) => void) => {
+      callbacks.push(handler);
+      return () => {};
+    }) as any);
+
+    const tabId = `ai-${convId}`;
+    useTabStore.setState({
+      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: convId, title: "t" } }],
+      activeTabId: tabId,
+    });
+    useAIStore.setState({
+      tabStates: { [tabId]: createTabState() },
+      conversationMessages: { [convId]: [] },
+      conversationStreaming: { [convId]: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendToTab(tabId, "hi");
+    return callbacks;
+  }
+
+  it("content 事件在 50ms 窗口内合并成一次消息更新", async () => {
+    const callbacks = await startStreamingConversation(201);
+    let messageUpdates = 0;
+    const unsubscribe = useAIStore.subscribe((state, previous) => {
+      if (state.conversationMessages[201] !== previous.conversationMessages[201]) {
+        messageUpdates += 1;
+      }
+    });
+
+    callbacks[0]?.({ type: "content", content: "Hel" });
+    callbacks[0]?.({ type: "content", content: "lo " });
+    callbacks[0]?.({ type: "content", content: "world" });
+
+    expect(useAIStore.getState().conversationMessages[201].at(-1)?.content).toBe("");
+    expect(messageUpdates).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(49);
+    expect(useAIStore.getState().conversationMessages[201].at(-1)?.content).toBe("");
+    expect(messageUpdates).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(1);
+    unsubscribe();
+
+    const assistant = useAIStore.getState().conversationMessages[201].at(-1)!;
+    expect(assistant.content).toBe("Hello world");
+    expect(assistant.blocks).toEqual([{ type: "text", content: "Hello world" }]);
+    expect(messageUpdates).toBe(1);
+  });
+
+  it("thinking 事件同样按窗口合并到 running thinking block", async () => {
+    const callbacks = await startStreamingConversation(202);
+
+    callbacks[0]?.({ type: "thinking", content: "step 1" });
+    callbacks[0]?.({ type: "thinking", content: "\nstep 2" });
+
+    expect(useAIStore.getState().conversationMessages[202].at(-1)?.blocks).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(50);
+
+    const assistant = useAIStore.getState().conversationMessages[202].at(-1)!;
+    expect(assistant.content).toBe("");
+    expect(assistant.blocks).toEqual([{ type: "thinking", content: "step 1\nstep 2", status: "running" }]);
+  });
+
+  it("非流式事件会先 flush 缓冲并取消未触发 timer", async () => {
+    const callbacks = await startStreamingConversation(203);
+
+    callbacks[0]?.({ type: "content", content: "final text" });
+    callbacks[0]?.({ type: "done" });
+
+    let assistant = useAIStore.getState().conversationMessages[203].at(-1)!;
+    expect(assistant.content).toBe("final text");
+    expect(assistant.streaming).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    assistant = useAIStore.getState().conversationMessages[203].at(-1)!;
+    expect(assistant.content).toBe("final text");
+    expect(assistant.blocks).toEqual([{ type: "text", content: "final text" }]);
+  });
+});
+
+describe("queue_consumed handler", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+  });
+
+  // 模拟 cago 一次 drainSteer 批量消费 N 条 Steer：连续 N 个 queue_consumed
+  // 事件在 LLM 出任何 token 前发上来。修复前每个事件都会插一个新的 streaming
+  // assistant 气泡——结果留下 N-1 个永远填不上的空气泡。
+  it("连续多条 queue_consumed 不留空 assistant 气泡", async () => {
+    const callbacks: Array<(event: any) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((_eventName: string, handler: (event: any) => void) => {
+      callbacks.push(handler);
+      return () => {};
+    }) as any);
+
+    const tabId = "ai-100";
+    useTabStore.setState({
+      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 100, title: "t" } }],
+      activeTabId: tabId,
+    });
+    useAIStore.setState({
+      tabStates: { [tabId]: createTabState() },
+      conversationMessages: { 100: [] },
+      conversationStreaming: { 100: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendToTab(tabId, "你好啊");
+    // sendToTab 已经把第一条 user + 空 streaming assistant 写进了 messages
+    // 现在伪造后端一次性 drain 3 条 Steer 的事件序列
+    callbacks[0]?.({ type: "queue_consumed", content: "哈哈哈" });
+    callbacks[0]?.({ type: "queue_consumed", content: "哈哈哈" });
+    callbacks[0]?.({ type: "queue_consumed", content: "提供给" });
+
+    const msgs = useAIStore.getState().conversationMessages[100];
+    // 期望：user 你好啊 / user 哈哈哈 / user 哈哈哈 / user 提供给 / 一个 streaming assistant
+    // —— 而不是 user / 空 / user / 空 / user / 空 / user / streaming
+    const roles = msgs.map((m) => m.role);
+    expect(roles).toEqual(["user", "user", "user", "user", "assistant"]);
+    expect(msgs.slice(0, 4).map((m) => m.content)).toEqual(["你好啊", "哈哈哈", "哈哈哈", "提供给"]);
+    expect(msgs[4].streaming).toBe(true);
+    expect(msgs[4].content).toBe("");
+    expect(msgs[4].blocks).toEqual([]);
+  });
+
+  it("queue_consumed 带 queue_id 时按 id 移除本地 pendingQueue", async () => {
+    const callbacks: Array<(event: any) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((_eventName: string, handler: (event: any) => void) => {
+      callbacks.push(handler);
+      return () => {};
+    }) as any);
+
+    const tabId = "ai-102";
+    useTabStore.setState({
+      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 102, title: "t" } }],
+      activeTabId: tabId,
+    });
+    useAIStore.setState({
+      tabStates: { [tabId]: createTabState() },
+      conversationMessages: { 102: [] },
+      conversationStreaming: { 102: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendToTab(tabId, "hi");
+    useAIStore.setState({
+      conversationStreaming: {
+        102: {
+          sending: true,
+          pendingQueue: [
+            { id: "q1", text: "first" },
+            { id: "q2", text: "second" },
+          ],
+        },
+      },
+    });
+
+    callbacks[0]?.({ type: "queue_consumed", queue_id: "q2", content: "second" });
+
+    expect(useAIStore.getState().conversationStreaming[102].pendingQueue).toEqual([{ id: "q1", text: "first" }]);
+    const msgs = useAIStore.getState().conversationMessages[102];
+    expect(msgs.map((m) => [m.role, m.content])).toEqual([
+      ["user", "hi"],
+      ["user", "second"],
+      ["assistant", ""],
+    ]);
+  });
+
+  // 反向：LLM 已经写过内容的 assistant 必须保留（设 streaming:false），
+  // 不能被新 queue_consumed 当空壳丢掉。
+  it("有内容的 assistant 会被收尾保留，不被误删", async () => {
+    const callbacks: Array<(event: any) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((_eventName: string, handler: (event: any) => void) => {
+      callbacks.push(handler);
+      return () => {};
+    }) as any);
+
+    const tabId = "ai-101";
+    useTabStore.setState({
+      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 101, title: "t" } }],
+      activeTabId: tabId,
+    });
+    useAIStore.setState({
+      tabStates: { [tabId]: createTabState() },
+      conversationMessages: { 101: [] },
+      conversationStreaming: { 101: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendToTab(tabId, "hi");
+    // 模拟第一轮 LLM 已经出了文本
+    callbacks[0]?.({ type: "content", content: "Hello world" });
+    callbacks[0]?.({ type: "queue_consumed", content: "扩展信息" });
+
+    const msgs = useAIStore.getState().conversationMessages[101];
+    expect(msgs.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    // 前一条 assistant 收尾，文本保留
+    expect(msgs[1].streaming).toBe(false);
+    // 新一轮 assistant 空 streaming
+    expect(msgs[3].streaming).toBe(true);
+    expect(msgs[3].blocks).toEqual([]);
+  });
+});
+
+describe("ChatMessage.id 稳定性", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+  });
+
+  // 回归 Copilot review：index 作 key 时，edit&resend / queue_consumed 截断重插会让
+  // React 复用错误 fiber，ToolBlock/ThinkingBlock 的 expanded 等本地 state 串到别的消息。
+  // 修复方式是给 ChatMessage 分配稳定 id，且新插消息 id 必须与旧消息不同。
+  it("send + queue_consumed 写入的消息都有唯一 id", async () => {
+    const callbacks: Array<(event: any) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((_eventName: string, handler: (event: any) => void) => {
+      callbacks.push(handler);
+      return () => {};
+    }) as any);
+
+    const tabId = "ai-200";
+    useTabStore.setState({
+      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: 200, title: "t" } }],
+      activeTabId: tabId,
+    });
+    useAIStore.setState({
+      tabStates: { [tabId]: createTabState() },
+      conversationMessages: { 200: [] },
+      conversationStreaming: { 200: { sending: false, pendingQueue: [] } },
+    });
+
+    await useAIStore.getState().sendToTab(tabId, "hi");
+    callbacks[0]?.({ type: "content", content: "answer" });
+    callbacks[0]?.({ type: "queue_consumed", content: "next" });
+
+    const msgs = useAIStore.getState().conversationMessages[200];
+    const ids = msgs.map((m) => m.id);
+    expect(ids.every((id) => typeof id === "string" && id.length > 0)).toBe(true);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("convertDisplayMessages 给从后端加载的每条消息分配 id", async () => {
+    vi.mocked(LoadConversationMessages).mockResolvedValue([
+      { role: "user", content: "a", blocks: [] },
+      { role: "assistant", content: "b", blocks: [] },
+    ] as any);
+    useAIStore.setState({
+      conversationMessages: {},
+      conversationStreaming: {},
+    });
+
+    await useAIStore.getState().openConversationTab(300);
+    await waitForStoreCondition(() => (useAIStore.getState().conversationMessages[300] || []).length === 2);
+
+    const msgs = useAIStore.getState().conversationMessages[300];
+    expect(msgs[0].id).toBeTruthy();
+    expect(msgs[1].id).toBeTruthy();
+    expect(msgs[0].id).not.toBe(msgs[1].id);
+  });
+});
+
+// AI 错误处理 & 自动重试：验证 cago EventRetry / EventError 翻译到前端后的状态机行为，
+// 以及 retryStatus → ErrorBlock 物化在退出路径的落盘。
+describe("retry/error handling", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useTabStore.setState({ tabs: [], activeTabId: null });
+    useAIStore.setState({
+      tabStates: {},
+      conversations: [],
+      conversationMessages: {},
+      conversationStreaming: {},
+    });
+    vi.mocked(SendAIMessage).mockResolvedValue(undefined as any);
+    vi.mocked(SaveConversationMessages).mockResolvedValue(undefined as any);
+  });
+
+  async function startStreamingConv(convId: number) {
+    const callbacks: Array<(event: any) => void> = [];
+    vi.mocked(EventsOn).mockImplementation(((_n: string, h: (event: any) => void) => {
+      callbacks.push(h);
+      return () => {};
+    }) as any);
+    const tabId = `ai-${convId}`;
+    useTabStore.setState({
+      tabs: [{ id: tabId, type: "ai", label: "t", meta: { type: "ai", conversationId: convId, title: "t" } }],
+      activeTabId: tabId,
+    });
+    useAIStore.setState({
+      tabStates: { [tabId]: createTabState() },
+      conversationMessages: { [convId]: [] },
+      conversationStreaming: { [convId]: { sending: false, pendingQueue: [] } },
+    });
+    await useAIStore.getState().sendToTab(tabId, "hi");
+    return callbacks;
+  }
+
+  it("retry 事件把 attempt/delayMs/cause 写入 lastAssistant.retryStatus", async () => {
+    const cbs = await startStreamingConv(401);
+    cbs[0]?.({ type: "retry", content: "2", retryDelayMs: 3000, error: "timeout" });
+    const last = useAIStore.getState().conversationMessages[401].at(-1)!;
+    expect(last.role).toBe("assistant");
+    expect(last.retryStatus).toBeTruthy();
+    expect(last.retryStatus!.attempt).toBe(2);
+    expect(last.retryStatus!.delayMs).toBe(3000);
+    expect(last.retryStatus!.cause).toBe("timeout");
+  });
+
+  it("retry 之后到达 tool_start 等非 retry 事件会清掉 retryStatus", async () => {
+    const cbs = await startStreamingConv(402);
+    cbs[0]?.({ type: "retry", content: "1", retryDelayMs: 2000, error: "timeout" });
+    expect(useAIStore.getState().conversationMessages[402].at(-1)?.retryStatus).toBeTruthy();
+    cbs[0]?.({ type: "tool_start", tool_name: "local_bash", tool_input: "{}", tool_call_id: "t1" });
+    expect(useAIStore.getState().conversationMessages[402].at(-1)?.retryStatus).toBeUndefined();
+  });
+
+  it("error 事件 push 一个 ErrorBlock 并 classify 分类", async () => {
+    const cbs = await startStreamingConv(403);
+    cbs[0]?.({ type: "error", error: "401 unauthorized: invalid api key" });
+    const last = useAIStore.getState().conversationMessages[403].at(-1)!;
+    const err = last.blocks.find((b) => b.type === "error");
+    expect(err).toBeTruthy();
+    expect(err?.errorKind).toBe("auth");
+    expect(err?.errorDetail).toContain("401");
+    expect(last.streaming).toBe(false);
+    expect(useAIStore.getState().conversationStreaming[403]?.sending).toBe(false);
+  });
+
+  it("stopped 事件清 retryStatus 但不 push ErrorBlock", async () => {
+    const cbs = await startStreamingConv(404);
+    cbs[0]?.({ type: "retry", content: "1", retryDelayMs: 1000, error: "timeout" });
+    cbs[0]?.({ type: "stopped" });
+    const last = useAIStore.getState().conversationMessages[404].at(-1)!;
+    expect(last.retryStatus).toBeUndefined();
+    expect(last.blocks.some((b) => b.type === "error")).toBe(false);
+  });
+
+  it("includeStreaming 落盘时把 retryStatus 物化成 kind=interrupted 的 ErrorBlock", async () => {
+    const cbs = await startStreamingConv(405);
+    cbs[0]?.({ type: "retry", content: "2", retryDelayMs: 5000, error: "connection reset" });
+    // 模拟应用退出 / 关 tab：触发 flushAllConversationsAsync 调 SaveConversationMessages(toDisplayMessages(.., true))
+    vi.mocked(SaveConversationMessages).mockClear();
+    const ev = useAIStore.getState();
+    // 直接通过 conversationMessages 验证 toDisplayMessages 路径：调用一次关闭 tab 触发 persist
+    useTabStore.getState().closeTab("ai-405");
+    await waitForStoreCondition(() => vi.mocked(SaveConversationMessages).mock.calls.length > 0);
+    const calls = vi.mocked(SaveConversationMessages).mock.calls;
+    const lastSaved = calls.at(-1)![1] as any[];
+    const lastMsg = lastSaved.at(-1);
+    const errBlock = lastMsg.blocks.find((b: any) => b.type === "error");
+    expect(errBlock).toBeTruthy();
+    expect(errBlock.errorKind).toBe("interrupted");
+    expect(errBlock.errorDetail).toBe("connection reset");
+    // 序列化结果中不应该有 retryStatus（ConversationDisplayMessage 没有该字段）。
+    expect((lastMsg as any).retryStatus).toBeUndefined();
+    void ev;
   });
 });

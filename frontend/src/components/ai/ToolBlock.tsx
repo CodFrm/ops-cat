@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import {
   Terminal,
   FileText,
@@ -38,7 +38,7 @@ function formatToolInput(input?: string): string {
   }
 }
 
-export function ToolBlock({ block }: ToolBlockProps) {
+export const ToolBlock = memo(function ToolBlock({ block }: ToolBlockProps) {
   const [expanded, setExpanded] = useState(false);
   const Icon = toolIcons[block.toolName || ""] || Terminal;
   const isRunning = block.status === "running";
@@ -108,4 +108,4 @@ export function ToolBlock({ block }: ToolBlockProps) {
       )}
     </div>
   );
-}
+});

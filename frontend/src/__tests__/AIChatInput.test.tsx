@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { AIChatInput, type AIChatInputHandle } from "@/components/ai/AIChatInput";
@@ -19,7 +19,7 @@ describe("AIChatInput", () => {
     seed();
   });
 
-  it("纯文本提交回调收到 text + 空 mentions", async () => {
+  it("纯文本提交回调收到 content（不含 mention 标签）", async () => {
     const onSubmit = vi.fn();
     render(<AIChatInput onSubmit={onSubmit} sendOnEnter={true} />);
     const editor = screen.getByRole("textbox");
@@ -27,9 +27,119 @@ describe("AIChatInput", () => {
     await userEvent.keyboard("hello");
     await userEvent.keyboard("{Enter}");
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    const [text, mentions] = onSubmit.mock.calls[0];
-    expect(text).toBe("hello");
-    expect(mentions).toEqual([]);
+    const [content] = onSubmit.mock.calls[0];
+    expect(content).toBe("hello");
+    expect(content).not.toContain("<mention");
+  });
+
+  it("提交后同步清空外部草稿和编辑器内容", async () => {
+    const onSubmit = vi.fn();
+    const onDraftChange = vi.fn();
+    const editorRef = { current: null as Editor | null };
+    const handleRef = createRef<AIChatInputHandle>();
+    render(
+      <AIChatInput
+        ref={handleRef}
+        onSubmit={onSubmit}
+        onDraftChange={onDraftChange}
+        sendOnEnter={true}
+        editorRef={editorRef}
+      />
+    );
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+
+    act(() => {
+      editorRef.current!.chain().focus().insertContent("hello").run();
+      handleRef.current!.submit();
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith("hello");
+    expect(onDraftChange).toHaveBeenLastCalledWith({ content: "" });
+    await waitFor(() => expect(editorRef.current!.getText()).toBe(""));
+  });
+
+  it("提交时取消未刷新的草稿节流，避免旧内容尾随写回", async () => {
+    const onSubmit = vi.fn();
+    const onDraftChange = vi.fn();
+    const editorRef = { current: null as Editor | null };
+    const handleRef = createRef<AIChatInputHandle>();
+    render(
+      <AIChatInput
+        ref={handleRef}
+        onSubmit={onSubmit}
+        onDraftChange={onDraftChange}
+        sendOnEnter={true}
+        editorRef={editorRef}
+      />
+    );
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        editorRef.current!.chain().focus().insertContent("hello").run();
+        handleRef.current!.submit();
+      });
+      expect(onDraftChange).toHaveBeenLastCalledWith({ content: "" });
+
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+
+      expect(onSubmit).toHaveBeenCalledWith("hello");
+      expect(onDraftChange.mock.calls).not.toContainEqual([{ content: "hello" }]);
+      expect(onDraftChange).toHaveBeenLastCalledWith({ content: "" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("IME 组合输入期间 Enter 不触发发送", async () => {
+    const onSubmit = vi.fn();
+    const editorRef = { current: null as Editor | null };
+    render(<AIChatInput onSubmit={onSubmit} sendOnEnter={true} editorRef={editorRef} />);
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+    const editor = screen.getByRole("textbox");
+
+    act(() => {
+      editorRef.current!.chain().focus().insertContent("nihao").run();
+    });
+    fireEvent.compositionStart(editor);
+    fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 13 });
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("keyCode 229 的 Enter 不触发发送", async () => {
+    const onSubmit = vi.fn();
+    const editorRef = { current: null as Editor | null };
+    render(<AIChatInput onSubmit={onSubmit} sendOnEnter={true} editorRef={editorRef} />);
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+    const editor = screen.getByRole("textbox");
+
+    act(() => {
+      editorRef.current!.chain().focus().insertContent("nihao").run();
+    });
+    fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 229 });
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("IME 结束后普通 Enter 正常发送", async () => {
+    const onSubmit = vi.fn();
+    const editorRef = { current: null as Editor | null };
+    render(<AIChatInput onSubmit={onSubmit} sendOnEnter={true} editorRef={editorRef} />);
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+    const editor = screen.getByRole("textbox");
+
+    act(() => {
+      editorRef.current!.chain().focus().insertContent("你好").run();
+    });
+    fireEvent.compositionStart(editor);
+    fireEvent.compositionEnd(editor);
+    fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 13 });
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("你好"));
   });
 
   it("输入 @ 弹出 MentionList", async () => {
@@ -88,9 +198,8 @@ describe("AIChatInput", () => {
     // 再次 Enter 应正常发送，mention 已插入
     await userEvent.keyboard("{Enter}");
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    const [text, mentions] = onSubmit.mock.calls[0];
-    expect(text).toMatch(/@prod-db/);
-    expect(mentions).toEqual([expect.objectContaining({ assetId: 42, name: "prod-db" })]);
+    const [content] = onSubmit.mock.calls[0];
+    expect(content).toMatch(/<mention asset-id="42"[^>]*>@prod-db<\/mention>/);
   });
 
   it("ArrowUp 在首字符位置接管：取最近一条用户消息", async () => {
@@ -151,7 +260,7 @@ describe("AIChatInput", () => {
     expect(editorRef.current!.getText()).not.toBe("history message");
   });
 
-  it("选中 mention 后提交回调 mentions 包含 assetId", async () => {
+  it("选中 mention 后提交回调 content 内联 <mention> XML", async () => {
     const onSubmit = vi.fn();
     const editorRef = { current: null as Editor | null };
     const handleRef = createRef<AIChatInputHandle>();
@@ -173,10 +282,8 @@ describe("AIChatInput", () => {
     // 通过 ref.submit 触发提交
     handleRef.current?.submit();
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    const [text, mentions] = onSubmit.mock.calls[0];
-    expect(text).toMatch(/@prod-db/);
-    expect(mentions).toEqual([expect.objectContaining({ assetId: 42, name: "prod-db" })]);
-    expect(mentions[0].end).toBeGreaterThan(mentions[0].start);
+    const [content] = onSubmit.mock.calls[0];
+    expect(content).toMatch(/check <mention asset-id="42"[^>]*>@prod-db<\/mention> disk/);
   });
 
   it("输入 `/` 打开 snippet 弹窗并请求 prompt 分类的列表", async () => {
@@ -323,24 +430,24 @@ describe("AIChatInput", () => {
     const onSubmit = vi.fn();
     const editorRef = { current: null as Editor | null };
     const handleRef = createRef<AIChatInputHandle>();
-    const content = "check @prod-db disk\nthen @prod-db again";
-    const draftMentions = [
-      { assetId: 42, name: "prod-db", start: 6, end: 14 },
-      { assetId: 42, name: "prod-db", start: 25, end: 33 },
-    ];
+    const mention = '<mention asset-id="42" type="mysql">@prod-db</mention>';
+    const content = `check ${mention} disk\nthen ${mention} again`;
 
     render(<AIChatInput ref={handleRef} onSubmit={onSubmit} sendOnEnter={true} editorRef={editorRef} />);
     await waitFor(() => expect(editorRef.current).not.toBeNull());
 
-    handleRef.current?.loadDraft({ content, mentions: draftMentions });
-    await waitFor(() => expect(editorRef.current!.getText({ blockSeparator: "\n" })).toBe(content));
+    handleRef.current?.loadDraft({ content });
+    // 编辑器内的可见文本里 @ 已被 TipTap mention 节点显示出来；多段落用 \n 分隔
+    await waitFor(() =>
+      expect(editorRef.current!.getText({ blockSeparator: "\n" })).toBe("check @prod-db disk\nthen @prod-db again")
+    );
 
     handleRef.current?.submit();
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    const [submittedText, submittedMentions] = onSubmit.mock.calls[0];
-    expect(submittedText).toBe(content);
-    expect(submittedMentions).toEqual(draftMentions);
+    const [submitted] = onSubmit.mock.calls[0];
+    expect(submitted).toMatch(/check <mention asset-id="42"[^>]*>@prod-db<\/mention> disk/);
+    expect(submitted).toMatch(/then <mention asset-id="42"[^>]*>@prod-db<\/mention> again/);
   });
 
   it("resets the history cursor after loading an external draft so ArrowUp restarts from latest", async () => {

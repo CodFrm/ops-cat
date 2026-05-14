@@ -1,13 +1,18 @@
 package credential_mgr_svc
 
 import (
+	"context"
 	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/opskat/opskat/internal/model/entity/credential_entity"
+	"github.com/opskat/opskat/internal/repository/credential_repo"
+	"github.com/opskat/opskat/internal/service/credential_svc"
 	. "github.com/smartystreets/goconvey/convey"
 	"github.com/stretchr/testify/assert"
 	gossh "golang.org/x/crypto/ssh"
@@ -124,6 +129,198 @@ func TestPassphraseReEncrypt(t *testing.T) {
 				_, err = gossh.ParsePrivateKey(newPemBytes)
 				assert.Error(t, err)
 			})
+		})
+	})
+}
+
+// fakeCredentialRepo: 内存实现，仅用于测试。Create 累积保存到 creds slice 用于断言。
+type fakeCredentialRepo struct {
+	mu     sync.Mutex
+	creds  []*credential_entity.Credential
+	nextID int64
+}
+
+func (r *fakeCredentialRepo) Find(_ context.Context, id int64) (*credential_entity.Credential, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.creds {
+		if c.ID == id {
+			return c, nil
+		}
+	}
+	return nil, fmt.Errorf("not found")
+}
+func (r *fakeCredentialRepo) List(_ context.Context) ([]*credential_entity.Credential, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]*credential_entity.Credential(nil), r.creds...), nil
+}
+func (r *fakeCredentialRepo) ListByType(_ context.Context, t string) ([]*credential_entity.Credential, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*credential_entity.Credential
+	for _, c := range r.creds {
+		if c.Type == t {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+func (r *fakeCredentialRepo) Create(_ context.Context, cred *credential_entity.Credential) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nextID++
+	cred.ID = r.nextID
+	r.creds = append(r.creds, cred)
+	return nil
+}
+func (r *fakeCredentialRepo) Update(_ context.Context, cred *credential_entity.Credential) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, c := range r.creds {
+		if c.ID == cred.ID {
+			r.creds[i] = cred
+			return nil
+		}
+	}
+	return fmt.Errorf("not found")
+}
+func (r *fakeCredentialRepo) Delete(_ context.Context, id int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, c := range r.creds {
+		if c.ID == id {
+			r.creds = append(r.creds[:i], r.creds[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("not found")
+}
+
+func setupCredentialTestEnv(t *testing.T) *fakeCredentialRepo {
+	t.Helper()
+	credential_svc.SetDefault(credential_svc.New("test-master-key-1234567890abcdef", []byte("test-salt-16byte")))
+	repo := &fakeCredentialRepo{}
+	credential_repo.RegisterCredential(repo)
+	return repo
+}
+
+func TestGenerateSSHKey_PersistsUsername(t *testing.T) {
+	Convey("GenerateSSHKey 写入 username 字段", t, func() {
+		repo := setupCredentialTestEnv(t)
+		ctx := context.Background()
+
+		Convey("提供 username", func() {
+			cred, err := GenerateSSHKey(ctx, GenerateKeyRequest{
+				Name:     "test-key",
+				KeyType:  credential_entity.KeyTypeED25519,
+				Username: "alice",
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, "alice", cred.Username)
+			assert.Len(t, repo.creds, 1)
+			assert.Equal(t, "alice", repo.creds[0].Username)
+		})
+
+		Convey("username 留空保持空字符串", func() {
+			cred, err := GenerateSSHKey(ctx, GenerateKeyRequest{
+				Name:    "test-key-2",
+				KeyType: credential_entity.KeyTypeED25519,
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, "", cred.Username)
+			assert.Len(t, repo.creds, 1)
+			assert.Equal(t, "", repo.creds[0].Username)
+		})
+	})
+}
+
+func TestImportSSHKeyFromPEM_PersistsUsername(t *testing.T) {
+	Convey("ImportSSHKeyFromPEM 写入 username 字段", t, func() {
+		repo := setupCredentialTestEnv(t)
+		ctx := context.Background()
+
+		// 用 gossh 现场生成一个无 passphrase 的 ed25519 PEM，避免 fixture
+		_, privKey, err := ed25519.GenerateKey(rand.Reader)
+		assert.NoError(t, err)
+		block, err := gossh.MarshalPrivateKey(privKey, "test")
+		assert.NoError(t, err)
+		pemData := string(pem.EncodeToMemory(block))
+
+		cred, err := ImportSSHKeyFromPEM(ctx, "imported", "comment", pemData, "", "bob")
+		assert.NoError(t, err)
+		assert.Equal(t, "bob", cred.Username)
+		assert.Len(t, repo.creds, 1)
+		assert.Equal(t, "bob", repo.creds[0].Username)
+	})
+}
+
+func TestUpdate_PersistsUsername(t *testing.T) {
+	Convey("Update 写入 username 字段（SSH 密钥与密码凭证均生效）", t, func() {
+		repo := setupCredentialTestEnv(t)
+		ctx := context.Background()
+
+		Convey("SSH 密钥：username 可被更新", func() {
+			cred, err := GenerateSSHKey(ctx, GenerateKeyRequest{
+				Name:     "k",
+				KeyType:  credential_entity.KeyTypeED25519,
+				Username: "alice",
+			})
+			assert.NoError(t, err)
+
+			updated, err := Update(ctx, UpdateRequest{
+				ID:       cred.ID,
+				Name:     "k",
+				Comment:  "c",
+				Username: "bob",
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, "bob", updated.Username)
+			// 持久层断言：避免依赖 repo 的指针复用语义
+			persisted, err := repo.Find(ctx, cred.ID)
+			assert.NoError(t, err)
+			assert.Equal(t, "bob", persisted.Username)
+		})
+
+		Convey("SSH 密钥：username 可被清空", func() {
+			cred, err := GenerateSSHKey(ctx, GenerateKeyRequest{
+				Name:     "k2",
+				KeyType:  credential_entity.KeyTypeED25519,
+				Username: "alice",
+			})
+			assert.NoError(t, err)
+
+			_, err = Update(ctx, UpdateRequest{
+				ID:       cred.ID,
+				Name:     "k2",
+				Comment:  "c",
+				Username: "",
+			})
+			assert.NoError(t, err)
+			persisted, err := repo.Find(ctx, cred.ID)
+			assert.NoError(t, err)
+			assert.Equal(t, "", persisted.Username)
+		})
+
+		Convey("密码凭证：username 仍可被更新（回归）", func() {
+			cred, err := CreatePassword(ctx, CreatePasswordRequest{
+				Name:     "p",
+				Username: "u1",
+				Password: "secret",
+			})
+			assert.NoError(t, err)
+
+			_, err = Update(ctx, UpdateRequest{
+				ID:          cred.ID,
+				Name:        "p",
+				Description: "desc",
+				Username:    "u2",
+			})
+			assert.NoError(t, err)
+			persisted, err := repo.Find(ctx, cred.ID)
+			assert.NoError(t, err)
+			assert.Equal(t, "u2", persisted.Username)
+			assert.Equal(t, "desc", persisted.Description)
 		})
 	})
 }

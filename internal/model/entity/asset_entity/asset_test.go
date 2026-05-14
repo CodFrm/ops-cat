@@ -135,6 +135,104 @@ func TestAsset_CanConnect(t *testing.T) {
 	})
 }
 
+func TestAsset_SerialConfig(t *testing.T) {
+	convey.Convey("串口配置序列化与反序列化", t, func() {
+		a := &Asset{Name: "serial", Type: AssetTypeSerial}
+		cfg := &SerialConfig{
+			PortPath:    "COM3",
+			BaudRate:    115200,
+			DataBits:    8,
+			StopBits:    "1",
+			Parity:      "none",
+			FlowControl: "hardware",
+		}
+
+		err := a.SetSerialConfig(cfg)
+		assert.NoError(t, err)
+
+		got, err := a.GetSerialConfig()
+		assert.NoError(t, err)
+		assert.Equal(t, cfg.PortPath, got.PortPath)
+		assert.Equal(t, cfg.BaudRate, got.BaudRate)
+		assert.Equal(t, cfg.DataBits, got.DataBits)
+		assert.Equal(t, cfg.StopBits, got.StopBits)
+		assert.Equal(t, cfg.Parity, got.Parity)
+		assert.Equal(t, cfg.FlowControl, got.FlowControl)
+		assert.True(t, a.IsSerial())
+	})
+}
+
+func TestValidateSerial(t *testing.T) {
+	convey.Convey("串口资产校验", t, func() {
+		newAsset := func(mutate func(*SerialConfig)) *Asset {
+			cfg := &SerialConfig{
+				PortPath:    "COM3",
+				BaudRate:    115200,
+				DataBits:    8,
+				StopBits:    "1",
+				Parity:      "none",
+				FlowControl: "none",
+			}
+			if mutate != nil {
+				mutate(cfg)
+			}
+			a := &Asset{Name: "serial", Type: AssetTypeSerial}
+			assert.NoError(t, a.SetSerialConfig(cfg))
+			return a
+		}
+
+		convey.Convey("配置完整时校验通过", func() {
+			assert.NoError(t, newAsset(nil).Validate())
+		})
+
+		convey.Convey("端口路径为空时返回错误", func() {
+			assert.Error(t, newAsset(func(cfg *SerialConfig) { cfg.PortPath = "" }).Validate())
+		})
+
+		convey.Convey("波特率无效时返回错误", func() {
+			assert.Error(t, newAsset(func(cfg *SerialConfig) { cfg.BaudRate = 0 }).Validate())
+		})
+
+		convey.Convey("数据位无效时返回错误", func() {
+			assert.Error(t, newAsset(func(cfg *SerialConfig) { cfg.DataBits = 9 }).Validate())
+		})
+
+		convey.Convey("停止位无效时返回错误", func() {
+			assert.Error(t, newAsset(func(cfg *SerialConfig) { cfg.StopBits = "3" }).Validate())
+		})
+
+		convey.Convey("校验位无效时返回错误", func() {
+			assert.Error(t, newAsset(func(cfg *SerialConfig) { cfg.Parity = "invalid" }).Validate())
+		})
+
+		convey.Convey("流控模式无效时返回错误", func() {
+			assert.Error(t, newAsset(func(cfg *SerialConfig) { cfg.FlowControl = "software" }).Validate())
+		})
+	})
+}
+
+func TestAsset_CanConnectSerial(t *testing.T) {
+	convey.Convey("串口资产连接能力判断", t, func() {
+		convey.Convey("活跃且端口路径存在时可连接", func() {
+			a := &Asset{Name: "serial", Type: AssetTypeSerial, Status: StatusActive}
+			assert.NoError(t, a.SetSerialConfig(&SerialConfig{PortPath: "COM3", BaudRate: 115200, DataBits: 8, StopBits: "1", Parity: "none"}))
+			assert.True(t, a.CanConnect())
+		})
+
+		convey.Convey("端口路径为空时不可连接", func() {
+			a := &Asset{Name: "serial", Type: AssetTypeSerial, Status: StatusActive}
+			assert.NoError(t, a.SetSerialConfig(&SerialConfig{PortPath: "", BaudRate: 115200, DataBits: 8, StopBits: "1", Parity: "none"}))
+			assert.False(t, a.CanConnect())
+		})
+
+		convey.Convey("非活跃串口资产不可连接", func() {
+			a := &Asset{Name: "serial", Type: AssetTypeSerial, Status: StatusDeleted}
+			assert.NoError(t, a.SetSerialConfig(&SerialConfig{PortPath: "COM3", BaudRate: 115200, DataBits: 8, StopBits: "1", Parity: "none"}))
+			assert.False(t, a.CanConnect())
+		})
+	})
+}
+
 func TestAsset_SSHAddress(t *testing.T) {
 	convey.Convey("SSHAddress格式", t, func() {
 		a := &Asset{Name: "test", Type: AssetTypeSSH}
