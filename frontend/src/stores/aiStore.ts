@@ -58,6 +58,11 @@ export interface ContentBlock {
   errorDetail?: string;
 }
 
+type PersistedConversationContentBlock = conversation_entity.ContentBlock & {
+  errorKind?: ErrorKind;
+  errorDetail?: string;
+};
+
 // Assistant 消息累计 token 使用量；单次用户 turn 可能跨多轮 LLM 调用，前端按 usage 事件累加。
 export interface TokenUsage {
   inputTokens?: number;
@@ -552,8 +557,8 @@ function toDisplayMessages(msgs: ChatMessage[], includeStreaming = false): app.C
                 toolName: b.toolName,
                 toolInput: b.toolInput,
                 status: includeStreaming ? normalizeSnapshotStatus(b.status) : b.status,
-                errorKind: b.errorKind,
-                errorDetail: b.errorDetail,
+                ...(b.errorKind ? { errorKind: b.errorKind } : {}),
+                ...(b.errorDetail ? { errorDetail: b.errorDetail } : {}),
               })
           ),
           tokenUsage: m.tokenUsage ? new conversation_entity.TokenUsage(m.tokenUsage) : undefined,
@@ -566,15 +571,18 @@ function convertDisplayMessages(displayMsgs: app.ConversationDisplayMessage[]): 
     id: crypto.randomUUID(),
     role: dm.role as "user" | "assistant" | "tool",
     content: dm.content,
-    blocks: (dm.blocks || []).map((b: conversation_entity.ContentBlock) => ({
-      type: b.type as ContentBlock["type"],
-      content: b.content,
-      toolName: b.toolName,
-      toolInput: b.toolInput,
-      status: b.status as ContentBlock["status"],
-      errorKind: b.errorKind as ErrorKind | undefined,
-      errorDetail: b.errorDetail,
-    })),
+    blocks: (dm.blocks || []).map((rawBlock: conversation_entity.ContentBlock) => {
+      const b = rawBlock as PersistedConversationContentBlock;
+      return {
+        type: b.type as ContentBlock["type"],
+        content: b.content,
+        toolName: b.toolName,
+        toolInput: b.toolInput,
+        status: b.status as ContentBlock["status"],
+        errorKind: b.errorKind,
+        errorDetail: b.errorDetail,
+      };
+    }),
     tokenUsage: dm.tokenUsage
       ? {
           inputTokens: dm.tokenUsage.inputTokens,
