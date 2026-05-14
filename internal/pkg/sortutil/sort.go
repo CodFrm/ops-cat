@@ -2,6 +2,47 @@ package sortutil
 
 import "fmt"
 
+// ReorderSiblings 把 movedID 从 siblings 中抽出，插到 beforeID 之前；
+// beforeID == 0 或未在 siblings 中找到时，追加到末尾。
+// 返回重排后的切片；若 movedID 未在 siblings 中找到，原样返回。
+func ReorderSiblings[T any](siblings []T, movedID, beforeID int64, getID func(T) int64) []T {
+	if movedID == beforeID {
+		return siblings
+	}
+
+	var moved T
+	var foundMoved bool
+	rest := make([]T, 0, len(siblings))
+	for _, item := range siblings {
+		if getID(item) == movedID {
+			moved = item
+			foundMoved = true
+			continue
+		}
+		rest = append(rest, item)
+	}
+	if !foundMoved {
+		return siblings
+	}
+
+	if beforeID == 0 {
+		return append(rest, moved)
+	}
+	result := make([]T, 0, len(siblings))
+	inserted := false
+	for _, item := range rest {
+		if !inserted && getID(item) == beforeID {
+			result = append(result, moved)
+			inserted = true
+		}
+		result = append(result, item)
+	}
+	if !inserted {
+		result = append(result, moved)
+	}
+	return result
+}
+
 // MoveItem 通用排序移动逻辑（up/down/top）
 func MoveItem[T any](id int64, direction string, items []T,
 	getID func(T) int64, getOrder func(T) int, updateOrder func(int64, int) error,

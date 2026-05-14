@@ -19,6 +19,7 @@ type AssetRepo interface {
 	DeleteByGroupID(ctx context.Context, groupID int64) error
 	FindByCredentialID(ctx context.Context, credentialID int64) ([]*asset_entity.Asset, error)
 	UpdateSortOrder(ctx context.Context, id int64, sortOrder int) error
+	UpdateGroupID(ctx context.Context, id, groupID int64) error
 	CountByTypes(ctx context.Context, types []string) (int64, error)
 }
 
@@ -109,6 +110,10 @@ func (r *assetRepo) DeleteByGroupID(ctx context.Context, groupID int64) error {
 
 func (r *assetRepo) UpdateSortOrder(ctx context.Context, id int64, sortOrder int) error {
 	return db.Ctx(ctx).Model(&asset_entity.Asset{}).Where("id = ?", id).Update("sort_order", sortOrder).Error
+}
+
+func (r *assetRepo) UpdateGroupID(ctx context.Context, id, groupID int64) error {
+	return db.Ctx(ctx).Model(&asset_entity.Asset{}).Where("id = ?", id).Update("group_id", groupID).Error
 }
 
 func (r *assetRepo) FindByCredentialID(ctx context.Context, credentialID int64) ([]*asset_entity.Asset, error) {
