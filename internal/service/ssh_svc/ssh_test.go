@@ -1,8 +1,15 @@
 package ssh_svc
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -714,4 +721,88 @@ func TestEnableSyncReturnsErrorIfDisableRacesIn(t *testing.T) {
 	if state := sess.GetSyncState(); state.Supported {
 		t.Fatalf("Supported must be false after disable race, got %#v", state)
 	}
+}
+
+// generateTestPrivateKeyPEM 生成 ed25519 测试私钥的 PKCS8 PEM 编码。
+func generateTestPrivateKeyPEM(t *testing.T) string {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("生成 ed25519 密钥失败: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		t.Fatalf("PKCS8 编码失败: %v", err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+}
+
+// TestBuildAuthMethods 校验各 authType 分支返回正确的 ssh.AuthMethod 序列。
+// 重点回归 issue #77：authType=key 分支必须在末尾追加 keyboard-interactive，
+// 以支持 publickey + MFA/OTP 链路（JumpServer 等堡垒机场景）。
+func TestBuildAuthMethods(t *testing.T) {
+	convey.Convey("buildAuthMethods 按 authType 返回正确的认证方法序列", t, func() {
+		pemKey := generateTestPrivateKeyPEM(t)
+		keyPath := filepath.Join(t.TempDir(), "id_test")
+		if err := os.WriteFile(keyPath, []byte(pemKey), 0o600); err != nil {
+			t.Fatalf("写入测试密钥文件失败: %v", err)
+		}
+
+		// crypto/ssh 包内的具体类型是私有的，但 %T 格式化能拿到稳定的类型名称，
+		// 足够用来断言 method 序列的组成与顺序。
+		const (
+			tPassword = "ssh.passwordCallback"
+			tPubKey   = "ssh.publicKeyCallback"
+			tKBI      = "ssh.KeyboardInteractiveChallenge"
+		)
+		typeNames := func(ms []ssh.AuthMethod) []string {
+			out := make([]string, len(ms))
+			for i, m := range ms {
+				out[i] = fmt.Sprintf("%T", m)
+			}
+			return out
+		}
+
+		convey.Convey("authType=password 返回 [password, keyboard-interactive]", func() {
+			ms, err := buildAuthMethods("password", "hunter2", "", "", nil, nil)
+			assert.NoError(t, err)
+			assert.Equal(t, []string{tPassword, tKBI}, typeNames(ms))
+		})
+
+		convey.Convey("authType=key + inline key 返回 [publickey, keyboard-interactive]（issue #77）", func() {
+			ms, err := buildAuthMethods("key", "", pemKey, "", nil, nil)
+			assert.NoError(t, err)
+			assert.Equal(t, []string{tPubKey, tKBI}, typeNames(ms))
+		})
+
+		convey.Convey("authType=key + 多个 file paths 返回 [publickey...publickey, keyboard-interactive]", func() {
+			ms, err := buildAuthMethods("key", "", "", "", []string{keyPath, keyPath}, nil)
+			assert.NoError(t, err)
+			assert.Equal(t, []string{tPubKey, tPubKey, tKBI}, typeNames(ms))
+		})
+
+		convey.Convey("authType=key + inline + file paths 同时存在", func() {
+			ms, err := buildAuthMethods("key", "", pemKey, "", []string{keyPath}, nil)
+			assert.NoError(t, err)
+			assert.Equal(t, []string{tPubKey, tPubKey, tKBI}, typeNames(ms))
+		})
+
+		convey.Convey("authType=key 但未提供任何密钥返回错误", func() {
+			_, err := buildAuthMethods("key", "", "", "", nil, nil)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "需要提供私钥")
+		})
+
+		convey.Convey("authType=keyboard-interactive 仅返回 [keyboard-interactive]", func() {
+			ms, err := buildAuthMethods("keyboard-interactive", "", "", "", nil, nil)
+			assert.NoError(t, err)
+			assert.Equal(t, []string{tKBI}, typeNames(ms))
+		})
+
+		convey.Convey("未知 authType 返回错误", func() {
+			_, err := buildAuthMethods("magic", "", "", "", nil, nil)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "不支持的认证方式")
+		})
+	})
 }

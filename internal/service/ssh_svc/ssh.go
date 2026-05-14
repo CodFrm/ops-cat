@@ -635,6 +635,8 @@ func buildAuthMethods(authType, password, key, keyPassphrase string, privateKeyP
 		if len(methods) == 0 {
 			return nil, fmt.Errorf("密钥认证方式需要提供私钥")
 		}
+		// 追加 keyboard-interactive 以支持 publickey + MFA/OTP 链路（JumpServer / 堡垒机场景，issue #77）
+		methods = append(methods, kbInteractive())
 	case "keyboard-interactive":
 		methods = append(methods, kbInteractive())
 	default:
