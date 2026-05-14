@@ -140,3 +140,17 @@ func (mr *MockGroupRepoMockRecorder) UpdateSortOrder(ctx, id, sortOrder any) *go
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateSortOrder", reflect.TypeOf((*MockGroupRepo)(nil).UpdateSortOrder), ctx, id, sortOrder)
 }
+
+// UpdateParentID mocks base method.
+func (m *MockGroupRepo) UpdateParentID(ctx context.Context, id, parentID int64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateParentID", ctx, id, parentID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateParentID indicates an expected call of UpdateParentID.
+func (mr *MockGroupRepoMockRecorder) UpdateParentID(ctx, id, parentID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateParentID", reflect.TypeOf((*MockGroupRepo)(nil).UpdateParentID), ctx, id, parentID)
+}

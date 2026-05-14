@@ -17,6 +17,7 @@ type GroupRepo interface {
 	Delete(ctx context.Context, id int64) error
 	ReparentChildren(ctx context.Context, oldParentID, newParentID int64) error
 	UpdateSortOrder(ctx context.Context, id int64, sortOrder int) error
+	UpdateParentID(ctx context.Context, id, parentID int64) error
 }
 
 var defaultGroup GroupRepo
@@ -75,4 +76,8 @@ func (r *groupRepo) ReparentChildren(ctx context.Context, oldParentID, newParent
 	return db.Ctx(ctx).Model(&group_entity.Group{}).
 		Where("parent_id = ?", oldParentID).
 		Update("parent_id", newParentID).Error
+}
+
+func (r *groupRepo) UpdateParentID(ctx context.Context, id, parentID int64) error {
+	return db.Ctx(ctx).Model(&group_entity.Group{}).Where("id = ?", id).Update("parent_id", parentID).Error
 }

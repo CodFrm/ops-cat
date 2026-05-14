@@ -14,7 +14,7 @@ import {
 import { useWailsEvent } from "@/hooks/useWailsEvent";
 import { RespondOpsctlApproval } from "../../../wailsjs/go/app/App";
 import { ai } from "../../../wailsjs/go/models";
-import { ShieldAlert, Terminal, Database, Server, FolderOpen, Globe } from "lucide-react";
+import { ShieldAlert, Terminal, Database, Server, FolderOpen, Globe, Usb } from "lucide-react";
 
 interface ApprovalItemData {
   type: string;
@@ -60,6 +60,7 @@ interface QueueItem {
 function TypeBadge({ type }: { type: string }) {
   const icons: Record<string, typeof Terminal> = {
     exec: Terminal,
+    serial: Usb,
     sql: Database,
     redis: Server,
     mongo: Database,

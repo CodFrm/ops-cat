@@ -13,6 +13,7 @@ import {
   Container,
   Cpu,
   Network,
+  Usb,
   Folder,
   FolderOpen,
   FolderHeart,
@@ -89,6 +90,7 @@ const ICON_DISPLAY_NAMES: Record<string, string> = {
   container: "Container",
   cpu: "CPU",
   network: "Network",
+  usb: "USB",
   aws: "AWS",
   azure: "Azure",
   gcp: "Google Cloud",
@@ -143,6 +145,7 @@ const CATEGORIES: IconCategory[] = [
       container: Container,
       cpu: Cpu,
       network: Network,
+      usb: Usb,
     },
   },
   {
@@ -260,9 +263,11 @@ interface IconPickerProps {
   value: string;
   onChange: (icon: string) => void;
   type?: "asset" | "group";
+  /** compact: 仅显示图标的方形触发按钮，无文字、无下拉箭头，便于和输入框同排。 */
+  compact?: boolean;
 }
 
-export function IconPicker({ value, onChange, type = "asset" }: IconPickerProps) {
+export function IconPicker({ value, onChange, type = "asset", compact = false }: IconPickerProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -317,13 +322,24 @@ export function IconPicker({ value, onChange, type = "asset" }: IconPickerProps)
       }}
     >
       <PopoverTrigger asChild>
-        <Button variant="outline" role="combobox" className="w-full justify-between font-normal h-9">
-          <div className="flex items-center gap-2">
-            <SelectedIcon className="h-4 w-4 shrink-0" style={resolvedColor ? { color: resolvedColor } : undefined} />
-            <span className="truncate">{displayName}</span>
-          </div>
-          <ChevronDown className="ml-auto h-4 w-4 shrink-0 opacity-50" />
-        </Button>
+        {compact ? (
+          <Button
+            variant="outline"
+            role="combobox"
+            aria-label={displayName}
+            className="h-9 w-9 shrink-0 p-0 flex items-center justify-center"
+          >
+            <SelectedIcon className="h-4 w-4" style={resolvedColor ? { color: resolvedColor } : undefined} />
+          </Button>
+        ) : (
+          <Button variant="outline" role="combobox" className="w-full justify-between font-normal h-9">
+            <div className="flex items-center gap-2">
+              <SelectedIcon className="h-4 w-4 shrink-0" style={resolvedColor ? { color: resolvedColor } : undefined} />
+              <span className="truncate">{displayName}</span>
+            </div>
+            <ChevronDown className="ml-auto h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        )}
       </PopoverTrigger>
       <PopoverContent className="w-[320px] p-0" align="start">
         <TooltipProvider delayDuration={400}>

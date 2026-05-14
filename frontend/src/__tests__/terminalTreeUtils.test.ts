@@ -84,7 +84,7 @@ describe("getTerminalActiveAssetIds", () => {
         tab1: {
           splitTree: { type: "terminal", sessionId: "s1" },
           activePaneId: "s1",
-          panes: { s1: { sessionId: "s1", connected: true, connectedAt: Date.now() } },
+          panes: { s1: { sessionId: "s1", transport: "ssh", connected: true, connectedAt: Date.now() } },
           directoryFollowMode: "off",
         },
       },

@@ -357,12 +357,51 @@ func TestRunner_SimpleTextResponse(t *testing.T) {
 	})
 }
 
-// 回归：subagent 调出的 general-purpose 子 agent 工具集含 bash/write/edit，
-// 旧实现只把 LocalToolGate 挂在父 agent 上，子 agent 调 bash 时绕过审批。
-// 这里通过 providertest 串起一条 parent → subagent → child bash 的端到端流，
+// TestBuildGeneralPurposeTools_AllLocalToolsPrefixed 跑真 cago 构造器，断言 GP subagent
+// 工具集里本地 7 件套全部带 local_ 前缀，且没有任何裸名 bash/write/edit/read/grep/find/ls 漏网。
+//
+// 同时覆盖两条回归：
+//   - WrapLocalTool 依赖 cago 内置工具是 *tool.RawTool。若 cago 升级换成别的 Tool
+//     实现，decorator 会静默 pass-through，本测试用真 cago bash.New/grep.New 等构造器
+//     而非合成 RawTool，能抓到此类依赖漂移。
+//   - 早期实现把 grep/find/ls 追加在 WrapLocalTool 循环之后，导致子 agent 看到的是
+//     裸 grep/find/ls 而不是 local_*。本测试断言全部 7 个名字都已带前缀。
+func TestBuildGeneralPurposeTools_AllLocalToolsPrefixed(t *testing.T) {
+	Convey("GP subagent 工具集里 7 件本地工具全部 local_ 前缀，无裸名漏网", t, func() {
+		tools := buildGeneralPurposeTools(t.TempDir())
+		names := make(map[string]bool, len(tools))
+		for _, tl := range tools {
+			names[tl.Name()] = true
+		}
+
+		// 7 件套必须全部以 local_ 前缀出现
+		for _, want := range []string{
+			"local_bash", "local_write", "local_edit",
+			"local_read", "local_grep", "local_find", "local_ls",
+		} {
+			So(names[want], ShouldBeTrue)
+		}
+
+		// 裸名一个都不能有
+		for _, banned := range []string{
+			"bash", "write", "edit", "read", "grep", "find", "ls",
+		} {
+			So(names[banned], ShouldBeFalse)
+		}
+
+		// 不在 localRenames 表里的本地工具保持原名（cago runtime 文案依赖）
+		So(names["bash_output"], ShouldBeTrue)
+		So(names["kill_shell"], ShouldBeTrue)
+	})
+}
+
+// 回归：subagent 调出的 general-purpose 子 agent 工具集含
+// local_bash/local_write/local_edit（cago 默认 bash/write/edit 经 WrapLocalTool 改名）。
+// 旧实现只把 LocalToolGate 挂在父 agent 上，子 agent 调 local_bash 时绕过审批。
+// 这里通过 providertest 串起一条 parent → subagent → child local_bash 的端到端流，
 // 断言 LocalToolGate.confirm 一定被触发。
 func TestRunner_GPSubagentInheritsLocalToolGate(t *testing.T) {
-	Convey("subagent 调出的 general-purpose 子 agent 调 bash 时也走 LocalToolGate", t, func() {
+	Convey("subagent 调出的 general-purpose 子 agent 调 local_bash 时也走 LocalToolGate", t, func() {
 		var confirmCalls int32
 		var seenTool, seenCmd string
 		gate := NewLocalToolGate(func(_ context.Context, req LocalToolApprovalRequest) ApprovalResponse {
@@ -379,9 +418,9 @@ func TestRunner_GPSubagentInheritsLocalToolGate(t *testing.T) {
 			provider.StreamChunk{ToolCallDelta: &provider.ToolCallDelta{Index: 0, ArgsDelta: `{"type":"general-purpose","prompt":"run echo"}`}},
 			provider.StreamChunk{FinishReason: provider.FinishToolCalls},
 		)
-		// 2) 子 agent: bash 调用 —— 期望被 gate 拦截
+		// 2) 子 agent: local_bash 调用 —— 期望被 gate 拦截
 		mock.QueueStream(
-			provider.StreamChunk{ToolCallDelta: &provider.ToolCallDelta{Index: 0, ID: "b1", Name: "bash"}},
+			provider.StreamChunk{ToolCallDelta: &provider.ToolCallDelta{Index: 0, ID: "b1", Name: "local_bash"}},
 			provider.StreamChunk{ToolCallDelta: &provider.ToolCallDelta{Index: 0, ArgsDelta: `{"command":"echo hi"}`}},
 			provider.StreamChunk{FinishReason: provider.FinishToolCalls},
 		)
@@ -417,7 +456,7 @@ func TestRunner_GPSubagentInheritsLocalToolGate(t *testing.T) {
 		}
 
 		So(atomic.LoadInt32(&confirmCalls), ShouldEqual, 1)
-		So(seenTool, ShouldEqual, "bash")
+		So(seenTool, ShouldEqual, "local_bash")
 		So(seenCmd, ShouldEqual, "echo hi")
 	})
 }
