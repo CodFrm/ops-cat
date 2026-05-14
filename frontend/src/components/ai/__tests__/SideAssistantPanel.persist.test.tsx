@@ -20,9 +20,8 @@ describe("SideAssistantPanel rail persistence", () => {
           conversationId: 1,
           title: "写迁移",
           createdAt: 1,
-          uiState: { inputDraft: { content: "", mentions: [] }, scrollTop: 0, editTarget: null },
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any,
+          uiState: { inputDraft: { content: "" }, scrollTop: 0, editTarget: null },
+        },
       ],
       activeSidebarTabId: "t1",
       tabStates: {},

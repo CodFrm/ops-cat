@@ -57,19 +57,18 @@ func (r CheckResult) DecisionString() string {
 	}
 }
 
-// --- CheckResult context（供 AuditingExecutor 读取决策信息）---
+// --- CheckResult 跨 middleware 共享 ---
+//
+// 调用约定：auditMiddleware 在 c.Next() 之前用 c.WithContext 把一个空的
+// *CheckResult slot 挂到 ctx 上（key=checkResultKey{}）。tool handler 通过
+// RecordDecision(ctx, r) 写决策；auditMiddleware 在 c.Next() 返回后读 slot 落审计。
+// 没有 slot（如 opsctl 直调 handler 路径）时 RecordDecision 是 no-op，
+// 决策走 callHandler 入参写审计，互不影响。
 
-type checkResultKey struct{}
-
-// withCheckResult 注入 CheckResult 占位指针（由 AuditingExecutor 调用）
-func withCheckResult(ctx context.Context, r *CheckResult) context.Context {
-	return context.WithValue(ctx, checkResultKey{}, r)
-}
-
-// setCheckResult 在工具 handler 中设置决策结果
-func setCheckResult(ctx context.Context, result CheckResult) {
-	if r, ok := ctx.Value(checkResultKey{}).(*CheckResult); ok && r != nil {
-		*r = result
+// RecordDecision 在工具 handler 中设置决策结果，供 audit middleware 读取。
+func RecordDecision(ctx context.Context, result CheckResult) {
+	if slot, ok := ctx.Value(checkResultKey{}).(*CheckResult); ok && slot != nil {
+		*slot = result
 	}
 }
 
@@ -77,29 +76,14 @@ func setCheckResult(ctx context.Context, result CheckResult) {
 // ctx 携带会话 ID 等上下文（通过 GetConversationID 获取）
 // kind: "single", "batch", "grant"
 // items: 审批项列表
-// agentRole: 子 agent 角色（可为空）
 // 返回 ApprovalResponse
-type CommandConfirmFunc func(ctx context.Context, kind string, items []ApprovalItem, agentRole string) ApprovalResponse
+type CommandConfirmFunc func(ctx context.Context, kind string, items []ApprovalItem) ApprovalResponse
 
 // GrantRequestFunc Grant 审批回调，创建 grant 并等待用户审批
 // ctx 携带会话 ID 等上下文（通过 GetConversationID 获取）
 // items 为多资产的审批条目列表，用户可能在审批弹窗中编辑
 // 返回 (approved, 用户编辑后的 patterns)
 type GrantRequestFunc func(ctx context.Context, items []ApprovalItem, reason string) (approved bool, finalPatterns []string)
-
-// ApprovedPattern 会话级已批准的命令模式
-type ApprovedPattern struct {
-	AssetID int64  // 0 表示所有资产
-	Pattern string // 命令模式，支持 * 通配，复用 MatchCommandRule 匹配
-}
-
-// Match 检查实际命令是否匹配此模式
-func (p *ApprovedPattern) Match(assetID int64, command string) bool {
-	if p.AssetID != 0 && p.AssetID != assetID {
-		return false
-	}
-	return MatchCommandRule(p.Pattern, command)
-}
 
 // CommandPolicyChecker 命令权限检查器，通过 context 注入到两条执行路径
 type CommandPolicyChecker struct {
@@ -114,7 +98,7 @@ func NewCommandPolicyChecker(confirmFunc CommandConfirmFunc) *CommandPolicyCheck
 	}
 }
 
-// ConfirmFunc 返回确认回调（供 batch_command 等直接调用）
+// ConfirmFunc 返回确认回调，供 batch_command 聚合多条审批项一次性调用。
 func (c *CommandPolicyChecker) ConfirmFunc() CommandConfirmFunc {
 	return c.confirmFunc
 }
@@ -299,11 +283,6 @@ func CheckRedisPolicyForOpsctl(ctx context.Context, assetID int64, command strin
 	return CheckPermission(ctx, asset_entity.AssetTypeRedis, assetID, command)
 }
 
-// CheckKafkaPolicyForOpsctl 检查 Kafka 策略，内部委托 CheckPermission。
-func CheckKafkaPolicyForOpsctl(ctx context.Context, assetID int64, command string) CheckResult {
-	return CheckPermission(ctx, asset_entity.AssetTypeKafka, assetID, command)
-}
-
 // CheckForAsset 按资产类型分发权限检查
 func (c *CommandPolicyChecker) CheckForAsset(ctx context.Context, assetID int64, assetType, command string) CheckResult {
 	result := CheckPermission(ctx, assetType, assetID, command)
@@ -351,36 +330,28 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 		AssetName: assetName,
 		Command:   command,
 	}}
-	agentRole := GetAgentRole(ctx)
-
-	resp := c.confirmFunc(ctx, "single", items, agentRole)
+	resp := c.confirmFunc(ctx, "single", items)
 
 	if resp.Decision == "deny" {
 		return CheckResult{Decision: Deny, Message: policyFmt(ctx, "USER DENIED: The user has denied execution of command: %s. Stop the current task immediately.", "用户拒绝：用户已拒绝执行命令: %s。请立即停止当前任务。", command), DecisionSource: SourceUserDeny}
 	}
 	if resp.Decision == "allowAll" {
 		sessionID := GetSessionID(ctx)
+		// 三条 grant 落库路径（handleConfirm / opsctl 单审批 / AI grant 流）共用 NormalizeGrantPatterns：
+		// SSH/K8s shell 类按 AST 子命令拆，其他类型直通。这里既保持本路径行为一致，
+		// 又保证编辑模式（多行/通配）后的每一行都按子命令分别落库。
 		var patterns []string
-		// 优先使用用户编辑后的模式（支持 * 通配符）
 		if len(resp.EditedItems) > 0 {
 			for _, item := range resp.EditedItems {
-				cmd := strings.TrimSpace(item.Command)
-				if cmd != "" {
-					patterns = append(patterns, cmd)
-				}
+				patterns = append(patterns, NormalizeGrantPatterns(assetType, item.Command)...)
 			}
 		}
-		// 无编辑项时回退：SSH 解析子命令，其他类型直接使用原始命令
 		if len(patterns) == 0 {
-			if assetType == asset_entity.AssetTypeSSH {
-				subCmds, _ := ExtractSubCommands(command)
-				if len(subCmds) == 0 {
-					subCmds = []string{command}
-				}
-				patterns = subCmds
-			} else {
-				patterns = []string{command}
-			}
+			patterns = NormalizeGrantPatterns(assetType, command)
+		}
+		if len(patterns) == 0 {
+			// shell parse 失败或全为空白 — 至少保留原命令一条，避免静默丢 grant
+			patterns = []string{command}
 		}
 		for _, cmd := range patterns {
 			SaveGrantPattern(ctx, sessionID, assetID, assetName, cmd)
@@ -683,21 +654,4 @@ func resolveGroupChain(ctx context.Context, groupID int64) []*group_entity.Group
 		currentID = g.ParentID
 	}
 	return chain
-}
-
-// --- agentRole context ---
-
-type agentRoleKeyType struct{}
-
-// WithAgentRole 注入 agent role（Sub Agent 用）
-func WithAgentRole(ctx context.Context, role string) context.Context {
-	return context.WithValue(ctx, agentRoleKeyType{}, role)
-}
-
-// GetAgentRole 获取 agent role
-func GetAgentRole(ctx context.Context) string {
-	if v, ok := ctx.Value(agentRoleKeyType{}).(string); ok {
-		return v
-	}
-	return ""
 }

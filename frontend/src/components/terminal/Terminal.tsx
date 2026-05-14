@@ -3,7 +3,7 @@ import type { Terminal as XTerminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { SearchAddon } from "@xterm/addon-search";
 import { WriteSSH, WriteSerial, ResizeSSH, ResizeSerialTerminal } from "../../../wailsjs/go/app/App";
-import { useShortcutStore, matchShortcut, formatBinding, formatModKey } from "@/stores/shortcutStore";
+import { useShortcutStore, formatBinding, formatModKey } from "@/stores/shortcutStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useTerminalThemeStore, toXtermTheme } from "@/stores/terminalThemeStore";
 import { builtinThemes, defaultLightTheme, defaultDarkTheme } from "@/data/terminalThemes";
@@ -105,21 +105,15 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       inst.fitAddon.fit();
     });
 
-    inst.term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-      const action = matchShortcut(e, useShortcutStore.getState().shortcuts);
-      if (action === "panel.filter" && e.type === "keydown") {
-        setShowSearch((v) => !v);
-        return false;
+    inst.bridge.setOnFilter(() => setShowSearch((v) => !v));
+    inst.bridge.setOnCopy(() => {
+      const selection = inst.term.getSelection();
+      if (selection) {
+        navigator.clipboard.writeText(selection);
+        toast.success(t("ssh.contextMenu.copied"), { duration: 1500 });
+        return true;
       }
-      if (e.key === "c" && (e.ctrlKey || e.metaKey) && e.type === "keydown") {
-        const selection = inst.term.getSelection();
-        if (selection) {
-          navigator.clipboard.writeText(selection);
-          toast.success(t("ssh.contextMenu.copied"), { duration: 1500 });
-          return false;
-        }
-      }
-      return !action;
+      return false;
     });
 
     const selDispose = inst.term.onSelectionChange(() => {
@@ -152,8 +146,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       // skip any term operations and just detach.
       const stillAlive = getTerminalInstance(sessionId) === inst;
       if (stillAlive) {
-        // Drop key handler so its closures can be GC'd; xterm only stores one slot.
-        inst.term.attachCustomKeyEventHandler(() => true);
+        // Drop callback closures so toast/setShowSearch can be GC'd;
+        // bridge keeps a single handler slot, just reset to no-ops.
+        inst.bridge.setOnFilter(() => {});
+        inst.bridge.setOnCopy(() => false);
       }
       if (inst.container.parentElement === wrapper) {
         wrapper.removeChild(inst.container);
@@ -173,6 +169,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     termRef.current.options.scrollback = scrollback;
     fitAddonRef.current?.fit();
   }, [xtermTheme, fontSize, fontFamily, scrollback]);
+
+  useEffect(() => {
+    const inst = getTerminalInstance(sessionId);
+    if (inst) inst.bridge.setShortcuts(shortcuts);
+  }, [sessionId, shortcuts]);
 
   useEffect(() => {
     activeRef.current = active;

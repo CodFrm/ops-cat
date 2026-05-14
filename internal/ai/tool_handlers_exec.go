@@ -62,7 +62,7 @@ func handleRequestGrant(ctx context.Context, args map[string]any) (string, error
 	}
 
 	result := checker.SubmitGrantMulti(ctx, grantItems, reason)
-	setCheckResult(ctx, result)
+	RecordDecision(ctx, result)
 	return result.Message, nil
 }
 
@@ -79,13 +79,13 @@ func handleRunCommand(ctx context.Context, args map[string]any) (string, error) 
 	// 权限检查（两条路径共用）
 	if checker := GetPolicyChecker(ctx); checker != nil {
 		result := checker.Check(ctx, assetID, command)
-		setCheckResult(ctx, result)
+		RecordDecision(ctx, result)
 		if result.Decision != Allow {
 			return result.Message, nil
 		}
 	}
 
-	// 如果有 SSH 缓存（内置 Agent 模式），使用缓存连接
+	// 如果 context 注入了 SSH 缓存，复用同一资产的连接
 	if cache := getSSHCache(ctx); cache != nil {
 		return runCommandWithCache(ctx, cache, assetID, command)
 	}

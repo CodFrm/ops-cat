@@ -2,7 +2,6 @@ package ai
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 
@@ -99,26 +98,32 @@ func TestCheckResult_DecisionString(t *testing.T) {
 }
 
 func TestCheckResult_Context(t *testing.T) {
-	convey.Convey("CheckResult context 传递", t, func() {
-		convey.Convey("setCheckResult 填充占位指针", func() {
-			holder := &CheckResult{}
-			ctx := withCheckResult(context.Background(), holder)
-
-			setCheckResult(ctx, CheckResult{
+	convey.Convey("CheckResult 跨 middleware 共享（ctx slot）", t, func() {
+		convey.Convey("auditMiddleware 挂的 slot 能被 RecordDecision 写入", func() {
+			slot := &CheckResult{}
+			ctx := context.WithValue(context.Background(), checkResultKey{}, slot)
+			RecordDecision(ctx, CheckResult{
 				Decision:       Allow,
 				DecisionSource: SourceGrantAllow,
 				MatchedPattern: "cat *",
 			})
-
-			assert.Equal(t, Allow, holder.Decision)
-			assert.Equal(t, SourceGrantAllow, holder.DecisionSource)
-			assert.Equal(t, "cat *", holder.MatchedPattern)
+			assert.Equal(t, Allow, slot.Decision)
+			assert.Equal(t, SourceGrantAllow, slot.DecisionSource)
+			assert.Equal(t, "cat *", slot.MatchedPattern)
 		})
 
-		convey.Convey("无占位指针时 setCheckResult 不 panic", func() {
+		convey.Convey("无 slot 时 RecordDecision 是 no-op", func() {
 			ctx := context.Background()
 			assert.NotPanics(t, func() {
-				setCheckResult(ctx, CheckResult{Decision: Allow})
+				RecordDecision(ctx, CheckResult{Decision: Allow})
+			})
+		})
+
+		convey.Convey("slot 是 nil 指针时 RecordDecision 不 panic", func() {
+			var nilSlot *CheckResult
+			ctx := context.WithValue(context.Background(), checkResultKey{}, nilSlot)
+			assert.NotPanics(t, func() {
+				RecordDecision(ctx, CheckResult{Decision: Allow})
 			})
 		})
 	})
@@ -214,61 +219,5 @@ func TestTruncateString(t *testing.T) {
 	})
 }
 
-func TestAuditingExecutor(t *testing.T) {
-	convey.Convey("AuditingExecutor", t, func() {
-		mockRepo := &mockAuditRepo{}
-		origRepo := audit_repo.Audit()
-		audit_repo.RegisterAudit(mockRepo)
-		t.Cleanup(func() {
-			if origRepo != nil {
-				audit_repo.RegisterAudit(origRepo)
-			}
-		})
-
-		inner := &mockExecutor{
-			results: map[string]string{
-				"list_assets": `[{"ID":1}]`,
-			},
-		}
-		writer := NewDefaultAuditWriter()
-		executor := NewAuditingExecutor(inner, writer)
-
-		convey.Convey("代理到 inner 并记录审计日志", func() {
-			ctx := WithAuditSource(context.Background(), "ai")
-			ctx = WithConversationID(ctx, 99)
-
-			result, err := executor.Execute(ctx, "list_assets", `{"asset_type":"ssh"}`)
-			assert.NoError(t, err)
-			assert.Equal(t, `[{"ID":1}]`, result)
-
-			// inner 应被调用
-			assert.Len(t, inner.calls, 1)
-			assert.Equal(t, "list_assets", inner.calls[0].Name)
-		})
-
-		convey.Convey("inner 报错时仍记录审计日志", func() {
-			failingInner := &failingExecutor{err: errors.New("connection refused")}
-			failExec := NewAuditingExecutor(failingInner, writer)
-
-			ctx := WithAuditSource(context.Background(), "ai")
-			result, err := failExec.Execute(ctx, "run_command", `{"asset_id":1,"command":"uptime"}`)
-
-			assert.Error(t, err)
-			assert.Equal(t, "", result)
-		})
-
-		convey.Convey("Close 代理到 inner", func() {
-			err := executor.Close()
-			assert.NoError(t, err)
-		})
-	})
-}
-
-// failingExecutor 模拟执行失败的 executor
-type failingExecutor struct {
-	err error
-}
-
-func (f *failingExecutor) Execute(_ context.Context, _ string, _ string) (string, error) {
-	return "", f.err
-}
+// TestAuditingExecutor 已随 AuditingExecutor 一并下线（M6 cutover）。
+// 等价覆盖参考 cago_audit_test.go 中的 TestRawTool_* 三组用例。

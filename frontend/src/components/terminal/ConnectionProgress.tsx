@@ -229,7 +229,7 @@ function LogArea({ logs }: { logs: ConnectionState["logs"] }) {
   };
 
   return (
-    <div className="border-t max-h-28 overflow-auto px-4 py-2 bg-muted/30 font-mono text-xs">
+    <div className="border-t max-h-28 overflow-auto px-4 py-2 bg-muted/30 font-mono text-xs select-text">
       {logs.map((log, i) => (
         <div key={i} className="flex items-start gap-2 py-px">
           <span className="text-muted-foreground/60 shrink-0">{formatTime(log.timestamp)}</span>

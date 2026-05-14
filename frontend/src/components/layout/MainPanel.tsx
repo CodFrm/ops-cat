@@ -261,6 +261,7 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset, commandO
                     <FileManagerPanel
                       tabId={tab.id}
                       sessionId={data.activePaneId}
+                      isActive={isActive}
                       isOpen={!!fileManagerOpenTabs[tab.id]}
                       width={fileManagerWidth}
                       onWidthChange={setFileManagerWidth}

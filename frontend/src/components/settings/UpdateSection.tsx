@@ -36,10 +36,11 @@ import {
   GetDebugMode,
   SetDebugMode,
   OpenLogsDir,
+  RestartApp,
 } from "../../../wailsjs/go/app/App";
 import { Bug, Download, FolderOpen, Loader2, ExternalLink, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { BrowserOpenURL, EventsOn, Quit } from "../../../wailsjs/runtime/runtime";
+import { BrowserOpenURL, EventsOn } from "../../../wailsjs/runtime/runtime";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const REPOSITORY_URL = "https://github.com/opskat/opskat";
@@ -64,6 +65,7 @@ export function UpdateSection() {
   const [customMirror, setCustomMirror] = useState("");
   const [showChecksumDialog, setShowChecksumDialog] = useState(false);
   const [debugMode, setDebugModeState] = useState(false);
+  const [restarting, setRestarting] = useState(false);
 
   useEffect(() => {
     GetAppVersion()
@@ -204,6 +206,16 @@ export function UpdateSection() {
       }
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleRestart = async () => {
+    setRestarting(true);
+    try {
+      await RestartApp();
+    } catch (e: unknown) {
+      setRestarting(false);
+      toast.error(errMsg(e));
     }
   };
 
@@ -365,7 +377,8 @@ export function UpdateSection() {
               </Button>
             ) : (
               <div className="flex gap-2">
-                <Button onClick={() => Quit()} size="sm">
+                <Button onClick={handleRestart} size="sm" disabled={restarting}>
+                  {restarting && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
                   {t("appUpdate.restartNow")}
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => setUpdateDone(false)}>

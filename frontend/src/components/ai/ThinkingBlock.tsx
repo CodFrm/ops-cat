@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Brain, ChevronRight, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ContentBlock } from "@/stores/aiStore";
@@ -7,10 +7,40 @@ interface ThinkingBlockProps {
   block: ContentBlock;
 }
 
-export function ThinkingBlock({ block }: ThinkingBlockProps) {
+const BOTTOM_THRESHOLD = 24;
+
+function isNearBottom(element: HTMLDivElement) {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_THRESHOLD;
+}
+
+export const ThinkingBlock = memo(function ThinkingBlock({ block }: ThinkingBlockProps) {
   const { t } = useTranslation();
   const isRunning = block.status === "running";
   const [expanded, setExpanded] = useState(isRunning);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const followBottomRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
+  const scrollRafRef = useRef<number | null>(null);
+
+  const scrollToThinkingBottom = useCallback((options?: { force?: boolean }) => {
+    const force = options?.force === true;
+    if (!force && !followBottomRef.current) return;
+
+    if (scrollRafRef.current !== null) {
+      cancelAnimationFrame(scrollRafRef.current);
+    }
+
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      const content = contentRef.current;
+      if (!content) return;
+      if (!force && !followBottomRef.current) return;
+
+      content.scrollTop = content.scrollHeight;
+      lastScrollTopRef.current = content.scrollTop;
+      followBottomRef.current = true;
+    });
+  }, []);
 
   // Auto-collapse when thinking completes
   useEffect(() => {
@@ -18,6 +48,39 @@ export function ThinkingBlock({ block }: ThinkingBlockProps) {
       setExpanded(false);
     }
   }, [isRunning]);
+
+  useEffect(() => {
+    return () => {
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!expanded || !isRunning) return;
+    followBottomRef.current = true;
+    scrollToThinkingBottom({ force: true });
+  }, [expanded, isRunning, scrollToThinkingBottom]);
+
+  useLayoutEffect(() => {
+    if (!expanded || !isRunning || !block.content) return;
+    scrollToThinkingBottom();
+  }, [block.content, expanded, isRunning, scrollToThinkingBottom]);
+
+  const handleContentScroll = useCallback(() => {
+    const content = contentRef.current;
+    if (!content) return;
+
+    const currentTop = content.scrollTop;
+    if (currentTop < lastScrollTopRef.current) {
+      followBottomRef.current = false;
+    } else if (isNearBottom(content)) {
+      followBottomRef.current = true;
+    }
+    lastScrollTopRef.current = currentTop;
+  }, []);
 
   const charCount = block.content.length;
   const summary = isRunning
@@ -44,7 +107,12 @@ export function ThinkingBlock({ block }: ThinkingBlockProps) {
       </button>
 
       {expanded && block.content && (
-        <div className="border-t border-purple-500/15 px-3 py-2 max-h-64 overflow-auto">
+        <div
+          ref={contentRef}
+          data-thinking-scroll
+          className="border-t border-purple-500/15 px-3 py-2 max-h-64 overflow-auto"
+          onScroll={handleContentScroll}
+        >
           <pre className="whitespace-pre-wrap break-words font-mono text-[11px] text-muted-foreground/80 leading-relaxed italic">
             {block.content}
           </pre>
@@ -52,4 +120,4 @@ export function ThinkingBlock({ block }: ThinkingBlockProps) {
       )}
     </div>
   );
-}
+});

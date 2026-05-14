@@ -20,8 +20,8 @@ import {status} from '../models';
 import {import_svc} from '../models';
 import {kafka_svc} from '../models';
 import {audit_repo} from '../models';
-import {ai} from '../models';
 import {redis_svc} from '../models';
+import {ai} from '../models';
 import {sftp_svc} from '../models';
 import {context} from '../models';
 
@@ -42,6 +42,8 @@ export function CheckForUpdate():Promise<update_svc.UpdateInfo>;
 export function Cleanup():Promise<void>;
 
 export function ClearGitHubToken():Promise<void>;
+
+export function ClearQueuedAIMessages(arg1:number):Promise<Array<string>>;
 
 export function ClearWebDAVConfig():Promise<void>;
 
@@ -361,7 +363,7 @@ export function PreviewSSHConfig():Promise<import_svc.PreviewResult>;
 
 export function PreviewTabbyConfig():Promise<import_svc.PreviewResult>;
 
-export function QueueAIMessage(arg1:number,arg2:string,arg3:Array<ai.MentionedAsset>):Promise<void>;
+export function QueueAIMessage(arg1:number,arg2:string,arg3:string):Promise<void>;
 
 export function RecordSnippetUse(arg1:number):Promise<void>;
 
@@ -415,6 +417,8 @@ export function RedisZSetRemove(arg1:number,arg2:number,arg3:string,arg4:string)
 
 export function ReloadExtensions():Promise<void>;
 
+export function RemoveQueuedAIMessage(arg1:number,arg2:string):Promise<boolean>;
+
 export function ResizeSSH(arg1:string,arg2:number,arg3:number):Promise<void>;
 
 export function RespondAIApproval(arg1:string,arg2:ai.ApprovalResponse):Promise<void>;
@@ -426,6 +430,8 @@ export function RespondHostKeyVerify(arg1:string,arg2:number):Promise<void>;
 export function RespondOpsctlApproval(arg1:string,arg2:ai.ApprovalResponse):Promise<void>;
 
 export function RespondPermission(arg1:string,arg2:string):Promise<void>;
+
+export function RestartApp():Promise<void>;
 
 export function SFTPCancelTransfer(arg1:string):Promise<void>;
 

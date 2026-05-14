@@ -19,12 +19,20 @@ import { getEntryPath, getParentPath, HANDLE_PX } from "./file-manager/utils";
 interface FileManagerPanelProps {
   tabId: string;
   sessionId: string;
+  isActive?: boolean;
   isOpen: boolean;
   width: number;
   onWidthChange: (width: number) => void;
 }
 
-export function FileManagerPanel({ tabId, sessionId, isOpen, width, onWidthChange }: FileManagerPanelProps) {
+export function FileManagerPanel({
+  tabId,
+  sessionId,
+  isActive = true,
+  isOpen,
+  width,
+  onWidthChange,
+}: FileManagerPanelProps) {
   const { t } = useTranslation();
   const {
     currentPath,
@@ -69,17 +77,20 @@ export function FileManagerPanel({ tabId, sessionId, isOpen, width, onWidthChang
   const startDownloadDir = useSFTPStore((s) => s.startDownloadDir);
   const allTransfers = useSFTPStore((s) => s.transfers);
 
-  const sessionTransfers = useMemo(
-    () => Object.values(allTransfers).filter((transfer) => transfer.sessionId === sessionId),
-    [allTransfers, sessionId]
+  const transferTarget = useMemo(() => ({ tabId, sessionId }), [tabId, sessionId]);
+  const tabTransfers = useMemo(
+    () => Object.values(allTransfers).filter((transfer) => transfer.tabId === tabId),
+    [allTransfers, tabId]
   );
 
   const isDragOver = useNativeFileDrop({
     currentPathRef,
+    isActive,
     isOpen,
     panelRef,
     sessionId,
     startUploadFile,
+    tabId,
   });
   const { handleResizeStart, isResizing, outerRef } = useResizeHandle({ onWidthChange, panelRef, width });
 
@@ -113,7 +124,7 @@ export function FileManagerPanel({ tabId, sessionId, isOpen, width, onWidthChang
     void loadDir(sessionSync.cwd);
   }, [currentPath, directoryFollowMode, isOpen, loadDir, sessionSync?.cwd, sessionSync?.cwdKnown]);
 
-  const doneUploadCount = sessionTransfers.filter((transfer) => {
+  const doneUploadCount = tabTransfers.filter((transfer) => {
     return transfer.status === "done" && transfer.direction === "upload";
   }).length;
   const prevDoneCount = useRef(0);
@@ -161,16 +172,16 @@ export function FileManagerPanel({ tabId, sessionId, isOpen, width, onWidthChang
           if (entry?.isDir) void navigateToPath(getFullPath(entry));
           break;
         case "download":
-          if (entry) startDownload(sessionId, getFullPath(entry));
+          if (entry) startDownload(transferTarget, getFullPath(entry));
           break;
         case "downloadDir":
-          if (entry) startDownloadDir(sessionId, getFullPath(entry));
+          if (entry) startDownloadDir(transferTarget, getFullPath(entry));
           break;
         case "upload":
-          startUpload(sessionId, currentPath.endsWith("/") ? currentPath : currentPath + "/");
+          startUpload(transferTarget, currentPath.endsWith("/") ? currentPath : currentPath + "/");
           break;
         case "uploadDir":
-          startUploadDir(sessionId, currentPath.endsWith("/") ? currentPath : currentPath + "/");
+          startUploadDir(transferTarget, currentPath.endsWith("/") ? currentPath : currentPath + "/");
           break;
         case "delete":
           if (entry) {
@@ -193,11 +204,11 @@ export function FileManagerPanel({ tabId, sessionId, isOpen, width, onWidthChang
       getFullPath,
       loadDir,
       navigateToPath,
-      sessionId,
       startDownload,
       startDownloadDir,
       startUpload,
       startUploadDir,
+      transferTarget,
     ]
   );
 
@@ -269,7 +280,7 @@ export function FileManagerPanel({ tabId, sessionId, isOpen, width, onWidthChang
               setSelected={setSelected}
             />
 
-            <TransferSection sessionId={sessionId} transfers={sessionTransfers} />
+            <TransferSection tabId={tabId} transfers={tabTransfers} />
           </div>
         </div>
       </div>

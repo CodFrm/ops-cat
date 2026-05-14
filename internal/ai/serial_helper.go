@@ -47,7 +47,7 @@ func handleRunSerialCommand(ctx context.Context, args map[string]any) (string, e
 	// 权限检查
 	if checker := GetPolicyChecker(ctx); checker != nil {
 		result := checker.CheckForAsset(ctx, assetID, asset_entity.AssetTypeSerial, command)
-		setCheckResult(ctx, result)
+		RecordDecision(ctx, result)
 		if result.Decision != Allow {
 			return result.Message, nil
 		}

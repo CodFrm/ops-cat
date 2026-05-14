@@ -53,9 +53,11 @@ func CheckPermission(ctx context.Context, assetType string, assetID int64, comma
 // --- SSH ---
 
 func checkSSHPermission(ctx context.Context, assetID int64, command string) CheckResult {
+	// 解析失败或没有可枚举的执行单元（注释/空白等）都退回 NeedConfirm，
+	// 不能整串匹配，否则 `allow *` 会误放行 parser 失败或仅注释的输入。
 	subCmds, err := ExtractSubCommands(command)
 	if err != nil || len(subCmds) == 0 {
-		subCmds = []string{command}
+		return CheckResult{Decision: NeedConfirm}
 	}
 
 	asset, err := asset_svc.Asset().Get(ctx, assetID)
@@ -117,16 +119,22 @@ func checkSSHPermission(ctx context.Context, assetID int64, command string) Chec
 // --- Database ---
 
 func checkDatabasePermission(ctx context.Context, assetID int64, sqlText string) CheckResult {
-	// 组通用策略
-	groupResult := CheckGroupGenericPolicy(ctx, assetID, sqlText, MatchCommandRule)
-	if groupResult.Decision == Deny {
-		return groupResult
-	}
-
-	// SQL 分类 + 查询策略
+	// 先解析一次 SQL，再把每条语句单独送入组通用/类型策略与 Grant 匹配。
+	// 整串传入会被 `SELECT *` 一类的组规则一次性放行，让 `SELECT 1; UPDATE users ...`
+	// 把后续高危语句藏进分号后绕过；`UPDATE *` 类 deny 同样命中不到尾部语句。
 	stmts, err := ClassifyStatements(sqlText)
 	if err != nil {
 		return CheckResult{Decision: Deny, Message: policyFmt(ctx, "SQL parse failed, execution denied: %v", "SQL 解析失败，拒绝执行: %v", err)}
+	}
+
+	stmtTexts := stmtRawTexts(stmts)
+	if len(stmtTexts) == 0 {
+		stmtTexts = []string{sqlText}
+	}
+
+	groupResult := CheckGroupGenericPolicy(ctx, assetID, stmtTexts, MatchCommandRule)
+	if groupResult.Decision == Deny {
+		return groupResult
 	}
 
 	asset, _ := resolveAssetPolicyChain(ctx, assetID)
@@ -142,24 +150,36 @@ func checkDatabasePermission(ctx context.Context, assetID int64, sqlText string)
 		return result
 	}
 
-	// DB Grant 匹配
-	if grantResult := matchGrantForAsset(ctx, assetID, sqlText); grantResult != nil {
+	// DB Grant 匹配：每条语句都必须命中 grant，不能用单条 grant 整串覆盖多语句
+	if grantResult := matchGrantForAssetSubCmds(ctx, assetID, stmtTexts); grantResult != nil {
 		return *grantResult
 	}
 
 	// NeedConfirm：收集允许的 SQL 类型作为提示
-	merged := mergeQueryPolicy(mergedPolicy, asset_entity.DefaultQueryPolicy())
+	merged := effectiveQueryPolicy(ctx, mergedPolicy)
 	if len(merged.AllowTypes) > 0 {
 		result.HintRules = merged.AllowTypes
 	}
 	return result
 }
 
+// stmtRawTexts 从 ClassifyStatements 结果里取每条语句的原始 SQL 文本（含 trim），
+// 用于按 statement 粒度送进组通用策略与 Grant 匹配。
+func stmtRawTexts(stmts []StatementInfo) []string {
+	out := make([]string, 0, len(stmts))
+	for _, s := range stmts {
+		if t := strings.TrimSpace(s.Raw); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // --- Redis ---
 
 func checkRedisPermission(ctx context.Context, assetID int64, command string) CheckResult {
-	// 组通用策略
-	groupResult := CheckGroupGenericPolicy(ctx, assetID, command, MatchRedisRule)
+	// 组通用策略（Redis 单语句，单元素切片）
+	groupResult := CheckGroupGenericPolicy(ctx, assetID, []string{command}, MatchRedisRule)
 	if groupResult.Decision == Deny {
 		return groupResult
 	}
@@ -184,7 +204,7 @@ func checkRedisPermission(ctx context.Context, assetID int64, command string) Ch
 	}
 
 	// NeedConfirm：收集允许的 Redis 命令作为提示
-	merged := mergeRedisPolicy(mergedPolicy, asset_entity.DefaultRedisPolicy())
+	merged := effectiveRedisPolicy(ctx, mergedPolicy)
 	if len(merged.AllowList) > 0 {
 		result.HintRules = merged.AllowList
 	}
@@ -194,7 +214,15 @@ func checkRedisPermission(ctx context.Context, assetID int64, command string) Ch
 // --- K8s ---
 
 func checkK8sPermission(ctx context.Context, assetID int64, command string) CheckResult {
-	groupResult := CheckGroupGenericPolicy(ctx, assetID, command, MatchCommandRule)
+	// K8s 也是 shell 类，组通用策略要按 AST 子命令逐条比对，避免整串匹配把
+	// `kubectl get pods && curl evil` 这类组合命令误放行。
+	// 解析失败或子命令为空（注释/空白等）一律 NeedConfirm，不退回整串。
+	subCmds, err := ExtractSubCommands(command)
+	if err != nil || len(subCmds) == 0 {
+		return CheckResult{Decision: NeedConfirm}
+	}
+
+	groupResult := CheckGroupGenericPolicy(ctx, assetID, subCmds, MatchCommandRule)
 	if groupResult.Decision == Deny {
 		return groupResult
 	}
@@ -211,11 +239,13 @@ func checkK8sPermission(ctx context.Context, assetID int64, command string) Chec
 		return result
 	}
 
-	if grantResult := matchGrantForAsset(ctx, assetID, command); grantResult != nil {
+	// K8s grant 也要按子命令逐条匹配，否则 `kubectl get *` 整串匹配会让
+	// `kubectl get pods && kubectl apply -f x.yaml` 被错误放行。
+	if grantResult := matchGrantForAssetSubCmds(ctx, assetID, subCmds); grantResult != nil {
 		return *grantResult
 	}
 
-	merged := mergeK8sPolicy(mergedPolicy, asset_entity.DefaultK8sPolicy())
+	merged := effectiveK8sPolicy(ctx, mergedPolicy)
 	if len(merged.AllowList) > 0 {
 		result.HintRules = merged.AllowList
 	}
@@ -225,8 +255,8 @@ func checkK8sPermission(ctx context.Context, assetID int64, command string) Chec
 // --- MongoDB ---
 
 func checkMongoDBPermission(ctx context.Context, assetID int64, operation string) CheckResult {
-	// 组通用策略
-	groupResult := CheckGroupGenericPolicy(ctx, assetID, operation, MatchCommandRule)
+	// 组通用策略（Mongo 操作是单 token，单元素切片）
+	groupResult := CheckGroupGenericPolicy(ctx, assetID, []string{operation}, MatchCommandRule)
 	if groupResult.Decision == Deny {
 		return groupResult
 	}
@@ -251,7 +281,7 @@ func checkMongoDBPermission(ctx context.Context, assetID int64, operation string
 	}
 
 	// NeedConfirm：收集允许的 MongoDB 操作类型作为提示
-	merged := mergeMongoPolicy(mergedPolicy, asset_entity.DefaultMongoPolicy())
+	merged := effectiveMongoPolicy(ctx, mergedPolicy)
 	if len(merged.AllowTypes) > 0 {
 		result.HintRules = merged.AllowTypes
 	}
@@ -263,7 +293,7 @@ func checkMongoDBPermission(ctx context.Context, assetID int64, operation string
 func checkKafkaPermission(ctx context.Context, assetID int64, command string) CheckResult {
 	// 组通用策略：使用通用 shell-glob 匹配，与 Database/MongoDB 一致；
 	// MatchKafkaRule 仅适用于 "<action> <resource>" 格式，不能用于通用 CommandPolicy。
-	groupResult := CheckGroupGenericPolicy(ctx, assetID, command, MatchCommandRule)
+	groupResult := CheckGroupGenericPolicy(ctx, assetID, []string{command}, MatchCommandRule)
 	if groupResult.Decision == Deny {
 		return groupResult
 	}
@@ -288,7 +318,7 @@ func checkKafkaPermission(ctx context.Context, assetID int64, command string) Ch
 	}
 
 	// NeedConfirm：收集允许的 Kafka action/resource 规则作为提示
-	merged := mergeKafkaPolicy(mergedPolicy, asset_entity.DefaultKafkaPolicy())
+	merged := effectiveKafkaPolicy(ctx, mergedPolicy)
 	if len(merged.AllowList) > 0 {
 		result.HintRules = merged.AllowList
 	}
@@ -302,7 +332,7 @@ func checkMongoPolicyRules(ctx context.Context, p *asset_entity.MongoPolicy, ope
 	}
 	// deny_types 检查
 	for _, denied := range p.DenyTypes {
-		if strings.EqualFold(operation, denied) {
+		if policyValueMatches(denied, operation) {
 			return CheckResult{
 				Decision:       Deny,
 				Message:        policyFmt(ctx, "MongoDB operation %s denied by policy", "MongoDB 操作 %s 被策略禁止", operation),
@@ -314,7 +344,7 @@ func checkMongoPolicyRules(ctx context.Context, p *asset_entity.MongoPolicy, ope
 	// allow_types 白名单
 	if len(p.AllowTypes) > 0 {
 		for _, allowed := range p.AllowTypes {
-			if strings.EqualFold(operation, allowed) {
+			if policyValueMatches(allowed, operation) {
 				return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
 			}
 		}
@@ -325,20 +355,8 @@ func checkMongoPolicyRules(ctx context.Context, p *asset_entity.MongoPolicy, ope
 
 // CheckMongoDBPolicy 检查 MongoDB 操作是否符合策略（合并默认策略后检查）
 func CheckMongoDBPolicy(ctx context.Context, p *asset_entity.MongoPolicy, operation string) CheckResult {
-	merged := mergeMongoPolicy(p, asset_entity.DefaultMongoPolicy())
+	merged := effectiveMongoPolicy(ctx, p)
 	return checkMongoPolicyRules(ctx, merged, operation)
-}
-
-func mergeMongoPolicy(custom, defaults *asset_entity.MongoPolicy) *asset_entity.MongoPolicy {
-	result := &asset_entity.MongoPolicy{}
-	if custom != nil {
-		result.AllowTypes = custom.AllowTypes
-		result.DenyTypes = append(result.DenyTypes, custom.DenyTypes...)
-	}
-	if defaults != nil {
-		result.DenyTypes = appendUnique(result.DenyTypes, defaults.DenyTypes...)
-	}
-	return result
 }
 
 // --- Grant 匹配辅助 ---
@@ -349,6 +367,15 @@ func matchGrantForAsset(ctx context.Context, assetID int64, command string) *Che
 }
 
 func matchGrantForAssetWith(ctx context.Context, assetID int64, command string, matchFn MatchFunc) *CheckResult {
+	return matchGrantForAssetSubCmdsWith(ctx, assetID, []string{command}, matchFn)
+}
+
+// matchGrantForAssetSubCmds 用 MatchCommandRule 按子命令逐条匹配，专给 shell 类资产（如 K8s）使用。
+func matchGrantForAssetSubCmds(ctx context.Context, assetID int64, subCmds []string) *CheckResult {
+	return matchGrantForAssetSubCmdsWith(ctx, assetID, subCmds, MatchCommandRule)
+}
+
+func matchGrantForAssetSubCmdsWith(ctx context.Context, assetID int64, subCmds []string, matchFn MatchFunc) *CheckResult {
 	asset, err := asset_svc.Asset().Get(ctx, assetID)
 	if err != nil {
 		return nil
@@ -357,13 +384,64 @@ func matchGrantForAssetWith(ctx context.Context, assetID int64, command string, 
 	if asset != nil && asset.GroupID > 0 {
 		groups = resolveGroupChain(ctx, asset.GroupID)
 	}
-	if pattern := matchGrantPatternsWith(ctx, assetID, groups, []string{command}, matchFn); pattern != "" {
+	if pattern := matchGrantPatternsWith(ctx, assetID, groups, subCmds, matchFn); pattern != "" {
 		return &CheckResult{Decision: Allow, DecisionSource: SourceGrantAllow, MatchedPattern: pattern}
 	}
 	return nil
 }
 
 // --- SaveGrantPattern ---
+
+// isShellLikeApprovalType 判断审批类型是否走 shell（SSH/K8s），grant 保存时需要按 AST 子命令拆。
+// 接受审批协议字符串（"exec"）以及 asset_entity 的内部类型常量（AssetTypeSSH/AssetTypeK8s）。
+func isShellLikeApprovalType(t string) bool {
+	switch t {
+	case "exec", asset_entity.AssetTypeSSH, asset_entity.AssetTypeK8s:
+		return true
+	}
+	return false
+}
+
+// NormalizeGrantPatterns 把一条用户审批输入拆成可独立匹配的 grant pattern 列表。
+//
+// 设计要点：
+//   - SSH/K8s 等 shell 类资产：按行 + ExtractSubCommands 拆，复合命令必须按子命令存，
+//     否则 `ls /tmp && cat /etc/hosts` 会被存成单条 pattern，后续 grant 子命令匹配永远命中失败。
+//   - 非 shell 类资产（sql/redis/mongo/kafka）：保留原命令，匹配规则各自处理。
+//   - 解析失败时退回原行，让上层依旧能存下 grant；下次匹配同样会解析失败走 NeedConfirm。
+//
+// 所有 SaveGrantPattern 调用前都应当先经过这个归一化函数。
+func NormalizeGrantPatterns(approvalType, command string) []string {
+	cmd := strings.TrimSpace(command)
+	if cmd == "" {
+		return nil
+	}
+	if !isShellLikeApprovalType(approvalType) {
+		return []string{cmd}
+	}
+	var patterns []string
+	for line := range strings.SplitSeq(cmd, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		subCmds, _ := ExtractSubCommands(line)
+		if len(subCmds) == 0 {
+			patterns = append(patterns, line)
+		} else {
+			patterns = append(patterns, subCmds...)
+		}
+	}
+	return patterns
+}
+
+// SaveGrantPatternsForApproval 用 NormalizeGrantPatterns 拆出 patterns 后依次落库。
+// 适合 app 层在多种审批回调（opsctl 单审批、AI grant 流）里调用，避免每个路径重复拆分逻辑。
+func SaveGrantPatternsForApproval(ctx context.Context, sessionID string, assetID int64, assetName, approvalType, command string) {
+	for _, p := range NormalizeGrantPatterns(approvalType, command) {
+		SaveGrantPattern(ctx, sessionID, assetID, assetName, p)
+	}
+}
 
 // SaveGrantPattern 将命令模式保存为已批准的 GrantItem。
 // 如果 sessionID 对应的 GrantSession 不存在，自动创建（状态: approved）。

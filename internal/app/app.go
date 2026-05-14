@@ -68,7 +68,8 @@ type App struct {
 	sshManager              *ssh_svc.Manager
 	sftpService             *sftp_svc.Service
 	forwardManager          *ForwardManager
-	aiAgent                 *ai.Agent
+	aiSystemCfg             *ai.SystemConfig
+	policyChecker           *ai.CommandPolicyChecker
 	githubAuthCancel        context.CancelFunc
 	permissionChan          chan ai.PermissionResponse // 前端权限响应 channel（CLI 工具用）
 	pendingAIApprovals      sync.Map                   // map[string]chan ai.ApprovalResponse（AI 审批用）
@@ -86,7 +87,7 @@ type App struct {
 	mu                      sync.Mutex                 // 保护 connCounter
 	connCounter             int64                      // 连接ID计数器
 	currentConversationID   int64                      // 当前活跃会话ID
-	runners                 sync.Map                   // map[int64]*ai.ConversationRunner
+	runners                 sync.Map                   // map[int64]*runnerEntry
 	extSvc                  *extension_svc.Service
 	flushAckCh              chan struct{} // OnBeforeClose 等待前端确认 flush 完成
 	k8sLogStreams           sync.Map      // map[string]context.CancelFunc — pod log stream cancellations
