@@ -70,10 +70,11 @@ func (sc *sharedClient) release() {
 type Session struct {
 	ID       string
 	AssetID  int64
+	charset  string // 远程编码：空/utf-8 = 直通；gbk/gb18030/... = 输入输出双向编解码
 	shared   *sharedClient
 	session  *ssh.Session
 	stdin    io.WriteCloser
-	stdout   io.Reader
+	stdout   io.Reader // 当 charset 非空且非 utf-8 时，已被 decodeStream 包成 UTF-8 流
 	mu       sync.Mutex
 	closed   bool
 	onData   func(data []byte)      // 终端输出回调
@@ -104,7 +105,7 @@ type Session struct {
 	probeShellStateFn  func(int) (shellProbeResult, error)
 }
 
-// Write 向终端写入数据（用户输入）
+// Write 向终端写入数据（用户输入，前端发来的是 UTF-8 字节）
 func (s *Session) Write(data []byte) error {
 	s.mu.Lock()
 	if s.closed {
@@ -112,13 +113,25 @@ func (s *Session) Write(data []byte) error {
 		return fmt.Errorf("session is closed")
 	}
 	hasNewline := bytes.ContainsAny(data, "\r\n")
+	// markUserInput 仅基于 ASCII (CR/LF) 检测换行，需在 UTF-8 原始字节上做。
 	s.markUserInput(data)
-	_, err := s.stdin.Write(data)
+	payload, encodeErr := encodeForRemote(s.charset, data)
+	if encodeErr != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("encode user input as %s: %w", s.charset, encodeErr)
+	}
+	_, err := s.stdin.Write(payload)
 	s.mu.Unlock()
 	if err == nil && hasNewline {
 		s.ensureSyncProbe()
 	}
 	return err
+}
+
+// Charset 返回会话配置的远程字符集名（空字符串表示 UTF-8 直通）。
+// 供 SFTP 等同会话子系统决定路径名编解码。
+func (s *Session) Charset() string {
+	return s.charset
 }
 
 // Resize 调整终端尺寸
@@ -279,7 +292,9 @@ func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
 
 	emitProgress(&cfg, "shell", "正在启动终端...")
 
-	sessionID, err := m.createSession(shared, cfg.AssetID, cfg.Cols, cfg.Rows, cfg.OnData, cfg.OnClosed, cfg.OnSync)
+	// 探测远端 locale 字符集（GBK / GB18030 等非 UTF-8 系统），失败退化为 UTF-8 直通。
+	probedCharset := probeCharset(client)
+	sessionID, err := m.createSession(shared, cfg.AssetID, cfg.Cols, cfg.Rows, probedCharset, cfg.OnData, cfg.OnClosed, cfg.OnSync)
 	if err != nil {
 		shared.release()
 		return "", err
@@ -289,7 +304,7 @@ func (m *Manager) Connect(cfg ConnectConfig) (string, error) {
 }
 
 // createSession 在 sharedClient 上创建新的 SSH 会话（PTY + shell）
-func (m *Manager) createSession(shared *sharedClient, assetID int64, cols, rows int,
+func (m *Manager) createSession(shared *sharedClient, assetID int64, cols, rows int, charset string,
 	onData func(string, []byte), onClosed func(string), onSync func(string, DirectorySyncState)) (string, error) {
 
 	session, err := shared.client.NewSession()
@@ -338,10 +353,11 @@ func (m *Manager) createSession(shared *sharedClient, assetID int64, cols, rows 
 	sess := &Session{
 		ID:       sessionID,
 		AssetID:  assetID,
+		charset:  charset,
 		shared:   shared,
 		session:  session,
 		stdin:    stdin,
-		stdout:   stdout,
+		stdout:   decodeStream(charset, stdout),
 		onData:   func(data []byte) { onData(sessionID, data) },
 		onClosed: onClosed,
 	}
@@ -382,7 +398,7 @@ func (m *Manager) NewSessionFrom(existingSessionID string, cols, rows int,
 
 	existing.shared.acquire()
 
-	sessionID, err := m.createSession(existing.shared, existing.AssetID, cols, rows, onData, onClosed, onSync)
+	sessionID, err := m.createSession(existing.shared, existing.AssetID, cols, rows, existing.charset, onData, onClosed, onSync)
 	if err != nil {
 		existing.shared.release()
 		return "", err
