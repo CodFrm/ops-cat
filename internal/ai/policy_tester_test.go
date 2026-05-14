@@ -115,9 +115,15 @@ func TestTestRedisPolicy(t *testing.T) {
 	ctx := context.Background()
 
 	Convey("testRedisPolicy", t, func() {
-		Convey("无策略时 auto-allow", func() {
+		Convey("无策略时使用默认 Redis 策略", func() {
 			out := testRedisPolicy(ctx, nil, nil, "GET user:1")
 			So(out.Decision, ShouldEqual, Allow)
+
+			out = testRedisPolicy(ctx, nil, nil, "SET user:1 val")
+			So(out.Decision, ShouldEqual, NeedConfirm)
+
+			out = testRedisPolicy(ctx, nil, nil, "DEBUG STATS")
+			So(out.Decision, ShouldEqual, Deny)
 		})
 
 		Convey("引用内置组 — 拒绝 FLUSHDB", func() {
@@ -203,9 +209,15 @@ func TestTestK8sPolicy(t *testing.T) {
 	ctx := context.Background()
 
 	Convey("testK8sPolicy", t, func() {
-		Convey("无策略时返回 NeedConfirm", func() {
+		Convey("无策略时使用默认 K8S 策略", func() {
 			out := testK8sPolicy(ctx, nil, nil, "kubectl get pods")
+			So(out.Decision, ShouldEqual, Allow)
+
+			out = testK8sPolicy(ctx, nil, nil, "kubectl apply -f deploy.yaml")
 			So(out.Decision, ShouldEqual, NeedConfirm)
+
+			out = testK8sPolicy(ctx, nil, nil, "kubectl delete pod nginx")
+			So(out.Decision, ShouldEqual, Deny)
 		})
 
 		Convey("引用内置组时允许只读命令", func() {
@@ -260,9 +272,15 @@ func TestTestQueryPolicy(t *testing.T) {
 	ctx := context.Background()
 
 	Convey("testQueryPolicy", t, func() {
-		Convey("无策略时 Allow（无限制）", func() {
+		Convey("无策略时使用默认 SQL 策略", func() {
 			out := testQueryPolicy(ctx, nil, nil, "SELECT * FROM users")
 			So(out.Decision, ShouldEqual, Allow)
+
+			out = testQueryPolicy(ctx, nil, nil, "INSERT INTO users VALUES (1)")
+			So(out.Decision, ShouldEqual, NeedConfirm)
+
+			out = testQueryPolicy(ctx, nil, nil, "DROP TABLE users")
+			So(out.Decision, ShouldEqual, Deny)
 		})
 
 		Convey("引用内置组 — SQL 只读允许 SELECT", func() {

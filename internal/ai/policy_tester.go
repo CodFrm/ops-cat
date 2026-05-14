@@ -198,14 +198,6 @@ func testQueryPolicy(ctx context.Context, current *asset_entity.QueryPolicy, gro
 		return *out
 	}
 
-	// 类型专用策略：当前（含引用的权限组）
-	if current != nil && len(current.Groups) > 0 {
-		grpAllowTypes, grpDenyTypes, grpDenyFlags := resolveQueryGroups(ctx, current.Groups)
-		current.AllowTypes = append(current.AllowTypes, grpAllowTypes...)
-		current.DenyTypes = append(current.DenyTypes, grpDenyTypes...)
-		current.DenyFlags = append(current.DenyFlags, grpDenyFlags...)
-	}
-
 	// 解析 SQL
 	stmts, err := ClassifyStatements(command)
 	if err != nil {
@@ -215,8 +207,8 @@ func testQueryPolicy(ctx context.Context, current *asset_entity.QueryPolicy, gro
 		}
 	}
 
-	// 复用核心策略检查逻辑（不合并默认策略，仅检查用户配置的规则）
-	result := checkQueryPolicyRules(ctx, current, stmts)
+	merged := mergeQueryPoliciesForTest(ctx, current, groups)
+	result := checkQueryPolicyRules(ctx, effectiveQueryPolicy(ctx, merged), stmts)
 	if result.Decision == Deny {
 		return PolicyTestOutput{
 			Decision:       Deny,
@@ -225,15 +217,15 @@ func testQueryPolicy(ctx context.Context, current *asset_entity.QueryPolicy, gro
 			Message:        result.Message,
 		}
 	}
-	if result.Decision == NeedConfirm {
-		return PolicyTestOutput{Decision: NeedConfirm}
-	}
 
 	// 检查组通用 allow 规则
 	if out := checkGenericAllow(groupAllow, command, MatchCommandRule); out != nil {
 		return *out
 	}
 
+	if result.Decision == NeedConfirm {
+		return PolicyTestOutput{Decision: NeedConfirm}
+	}
 	return PolicyTestOutput{Decision: Allow}
 }
 
@@ -247,15 +239,8 @@ func testRedisPolicy(ctx context.Context, current *asset_entity.RedisPolicy, gro
 		return *out
 	}
 
-	// 类型专用策略：当前资产（含引用的权限组）
-	if current != nil && len(current.Groups) > 0 {
-		grpAllow, grpDeny := resolveRedisGroups(ctx, current.Groups)
-		current.AllowList = append(current.AllowList, grpAllow...)
-		current.DenyList = append(current.DenyList, grpDeny...)
-	}
-
-	// 复用核心策略检查逻辑（不合并默认策略，仅检查用户配置的规则）
-	result := checkRedisPolicyRules(ctx, current, command)
+	merged := mergeRedisPoliciesForTest(ctx, current, groups)
+	result := checkRedisPolicyRules(ctx, effectiveRedisPolicy(ctx, merged), command)
 
 	// deny 结果映射
 	if result.Decision == Deny {
@@ -282,39 +267,8 @@ func testRedisPolicy(ctx context.Context, current *asset_entity.RedisPolicy, gro
 // --- K8S ---
 
 func testK8sPolicy(ctx context.Context, current *asset_entity.K8sPolicy, groups []*group_entity.Group, command string) PolicyTestOutput {
-	var policies []*asset_entity.K8sPolicy
-	if current != nil {
-		policies = append(policies, current)
-	}
-	for _, g := range groups {
-		p, err := g.GetK8sPolicy()
-		if err != nil || p == nil {
-			continue
-		}
-		policies = append(policies, p)
-	}
-
-	if len(policies) == 0 {
-		return PolicyTestOutput{Decision: NeedConfirm}
-	}
-
-	for _, p := range policies {
-		if len(p.Groups) > 0 {
-			grpAllow, grpDeny := resolveCommandGroups(ctx, p.Groups)
-			p.AllowList = append(p.AllowList, grpAllow...)
-			p.DenyList = append(p.DenyList, grpDeny...)
-		}
-	}
-
-	merged := &asset_entity.K8sPolicy{}
-	for _, p := range policies {
-		if len(merged.AllowList) == 0 && len(p.AllowList) > 0 {
-			merged.AllowList = p.AllowList
-		}
-		merged.DenyList = appendUnique(merged.DenyList, p.DenyList...)
-	}
-
-	result := checkK8sPolicyRules(ctx, merged, command)
+	merged := mergeK8sPoliciesForTest(ctx, current, groups)
+	result := checkK8sPolicyRules(ctx, effectiveK8sPolicy(ctx, merged), command)
 	if result.Decision == Deny {
 		return PolicyTestOutput{
 			Decision:       Deny,
@@ -327,6 +281,76 @@ func testK8sPolicy(ctx context.Context, current *asset_entity.K8sPolicy, groups 
 		return PolicyTestOutput{Decision: NeedConfirm}
 	}
 	return PolicyTestOutput{Decision: Allow}
+}
+
+func mergeQueryPoliciesForTest(ctx context.Context, current *asset_entity.QueryPolicy, groups []*group_entity.Group) *asset_entity.QueryPolicy {
+	var policies []*asset_entity.QueryPolicy
+	if current != nil {
+		policies = append(policies, current)
+	}
+	for _, g := range groups {
+		p, err := g.GetQueryPolicy()
+		if err == nil && p != nil {
+			policies = append(policies, p)
+		}
+	}
+
+	merged := &asset_entity.QueryPolicy{}
+	for _, p := range policies {
+		expanded := expandQueryPolicy(ctx, p)
+		if len(merged.AllowTypes) == 0 && len(expanded.AllowTypes) > 0 {
+			merged.AllowTypes = appendUnique(merged.AllowTypes, expanded.AllowTypes...)
+		}
+		merged.DenyTypes = appendUnique(merged.DenyTypes, expanded.DenyTypes...)
+		merged.DenyFlags = appendUnique(merged.DenyFlags, expanded.DenyFlags...)
+	}
+	return merged
+}
+
+func mergeRedisPoliciesForTest(ctx context.Context, current *asset_entity.RedisPolicy, groups []*group_entity.Group) *asset_entity.RedisPolicy {
+	var policies []*asset_entity.RedisPolicy
+	if current != nil {
+		policies = append(policies, current)
+	}
+	for _, g := range groups {
+		p, err := g.GetRedisPolicy()
+		if err == nil && p != nil {
+			policies = append(policies, p)
+		}
+	}
+
+	merged := &asset_entity.RedisPolicy{}
+	for _, p := range policies {
+		expanded := expandRedisPolicy(ctx, p)
+		if len(merged.AllowList) == 0 && len(expanded.AllowList) > 0 {
+			merged.AllowList = appendUnique(merged.AllowList, expanded.AllowList...)
+		}
+		merged.DenyList = appendUnique(merged.DenyList, expanded.DenyList...)
+	}
+	return merged
+}
+
+func mergeK8sPoliciesForTest(ctx context.Context, current *asset_entity.K8sPolicy, groups []*group_entity.Group) *asset_entity.K8sPolicy {
+	var policies []*asset_entity.K8sPolicy
+	if current != nil {
+		policies = append(policies, current)
+	}
+	for _, g := range groups {
+		p, err := g.GetK8sPolicy()
+		if err == nil && p != nil {
+			policies = append(policies, p)
+		}
+	}
+
+	merged := &asset_entity.K8sPolicy{}
+	for _, p := range policies {
+		expanded := expandK8sPolicy(ctx, p)
+		if len(merged.AllowList) == 0 && len(expanded.AllowList) > 0 {
+			merged.AllowList = appendUnique(merged.AllowList, expanded.AllowList...)
+		}
+		merged.DenyList = appendUnique(merged.DenyList, expanded.DenyList...)
+	}
+	return merged
 }
 
 // --- 通用组链解析 ---

@@ -51,6 +51,24 @@ func ExtractRedisCommand(cmd string) (fullCmd string, args string) {
 // MatchRedisRule 检查 Redis 命令是否匹配规则
 // 规则格式: "FLUSHDB", "CONFIG SET *", "DEL user:*"
 func MatchRedisRule(rule, cmd string) bool {
+	if isWildcardAll(rule) {
+		cmdCmd, _ := ExtractRedisCommand(cmd)
+		return cmdCmd != ""
+	}
+
+	ruleParts := strings.Fields(strings.TrimSpace(rule))
+	cmdParts := strings.Fields(strings.TrimSpace(cmd))
+	if len(ruleParts) == 0 || len(cmdParts) == 0 {
+		return false
+	}
+	if redisMultiWordCmds[strings.ToUpper(ruleParts[0])] &&
+		len(ruleParts) == 2 &&
+		isWildcardAll(ruleParts[1]) &&
+		len(cmdParts) >= 2 &&
+		strings.EqualFold(ruleParts[0], cmdParts[0]) {
+		return true
+	}
+
 	ruleCmd, ruleArgs := ExtractRedisCommand(rule)
 	cmdCmd, cmdArgs := ExtractRedisCommand(cmd)
 
@@ -76,7 +94,7 @@ func MatchRedisRule(rule, cmd string) bool {
 
 // CheckRedisPolicy 检查 Redis 命令是否符合策略（合并默认策略后检查）
 func CheckRedisPolicy(ctx context.Context, policy *asset_entity.RedisPolicy, cmd string) CheckResult {
-	merged := mergeRedisPolicy(policy, asset_entity.DefaultRedisPolicy())
+	merged := effectiveRedisPolicy(ctx, policy)
 	return checkRedisPolicyRules(ctx, merged, cmd)
 }
 

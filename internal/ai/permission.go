@@ -2,7 +2,6 @@ package ai
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
@@ -145,7 +144,7 @@ func checkDatabasePermission(ctx context.Context, assetID int64, sqlText string)
 	}
 
 	// NeedConfirm：收集允许的 SQL 类型作为提示
-	merged := mergeQueryPolicy(mergedPolicy, asset_entity.DefaultQueryPolicy())
+	merged := effectiveQueryPolicy(ctx, mergedPolicy)
 	if len(merged.AllowTypes) > 0 {
 		result.HintRules = merged.AllowTypes
 	}
@@ -181,7 +180,7 @@ func checkRedisPermission(ctx context.Context, assetID int64, command string) Ch
 	}
 
 	// NeedConfirm：收集允许的 Redis 命令作为提示
-	merged := mergeRedisPolicy(mergedPolicy, asset_entity.DefaultRedisPolicy())
+	merged := effectiveRedisPolicy(ctx, mergedPolicy)
 	if len(merged.AllowList) > 0 {
 		result.HintRules = merged.AllowList
 	}
@@ -212,7 +211,7 @@ func checkK8sPermission(ctx context.Context, assetID int64, command string) Chec
 		return *grantResult
 	}
 
-	merged := mergeK8sPolicy(mergedPolicy, asset_entity.DefaultK8sPolicy())
+	merged := effectiveK8sPolicy(ctx, mergedPolicy)
 	if len(merged.AllowList) > 0 {
 		result.HintRules = merged.AllowList
 	}
@@ -248,7 +247,7 @@ func checkMongoDBPermission(ctx context.Context, assetID int64, operation string
 	}
 
 	// NeedConfirm：收集允许的 MongoDB 操作类型作为提示
-	merged := mergeMongoPolicy(mergedPolicy, asset_entity.DefaultMongoPolicy())
+	merged := effectiveMongoPolicy(ctx, mergedPolicy)
 	if len(merged.AllowTypes) > 0 {
 		result.HintRules = merged.AllowTypes
 	}
@@ -285,7 +284,7 @@ func checkKafkaPermission(ctx context.Context, assetID int64, command string) Ch
 	}
 
 	// NeedConfirm：收集允许的 Kafka action/resource 规则作为提示
-	merged := mergeKafkaPolicy(mergedPolicy, asset_entity.DefaultKafkaPolicy())
+	merged := effectiveKafkaPolicy(ctx, mergedPolicy)
 	if len(merged.AllowList) > 0 {
 		result.HintRules = merged.AllowList
 	}
@@ -299,7 +298,7 @@ func checkMongoPolicyRules(ctx context.Context, p *asset_entity.MongoPolicy, ope
 	}
 	// deny_types 检查
 	for _, denied := range p.DenyTypes {
-		if strings.EqualFold(operation, denied) {
+		if policyValueMatches(denied, operation) {
 			return CheckResult{
 				Decision:       Deny,
 				Message:        policyFmt(ctx, "MongoDB operation %s denied by policy", "MongoDB 操作 %s 被策略禁止", operation),
@@ -311,7 +310,7 @@ func checkMongoPolicyRules(ctx context.Context, p *asset_entity.MongoPolicy, ope
 	// allow_types 白名单
 	if len(p.AllowTypes) > 0 {
 		for _, allowed := range p.AllowTypes {
-			if strings.EqualFold(operation, allowed) {
+			if policyValueMatches(allowed, operation) {
 				return CheckResult{Decision: Allow, DecisionSource: SourcePolicyAllow}
 			}
 		}
@@ -322,7 +321,7 @@ func checkMongoPolicyRules(ctx context.Context, p *asset_entity.MongoPolicy, ope
 
 // CheckMongoDBPolicy 检查 MongoDB 操作是否符合策略（合并默认策略后检查）
 func CheckMongoDBPolicy(ctx context.Context, p *asset_entity.MongoPolicy, operation string) CheckResult {
-	merged := mergeMongoPolicy(p, asset_entity.DefaultMongoPolicy())
+	merged := effectiveMongoPolicy(ctx, p)
 	return checkMongoPolicyRules(ctx, merged, operation)
 }
 

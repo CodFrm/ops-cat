@@ -340,7 +340,24 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 		if len(resp.EditedItems) > 0 {
 			for _, item := range resp.EditedItems {
 				cmd := strings.TrimSpace(item.Command)
-				if cmd != "" {
+				if cmd == "" {
+					continue
+				}
+				if assetType == asset_entity.AssetTypeSSH {
+					// SSH：按行 + ExtractSubCommands 拆，保证每条 grant 可单独匹配
+					for line := range strings.SplitSeq(cmd, "\n") {
+						line = strings.TrimSpace(line)
+						if line == "" {
+							continue
+						}
+						subCmds, _ := ExtractSubCommands(line)
+						if len(subCmds) == 0 {
+							patterns = append(patterns, line)
+						} else {
+							patterns = append(patterns, subCmds...)
+						}
+					}
+				} else {
 					patterns = append(patterns, cmd)
 				}
 			}

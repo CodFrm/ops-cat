@@ -127,20 +127,6 @@ func TestCheckPermission_SSH(t *testing.T) {
 			So(result.HintRules, ShouldNotContain, "cat *")
 		})
 
-		Convey("exec type alias maps to SSH", func() {
-			asset := &asset_entity.Asset{
-				ID:   1,
-				Type: asset_entity.AssetTypeSSH,
-				CmdPolicy: mustJSON(asset_entity.CommandPolicy{
-					AllowList: []string{"uptime"},
-				}),
-			}
-			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
-
-			result := CheckPermission(ctx, "exec", 1, "uptime")
-			So(result.Decision, ShouldEqual, Allow)
-		})
-
 		Convey("DB grant match → Allow", func() {
 			asset := &asset_entity.Asset{ID: 1, Type: asset_entity.AssetTypeSSH}
 			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
@@ -166,6 +152,112 @@ func TestCheckPermission_SSH(t *testing.T) {
 			result := CheckPermission(grantCtx, "ssh", 1, "uptime")
 			So(result.Decision, ShouldEqual, Allow)
 			So(result.DecisionSource, ShouldEqual, SourceGrantAllow)
+		})
+	})
+}
+
+func TestCheckPermission_SSHAllowDenyDecisionMatrix(t *testing.T) {
+	Convey("SSH allow/deny decision matrix", t, func() {
+		ctx, mockAsset, _ := setupPolicyTest(t)
+
+		Convey("allow matches and deny misses → Allow", func() {
+			asset := &asset_entity.Asset{
+				ID:   1,
+				Type: asset_entity.AssetTypeSSH,
+				CmdPolicy: mustJSON(asset_entity.CommandPolicy{
+					AllowList: []string{"ls *"},
+					DenyList:  []string{"rm *"},
+				}),
+			}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			result := CheckPermission(ctx, "ssh", 1, "ls /tmp")
+			So(result.Decision, ShouldEqual, Allow)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyAllow)
+			So(result.MatchedPattern, ShouldEqual, "ls *")
+		})
+
+		Convey("allow misses and deny misses → NeedConfirm", func() {
+			asset := &asset_entity.Asset{
+				ID:   1,
+				Type: asset_entity.AssetTypeSSH,
+				CmdPolicy: mustJSON(asset_entity.CommandPolicy{
+					AllowList: []string{"ls *"},
+					DenyList:  []string{"rm *"},
+				}),
+			}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			result := CheckPermission(ctx, "ssh", 1, "systemctl restart nginx")
+			So(result.Decision, ShouldEqual, NeedConfirm)
+		})
+
+		Convey("allow misses and deny matches → Deny", func() {
+			asset := &asset_entity.Asset{
+				ID:   1,
+				Type: asset_entity.AssetTypeSSH,
+				CmdPolicy: mustJSON(asset_entity.CommandPolicy{
+					AllowList: []string{"ls *"},
+					DenyList:  []string{"rm *"},
+				}),
+			}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			result := CheckPermission(ctx, "ssh", 1, "rm /tmp/foo")
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
+			So(result.MatchedPattern, ShouldEqual, "rm *")
+		})
+
+		Convey("allow matches and deny matches → Deny", func() {
+			asset := &asset_entity.Asset{
+				ID:   1,
+				Type: asset_entity.AssetTypeSSH,
+				CmdPolicy: mustJSON(asset_entity.CommandPolicy{
+					AllowList: []string{"rm *"},
+					DenyList:  []string{"rm *"},
+				}),
+			}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			result := CheckPermission(ctx, "ssh", 1, "rm /tmp/foo")
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
+			So(result.MatchedPattern, ShouldEqual, "rm *")
+		})
+
+		Convey("allow * matches every command when deny misses → Allow", func() {
+			asset := &asset_entity.Asset{
+				ID:   1,
+				Type: asset_entity.AssetTypeSSH,
+				CmdPolicy: mustJSON(asset_entity.CommandPolicy{
+					AllowList: []string{"*"},
+					DenyList:  []string{"rm *"},
+				}),
+			}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			result := CheckPermission(ctx, "ssh", 1, "systemctl restart nginx")
+			So(result.Decision, ShouldEqual, Allow)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyAllow)
+			So(result.MatchedPattern, ShouldEqual, "*")
+		})
+
+		Convey("deny * matches every command and wins over allow → Deny", func() {
+			asset := &asset_entity.Asset{
+				ID:   1,
+				Type: asset_entity.AssetTypeSSH,
+				CmdPolicy: mustJSON(asset_entity.CommandPolicy{
+					AllowList: []string{"ls *"},
+					DenyList:  []string{"*"},
+				}),
+			}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			result := CheckPermission(ctx, "ssh", 1, "ls /tmp")
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
+			So(result.MatchedPattern, ShouldEqual, "*")
 		})
 	})
 }
@@ -220,6 +312,22 @@ func TestCheckPermission_Database(t *testing.T) {
 			So(result.HintRules, ShouldContain, "SHOW")
 		})
 
+		Convey("empty policy uses effective defaults", func() {
+			asset := &asset_entity.Asset{ID: 1, Type: asset_entity.AssetTypeDatabase}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			result := CheckPermission(ctx, "database", 1, "SELECT 1")
+			So(result.Decision, ShouldEqual, Allow)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyAllow)
+
+			result = CheckPermission(ctx, "database", 1, "INSERT INTO users VALUES (1)")
+			So(result.Decision, ShouldEqual, NeedConfirm)
+
+			result = CheckPermission(ctx, "database", 1, "DROP TABLE users")
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
+		})
+
 		Convey("invalid SQL → Deny", func() {
 			asset := &asset_entity.Asset{ID: 1, Type: asset_entity.AssetTypeDatabase}
 			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
@@ -227,21 +335,6 @@ func TestCheckPermission_Database(t *testing.T) {
 			result := CheckPermission(ctx, "database", 1, "NOT VALID SQL !!!")
 			So(result.Decision, ShouldEqual, Deny)
 			assert.Contains(t, result.Message, "SQL")
-		})
-
-		Convey("sql type alias maps to Database", func() {
-			asset := &asset_entity.Asset{
-				ID:   1,
-				Type: asset_entity.AssetTypeDatabase,
-				CmdPolicy: mustJSON(asset_entity.QueryPolicy{
-					AllowTypes: []string{"SELECT", "SHOW"},
-				}),
-			}
-			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
-
-			result := CheckPermission(ctx, "sql", 1, "SELECT 1")
-			So(result.Decision, ShouldEqual, Allow)
-			So(result.DecisionSource, ShouldEqual, SourcePolicyAllow)
 		})
 
 		Convey("group deny overrides asset allow", func() {
@@ -319,12 +412,51 @@ func TestCheckPermission_Redis(t *testing.T) {
 			So(result.HintRules, ShouldContain, "HGETALL *")
 		})
 
-		Convey("no policy auto-allows", func() {
+		Convey("empty policy uses Redis defaults", func() {
 			asset := &asset_entity.Asset{ID: 1, Type: asset_entity.AssetTypeRedis}
 			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
 
 			result := CheckPermission(ctx, "redis", 1, "GET user:1")
 			So(result.Decision, ShouldEqual, Allow)
+
+			result = CheckPermission(ctx, "redis", 1, "SET user:1 val")
+			So(result.Decision, ShouldEqual, NeedConfirm)
+
+			result = CheckPermission(ctx, "redis", 1, "DEBUG STATS")
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
+		})
+
+		Convey("grant match bypasses NeedConfirm", func() {
+			asset := &asset_entity.Asset{
+				ID:   1,
+				Type: asset_entity.AssetTypeRedis,
+				CmdPolicy: mustJSON(asset_entity.RedisPolicy{
+					AllowList: []string{"GET *"},
+				}),
+			}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			stubGrant := newStubGrantRepo()
+			origGrant := grant_repo.Grant()
+			grant_repo.RegisterGrant(stubGrant)
+			t.Cleanup(func() {
+				if origGrant != nil {
+					grant_repo.RegisterGrant(origGrant)
+				}
+			})
+
+			stubGrant.sessions["sess-redis"] = &grant_entity.GrantSession{
+				ID: "sess-redis", Status: grant_entity.GrantStatusApproved,
+			}
+			stubGrant.items["sess-redis"] = []*grant_entity.GrantItem{
+				{GrantSessionID: "sess-redis", AssetID: 1, Command: "SET *"},
+			}
+
+			grantCtx := WithSessionID(ctx, "sess-redis")
+			result := CheckPermission(grantCtx, "redis", 1, "SET user:1 val")
+			So(result.Decision, ShouldEqual, Allow)
+			So(result.DecisionSource, ShouldEqual, SourceGrantAllow)
 		})
 	})
 }
@@ -460,65 +592,96 @@ func TestSaveGrantPattern(t *testing.T) {
 	})
 }
 
-func TestCheckPermission_DBGrantForDatabaseRedis(t *testing.T) {
-	Convey("DB Grant matching works for database/redis types", t, func() {
-		ctx, mockAsset, _ := setupPolicyTest(t)
+func TestHandleConfirm_AllowAllGrantPatternSaving(t *testing.T) {
+	Convey("handleConfirm allowAll 保存 grant 时按类型决定是否拆分", t, func() {
 
-		stubGrant := newStubGrantRepo()
-		origGrant := grant_repo.Grant()
-		grant_repo.RegisterGrant(stubGrant)
-		t.Cleanup(func() {
-			if origGrant != nil {
-				grant_repo.RegisterGrant(origGrant)
-			}
+		Convey("SSH + EditedItems：按行 + shell 子命令拆", func() {
+			ctx, mockAsset, _ := setupPolicyTest(t)
+			stubGrant := newStubGrantRepo()
+			origGrant := grant_repo.Grant()
+			grant_repo.RegisterGrant(stubGrant)
+			t.Cleanup(func() {
+				if origGrant != nil {
+					grant_repo.RegisterGrant(origGrant)
+				}
+			})
+
+			asset := &asset_entity.Asset{ID: 1, Name: "web-01", Type: asset_entity.AssetTypeSSH}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			checker := NewCommandPolicyChecker(func(_ context.Context, kind string, items []ApprovalItem) ApprovalResponse {
+				So(kind, ShouldEqual, "single")
+				So(items, ShouldHaveLength, 1)
+				return ApprovalResponse{
+					Decision: "allowAll",
+					EditedItems: []ApprovalItem{
+						{Type: "exec", Command: "set -e; uname -a\ncat /etc/hosts"},
+					},
+				}
+			})
+
+			result := checker.Check(WithSessionID(ctx, "sess-edited"), 1, "set -e; uname -a")
+			So(result.Decision, ShouldEqual, Allow)
+			So(result.DecisionSource, ShouldEqual, SourceUserAllow)
+
+			So(stubGrant.items["sess-edited"], ShouldHaveLength, 3)
+			So(stubGrant.items["sess-edited"][0].Command, ShouldEqual, "set -e")
+			So(stubGrant.items["sess-edited"][1].Command, ShouldEqual, "uname -a")
+			So(stubGrant.items["sess-edited"][2].Command, ShouldEqual, "cat /etc/hosts")
 		})
 
-		Convey("database: grant match bypasses NeedConfirm", func() {
+		Convey("SSH + 无 EditedItems：按 ExtractSubCommands 拆原始命令", func() {
+			ctx, mockAsset, _ := setupPolicyTest(t)
+			stubGrant := newStubGrantRepo()
+			origGrant := grant_repo.Grant()
+			grant_repo.RegisterGrant(stubGrant)
+			t.Cleanup(func() {
+				if origGrant != nil {
+					grant_repo.RegisterGrant(origGrant)
+				}
+			})
+
+			asset := &asset_entity.Asset{ID: 1, Name: "web-01", Type: asset_entity.AssetTypeSSH}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			checker := NewCommandPolicyChecker(func(_ context.Context, _ string, _ []ApprovalItem) ApprovalResponse {
+				return ApprovalResponse{Decision: "allowAll"}
+			})
+
+			result := checker.Check(WithSessionID(ctx, "sess-noedit"), 1, "ls /tmp && cat /etc/hosts")
+			So(result.Decision, ShouldEqual, Allow)
+
+			So(stubGrant.items["sess-noedit"], ShouldHaveLength, 2)
+			So(stubGrant.items["sess-noedit"][0].Command, ShouldEqual, "ls /tmp")
+			So(stubGrant.items["sess-noedit"][1].Command, ShouldEqual, "cat /etc/hosts")
+		})
+
+		Convey("非 SSH 类型 allowAll 不走 shell AST，保留原命令一条 grant", func() {
+			ctx, mockAsset, _ := setupPolicyTest(t)
+			stubGrant := newStubGrantRepo()
+			origGrant := grant_repo.Grant()
+			grant_repo.RegisterGrant(stubGrant)
+			t.Cleanup(func() {
+				if origGrant != nil {
+					grant_repo.RegisterGrant(origGrant)
+				}
+			})
+
 			asset := &asset_entity.Asset{
-				ID:   1,
-				Type: asset_entity.AssetTypeDatabase,
-				CmdPolicy: mustJSON(asset_entity.QueryPolicy{
-					AllowTypes: []string{"SELECT"},
-				}),
+				ID: 1, Name: "db-01", Type: asset_entity.AssetTypeDatabase,
+				CmdPolicy: mustJSON(asset_entity.QueryPolicy{AllowTypes: []string{"SELECT"}}),
 			}
 			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
 
-			// INSERT would normally be NeedConfirm, but grant allows it
-			stubGrant.sessions["sess-db"] = &grant_entity.GrantSession{
-				ID: "sess-db", Status: grant_entity.GrantStatusApproved,
-			}
-			stubGrant.items["sess-db"] = []*grant_entity.GrantItem{
-				{GrantSessionID: "sess-db", AssetID: 1, Command: "INSERT *"},
-			}
+			checker := NewCommandPolicyChecker(func(_ context.Context, _ string, _ []ApprovalItem) ApprovalResponse {
+				return ApprovalResponse{Decision: "allowAll"}
+			})
 
-			grantCtx := WithSessionID(ctx, "sess-db")
-			result := CheckPermission(grantCtx, "database", 1, "INSERT INTO users VALUES (1)")
+			result := checker.CheckForAsset(WithSessionID(ctx, "sess-db"), 1, asset_entity.AssetTypeDatabase, "INSERT INTO users VALUES (1); UPDATE users SET name='x'")
 			So(result.Decision, ShouldEqual, Allow)
-			So(result.DecisionSource, ShouldEqual, SourceGrantAllow)
-		})
 
-		Convey("redis: grant match bypasses NeedConfirm", func() {
-			asset := &asset_entity.Asset{
-				ID:   1,
-				Type: asset_entity.AssetTypeRedis,
-				CmdPolicy: mustJSON(asset_entity.RedisPolicy{
-					AllowList: []string{"GET *"},
-				}),
-			}
-			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
-
-			// SET would normally be NeedConfirm, but grant allows it
-			stubGrant.sessions["sess-redis"] = &grant_entity.GrantSession{
-				ID: "sess-redis", Status: grant_entity.GrantStatusApproved,
-			}
-			stubGrant.items["sess-redis"] = []*grant_entity.GrantItem{
-				{GrantSessionID: "sess-redis", AssetID: 1, Command: "SET *"},
-			}
-
-			grantCtx := WithSessionID(ctx, "sess-redis")
-			result := CheckPermission(grantCtx, "redis", 1, "SET user:1 val")
-			So(result.Decision, ShouldEqual, Allow)
-			So(result.DecisionSource, ShouldEqual, SourceGrantAllow)
+			So(stubGrant.items["sess-db"], ShouldHaveLength, 1)
+			So(stubGrant.items["sess-db"][0].Command, ShouldEqual, "INSERT INTO users VALUES (1); UPDATE users SET name='x'")
 		})
 	})
 }
@@ -610,6 +773,23 @@ func TestCheckPermission_GrantDoesNotOverridePolicyDeny(t *testing.T) {
 			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
 		})
 
+		Convey("Database: grant cannot bypass default dangerous deny", func() {
+			asset := &asset_entity.Asset{ID: 1, Type: asset_entity.AssetTypeDatabase}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			stubGrant.sessions["sess-default-db"] = &grant_entity.GrantSession{
+				ID: "sess-default-db", Status: grant_entity.GrantStatusApproved,
+			}
+			stubGrant.items["sess-default-db"] = []*grant_entity.GrantItem{
+				{GrantSessionID: "sess-default-db", AssetID: 1, Command: "DROP TABLE *"},
+			}
+
+			grantCtx := WithSessionID(ctx, "sess-default-db")
+			result := CheckPermission(grantCtx, "database", 1, "DROP TABLE users")
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
+		})
+
 		Convey("Redis: grant exists but deny list matches → Deny", func() {
 			asset := &asset_entity.Asset{
 				ID: 1, Type: asset_entity.AssetTypeRedis,
@@ -626,6 +806,23 @@ func TestCheckPermission_GrantDoesNotOverridePolicyDeny(t *testing.T) {
 
 			grantCtx := WithSessionID(ctx, "sess-3")
 			result := CheckPermission(grantCtx, "redis", 1, "FLUSHDB")
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
+		})
+
+		Convey("Redis: grant cannot bypass default dangerous deny", func() {
+			asset := &asset_entity.Asset{ID: 1, Type: asset_entity.AssetTypeRedis}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			stubGrant.sessions["sess-default-redis"] = &grant_entity.GrantSession{
+				ID: "sess-default-redis", Status: grant_entity.GrantStatusApproved,
+			}
+			stubGrant.items["sess-default-redis"] = []*grant_entity.GrantItem{
+				{GrantSessionID: "sess-default-redis", AssetID: 1, Command: "DEBUG *"},
+			}
+
+			grantCtx := WithSessionID(ctx, "sess-default-redis")
+			result := CheckPermission(grantCtx, "redis", 1, "DEBUG STATS")
 			So(result.Decision, ShouldEqual, Deny)
 			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
 		})
@@ -715,8 +912,94 @@ func TestCheckPermission_MultiSubCommand(t *testing.T) {
 	})
 }
 
+func TestCheckPermission_ShellSubstitutionPolicy(t *testing.T) {
+	Convey("shell command substitutions are checked as executable sub-commands", t, func() {
+		ctx, mockAsset, _ := setupPolicyTest(t)
+
+		Convey("allowing echo does not allow command substitution payload", func() {
+			asset := &asset_entity.Asset{
+				ID:   1,
+				Type: asset_entity.AssetTypeSSH,
+				CmdPolicy: mustJSON(asset_entity.CommandPolicy{
+					AllowList: []string{"echo *"},
+				}),
+			}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			result := CheckPermission(ctx, "ssh", 1, "echo $(rm -rf /)")
+			So(result.Decision, ShouldEqual, NeedConfirm)
+		})
+
+		Convey("deny list still wins inside command substitution", func() {
+			asset := &asset_entity.Asset{
+				ID:   1,
+				Type: asset_entity.AssetTypeSSH,
+				CmdPolicy: mustJSON(asset_entity.CommandPolicy{
+					AllowList: []string{"echo *", "rm *"},
+					DenyList:  []string{"rm *"},
+				}),
+			}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			result := CheckPermission(ctx, "ssh", 1, "echo $(rm -rf /)")
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
+			So(result.MatchedPattern, ShouldEqual, "rm *")
+		})
+	})
+}
+
+func TestCheckPermission_EnvironmentPrefixPolicy(t *testing.T) {
+	Convey("environment assignments before a command do not bypass command policy matching", t, func() {
+		ctx, mockAsset, _ := setupPolicyTest(t)
+		asset := &asset_entity.Asset{
+			ID:   1,
+			Type: asset_entity.AssetTypeSSH,
+			CmdPolicy: mustJSON(asset_entity.CommandPolicy{
+				AllowList: []string{"apt-get *"},
+			}),
+		}
+		mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+		result := CheckPermission(ctx, "ssh", 1, "DEBIAN_FRONTEND=noninteractive apt-get update -qq")
+		So(result.Decision, ShouldEqual, Allow)
+		So(result.DecisionSource, ShouldEqual, SourcePolicyAllow)
+		So(result.MatchedPattern, ShouldEqual, "apt-get *")
+	})
+}
+
+func TestCheckPermission_ComplexShellCommandPolicy(t *testing.T) {
+	Convey("complex shell command requires every executable unit to be allowed", t, func() {
+		ctx, mockAsset, _ := setupPolicyTest(t)
+		asset := &asset_entity.Asset{
+			ID:   1,
+			Type: asset_entity.AssetTypeSSH,
+			CmdPolicy: mustJSON(asset_entity.CommandPolicy{
+				AllowList: []string{
+					"cd *",
+					"apt-get *",
+					"echo *",
+					"printf *",
+					"whoami",
+					"grep *",
+					"hostname",
+					"uname *",
+				},
+				DenyList: []string{"rm *"},
+			}),
+		}
+		mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+		command := "cd /tmp && DEBIAN_FRONTEND=noninteractive apt-get update -qq; echo \"$(printf '%s' \"$(whoami)\")\" | grep \"$(hostname)\" || echo '$(rm -rf /)' && printf %s `uname -s`"
+
+		result := CheckPermission(ctx, "ssh", 1, command)
+		So(result.Decision, ShouldEqual, Allow)
+		So(result.DecisionSource, ShouldEqual, SourcePolicyAllow)
+	})
+}
+
 func TestCheckPermission_SQLGrantWithTypeAlias(t *testing.T) {
-	Convey("SQL grant with 'sql' type alias", t, func() {
+	Convey("通过 'sql' 别名 + grant 放行 INSERT（覆盖别名 ∩ grant 这一交叉路径）", t, func() {
 		ctx, mockAsset, _ := setupPolicyTest(t)
 
 		stubGrant := newStubGrantRepo()
@@ -742,22 +1025,8 @@ func TestCheckPermission_SQLGrantWithTypeAlias(t *testing.T) {
 		}
 
 		grantCtx := WithSessionID(ctx, "sess-sql")
-
-		Convey("INSERT via grant with sql alias → Allow", func() {
-			result := CheckPermission(grantCtx, "sql", 1, "INSERT INTO users VALUES (1)")
-			So(result.Decision, ShouldEqual, Allow)
-			So(result.DecisionSource, ShouldEqual, SourceGrantAllow)
-		})
-
-		Convey("SELECT via policy with sql alias → Allow", func() {
-			result := CheckPermission(grantCtx, "sql", 1, "SELECT 1")
-			So(result.Decision, ShouldEqual, Allow)
-			So(result.DecisionSource, ShouldEqual, SourcePolicyAllow)
-		})
-
-		Convey("UPDATE without grant → NeedConfirm", func() {
-			result := CheckPermission(grantCtx, "sql", 1, "UPDATE users SET name='x' WHERE id=1")
-			So(result.Decision, ShouldEqual, NeedConfirm)
-		})
+		result := CheckPermission(grantCtx, "sql", 1, "INSERT INTO users VALUES (1)")
+		So(result.Decision, ShouldEqual, Allow)
+		So(result.DecisionSource, ShouldEqual, SourceGrantAllow)
 	})
 }

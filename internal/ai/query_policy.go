@@ -106,7 +106,7 @@ func classifyStmt(stmt ast.StmtNode) StatementInfo {
 
 // CheckQueryPolicy 检查 SQL 语句是否符合策略（合并默认策略后检查）
 func CheckQueryPolicy(ctx context.Context, policy *asset_entity.QueryPolicy, stmts []StatementInfo) CheckResult {
-	merged := mergeQueryPolicy(policy, asset_entity.DefaultQueryPolicy())
+	merged := effectiveQueryPolicy(ctx, policy)
 	return checkQueryPolicyRules(ctx, merged, stmts)
 }
 
@@ -118,7 +118,7 @@ func checkQueryPolicyRules(ctx context.Context, policy *asset_entity.QueryPolicy
 	for _, stmt := range stmts {
 		// deny_types 检查
 		for _, denied := range policy.DenyTypes {
-			if strings.EqualFold(stmt.Type, denied) {
+			if policyValueMatches(denied, stmt.Type) {
 				return CheckResult{
 					Decision:       Deny,
 					Message:        policyFmt(ctx, "SQL statement type %s denied by policy", "SQL 语句类型 %s 被策略禁止", stmt.Type),
@@ -137,7 +137,7 @@ func checkQueryPolicyRules(ctx context.Context, policy *asset_entity.QueryPolicy
 			}
 		}
 		// allow_types 白名单
-		if len(policy.AllowTypes) > 0 && !containsStrFold(policy.AllowTypes, stmt.Type) {
+		if len(policy.AllowTypes) > 0 && !containsPolicyValue(policy.AllowTypes, stmt.Type) {
 			return CheckResult{Decision: NeedConfirm}
 		}
 	}
@@ -161,15 +161,6 @@ func mergeQueryPolicy(custom, defaults *asset_entity.QueryPolicy) *asset_entity.
 func containsStr(slice []string, s string) bool {
 	for _, item := range slice {
 		if item == s {
-			return true
-		}
-	}
-	return false
-}
-
-func containsStrFold(slice []string, s string) bool {
-	for _, item := range slice {
-		if strings.EqualFold(item, s) {
 			return true
 		}
 	}

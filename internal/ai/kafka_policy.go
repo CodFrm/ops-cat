@@ -15,6 +15,11 @@ import (
 // Both rule and command must be exactly "<action> <resource>", for example:
 // "topic.read orders-*" or "topic.config.write orders".
 func MatchKafkaRule(rule, command string) bool {
+	if isWildcardAll(rule) {
+		_, _, ok := splitKafkaRule(command)
+		return ok
+	}
+
 	ruleAction, ruleResource, ok := splitKafkaRule(rule)
 	if !ok {
 		return false
@@ -50,7 +55,7 @@ func splitKafkaRule(value string) (action, resource string, ok bool) {
 }
 
 func CheckKafkaPolicy(ctx context.Context, policy *asset_entity.KafkaPolicy, command string) CheckResult {
-	merged := mergeKafkaPolicy(policy, asset_entity.DefaultKafkaPolicy())
+	merged := effectiveKafkaPolicy(ctx, policy)
 	return checkKafkaPolicyRules(ctx, merged, command)
 }
 

@@ -336,7 +336,7 @@ func TestCheckRedisPolicyForOpsctl(t *testing.T) {
 			So(result.Decision, ShouldEqual, Allow)
 		})
 
-		Convey("no policy auto-allows", func() {
+		Convey("empty policy uses Redis defaults", func() {
 			asset := &asset_entity.Asset{
 				ID:   1,
 				Type: asset_entity.AssetTypeRedis,
@@ -345,6 +345,13 @@ func TestCheckRedisPolicyForOpsctl(t *testing.T) {
 
 			result := CheckRedisPolicyForOpsctl(ctx, 1, "GET user:1")
 			So(result.Decision, ShouldEqual, Allow)
+
+			result = CheckRedisPolicyForOpsctl(ctx, 1, "SET user:1 val")
+			So(result.Decision, ShouldEqual, NeedConfirm)
+
+			result = CheckRedisPolicyForOpsctl(ctx, 1, "DEBUG STATS")
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
 		})
 	})
 }

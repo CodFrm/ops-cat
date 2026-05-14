@@ -65,6 +65,16 @@ func TestMatchRedisRule(t *testing.T) {
 			So(MatchRedisRule("GET *", "GET"), ShouldBeTrue)
 		})
 
+		Convey("单独 * 匹配任意 Redis 命令", func() {
+			So(MatchRedisRule("*", "INFO"), ShouldBeTrue)
+			So(MatchRedisRule("*", "SET a b"), ShouldBeTrue)
+		})
+
+		Convey("多词命令的子命令通配符保持语义", func() {
+			So(MatchRedisRule("DEBUG *", "DEBUG STATS"), ShouldBeTrue)
+			So(MatchRedisRule("DEBUG *", "CONFIG SET maxmemory 128mb"), ShouldBeFalse)
+		})
+
 		Convey("key pattern glob 匹配", func() {
 			So(MatchRedisRule("DEL user:*", "DEL user:123"), ShouldBeTrue)
 			So(MatchRedisRule("DEL user:*", "DEL order:123"), ShouldBeFalse)
@@ -115,11 +125,25 @@ func TestCheckRedisPolicy(t *testing.T) {
 			So(result.Decision, ShouldEqual, NeedConfirm)
 		})
 
-		Convey("无允许列表 → 全部允许", func() {
+		Convey("空策略使用默认只读 allow", func() {
 			p := &asset_entity.RedisPolicy{}
-			result := CheckRedisPolicy(ctx, p, "SET mykey value")
+			result := CheckRedisPolicy(ctx, p, "INFO")
 			So(result.Decision, ShouldEqual, Allow)
 			So(result.DecisionSource, ShouldEqual, SourcePolicyAllow)
+		})
+
+		Convey("空策略下写命令需要确认", func() {
+			p := &asset_entity.RedisPolicy{}
+			result := CheckRedisPolicy(ctx, p, "SET mykey value")
+			So(result.Decision, ShouldEqual, NeedConfirm)
+		})
+
+		Convey("空策略叠加默认 dangerous deny", func() {
+			p := &asset_entity.RedisPolicy{}
+			result := CheckRedisPolicy(ctx, p, "DEBUG STATS")
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
+			So(result.MatchedPattern, ShouldEqual, "DEBUG *")
 		})
 
 		Convey("拒绝列表优先于允许列表", func() {
@@ -133,10 +157,42 @@ func TestCheckRedisPolicy(t *testing.T) {
 		})
 
 		Convey("nil policy 使用默认策略", func() {
-			// DefaultRedisPolicy 只含 Groups 引用，mergeRedisPolicy 不解析 Groups
-			// 所以 nil policy 时 DenyList/AllowList 都为空 → Allow
 			result := CheckRedisPolicy(ctx, nil, "GET mykey")
 			So(result.Decision, ShouldEqual, Allow)
+
+			result = CheckRedisPolicy(ctx, nil, "SET mykey value")
+			So(result.Decision, ShouldEqual, NeedConfirm)
+
+			result = CheckRedisPolicy(ctx, nil, "DEBUG STATS")
+			So(result.Decision, ShouldEqual, Deny)
+		})
+
+		Convey("allow_list wildcard allows any non-dangerous Redis command", func() {
+			p := &asset_entity.RedisPolicy{AllowList: []string{"*"}}
+			result := CheckRedisPolicy(ctx, p, "SET mykey value")
+			So(result.Decision, ShouldEqual, Allow)
+
+			result = CheckRedisPolicy(ctx, p, "DEBUG STATS")
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
+		})
+
+		Convey("deny_list wildcard denies every Redis command", func() {
+			p := &asset_entity.RedisPolicy{DenyList: []string{"*"}}
+			result := CheckRedisPolicy(ctx, p, "INFO")
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
+			So(result.MatchedPattern, ShouldEqual, "*")
+		})
+
+		Convey("explicit allow list replaces default read-only allow", func() {
+			p := &asset_entity.RedisPolicy{AllowList: []string{"GET *"}}
+			result := CheckRedisPolicy(ctx, p, "INFO")
+			So(result.Decision, ShouldEqual, NeedConfirm)
+
+			result = CheckRedisPolicy(ctx, p, "DEBUG STATS")
+			So(result.Decision, ShouldEqual, Deny)
+			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
 		})
 	})
 }

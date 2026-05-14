@@ -57,7 +57,7 @@ func ParseCommandRule(rule string) *ParsedCommand {
 
 // ParseActualCommand 解析实际命令，用规则的 flag 列表作为参照判断哪些 flag 带值
 func ParseActualCommand(command string, rule *ParsedCommand) *ParsedCommand {
-	tokens := tokenize(command)
+	tokens := stripLeadingAssigns(tokenize(command))
 	if len(tokens) == 0 {
 		return &ParsedCommand{}
 	}
@@ -99,6 +99,11 @@ func ParseActualCommand(command string, rule *ParsedCommand) *ParsedCommand {
 
 // MatchCommandRule 检查实际命令是否匹配规则字符串
 func MatchCommandRule(rule, command string) bool {
+	// 单独 "*" 作为规则匹配任意非空命令（含带环境变量前缀的命令）
+	if isWildcardAll(rule) {
+		return strings.TrimSpace(command) != ""
+	}
+
 	parsedRule := ParseCommandRule(rule)
 	if parsedRule.Program == "" {
 		return false
@@ -180,6 +185,36 @@ func isFlag(s string) bool {
 	return strings.HasPrefix(s, "-")
 }
 
+// stripLeadingAssigns 剥掉实际命令头部的 NAME=VALUE 环境变量赋值，
+// 让 `DEBIAN_FRONTEND=noninteractive apt-get update` 与规则 `apt-get *` 匹配。
+func stripLeadingAssigns(tokens []string) []string {
+	i := 0
+	for i < len(tokens) && looksLikeEnvAssign(tokens[i]) {
+		i++
+	}
+	return tokens[i:]
+}
+
+func looksLikeEnvAssign(t string) bool {
+	eq := strings.IndexByte(t, '=')
+	if eq <= 0 {
+		return false
+	}
+	for i := range eq {
+		c := t[i]
+		if i == 0 {
+			if c != '_' && (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
+				return false
+			}
+		} else {
+			if c != '_' && (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func matchSubCommand(pattern string, subs []string) bool {
 	for _, sub := range subs {
 		if matchGlobPattern(pattern, sub) {
@@ -227,7 +262,7 @@ func allSubCommandsAllowed(subCmds []string, allowRules []string) (bool, string)
 
 // findHintRules 从 allow 规则中找同程序名的规则作为提示
 func findHintRules(command string, allowRules []string) []string {
-	tokens := tokenize(command)
+	tokens := stripLeadingAssigns(tokenize(command))
 	if len(tokens) == 0 {
 		return nil
 	}

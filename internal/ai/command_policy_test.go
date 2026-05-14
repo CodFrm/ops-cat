@@ -78,6 +78,16 @@ func TestMatchCommandRule(t *testing.T) {
 			So(MatchCommandRule("ls *", "ls"), ShouldBeTrue)
 		})
 
+		Convey("单独 * 匹配任意命令", func() {
+			So(MatchCommandRule("*", "ls -la /tmp"), ShouldBeTrue)
+			So(MatchCommandRule("*", "DEBIAN_FRONTEND=noninteractive apt-get update -qq"), ShouldBeTrue)
+			So(MatchCommandRule("*", "rm -rf /"), ShouldBeTrue)
+		})
+
+		Convey("环境变量前缀不影响实际程序匹配", func() {
+			So(MatchCommandRule("apt-get *", "DEBIAN_FRONTEND=noninteractive apt-get update -qq"), ShouldBeTrue)
+		})
+
 		Convey("子命令匹配", func() {
 			So(MatchCommandRule("kubectl get *", "kubectl get po"), ShouldBeTrue)
 			So(MatchCommandRule("kubectl get *", "kubectl delete po"), ShouldBeFalse)
@@ -214,25 +224,96 @@ func TestExtractSubCommands(t *testing.T) {
 		Convey("|| 组合", func() {
 			cmds, err := ExtractSubCommands("ls /tmp || echo fail")
 			So(err, ShouldBeNil)
-			So(cmds, ShouldHaveLength, 2)
+			So(cmds, ShouldResemble, []string{"ls /tmp", "echo fail"})
 		})
 
 		Convey("; 分隔", func() {
 			cmds, err := ExtractSubCommands("ls; pwd; whoami")
 			So(err, ShouldBeNil)
-			So(cmds, ShouldHaveLength, 3)
+			So(cmds, ShouldResemble, []string{"ls", "pwd", "whoami"})
 		})
 
 		Convey("管道", func() {
 			cmds, err := ExtractSubCommands("cat file | grep error")
 			So(err, ShouldBeNil)
-			So(cmds, ShouldHaveLength, 2)
+			So(cmds, ShouldResemble, []string{"cat file", "grep error"})
 		})
 
 		Convey("命令替换", func() {
 			cmds, err := ExtractSubCommands("echo $(whoami)")
 			So(err, ShouldBeNil)
-			So(len(cmds), ShouldBeGreaterThanOrEqualTo, 1)
+			So(cmds, ShouldResemble, []string{"echo $(whoami)", "whoami"})
+		})
+
+		Convey("环境变量前缀会归一化到实际执行命令", func() {
+			cmds, err := ExtractSubCommands("DEBIAN_FRONTEND=noninteractive apt-get update -qq && systemctl stop nginx")
+			So(err, ShouldBeNil)
+			So(cmds, ShouldResemble, []string{"apt-get update -qq", "systemctl stop nginx"})
+		})
+
+		Convey("反引号命令替换也会提取内部命令", func() {
+			cmds, err := ExtractSubCommands("echo `whoami`")
+			So(err, ShouldBeNil)
+			So(cmds, ShouldContain, "whoami")
+		})
+
+		Convey("双引号内命令替换会执行并提取", func() {
+			cmds, err := ExtractSubCommands(`echo "$(uname -a)"`)
+			So(err, ShouldBeNil)
+			So(cmds, ShouldContain, "uname -a")
+		})
+
+		Convey("单引号内命令替换不会被当作执行单元", func() {
+			cmds, err := ExtractSubCommands(`echo '$(rm -rf /)'`)
+			So(err, ShouldBeNil)
+			So(cmds, ShouldHaveLength, 1)
+			So(cmds[0], ShouldEqual, `echo '$(rm -rf /)'`)
+		})
+
+		Convey("嵌套命令替换递归提取", func() {
+			cmds, err := ExtractSubCommands(`echo "$(printf '%s' "$(whoami)")"`)
+			So(err, ShouldBeNil)
+			So(cmds, ShouldContain, "whoami")
+			So(cmds, ShouldContain, `printf '%s' "$(whoami)"`)
+		})
+
+		Convey("复杂组合命令覆盖环境变量、连接符、管道、命令替换和引用差异", func() {
+			command := "cd /tmp && DEBIAN_FRONTEND=noninteractive apt-get update -qq; echo \"$(printf '%s' \"$(whoami)\")\" | grep \"$(hostname)\" || echo '$(rm -rf /)' && printf %s `uname -s`"
+
+			cmds, err := ExtractSubCommands(command)
+			So(err, ShouldBeNil)
+
+			So(cmds, ShouldContain, "cd /tmp")
+			So(cmds, ShouldContain, "apt-get update -qq")
+			So(cmds, ShouldContain, `echo "$(printf '%s' "$(whoami)")"`)
+			So(cmds, ShouldContain, `printf '%s' "$(whoami)"`)
+			So(cmds, ShouldContain, "whoami")
+			So(cmds, ShouldContain, `grep "$(hostname)"`)
+			So(cmds, ShouldContain, "hostname")
+			So(cmds, ShouldContain, `echo '$(rm -rf /)'`)
+			So(cmds, ShouldContain, "uname -s")
+			So(cmds, ShouldNotContain, "rm -rf /")
+		})
+
+		Convey("Stmt 上的重定向不会污染提取出来的子命令", func() {
+			// 2>/dev/null、2>&1、>file 都挂在 Stmt.Redirs 上，
+			// 打印 stmt.Cmd 时应剥掉，匹配规则只看实际命令
+			cmds, err := ExtractSubCommands("systemctl stop nginx 2>/dev/null && systemctl disable nginx 2>/dev/null; echo done > /tmp/out.log")
+			So(err, ShouldBeNil)
+			So(cmds, ShouldResemble, []string{
+				"systemctl stop nginx",
+				"systemctl disable nginx",
+				"echo done",
+			})
+		})
+
+		Convey("git clone 2>&1 也被剥离", func() {
+			cmds, err := ExtractSubCommands("cd /tmp && git clone --depth 1 https://example.com/x.git x 2>&1")
+			So(err, ShouldBeNil)
+			So(cmds, ShouldResemble, []string{
+				"cd /tmp",
+				"git clone --depth 1 https://example.com/x.git x",
+			})
 		})
 	})
 }
