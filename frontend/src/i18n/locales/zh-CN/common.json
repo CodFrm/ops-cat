@@ -766,7 +766,7 @@
     "approvalLocalToolTitle": "AI 想执行本地 {{tool}} 工具",
     "approvalLocalToolContentPreview": "查看写入内容",
     "approvalLocalToolEditPreview": "查看修改预览",
-    "approvalLocalToolPatternHint": "每行一条；* 通配符（bash 按命令、write/edit 按路径）。",
+    "approvalLocalToolPatternHint": "每行一条；* 通配符（local_bash 按命令、local_write/local_edit 按路径）。",
     "permissionRequestHint": "AI 正在申请命令执行权限，可编辑模式后批准",
     "permissionPatternPlaceholder": "命令模式，支持 * 通配符",
     "permissionApprove": "批准",

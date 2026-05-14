@@ -127,7 +127,7 @@ export const ApprovalBlock = memo(function ApprovalBlock({ block }: ApprovalBloc
               {isLocalTool && item.detail && (
                 <details className="text-[10px] text-muted-foreground/80">
                   <summary className="cursor-pointer select-none">
-                    {item.type === "write"
+                    {item.type === "local_write"
                       ? t("ai.approvalLocalToolContentPreview", "查看写入内容")
                       : t("ai.approvalLocalToolEditPreview", "查看修改预览")}
                   </summary>
@@ -176,7 +176,7 @@ export const ApprovalBlock = memo(function ApprovalBlock({ block }: ApprovalBloc
             placeholder={t("opsctlApproval.patternPlaceholder")}
           />
           <div className="text-[10px] text-muted-foreground/70">
-            {t("ai.approvalLocalToolPatternHint", "每行一条；* 通配符（bash 按命令、write/edit 按路径）。")}
+            {t("ai.approvalLocalToolPatternHint", "每行一条；* 通配符（local_bash 按命令、local_write/local_edit 按路径）。")}
           </div>
         </div>
       )}

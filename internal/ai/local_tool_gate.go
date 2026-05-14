@@ -13,12 +13,12 @@ import (
 // LocalToolApprovalRequest 是 LocalToolGate 发往前端的本地工具审批载荷。
 //
 // 与 ApprovalItem 不同：本地工具没有 asset/group 概念，只有命令/路径本体；
-// SubCommands 用于 bash 复合命令的展示与默认 pattern 生成。
+// SubCommands 用于 local_bash 复合命令的展示与默认 pattern 生成。
 type LocalToolApprovalRequest struct {
 	ToolName        string   // "local_bash" | "local_write" | "local_edit"
-	Command         string   // bash: 原始 command；write/edit: path
-	Detail          string   // write 内容预览 / edit 改动预览，bash 留空
-	SubCommands     []string // bash 按 mvdan.cc/sh 拆分的子命令；write/edit 为单条 = path
+	Command         string   // local_bash: 原始 command；local_write/local_edit: path
+	Detail          string   // local_write 内容预览 / local_edit 改动预览，local_bash 留空
+	SubCommands     []string // local_bash 按 mvdan.cc/sh 拆分的子命令；local_write/local_edit 为单条 = path
 	DefaultPatterns []string // 默认 pattern（"git pull" → "git *"，path 默认原值），前端预填可编辑
 }
 
@@ -151,8 +151,8 @@ func (g *LocalToolGate) allMatch(convID int64, tool string, subjects []string) b
 	return true
 }
 
-// matchLocalPattern：bash 用 MatchCommandRule（与 run_command 一致，支持 *），
-// write/edit 用 path.Match（POSIX glob，* 不跨 /）。
+// matchLocalPattern：local_bash 用 MatchCommandRule（与 run_command 一致，支持 *），
+// local_write/local_edit 用 path.Match（POSIX glob，* 不跨 /）。
 func matchLocalPattern(tool, pattern, subject string) bool {
 	if pattern == "*" || pattern == subject {
 		return true
@@ -203,7 +203,7 @@ func primaryCommand(tool string, in map[string]any) string {
 	return ""
 }
 
-// detailOf 给前端展示用的补充内容：write 显示前若干内容，edit 显示 diff 摘要。
+// detailOf 给前端展示用的补充内容：local_write 显示前若干内容，local_edit 显示 diff 摘要。
 func detailOf(tool string, in map[string]any) string {
 	switch tool {
 	case "local_write":
