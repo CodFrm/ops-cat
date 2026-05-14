@@ -1,12 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, GitMerge, Upload, X } from "lucide-react";
 import type * as MonacoNS from "monaco-editor";
@@ -128,12 +120,7 @@ function buildMergePaneDecorations(
           className,
           glyphMarginClassName,
           overviewRuler: {
-            color:
-              block.kind === "insert"
-                ? "#16a34a"
-                : block.kind === "delete"
-                  ? "#dc2626"
-                  : "#d97706",
+            color: block.kind === "insert" ? "#16a34a" : block.kind === "delete" ? "#dc2626" : "#d97706",
             position: monaco.editor.OverviewRulerLane.Full,
           },
         },
@@ -231,10 +218,7 @@ interface ExternalEditIdeaEditorPaneProps {
 function ExternalEditIdeaEditorPane({ badge, children, tone, title }: ExternalEditIdeaEditorPaneProps) {
   return (
     <div
-      className={cn(
-        "flex min-h-0 flex-col bg-[#1f2329]",
-        tone === "final" && "ring-1 ring-amber-400/40"
-      )}
+      className={cn("flex min-h-0 flex-col bg-[#1f2329]", tone === "final" && "ring-1 ring-amber-400/40")}
       data-idea-pane={tone}
       data-testid={`external-edit-idea-pane-${tone}`}
     >
@@ -874,10 +858,7 @@ export function FileManagerPanel({
             <DialogTitle>{t("externalEdit.pending.title")}</DialogTitle>
             <DialogDescription>{t("externalEdit.pending.description")}</DialogDescription>
           </DialogHeader>
-          <div
-            className="min-h-0 space-y-3 overflow-y-auto px-6 py-4"
-            data-testid="external-edit-pending-dialog-body"
-          >
+          <div className="min-h-0 space-y-3 overflow-y-auto px-6 py-4" data-testid="external-edit-pending-dialog-body">
             {pendingItems.length === 0 ? (
               <div className="rounded border bg-muted/20 px-3 py-4 text-sm text-muted-foreground">
                 {t("externalEdit.pending.empty")}
@@ -900,10 +881,7 @@ export function FileManagerPanel({
                 return (
                   <div
                     key={item.id}
-                    className={cn(
-                      "rounded border px-4 py-4 text-sm",
-                      cardTone
-                    )}
+                    className={cn("rounded border px-4 py-4 text-sm", cardTone)}
                     data-testid={`external-edit-pending-${item.type}`}
                   >
                     <div className="flex flex-col gap-3">
@@ -1056,8 +1034,8 @@ export function FileManagerPanel({
       </Dialog>
 
       {safeCompareResult && (
-          <ExternalEditIdeaFrame
-            fileName={safeCompareResult.fileName}
+        <ExternalEditIdeaFrame
+          fileName={safeCompareResult.fileName}
           helper={t("externalEdit.compare.helper")}
           layoutLabel={t("externalEdit.compare.remoteLeftLocalRight")}
           mode="compare"
@@ -1194,74 +1172,74 @@ export function FileManagerPanel({
               title={t("externalEdit.merge.localDraft")}
               tone="local"
             >
-                <CodeEditor
-                  className="min-h-0 flex-1 overflow-hidden"
-                  fontSize={12}
-                  height="100%"
-                  language="plaintext"
-                  options={{
-                    lineNumbers: "on",
-                    contextmenu: true,
-                    glyphMargin: true,
-                    minimap: { enabled: false },
-                    overviewRulerLanes: 3,
-                    readOnly: true,
-                  }}
-                  readOnly
-                  testId="external-edit-merge-local"
-                  value={safeMergeResult.localContent || ""}
-                  onMount={handleMergeEditorMount("local")}
-                />
+              <CodeEditor
+                className="min-h-0 flex-1 overflow-hidden"
+                fontSize={12}
+                height="100%"
+                language="plaintext"
+                options={{
+                  lineNumbers: "on",
+                  contextmenu: true,
+                  glyphMargin: true,
+                  minimap: { enabled: false },
+                  overviewRulerLanes: 3,
+                  readOnly: true,
+                }}
+                readOnly
+                testId="external-edit-merge-local"
+                value={safeMergeResult.localContent || ""}
+                onMount={handleMergeEditorMount("local")}
+              />
             </ExternalEditIdeaEditorPane>
             <ExternalEditIdeaEditorPane
               badge={t("externalEdit.merge.editableCenter")}
               title={t("externalEdit.merge.finalDraft")}
               tone="final"
             >
-                <CodeEditor
-                  className="min-h-0 flex-1 overflow-hidden"
-                  fontSize={12}
-                  height="100%"
-                  language="plaintext"
-                  options={{
-                    lineNumbers: "on",
-                    contextmenu: true,
-                    glyphMargin: true,
-                    minimap: { enabled: false },
-                    overviewRulerLanes: 3,
-                  }}
-                  testId="external-edit-merge-final"
-                  value={mergeFinalContent}
-                  onChange={(value) => {
-                    setMergeFinalContent(value);
-                    setMergeDirty(true);
-                  }}
-                  onMount={handleMergeEditorMount("final")}
-                />
+              <CodeEditor
+                className="min-h-0 flex-1 overflow-hidden"
+                fontSize={12}
+                height="100%"
+                language="plaintext"
+                options={{
+                  lineNumbers: "on",
+                  contextmenu: true,
+                  glyphMargin: true,
+                  minimap: { enabled: false },
+                  overviewRulerLanes: 3,
+                }}
+                testId="external-edit-merge-final"
+                value={mergeFinalContent}
+                onChange={(value) => {
+                  setMergeFinalContent(value);
+                  setMergeDirty(true);
+                }}
+                onMount={handleMergeEditorMount("final")}
+              />
             </ExternalEditIdeaEditorPane>
             <ExternalEditIdeaEditorPane
               badge={t("externalEdit.merge.readOnlySide")}
               title={t("externalEdit.merge.remoteDraft")}
               tone="remote"
             >
-                <CodeEditor
-                  className="min-h-0 flex-1 overflow-hidden"
-                  fontSize={12}
-                  height="100%"
-                  language="plaintext"
-                  options={{
-                    lineNumbers: "on",
-                    contextmenu: true,
-                    glyphMargin: true,
-                    minimap: { enabled: false },
-                    overviewRulerLanes: 3,
-                    readOnly: true,
-                  }}
-                  readOnly
-                  testId="external-edit-merge-remote"
-                  value={safeMergeResult.remoteContent || ""}
-                  onMount={handleMergeEditorMount("remote")}
-                />
+              <CodeEditor
+                className="min-h-0 flex-1 overflow-hidden"
+                fontSize={12}
+                height="100%"
+                language="plaintext"
+                options={{
+                  lineNumbers: "on",
+                  contextmenu: true,
+                  glyphMargin: true,
+                  minimap: { enabled: false },
+                  overviewRulerLanes: 3,
+                  readOnly: true,
+                }}
+                readOnly
+                testId="external-edit-merge-remote"
+                value={safeMergeResult.remoteContent || ""}
+                onMount={handleMergeEditorMount("remote")}
+              />
             </ExternalEditIdeaEditorPane>
           </div>
         </ExternalEditIdeaFrame>

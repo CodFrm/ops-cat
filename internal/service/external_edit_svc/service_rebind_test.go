@@ -314,13 +314,6 @@ func (h *rebindHarness) refreshSession(t *testing.T, sessionID string) *Session 
 	return session
 }
 
-func (h *rebindHarness) advanceNow(delta time.Duration) {
-	h.now = h.now.Add(delta)
-	h.svc.now = func() time.Time {
-		return h.now
-	}
-}
-
 func markDirtyLocalCopy(t *testing.T, session *Session, data []byte) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(session.LocalPath, data, 0o600))
@@ -335,7 +328,8 @@ func readBakeupFiles(t *testing.T, workspaceDir string) [][]byte {
 		if entry.IsDir() {
 			continue
 		}
-		data, readErr := os.ReadFile(filepath.Join(workspaceDir, "bakeup", entry.Name()))
+		path := filepath.Join(workspaceDir, "bakeup", entry.Name())
+		data, readErr := os.ReadFile(path) //nolint:gosec // path comes from the test workspace bakeup directory
 		require.NoError(t, readErr)
 		files = append(files, data)
 	}
@@ -1204,8 +1198,8 @@ func TestExternalEditRestoreCleanupRemovesExpiredBakeupEntries(t *testing.T) {
 	require.NoError(t, h.svc.Close())
 
 	cfg := &bootstrap.AppConfig{
-		ExternalEditDefaultEditorID:     "system-text",
-		ExternalEditWorkspaceRoot:       h.manifest,
+		ExternalEditDefaultEditorID:      "system-text",
+		ExternalEditWorkspaceRoot:        h.manifest,
 		ExternalEditCleanupRetentionDays: 1,
 	}
 	reopened, err := NewService(Options{

@@ -5,10 +5,7 @@ import { FileManagerPanel } from "../components/terminal/FileManagerPanel";
 import { useTerminalStore, type TerminalDirectorySyncState } from "../stores/terminalStore";
 import { useSFTPStore, type SFTPTransfer } from "../stores/sftpStore";
 import { useExternalEditStore } from "../stores/externalEditStore";
-import {
-  type ExternalEditMergePrepareResult,
-  type ExternalEditSession,
-} from "../lib/externalEditApi";
+import { type ExternalEditMergePrepareResult, type ExternalEditSession } from "../lib/externalEditApi";
 import { ChangeSSHDirectory, SFTPListDir } from "../../wailsjs/go/app/App";
 
 const { toastError } = vi.hoisted(() => ({
@@ -49,10 +46,12 @@ vi.mock("@/components/CodeDiffViewer", () => ({
     codeDiffViewerMock(props);
     window.setTimeout(() => props.onDiffStatsChange?.({ total: 2, blocks: [{ id: "a" }, { id: "b" }] }), 0);
     return (
-      <div data-active-block-index={props.activeBlockIndex} data-navigation-token={props.navigationToken} data-testid={props.testId}>
-        externalEdit.compare.readOnly
-        externalEdit.compare.remoteSnapshot
-        externalEdit.compare.localDraft
+      <div
+        data-active-block-index={props.activeBlockIndex}
+        data-navigation-token={props.navigationToken}
+        data-testid={props.testId}
+      >
+        externalEdit.compare.readOnly externalEdit.compare.remoteSnapshot externalEdit.compare.localDraft
         {props.original}
         {props.modified}
       </div>
@@ -80,7 +79,13 @@ vi.mock("@/components/CodeEditor", () => ({
       setPosition: vi.fn(),
     };
     const monaco = {
-      Range: vi.fn(function Range(this: unknown, startLine: number, startColumn: number, endLine: number, endColumn: number) {
+      Range: vi.fn(function Range(
+        this: unknown,
+        startLine: number,
+        startColumn: number,
+        endLine: number,
+        endColumn: number
+      ) {
         return { startLineNumber: startLine, startColumn, endLineNumber: endLine, endColumn };
       }),
       editor: { OverviewRulerLane: { Full: 7 } },
@@ -311,7 +316,12 @@ describe("FileManagerPanel", () => {
   it("keeps clean reread drafts and retained stale drafts out of the main file manager surface", async () => {
     useExternalEditStore.setState({
       sessions: {
-        stale: makeExternalEditSession({ id: "stale", state: "stale", supersededBySessionId: "snapshot", updatedAt: 30 }),
+        stale: makeExternalEditSession({
+          id: "stale",
+          state: "stale",
+          supersededBySessionId: "snapshot",
+          updatedAt: 30,
+        }),
         snapshot: makeExternalEditSession({
           id: "snapshot",
           state: "clean",
@@ -372,7 +382,9 @@ describe("FileManagerPanel", () => {
     expect(screen.getByTestId("external-edit-compare-diff-editor")).toHaveTextContent(
       "externalEdit.compare.remoteSnapshot"
     );
-    expect(screen.getByTestId("external-edit-compare-diff-editor")).toHaveTextContent("externalEdit.compare.localDraft");
+    expect(screen.getByTestId("external-edit-compare-diff-editor")).toHaveTextContent(
+      "externalEdit.compare.localDraft"
+    );
     expect(screen.getByText("externalEdit.compare.helper")).toBeInTheDocument();
   });
 
@@ -399,7 +411,12 @@ describe("FileManagerPanel", () => {
     const user = userEvent.setup();
     useExternalEditStore.setState({
       sessions: {
-        conflict: makeExternalEditSession({ id: "conflict", state: "conflict", recordState: "conflict", updatedAt: 30 }),
+        conflict: makeExternalEditSession({
+          id: "conflict",
+          state: "conflict",
+          recordState: "conflict",
+          updatedAt: 30,
+        }),
       },
     });
 
@@ -408,13 +425,25 @@ describe("FileManagerPanel", () => {
     await user.click(await screen.findByTestId("external-edit-pending-entry"));
     const pendingDialog = await screen.findByTestId("external-edit-pending-dialog");
     expect(within(pendingDialog).getByRole("button", { name: "externalEdit.actions.merge" })).toBeInTheDocument();
-    expect(within(pendingDialog).getByRole("button", { name: "externalEdit.actions.acceptRemote" })).toBeInTheDocument();
+    expect(
+      within(pendingDialog).getByRole("button", { name: "externalEdit.actions.acceptRemote" })
+    ).toBeInTheDocument();
     expect(within(pendingDialog).getByRole("button", { name: "externalEdit.actions.overwrite" })).toBeInTheDocument();
-    expect(within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.compare" })).not.toBeInTheDocument();
-    expect(within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.reread" })).not.toBeInTheDocument();
-    expect(within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.reopenLocal" })).not.toBeInTheDocument();
-    expect(within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.hideRecord" })).not.toBeInTheDocument();
-    expect(within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.deleteLocal" })).not.toBeInTheDocument();
+    expect(
+      within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.compare" })
+    ).not.toBeInTheDocument();
+    expect(
+      within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.reread" })
+    ).not.toBeInTheDocument();
+    expect(
+      within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.reopenLocal" })
+    ).not.toBeInTheDocument();
+    expect(
+      within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.hideRecord" })
+    ).not.toBeInTheDocument();
+    expect(
+      within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.deleteLocal" })
+    ).not.toBeInTheDocument();
   });
 
   it("shows continue, reread, and overwrite for recovery pending records", async () => {
@@ -441,15 +470,25 @@ describe("FileManagerPanel", () => {
 
     await user.click(await screen.findByTestId("external-edit-pending-entry"));
     const pendingDialog = await screen.findByTestId("external-edit-pending-dialog");
-    expect(within(pendingDialog).getByRole("button", { name: /继续修改|externalEdit\.actions\.continueEdit/ })).toBeInTheDocument();
+    expect(
+      within(pendingDialog).getByRole("button", { name: /继续修改|externalEdit\.actions\.continueEdit/ })
+    ).toBeInTheDocument();
     expect(within(pendingDialog).getByRole("button", { name: "externalEdit.actions.reread" })).toBeInTheDocument();
     expect(within(pendingDialog).getByRole("button", { name: "externalEdit.actions.overwrite" })).toBeInTheDocument();
     expect(within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.merge" })).not.toBeInTheDocument();
-    expect(within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.reopenLocal" })).not.toBeInTheDocument();
-    expect(within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.hideRecord" })).not.toBeInTheDocument();
-    expect(within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.deleteLocal" })).not.toBeInTheDocument();
+    expect(
+      within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.reopenLocal" })
+    ).not.toBeInTheDocument();
+    expect(
+      within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.hideRecord" })
+    ).not.toBeInTheDocument();
+    expect(
+      within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.deleteLocal" })
+    ).not.toBeInTheDocument();
 
-    await user.click(within(pendingDialog).getByRole("button", { name: /继续修改|externalEdit\.actions\.continueEdit/ }));
+    await user.click(
+      within(pendingDialog).getByRole("button", { name: /继续修改|externalEdit\.actions\.continueEdit/ })
+    );
     await user.click(within(pendingDialog).getByRole("button", { name: "externalEdit.actions.reread" }));
     await user.click(within(pendingDialog).getByRole("button", { name: "externalEdit.actions.overwrite" }));
 
@@ -467,8 +506,10 @@ describe("FileManagerPanel", () => {
           state: "conflict",
           recordState: "conflict",
           documentKey: "101:/srv/app/projects/very/deep/path/demo-long-name.txt",
-          remotePath: "/srv/app/projects/very/deep/path/with-a-very-long-segment/and-another-segment/demo-long-name.txt",
-          remoteRealPath: "/srv/app/projects/very/deep/path/with-a-very-long-segment/and-another-segment/demo-long-name.txt",
+          remotePath:
+            "/srv/app/projects/very/deep/path/with-a-very-long-segment/and-another-segment/demo-long-name.txt",
+          remoteRealPath:
+            "/srv/app/projects/very/deep/path/with-a-very-long-segment/and-another-segment/demo-long-name.txt",
           updatedAt: 30,
         }),
       },
@@ -505,7 +546,9 @@ describe("FileManagerPanel", () => {
     expect(merge.className).toContain("break-words");
     expect(overwrite.className).toContain("!whitespace-normal");
 
-    const footerClose = within(screen.getByTestId("external-edit-pending-dialog-footer")).getByRole("button", { name: "action.close" });
+    const footerClose = within(screen.getByTestId("external-edit-pending-dialog-footer")).getByRole("button", {
+      name: "action.close",
+    });
     expect(footerClose).toBeInTheDocument();
   });
 
@@ -513,7 +556,12 @@ describe("FileManagerPanel", () => {
     const user = userEvent.setup();
     useExternalEditStore.setState({
       sessions: {
-        conflict: makeExternalEditSession({ id: "conflict", state: "conflict", recordState: "conflict", updatedAt: 30 }),
+        conflict: makeExternalEditSession({
+          id: "conflict",
+          state: "conflict",
+          recordState: "conflict",
+          updatedAt: 30,
+        }),
       },
       prepareMerge: vi.fn(async () => {
         const result = {
@@ -723,7 +771,12 @@ describe("FileManagerPanel", () => {
     const user = userEvent.setup();
     useExternalEditStore.setState({
       sessions: {
-        conflict: makeExternalEditSession({ id: "conflict", state: "conflict", recordState: "conflict", updatedAt: 30 }),
+        conflict: makeExternalEditSession({
+          id: "conflict",
+          state: "conflict",
+          recordState: "conflict",
+          updatedAt: 30,
+        }),
       },
       prepareMerge: vi.fn(async () => {
         throw new Error("SSH session ssh-b failed at C:\\Users\\owner\\AppData\\Local\\OpsKat\\tmp\\draft.txt");
@@ -820,9 +873,13 @@ describe("FileManagerPanel", () => {
 
     const pendingDialog = await screen.findByTestId("external-edit-pending-dialog");
     expect(within(pendingDialog).getByRole("button", { name: "externalEdit.actions.merge" })).toBeInTheDocument();
-    expect(within(pendingDialog).getByRole("button", { name: "externalEdit.actions.acceptRemote" })).toBeInTheDocument();
+    expect(
+      within(pendingDialog).getByRole("button", { name: "externalEdit.actions.acceptRemote" })
+    ).toBeInTheDocument();
     expect(within(pendingDialog).getByRole("button", { name: "externalEdit.actions.overwrite" })).toBeInTheDocument();
-    expect(within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.reread" })).not.toBeInTheDocument();
+    expect(
+      within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.reread" })
+    ).not.toBeInTheDocument();
   });
 
   it("shows runtime non-conflict pending in the same three-action matrix", async () => {
@@ -848,13 +905,19 @@ describe("FileManagerPanel", () => {
 
     await user.click(await screen.findByTestId("external-edit-pending-entry"));
     const pendingDialog = await screen.findByTestId("external-edit-pending-dialog");
-    await user.click(within(pendingDialog).getByRole("button", { name: /继续修改|externalEdit\.actions\.continueEdit/ }));
+    await user.click(
+      within(pendingDialog).getByRole("button", { name: /继续修改|externalEdit\.actions\.continueEdit/ })
+    );
     expect(continuePendingSession).toHaveBeenCalledWith("runtime-pending", "runtime");
-    expect(within(pendingDialog).getByRole("button", { name: /继续修改|externalEdit\.actions\.continueEdit/ })).toBeInTheDocument();
+    expect(
+      within(pendingDialog).getByRole("button", { name: /继续修改|externalEdit\.actions\.continueEdit/ })
+    ).toBeInTheDocument();
     expect(within(pendingDialog).getByRole("button", { name: "externalEdit.actions.reread" })).toBeInTheDocument();
     expect(within(pendingDialog).getByRole("button", { name: "externalEdit.actions.overwrite" })).toBeInTheDocument();
     expect(within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.merge" })).not.toBeInTheDocument();
-    expect(within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.acceptRemote" })).not.toBeInTheDocument();
+    expect(
+      within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.acceptRemote" })
+    ).not.toBeInTheDocument();
   });
 
   it("keeps remote-missing and error actions outside the unified 2/3 action matrix", async () => {
@@ -889,8 +952,12 @@ describe("FileManagerPanel", () => {
     expect(within(pendingDialog).getByRole("button", { name: "externalEdit.actions.saveAgain" })).toBeInTheDocument();
     expect(within(pendingDialog).getByRole("button", { name: "externalEdit.actions.viewError" })).toBeInTheDocument();
     expect(within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.merge" })).not.toBeInTheDocument();
-    expect(within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.acceptRemote" })).not.toBeInTheDocument();
-    expect(within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.reread" })).not.toBeInTheDocument();
+    expect(
+      within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.acceptRemote" })
+    ).not.toBeInTheDocument();
+    expect(
+      within(pendingDialog).queryByRole("button", { name: "externalEdit.actions.reread" })
+    ).not.toBeInTheDocument();
   });
 
   it("keeps clipboard residue hidden from file manager runtime surfaces", async () => {

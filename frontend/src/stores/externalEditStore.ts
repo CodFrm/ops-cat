@@ -316,7 +316,14 @@ export function buildExternalEditAttentionItems(
   return visiblePrimarySessionsByDocument(sessions)
     .flatMap((session): ExternalEditAttentionItem[] => {
       if (session.state === "remote_missing") {
-        return [{ id: `remote-missing:${session.documentKey}`, type: "remote_missing", documentKey: session.documentKey, session }];
+        return [
+          {
+            id: `remote-missing:${session.documentKey}`,
+            type: "remote_missing",
+            documentKey: session.documentKey,
+            session,
+          },
+        ];
       }
       if (session.state === "conflict") {
         return [

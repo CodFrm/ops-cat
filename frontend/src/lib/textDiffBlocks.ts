@@ -24,9 +24,7 @@ export function buildTextDiffBlocks(original: string, modified: string): TextDif
   for (let i = originalLines.length - 1; i >= 0; i -= 1) {
     for (let j = modifiedLines.length - 1; j >= 0; j -= 1) {
       lcs[i][j] =
-        originalLines[i] === modifiedLines[j]
-          ? lcs[i + 1][j + 1] + 1
-          : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+        originalLines[i] === modifiedLines[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
     }
   }
 

@@ -73,12 +73,7 @@ function makeEditorDecorations(
     const className = lineRangeDecorationClass(block.kind, isActive, side);
     const glyphClassName = lineMarkerDecorationClass(block.kind, isActive, side);
     if (!className && !glyphClassName) return [];
-    const color =
-      block.kind === "insert"
-        ? "#16a34a"
-        : block.kind === "delete"
-          ? "#dc2626"
-          : "#d97706";
+    const color = block.kind === "insert" ? "#16a34a" : block.kind === "delete" ? "#dc2626" : "#d97706";
     return [
       {
         range: new monaco.Range(startLine, 1, endLine, 1),
@@ -175,13 +170,16 @@ export function CodeDiffViewer({
     setLoadAttempt((n) => n + 1);
   }, []);
 
-  const handleMount = useCallback<DiffOnMount>((editor, monaco) => {
-    diffEditorRef.current = editor;
-    monacoRef.current = monaco;
-    window.setTimeout(() => {
-      applyDecorations();
-    }, 0);
-  }, [applyDecorations]);
+  const handleMount = useCallback<DiffOnMount>(
+    (editor, monaco) => {
+      diffEditorRef.current = editor;
+      monacoRef.current = monaco;
+      window.setTimeout(() => {
+        applyDecorations();
+      }, 0);
+    },
+    [applyDecorations]
+  );
 
   const showHeader = originalTitle || modifiedTitle || badge;
   const header = showHeader ? (

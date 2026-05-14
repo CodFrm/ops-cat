@@ -93,8 +93,8 @@ const (
 )
 
 const (
-	reconcileSettleDelay = 100 * time.Millisecond
-	autoSaveDebounce     = 500 * time.Millisecond
+	reconcileSettleDelay        = 100 * time.Millisecond
+	autoSaveDebounce            = 500 * time.Millisecond
 	defaultCleanupRetentionDays = 7
 	minCleanupRetentionDays     = 1
 	maxCleanupRetentionDays     = 365
@@ -179,18 +179,18 @@ func (f launcherFunc) Launch(path string, args []string) error {
 }
 
 type Settings struct {
-	DefaultEditorID string                           `json:"defaultEditorId"`
-	WorkspaceRoot   string                           `json:"workspaceRoot"`
-	CleanupRetentionDays int                         `json:"cleanupRetentionDays"`
-	Editors         []Editor                         `json:"editors"`
-	CustomEditors   []bootstrap.ExternalEditorConfig `json:"customEditors"`
+	DefaultEditorID      string                           `json:"defaultEditorId"`
+	WorkspaceRoot        string                           `json:"workspaceRoot"`
+	CleanupRetentionDays int                              `json:"cleanupRetentionDays"`
+	Editors              []Editor                         `json:"editors"`
+	CustomEditors        []bootstrap.ExternalEditorConfig `json:"customEditors"`
 }
 
 type SettingsInput struct {
-	DefaultEditorID string                           `json:"defaultEditorId"`
-	WorkspaceRoot   string                           `json:"workspaceRoot"`
-	CleanupRetentionDays int                         `json:"cleanupRetentionDays"`
-	CustomEditors   []bootstrap.ExternalEditorConfig `json:"customEditors"`
+	DefaultEditorID      string                           `json:"defaultEditorId"`
+	WorkspaceRoot        string                           `json:"workspaceRoot"`
+	CleanupRetentionDays int                              `json:"cleanupRetentionDays"`
+	CustomEditors        []bootstrap.ExternalEditorConfig `json:"customEditors"`
 }
 
 type Editor struct {
@@ -582,11 +582,11 @@ func (s *Service) GetSettings() (*Settings, error) {
 	}
 
 	return &Settings{
-		DefaultEditorID:       defaultID,
-		WorkspaceRoot:         workspaceRoot,
-		CleanupRetentionDays:  normalizeCleanupRetentionDays(cfg.ExternalEditCleanupRetentionDays),
-		Editors:               editors,
-		CustomEditors:         cloneCustomEditors(cfg.ExternalEditCustomEditors),
+		DefaultEditorID:      defaultID,
+		WorkspaceRoot:        workspaceRoot,
+		CleanupRetentionDays: normalizeCleanupRetentionDays(cfg.ExternalEditCleanupRetentionDays),
+		Editors:              editors,
+		CustomEditors:        cloneCustomEditors(cfg.ExternalEditCustomEditors),
 	}, nil
 }
 
@@ -920,7 +920,7 @@ func (s *Service) refreshInternal(sessionID string) (*Session, error) {
 		return nil, err
 	}
 
-	localData, err := os.ReadFile(current.LocalPath) //nolint:gosec // local path is controlled by the service workspace
+	localData, err := os.ReadFile(current.LocalPath)
 	if err != nil {
 		return nil, fmt.Errorf("读取本地副本失败: %w", err)
 	}
@@ -1020,7 +1020,7 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 	}
 	s.clearRecordError(session)
 
-	localData, err := os.ReadFile(session.LocalPath) //nolint:gosec // local path is controlled by the service workspace
+	localData, err := os.ReadFile(session.LocalPath)
 	if err != nil {
 		saveErr := fmt.Errorf("读取本地副本失败: %w", err)
 		failed := s.recordError(sessionID, "read_local_copy", saveErr)
@@ -1215,7 +1215,7 @@ func (s *Service) markRemoteMissingConflict(sessionID string, session *Session, 
 }
 
 func (s *Service) loadManifest() error {
-	data, err := os.ReadFile(s.manifestPath) //nolint:gosec // manifest path is controlled by the application data dir
+	data, err := os.ReadFile(s.manifestPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return s.writeManifest(&manifestFile{Version: manifestVersion, Sessions: []*Session{}})
@@ -1387,7 +1387,7 @@ func (s *Service) reconcileLocalCopy(sessionID string) {
 		return
 	}
 
-	data, err := os.ReadFile(session.LocalPath) //nolint:gosec // local path is controlled by the service workspace
+	data, err := os.ReadFile(session.LocalPath)
 	if err != nil {
 		return
 	}
@@ -1620,55 +1620,6 @@ func (s *Service) markSessionState(sessionID, state string, dirty bool, localHas
 	return cloneSession(session)
 }
 
-func (s *Service) updateRecordLifecycle(sessionID, recordState string, hidden bool, lastError *ErrorSnapshot) *Session {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	session := s.sessions[sessionID]
-	if session == nil {
-		return nil
-	}
-	session.RecordState = recordState
-	session.Hidden = hidden
-	session.LastError = cloneErrorSnapshot(lastError)
-	session.UpdatedAt = s.now().Unix()
-	if err := s.saveManifestLocked(); err != nil {
-		logger.Default().Warn("persist external edit manifest after lifecycle change", zap.Error(err))
-	}
-	return cloneSession(session)
-}
-
-func (s *Service) retireSessionRecord(sessionID, recordState string, hidden bool, lastError *ErrorSnapshot) *Session {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	session := s.sessions[sessionID]
-	if session == nil {
-		return nil
-	}
-	if timer, ok := s.reconcileTimers[sessionID]; ok {
-		timer.Stop()
-		delete(s.reconcileTimers, sessionID)
-	}
-	if strings.TrimSpace(session.DocumentKey) != "" {
-		if timer, ok := s.autoSaveTimers[session.DocumentKey]; ok {
-			timer.Stop()
-			delete(s.autoSaveTimers, session.DocumentKey)
-		}
-		if !s.autoSavePaused[session.DocumentKey] {
-			delete(s.autoSaveTried, session.DocumentKey)
-		}
-	}
-	session.RecordState = recordState
-	session.Hidden = hidden
-	session.LastError = cloneErrorSnapshot(lastError)
-	session.UpdatedAt = s.now().Unix()
-	if err := s.saveManifestLocked(); err != nil {
-		logger.Default().Warn("persist external edit manifest after retiring lifecycle", zap.Error(err))
-	}
-	return cloneSession(session)
-}
-
 func (s *Service) recordError(sessionID, step string, err error) *Session {
 	snapshot := buildErrorSnapshot(step, err, s.now().Unix())
 	s.mu.Lock()
@@ -1871,35 +1822,6 @@ func (s *Service) removeSessionLocked(sessionID string) {
 	if err := cleanupWorkspace(session.WorkspaceRoot, session.WorkspaceDir); err != nil {
 		logger.Default().Warn("cleanup external edit workspace", zap.String("path", session.WorkspaceDir), zap.Error(err))
 	}
-}
-
-func (s *Service) deleteSessionAndWorkspace(sessionID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	session := s.sessions[sessionID]
-	if session == nil {
-		return fmt.Errorf("外部编辑会话不存在")
-	}
-	workspaceRoot := session.WorkspaceRoot
-	workspaceDir := session.WorkspaceDir
-	if err := cleanupWorkspace(workspaceRoot, workspaceDir); err != nil {
-		deleteErr := fmt.Errorf("删除本地副本失败，请先关闭编辑器或手动清理后再重试")
-		logger.Default().Warn("cleanup external edit workspace during delete", zap.String("path", workspaceDir), zap.Error(err))
-		return deleteErr
-	}
-	delete(s.sessions, sessionID)
-	if timer, ok := s.reconcileTimers[sessionID]; ok {
-		timer.Stop()
-		delete(s.reconcileTimers, sessionID)
-	}
-	if !s.workspaceDirInUseLocked(session.WorkspaceDir) {
-		s.removeWatchLocked(session.WorkspaceDir)
-	}
-	if err := s.saveManifestLocked(); err != nil {
-		return err
-	}
-	return nil
 }
 
 func (s *Service) normalizeLoadedSessionLocked(session *Session) {
@@ -3242,34 +3164,6 @@ func isSSHSessionMissingError(err error) bool {
 		strings.Contains(text, "ssh session does not exist")
 }
 
-func (s *Service) rollbackRereadSession(original *Session, newSessionID string) {
-	if original == nil {
-		return
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	created := s.sessions[newSessionID]
-	if created != nil {
-		s.removeWatchLocked(created.WorkspaceDir)
-		delete(s.sessions, newSessionID)
-		if timer, ok := s.reconcileTimers[newSessionID]; ok {
-			timer.Stop()
-			delete(s.reconcileTimers, newSessionID)
-		}
-	}
-	s.sessions[original.ID] = original
-	if err := s.saveManifestLocked(); err != nil {
-		logger.Default().Warn("rollback reread external edit manifest", zap.Error(err))
-	}
-	if created != nil {
-		if err := cleanupWorkspace(created.WorkspaceRoot, created.WorkspaceDir); err != nil {
-			logger.Default().Warn("cleanup reread workspace", zap.String("path", created.WorkspaceDir), zap.Error(err))
-		}
-	}
-}
-
 func (s *Service) rebuildDocumentSessionFromRemote(
 	req OpenRequest,
 	editor Editor,
@@ -3865,7 +3759,7 @@ func validateExecutable(execPath string) (string, error) {
 	if ext == ".bat" || ext == ".cmd" {
 		return "", fmt.Errorf("不允许使用 .bat 或 .cmd 作为外部编辑器")
 	}
-	info, err := os.Stat(execPath) //nolint:gosec // path is validated and explicitly provided by the user or built-in detector
+	info, err := os.Stat(execPath)
 	if err != nil {
 		return "", fmt.Errorf("外部编辑器不可访问: %w", err)
 	}
@@ -3877,7 +3771,7 @@ func validateExecutable(execPath string) (string, error) {
 	}
 	if isWindows() {
 		if ext != ".exe" {
-			return "", fmt.Errorf("Windows 外部编辑器必须是 .exe 文件")
+			return "", fmt.Errorf("仅支持 .exe 格式的 Windows 外部编辑器")
 		}
 		return execPath, nil
 	}

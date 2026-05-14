@@ -600,7 +600,6 @@ describe("external edit clipboard residue runtime state", () => {
     expect(state.pendingConflict).toBeNull();
   });
 
-
   it("scrubs clipboard residue from pending dialogs, modal state, and event paths", () => {
     const clipboard = makeClipboardResidueSession();
     const valid = makeSession({ id: "valid", documentKey: "101:/srv/app/demo.txt", state: "dirty", updatedAt: 10 });

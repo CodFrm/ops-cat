@@ -28,7 +28,13 @@ vi.mock("@monaco-editor/react", () => ({
         }),
       },
       {
-        Range: vi.fn(function Range(this: unknown, startLine: number, startColumn: number, endLine: number, endColumn: number) {
+        Range: vi.fn(function Range(
+          this: unknown,
+          startLine: number,
+          startColumn: number,
+          endLine: number,
+          endColumn: number
+        ) {
           return { startLineNumber: startLine, startColumn, endLineNumber: endLine, endColumn };
         }),
         editor: { OverviewRulerLane: { Full: 7 } },
