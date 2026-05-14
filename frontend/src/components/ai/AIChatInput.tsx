@@ -1,6 +1,7 @@
 import { memo, useEffect, useImperativeHandle, useMemo, useRef, forwardRef, type MutableRefObject } from "react";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import Document from "@tiptap/extension-document";
+import HardBreak from "@tiptap/extension-hard-break";
 import Paragraph from "@tiptap/extension-paragraph";
 import Placeholder from "@tiptap/extension-placeholder";
 import Text from "@tiptap/extension-text";
@@ -77,6 +78,7 @@ const AIChatInputComponent = forwardRef<AIChatInputHandle, AIChatInputProps>(fun
   const editor = useEditor({
     extensions: [
       Document,
+      HardBreak,
       Paragraph,
       Text,
       Placeholder.configure({ placeholder: placeholder || "" }),
