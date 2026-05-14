@@ -181,14 +181,60 @@ func isFlag(s string) bool {
 	return strings.HasPrefix(s, "-")
 }
 
+// dangerousEnvAssigns 列出会改变命令解析或解释器行为的环境变量。
+// 这些变量出现在命令头部时，绝不能像 DEBIAN_FRONTEND 那样被静默剥离 ——
+// 否则 `PATH=/tmp/evil ls` 这种攻击载荷会被 `ls *` 规则放行。
+var dangerousEnvAssigns = map[string]struct{}{
+	"PATH":                       {},
+	"LD_PRELOAD":                 {},
+	"LD_LIBRARY_PATH":            {},
+	"LD_AUDIT":                   {},
+	"LD_DEBUG":                   {},
+	"DYLD_INSERT_LIBRARIES":      {}, // macOS 等价 LD_PRELOAD
+	"DYLD_LIBRARY_PATH":          {},
+	"DYLD_FALLBACK_LIBRARY_PATH": {},
+	"IFS":                        {},
+	"BASH_ENV":                   {},
+	"ENV":                        {},
+	"SHELLOPTS":                  {},
+	"BASHOPTS":                   {},
+	"BASH_FUNC":                  {}, // shellshock 类
+	"PROMPT_COMMAND":             {},
+	"PS4":                        {},
+	"GIT_CONFIG_GLOBAL":          {},
+	"GIT_CONFIG_SYSTEM":          {},
+	"NIX_PATH":                   {},
+	"PYTHONPATH":                 {},
+	"PERL5LIB":                   {},
+	"RUBYLIB":                    {},
+	"NODE_OPTIONS":               {},
+}
+
 // stripLeadingAssigns 剥掉实际命令头部的 NAME=VALUE 环境变量赋值，
 // 让 `DEBIAN_FRONTEND=noninteractive apt-get update` 与规则 `apt-get *` 匹配。
+// 遇到危险变量（PATH、LD_PRELOAD 等）立刻停止剥离，保留前缀让 Program 比较失败，
+// 上层会落到 NeedConfirm，迫使用户明确审批一次。
 func stripLeadingAssigns(tokens []string) []string {
 	i := 0
 	for i < len(tokens) && looksLikeEnvAssign(tokens[i]) {
+		if isDangerousEnvAssign(tokens[i]) {
+			return tokens[i:]
+		}
 		i++
 	}
 	return tokens[i:]
+}
+
+// isDangerousEnvAssign 判断 token 是否是危险环境变量赋值（NAME 在黑名单）。
+func isDangerousEnvAssign(t string) bool {
+	eq := strings.IndexByte(t, '=')
+	if eq <= 0 {
+		return false
+	}
+	if _, ok := dangerousEnvAssigns[t[:eq]]; ok {
+		return true
+	}
+	return false
 }
 
 func looksLikeEnvAssign(t string) bool {

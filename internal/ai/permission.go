@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
@@ -115,16 +116,22 @@ func checkSSHPermission(ctx context.Context, assetID int64, command string) Chec
 // --- Database ---
 
 func checkDatabasePermission(ctx context.Context, assetID int64, sqlText string) CheckResult {
-	// 组通用策略（SQL 不做 shell 拆分，整条语句交给 MatchCommandRule）
-	groupResult := CheckGroupGenericPolicy(ctx, assetID, []string{sqlText}, MatchCommandRule)
-	if groupResult.Decision == Deny {
-		return groupResult
-	}
-
-	// SQL 分类 + 查询策略
+	// 先解析一次 SQL，再把每条语句单独送入组通用/类型策略与 Grant 匹配。
+	// 整串传入会被 `SELECT *` 一类的组规则一次性放行，让 `SELECT 1; UPDATE users ...`
+	// 把后续高危语句藏进分号后绕过；`UPDATE *` 类 deny 同样命中不到尾部语句。
 	stmts, err := ClassifyStatements(sqlText)
 	if err != nil {
 		return CheckResult{Decision: Deny, Message: policyFmt(ctx, "SQL parse failed, execution denied: %v", "SQL 解析失败，拒绝执行: %v", err)}
+	}
+
+	stmtTexts := stmtRawTexts(stmts)
+	if len(stmtTexts) == 0 {
+		stmtTexts = []string{sqlText}
+	}
+
+	groupResult := CheckGroupGenericPolicy(ctx, assetID, stmtTexts, MatchCommandRule)
+	if groupResult.Decision == Deny {
+		return groupResult
 	}
 
 	asset, _ := resolveAssetPolicyChain(ctx, assetID)
@@ -140,8 +147,8 @@ func checkDatabasePermission(ctx context.Context, assetID int64, sqlText string)
 		return result
 	}
 
-	// DB Grant 匹配
-	if grantResult := matchGrantForAsset(ctx, assetID, sqlText); grantResult != nil {
+	// DB Grant 匹配：每条语句都必须命中 grant，不能用单条 grant 整串覆盖多语句
+	if grantResult := matchGrantForAssetSubCmds(ctx, assetID, stmtTexts); grantResult != nil {
 		return *grantResult
 	}
 
@@ -151,6 +158,18 @@ func checkDatabasePermission(ctx context.Context, assetID int64, sqlText string)
 		result.HintRules = merged.AllowTypes
 	}
 	return result
+}
+
+// stmtRawTexts 从 ClassifyStatements 结果里取每条语句的原始 SQL 文本（含 trim），
+// 用于按 statement 粒度送进组通用策略与 Grant 匹配。
+func stmtRawTexts(stmts []StatementInfo) []string {
+	out := make([]string, 0, len(stmts))
+	for _, s := range stmts {
+		if t := strings.TrimSpace(s.Raw); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // --- Redis ---
@@ -369,6 +388,57 @@ func matchGrantForAssetSubCmdsWith(ctx context.Context, assetID int64, subCmds [
 }
 
 // --- SaveGrantPattern ---
+
+// isShellLikeApprovalType 判断审批类型是否走 shell（SSH/K8s），grant 保存时需要按 AST 子命令拆。
+// 接受审批协议字符串（"exec"）以及 asset_entity 的内部类型常量（AssetTypeSSH/AssetTypeK8s）。
+func isShellLikeApprovalType(t string) bool {
+	switch t {
+	case "exec", asset_entity.AssetTypeSSH, asset_entity.AssetTypeK8s:
+		return true
+	}
+	return false
+}
+
+// NormalizeGrantPatterns 把一条用户审批输入拆成可独立匹配的 grant pattern 列表。
+//
+// 设计要点：
+//   - SSH/K8s 等 shell 类资产：按行 + ExtractSubCommands 拆，复合命令必须按子命令存，
+//     否则 `ls /tmp && cat /etc/hosts` 会被存成单条 pattern，后续 grant 子命令匹配永远命中失败。
+//   - 非 shell 类资产（sql/redis/mongo/kafka）：保留原命令，匹配规则各自处理。
+//   - 解析失败时退回原行，让上层依旧能存下 grant；下次匹配同样会解析失败走 NeedConfirm。
+//
+// 所有 SaveGrantPattern 调用前都应当先经过这个归一化函数。
+func NormalizeGrantPatterns(approvalType, command string) []string {
+	cmd := strings.TrimSpace(command)
+	if cmd == "" {
+		return nil
+	}
+	if !isShellLikeApprovalType(approvalType) {
+		return []string{cmd}
+	}
+	var patterns []string
+	for line := range strings.SplitSeq(cmd, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		subCmds, _ := ExtractSubCommands(line)
+		if len(subCmds) == 0 {
+			patterns = append(patterns, line)
+		} else {
+			patterns = append(patterns, subCmds...)
+		}
+	}
+	return patterns
+}
+
+// SaveGrantPatternsForApproval 用 NormalizeGrantPatterns 拆出 patterns 后依次落库。
+// 适合 app 层在多种审批回调（opsctl 单审批、AI grant 流）里调用，避免每个路径重复拆分逻辑。
+func SaveGrantPatternsForApproval(ctx context.Context, sessionID string, assetID int64, assetName, approvalType, command string) {
+	for _, p := range NormalizeGrantPatterns(approvalType, command) {
+		SaveGrantPattern(ctx, sessionID, assetID, assetName, p)
+	}
+}
 
 // SaveGrantPattern 将命令模式保存为已批准的 GrantItem。
 // 如果 sessionID 对应的 GrantSession 不存在，自动创建（状态: approved）。

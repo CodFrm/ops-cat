@@ -192,19 +192,28 @@ func testSSHPolicy(ctx context.Context, current *asset_entity.CommandPolicy, gro
 // --- Database ---
 
 func testQueryPolicy(ctx context.Context, current *asset_entity.QueryPolicy, groups []*group_entity.Group, command string) PolicyTestOutput {
-	// 先检查组通用规则（用 MatchCommandRule，SQL 以动词开头可匹配）
-	groupDeny, groupAllow := collectGroupGenericRules(ctx, groups)
-	if out := checkGenericDeny(groupDeny, command, MatchCommandRule); out != nil {
-		out.Message = policyFmt(ctx, "SQL statement denied by group policy: %s", "SQL 语句被组策略禁止: %s", command)
-		return *out
-	}
-
-	// 解析 SQL
+	// 先解析 SQL，按每条语句各自送进组通用策略；整串送会让 `SELECT *` 这种宽规则一次性
+	// 放行 `SELECT 1; UPDATE users ...`，同时 `UPDATE *` 类 deny 也命中不到尾部。
 	stmts, err := ClassifyStatements(command)
 	if err != nil {
 		return PolicyTestOutput{
 			Decision: Deny,
 			Message:  policyFmt(ctx, "SQL parse failed, execution denied: %v", "SQL 解析失败，拒绝执行: %v", err),
+		}
+	}
+
+	stmtTexts := stmtRawTexts(stmts)
+	if len(stmtTexts) == 0 {
+		stmtTexts = []string{command}
+	}
+
+	groupDeny, groupAllow := collectGroupGenericRules(ctx, groups)
+
+	// 组通用 deny：任一语句命中即拒
+	for _, stmtText := range stmtTexts {
+		if out := checkGenericDeny(groupDeny, stmtText, MatchCommandRule); out != nil {
+			out.Message = policyFmt(ctx, "SQL statement denied by group policy: %s", "SQL 语句被组策略禁止: %s", stmtText)
+			return *out
 		}
 	}
 
@@ -219,15 +228,40 @@ func testQueryPolicy(ctx context.Context, current *asset_entity.QueryPolicy, gro
 		}
 	}
 
-	// 检查组通用 allow 规则
-	if out := checkGenericAllow(groupAllow, command, MatchCommandRule); out != nil {
-		return *out
-	}
-
+	// 与 runtime checkDatabasePermission 对齐：组通用 allow 只用来把 NeedConfirm 升为 Allow，
+	// 资产策略已是 Allow 时不能再被组规则"抢走"决策来源；多语句必须每条都命中。
 	if result.Decision == NeedConfirm {
+		if out := groupAllowAllStmts(groupAllow, stmtTexts, MatchCommandRule); out != nil {
+			return *out
+		}
 		return PolicyTestOutput{Decision: NeedConfirm}
 	}
 	return PolicyTestOutput{Decision: Allow}
+}
+
+// groupAllowAllStmts 返回组通用 allow 对所有语句的命中结果；任一未命中则 nil。
+func groupAllowAllStmts(rules []taggedRule, stmts []string, matchFn MatchFunc) *PolicyTestOutput {
+	if len(rules) == 0 || len(stmts) == 0 {
+		return nil
+	}
+	var firstSource, firstPattern string
+	for _, s := range stmts {
+		hit := false
+		for _, tr := range rules {
+			if matchFn(tr.Rule, s) {
+				hit = true
+				if firstSource == "" {
+					firstSource = tr.Source
+					firstPattern = tr.Rule
+				}
+				break
+			}
+		}
+		if !hit {
+			return nil
+		}
+	}
+	return &PolicyTestOutput{Decision: Allow, MatchedSource: firstSource, MatchedPattern: firstPattern}
 }
 
 // --- Redis ---
@@ -253,13 +287,12 @@ func testRedisPolicy(ctx context.Context, current *asset_entity.RedisPolicy, gro
 		}
 	}
 
-	// 检查组通用 allow 规则（优先于资产 allow 结论）
-	if out := checkGenericAllow(groupAllow, command, MatchRedisRule); out != nil {
-		return *out
-	}
-
-	// 映射资产策略结果（Allow 或 NeedConfirm）
+	// 与 runtime checkRedisPermission 对齐：组通用 allow 只用来把 NeedConfirm 升为 Allow，
+	// 资产策略已是 Allow 时不能再被组规则改写 MatchedSource。
 	if result.Decision == NeedConfirm {
+		if out := checkGenericAllow(groupAllow, command, MatchRedisRule); out != nil {
+			return *out
+		}
 		return PolicyTestOutput{Decision: NeedConfirm}
 	}
 	return PolicyTestOutput{Decision: Allow}

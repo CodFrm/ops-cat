@@ -165,13 +165,37 @@ func TestTestRedisPolicy(t *testing.T) {
 			So(out.MatchedPattern, ShouldEqual, "GET *")
 		})
 
-		Convey("组通用策略 allow 匹配 Redis 命令", func() {
+		Convey("组通用 allow 仅在资产策略 NeedConfirm 时提升 Redis 决策为 Allow", func() {
+			// 与 runtime checkRedisPermission 对齐：资产策略已是 Allow（默认 Redis 策略
+			// 允许 GET *）时直接返回，不会被 dev组 的 allow 抢走 MatchedSource
 			groups := []*group_entity.Group{
 				makeGroup("dev组", `{"allow_list":["GET *"]}`),
 			}
 			out := testRedisPolicy(ctx, nil, groups, "GET user:1")
 			So(out.Decision, ShouldEqual, Allow)
+			So(out.MatchedSource, ShouldEqual, "")
+		})
+
+		Convey("Redis 默认策略 NeedConfirm 时组 allow 升级为 Allow", func() {
+			// SET 默认 NeedConfirm，dev组 显式 allow_list 覆盖 → Allow, MatchedSource=dev组
+			groups := []*group_entity.Group{
+				makeGroup("dev组", `{"allow_list":["SET *"]}`),
+			}
+			out := testRedisPolicy(ctx, nil, groups, "SET user:1 val")
+			So(out.Decision, ShouldEqual, Allow)
 			So(out.MatchedSource, ShouldEqual, "dev组")
+		})
+
+		Convey("资产 Redis allow 已通过时组 allow 不应改写决策来源", func() {
+			// runtime checkRedisPermission 只用组 allow 把 NeedConfirm 升为 Allow；
+			// 资产策略本身命中 Allow 时，tester 不能再被组规则"抢走"成 MatchedSource=组名
+			p := &asset_entity.RedisPolicy{AllowList: []string{"GET *"}}
+			groups := []*group_entity.Group{
+				makeGroup("dev组", `{"allow_list":["GET *"]}`),
+			}
+			out := testRedisPolicy(ctx, p, groups, "GET user:1")
+			So(out.Decision, ShouldEqual, Allow)
+			So(out.MatchedSource, ShouldEqual, "")
 		})
 
 		Convey("组通用 deny 优先于资产 allow", func() {
@@ -339,13 +363,55 @@ func TestTestQueryPolicy(t *testing.T) {
 			So(out.MatchedPattern, ShouldEqual, "DELETE *")
 		})
 
-		Convey("组通用策略 allow 匹配 SQL", func() {
+		Convey("组通用 allow 仅在资产 SQL 策略 NeedConfirm 时提升决策为 Allow", func() {
+			// 与 runtime checkDatabasePermission 对齐：资产/默认策略已是 Allow（默认允许 SELECT）
+			// 时不会被 dev组 的 allow 抢走 MatchedSource。
 			groups := []*group_entity.Group{
 				makeGroup("dev组", `{"allow_list":["SELECT *"]}`),
 			}
 			out := testQueryPolicy(ctx, nil, groups, "SELECT * FROM users")
 			So(out.Decision, ShouldEqual, Allow)
+			So(out.MatchedSource, ShouldEqual, "")
+		})
+
+		Convey("SQL 默认策略 NeedConfirm 时组 allow 升级为 Allow", func() {
+			// INSERT 默认 NeedConfirm，dev组 显式 allow_list 覆盖 → Allow, MatchedSource=dev组
+			groups := []*group_entity.Group{
+				makeGroup("dev组", `{"allow_list":["INSERT *"]}`),
+			}
+			out := testQueryPolicy(ctx, nil, groups, "INSERT INTO users VALUES (1)")
+			So(out.Decision, ShouldEqual, Allow)
 			So(out.MatchedSource, ShouldEqual, "dev组")
+		})
+
+		Convey("资产 SQL allow 已通过时组 allow 不应改写决策来源", func() {
+			// runtime checkDatabasePermission 仅在 NeedConfirm 时用组 allow 升级；
+			// 资产策略本身就允许 SELECT 时，tester 不能被组规则"抢走"决策来源
+			p := &asset_entity.QueryPolicy{AllowTypes: []string{"SELECT"}}
+			groups := []*group_entity.Group{
+				makeGroup("dev组", `{"allow_list":["SELECT *"]}`),
+			}
+			out := testQueryPolicy(ctx, p, groups, "SELECT * FROM users")
+			So(out.Decision, ShouldEqual, Allow)
+			So(out.MatchedSource, ShouldEqual, "")
+		})
+
+		Convey("组通用 deny UPDATE * 命中分号后的 UPDATE 语句（多语句拆分检查）", func() {
+			// 防止 `SELECT 1; UPDATE users SET ...` 整串匹配 SELECT 规则导致 UPDATE 被静默放行
+			groups := []*group_entity.Group{
+				makeGroup("prod组", `{"deny_list":["UPDATE *"]}`),
+			}
+			out := testQueryPolicy(ctx, nil, groups, "SELECT 1; UPDATE users SET name='x' WHERE id=1")
+			So(out.Decision, ShouldEqual, Deny)
+			So(out.MatchedSource, ShouldEqual, "prod组")
+		})
+
+		Convey("组 allow SELECT * 不能放行多语句中的 UPDATE", func() {
+			groups := []*group_entity.Group{
+				makeGroup("dev组", `{"allow_list":["SELECT *"]}`),
+			}
+			out := testQueryPolicy(ctx, nil, groups, "SELECT 1; UPDATE users SET name='x' WHERE id=1")
+			So(out.Decision, ShouldNotEqual, Allow)
 		})
 
 		Convey("资产 deny_types 覆盖", func() {

@@ -1187,6 +1187,160 @@ func TestCheckPermission_K8sGrantNotReusedAcrossComposite(t *testing.T) {
 	})
 }
 
+// TestCheckPermission_RedirectionSideEffect 覆盖：echo * 不能放行 echo pwned > /etc/cron.d/x。
+// 重定向到任意路径会产生写副作用，必须作为额外执行单元强制 NeedConfirm（除非策略显式覆盖）。
+func TestCheckPermission_RedirectionSideEffect(t *testing.T) {
+	Convey("echo * 不能放行 echo pwned > /etc/cron.d/x", t, func() {
+		ctx, mockAsset, _ := setupPolicyTest(t)
+		asset := &asset_entity.Asset{
+			ID:   1,
+			Type: asset_entity.AssetTypeSSH,
+			CmdPolicy: mustJSON(asset_entity.CommandPolicy{
+				AllowList: []string{"echo *"},
+			}),
+		}
+		mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+		result := CheckPermission(ctx, "ssh", 1, "echo pwned > /etc/cron.d/x")
+		So(result.Decision, ShouldNotEqual, Allow)
+	})
+
+	Convey("/dev/null 重定向不影响匹配（公认安全目标）", t, func() {
+		ctx, mockAsset, _ := setupPolicyTest(t)
+		asset := &asset_entity.Asset{
+			ID:   1,
+			Type: asset_entity.AssetTypeSSH,
+			CmdPolicy: mustJSON(asset_entity.CommandPolicy{
+				AllowList: []string{"systemctl *"},
+			}),
+		}
+		mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+		result := CheckPermission(ctx, "ssh", 1, "systemctl stop nginx 2>/dev/null")
+		So(result.Decision, ShouldEqual, Allow)
+	})
+}
+
+// TestCheckPermission_DangerousEnvPrefixBypass 覆盖：PATH=/tmp/evil ls 不能被 ls * 放行。
+func TestCheckPermission_DangerousEnvPrefixBypass(t *testing.T) {
+	Convey("PATH= 等危险环境变量前缀必须保留参与匹配", t, func() {
+		ctx, mockAsset, _ := setupPolicyTest(t)
+		asset := &asset_entity.Asset{
+			ID:   1,
+			Type: asset_entity.AssetTypeSSH,
+			CmdPolicy: mustJSON(asset_entity.CommandPolicy{
+				AllowList: []string{"ls *"},
+			}),
+		}
+		mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+		result := CheckPermission(ctx, "ssh", 1, "PATH=/tmp/evil ls -la")
+		So(result.Decision, ShouldNotEqual, Allow)
+	})
+}
+
+// TestCheckPermission_SQLMultiStatementGroupBypass 覆盖 #3：组通用 SQL allow `SELECT *`
+// 不能放行 `SELECT 1; UPDATE users SET name='x' WHERE id=1` 这样把 UPDATE 挂在分号后的语句。
+// 同时 `UPDATE *` 组通用 deny 必须能命中分号后的 UPDATE。
+func TestCheckPermission_SQLMultiStatementGroupBypass(t *testing.T) {
+	Convey("SQL 多语句不能整串过组通用策略", t, func() {
+		Convey("组 allow SELECT * 不放行后续 UPDATE 语句", func() {
+			ctx, mockAsset, stubGrp := setupPolicyTest(t)
+			stubGrp.groups[10] = &group_entity.Group{
+				ID: 10, Name: "dev",
+				CmdPolicy: `{"allow_list":["SELECT *"]}`,
+			}
+			asset := &asset_entity.Asset{ID: 1, Type: asset_entity.AssetTypeDatabase, GroupID: 10}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			result := CheckPermission(ctx, "database", 1, "SELECT 1; UPDATE users SET name='x' WHERE id=1")
+			So(result.Decision, ShouldNotEqual, Allow)
+		})
+
+		Convey("组 deny UPDATE * 命中分号后的 UPDATE 语句", func() {
+			ctx, mockAsset, stubGrp := setupPolicyTest(t)
+			stubGrp.groups[10] = &group_entity.Group{
+				ID: 10, Name: "prod",
+				CmdPolicy: `{"deny_list":["UPDATE *"]}`,
+			}
+			asset := &asset_entity.Asset{ID: 1, Type: asset_entity.AssetTypeDatabase, GroupID: 10}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			result := CheckPermission(ctx, "database", 1, "SELECT 1; UPDATE users SET name='x' WHERE id=1")
+			So(result.Decision, ShouldEqual, Deny)
+		})
+
+		Convey("DB grant SELECT * 不能放行包含 UPDATE 的多语句 SQL", func() {
+			ctx, mockAsset, _ := setupPolicyTest(t)
+			stubGrant := newStubGrantRepo()
+			origGrant := grant_repo.Grant()
+			grant_repo.RegisterGrant(stubGrant)
+			t.Cleanup(func() {
+				if origGrant != nil {
+					grant_repo.RegisterGrant(origGrant)
+				}
+			})
+
+			asset := &asset_entity.Asset{ID: 1, Type: asset_entity.AssetTypeDatabase}
+			mockAsset.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
+
+			stubGrant.sessions["sess-multi"] = &grant_entity.GrantSession{
+				ID: "sess-multi", Status: grant_entity.GrantStatusApproved,
+			}
+			stubGrant.items["sess-multi"] = []*grant_entity.GrantItem{
+				{GrantSessionID: "sess-multi", AssetID: 1, Command: "SELECT *"},
+			}
+
+			grantCtx := WithSessionID(ctx, "sess-multi")
+			result := CheckPermission(grantCtx, "database", 1, "SELECT 1; UPDATE users SET name='x' WHERE id=1")
+			So(result.Decision, ShouldNotEqual, Allow)
+		})
+	})
+}
+
+// TestNormalizeGrantPatterns 覆盖 #6：grant 拆分逻辑要在所有 SaveGrantPattern 调用前集中处理，
+// 否则其他审批路径直接存复合命令会让后续 grant 匹配失败或绕过子命令检查。
+func TestNormalizeGrantPatterns(t *testing.T) {
+	Convey("NormalizeGrantPatterns", t, func() {
+		Convey("SSH 类型按行 + ExtractSubCommands 拆", func() {
+			patterns := NormalizeGrantPatterns("exec", "ls /tmp && cat /etc/hosts\nuptime")
+			So(patterns, ShouldResemble, []string{"ls /tmp", "cat /etc/hosts", "uptime"})
+		})
+
+		Convey("K8s 类型与 SSH 一致拆分", func() {
+			patterns := NormalizeGrantPatterns("k8s", "kubectl get pods && kubectl apply -f x.yaml")
+			So(patterns, ShouldResemble, []string{"kubectl get pods", "kubectl apply -f x.yaml"})
+		})
+
+		Convey("非 shell 类型保留原命令", func() {
+			patterns := NormalizeGrantPatterns("sql", "SELECT 1; UPDATE users SET name='x'")
+			So(patterns, ShouldResemble, []string{"SELECT 1; UPDATE users SET name='x'"})
+
+			patterns = NormalizeGrantPatterns("redis", "GET user:1")
+			So(patterns, ShouldResemble, []string{"GET user:1"})
+		})
+
+		Convey("空命令返回 nil", func() {
+			So(NormalizeGrantPatterns("exec", ""), ShouldBeNil)
+			So(NormalizeGrantPatterns("exec", "   "), ShouldBeNil)
+		})
+
+		Convey("AST 解析失败保留原行", func() {
+			patterns := NormalizeGrantPatterns("exec", "echo $(")
+			So(patterns, ShouldResemble, []string{"echo $("})
+		})
+
+		Convey("asset_entity 类型常量与 approval type 都能识别", func() {
+			// 单元测试不依赖具体常量值；只要传 AssetTypeSSH/K8s 也能走 shell 路径
+			patterns := NormalizeGrantPatterns(asset_entity.AssetTypeSSH, "ls && pwd")
+			So(patterns, ShouldResemble, []string{"ls", "pwd"})
+
+			patterns = NormalizeGrantPatterns(asset_entity.AssetTypeK8s, "kubectl get pods")
+			So(patterns, ShouldResemble, []string{"kubectl get pods"})
+		})
+	})
+}
+
 // TestCheckPermission_K8sGroupGenericBypass 覆盖 #2：组通用 allow 不能用整串匹配绕过子命令检查。
 func TestCheckPermission_K8sGroupGenericBypass(t *testing.T) {
 	Convey("组通用 CmdPolicy allow 必须按子命令逐条命中", t, func() {

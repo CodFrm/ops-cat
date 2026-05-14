@@ -335,47 +335,21 @@ func (c *CommandPolicyChecker) handleConfirm(ctx context.Context, assetID int64,
 	}
 	if resp.Decision == "allowAll" {
 		sessionID := GetSessionID(ctx)
+		// 三条 grant 落库路径（handleConfirm / opsctl 单审批 / AI grant 流）共用 NormalizeGrantPatterns：
+		// SSH/K8s shell 类按 AST 子命令拆，其他类型直通。这里既保持本路径行为一致，
+		// 又保证编辑模式（多行/通配）后的每一行都按子命令分别落库。
 		var patterns []string
-		// SSH 与 K8s 都是 shell 类，grant 必须按子命令拆开存储，否则
-		// `kubectl get *` 这种宽规则会被组合命令一整串匹配复用，绕过子命令检查。
-		shellType := assetType == asset_entity.AssetTypeSSH || assetType == asset_entity.AssetTypeK8s
-		// 优先使用用户编辑后的模式（支持 * 通配符）
 		if len(resp.EditedItems) > 0 {
 			for _, item := range resp.EditedItems {
-				cmd := strings.TrimSpace(item.Command)
-				if cmd == "" {
-					continue
-				}
-				if shellType {
-					// 按行 + ExtractSubCommands 拆，保证每条 grant 可单独匹配
-					for line := range strings.SplitSeq(cmd, "\n") {
-						line = strings.TrimSpace(line)
-						if line == "" {
-							continue
-						}
-						subCmds, _ := ExtractSubCommands(line)
-						if len(subCmds) == 0 {
-							patterns = append(patterns, line)
-						} else {
-							patterns = append(patterns, subCmds...)
-						}
-					}
-				} else {
-					patterns = append(patterns, cmd)
-				}
+				patterns = append(patterns, NormalizeGrantPatterns(assetType, item.Command)...)
 			}
 		}
-		// 无编辑项时回退：shell 类资产解析子命令，其他类型直接使用原始命令
 		if len(patterns) == 0 {
-			if shellType {
-				subCmds, _ := ExtractSubCommands(command)
-				if len(subCmds) == 0 {
-					subCmds = []string{command}
-				}
-				patterns = subCmds
-			} else {
-				patterns = []string{command}
-			}
+			patterns = NormalizeGrantPatterns(assetType, command)
+		}
+		if len(patterns) == 0 {
+			// shell parse 失败或全为空白 — 至少保留原命令一条，避免静默丢 grant
+			patterns = []string{command}
 		}
 		for _, cmd := range patterns {
 			SaveGrantPattern(ctx, sessionID, assetID, assetName, cmd)
