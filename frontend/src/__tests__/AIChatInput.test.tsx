@@ -64,6 +64,38 @@ describe("AIChatInput", () => {
     expect(onSubmit).toHaveBeenCalledWith("hello\nworld");
   });
 
+  it("Enter 换行模式下 Ctrl+Enter 发送，普通 Enter 换行", async () => {
+    const onSubmit = vi.fn();
+    render(<AIChatInput onSubmit={onSubmit} sendOnEnter={false} />);
+    const editor = screen.getByRole("textbox");
+
+    await userEvent.click(editor);
+    await userEvent.keyboard("hello");
+    await userEvent.keyboard("{Enter}");
+    expect(onSubmit).not.toHaveBeenCalled();
+    await userEvent.keyboard("world");
+    await userEvent.keyboard("{Control>}{Enter}{/Control}");
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith("hello\nworld");
+  });
+
+  it("Enter 换行模式下 Shift+Enter 插入硬换行而不发送", async () => {
+    const onSubmit = vi.fn();
+    render(<AIChatInput onSubmit={onSubmit} sendOnEnter={false} />);
+    const editor = screen.getByRole("textbox");
+
+    await userEvent.click(editor);
+    await userEvent.keyboard("hello");
+    await userEvent.keyboard("{Shift>}{Enter}{/Shift}");
+    expect(onSubmit).not.toHaveBeenCalled();
+    await userEvent.keyboard("world");
+    await userEvent.keyboard("{Control>}{Enter}{/Control}");
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith("hello\nworld");
+  });
+
   it("提交后同步清空外部草稿和编辑器内容", async () => {
     const onSubmit = vi.fn();
     const onDraftChange = vi.fn();

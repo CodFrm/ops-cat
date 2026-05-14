@@ -128,11 +128,6 @@ const AIChatInputComponent = forwardRef<AIChatInputHandle, AIChatInputProps>(fun
         if (isEnter && suggestionActive) {
           return false;
         }
-        if (isEnter && (event.shiftKey || (shouldSendOnEnter && mod))) {
-          event.preventDefault();
-          editor.commands.setHardBreak();
-          return true;
-        }
         if (isEnter && shouldSendOnEnter && !event.shiftKey && !mod) {
           event.preventDefault();
           triggerSubmitRef.current();
