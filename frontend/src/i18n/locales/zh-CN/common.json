@@ -956,6 +956,8 @@
     "scrollback": "回滚缓冲区",
     "scrollbackUnit": "行",
     "scrollbackHint": "终端可向上回滚的最大行数，越大越占内存（范围 100 - 1000000）",
+    "gpuAcceleration": "GPU 加速",
+    "gpuAccelerationHint": "使用 WebGL 渲染终端，初始化失败时会自动关闭",
     "default": "默认",
     "builtinThemes": "预置配色",
     "customThemes": "自定义配色",

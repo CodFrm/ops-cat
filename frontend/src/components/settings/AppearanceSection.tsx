@@ -18,6 +18,7 @@ import {
   CardHeader,
   CardTitle,
   Separator,
+  Switch,
 } from "@opskat/ui";
 import { useTheme, useResolvedTheme } from "@/components/theme-provider";
 import { Plus, Pencil, Trash2 } from "lucide-react";
@@ -30,7 +31,7 @@ import {
   loadInstalledFonts,
   quoteFamilyName,
   resolveDefaultFontPrimary,
-  terminalFontPresets,
+  resolveFontPresetOrphan,
 } from "@/data/terminalFonts";
 import { TerminalThemeEditor } from "@/components/settings/TerminalThemeEditor";
 
@@ -114,6 +115,8 @@ export function TerminalSection() {
     setCustomFontFamily,
     scrollback,
     setScrollback,
+    webglEnabled,
+    setWebglEnabled,
     customThemes,
     addCustomTheme,
     updateCustomTheme,
@@ -139,21 +142,22 @@ export function TerminalSection() {
 
   const defaultResolvedName = useMemo(() => resolveDefaultFontPrimary(installedFonts ?? null), [installedFonts]);
 
-  // Validity check: keep the currently-stored id as the select value as long
-  // as it resolves to something — either a hardcoded preset, the custom mode,
-  // or a system family we just loaded. Unknown values during initial load are
-  // optimistically preserved so the dropdown doesn't flash "Default".
-  const fontSelectValue = useMemo(() => {
-    if (fontPresetId === CUSTOM_TERMINAL_FONT_PRESET_ID || fontPresetId === DEFAULT_TERMINAL_FONT_PRESET_ID) {
-      return fontPresetId;
-    }
-    const selectedOption = fontOptions.find((option) => option.value === fontPresetId || option.name === fontPresetId);
-    if (selectedOption) return selectedOption.value;
-    if (installedFonts === undefined) return fontPresetId;
-    return terminalFontPresets.some((preset) => preset.id === fontPresetId)
+  // Orphan = the stored fontPresetId resolves to something we are NOT already
+  // rendering in the recommended/other groups (e.g. a legacy preset id, or a
+  // family that was installed when the user picked it but is gone now). We
+  // render it as a standalone item so the Select doesn't show a blank value
+  // and the user can see what was previously chosen.
+  const orphan = useMemo(
+    () => resolveFontPresetOrphan(fontPresetId, fontOptions, installedFonts),
+    [fontPresetId, fontOptions, installedFonts]
+  );
+
+  const fontSelectValue =
+    fontPresetId === CUSTOM_TERMINAL_FONT_PRESET_ID || fontPresetId === DEFAULT_TERMINAL_FONT_PRESET_ID
       ? fontPresetId
-      : DEFAULT_TERMINAL_FONT_PRESET_ID;
-  }, [fontOptions, fontPresetId, installedFonts]);
+      : (fontOptions.find((opt) => opt.value === fontPresetId || opt.name === fontPresetId)?.value ??
+        orphan?.value ??
+        fontPresetId);
 
   return (
     <>
@@ -183,7 +187,18 @@ export function TerminalSection() {
                     )}
                   </span>
                 </SelectItem>
+                <SelectSeparator />
                 <SelectItem value={CUSTOM_TERMINAL_FONT_PRESET_ID}>{t("terminal.customFont")}</SelectItem>
+                {orphan && (
+                  <>
+                    <SelectSeparator />
+                    <SelectItem key={`orphan-${orphan.value}`} value={orphan.value}>
+                      <span className="min-w-0 flex-1 truncate" style={{ fontFamily: quoteFamilyName(orphan.name) }}>
+                        {orphan.name}
+                      </span>
+                    </SelectItem>
+                  </>
+                )}
                 {recommendedFonts.length > 0 && (
                   <>
                     <SelectSeparator />
@@ -257,6 +272,17 @@ export function TerminalSection() {
               <span className="text-sm text-muted-foreground">{t("terminal.scrollbackUnit")}</span>
             </div>
             <p className="text-xs text-muted-foreground">{t("terminal.scrollbackHint")}</p>
+          </div>
+
+          {/* GPU acceleration (WebGL renderer). Auto-flips to off when the
+              renderer fails to initialize or its WebGL context is lost — so
+              "On" actually reflects "currently working". User can re-enable. */}
+          <div className="flex items-start justify-between gap-4">
+            <div className="grid gap-1">
+              <Label>{t("terminal.gpuAcceleration")}</Label>
+              <p className="text-xs text-muted-foreground">{t("terminal.gpuAccelerationHint")}</p>
+            </div>
+            <Switch checked={webglEnabled} onCheckedChange={setWebglEnabled} />
           </div>
 
           <Separator />

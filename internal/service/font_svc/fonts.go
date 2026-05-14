@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf16"
@@ -16,11 +17,38 @@ import (
 
 const fontconfigTimeout = 2 * time.Second
 
+// Process-lifetime cache. Scanning `/System/Library/Fonts/**` reads hundreds of
+// TTF files; the result almost never changes during a session. Recompute only
+// on the next app start. The lock is held during the slow scan so concurrent
+// callers serialize and then see the cached result.
+var (
+	cacheMu      sync.Mutex
+	cachedResult []string
+	cachedValid  bool
+)
+
+// InvalidateCache clears the in-memory cache so the next ListFamilies call
+// re-scans. Exposed for cases where the user just installed a new font and we
+// want to refresh without restarting the app.
+func InvalidateCache() {
+	cacheMu.Lock()
+	cachedResult = nil
+	cachedValid = false
+	cacheMu.Unlock()
+}
+
 // ListFamilies returns installed font family names. It prefers fontconfig when
-// available and falls back to parsing common system font directories.
+// available and falls back to parsing common system font directories. Results
+// are cached for the lifetime of the process.
 func ListFamilies(ctx context.Context) ([]string, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+	if cachedValid {
+		return cachedResult, nil
 	}
 
 	families := make(map[string]struct{})
@@ -36,11 +64,17 @@ func ListFamilies(ctx context.Context) ([]string, error) {
 		out = append(out, family)
 	}
 	sort.Strings(out)
+	cachedResult = out
+	cachedValid = true
 	return out, nil
 }
 
 func listFontconfigFamilies(ctx context.Context) []string {
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		return nil
+	}
+	// macOS doesn't ship fontconfig — skip the fork when fc-list isn't on PATH.
+	if _, err := exec.LookPath("fc-list"); err != nil {
 		return nil
 	}
 
@@ -92,22 +126,19 @@ func scanFontDirectories(dirs []string) []string {
 		}
 
 		_ = filepath.WalkDir(cleanDir, func(path string, entry os.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if entry.IsDir() {
-				return nil
-			}
-			ext := strings.ToLower(filepath.Ext(path))
-			if ext != ".ttf" && ext != ".otf" && ext != ".ttc" {
-				return nil
-			}
-			names, err := parseFontFileFamilies(path)
-			if err != nil {
-				return nil
-			}
-			for _, name := range names {
-				addFamily(families, name)
+			if err == nil {
+				if entry.IsDir() {
+					return nil
+				}
+				ext := strings.ToLower(filepath.Ext(path))
+				if ext != ".ttf" && ext != ".otf" && ext != ".ttc" {
+					return nil
+				}
+				if names, err := parseFontFileFamilies(path); err == nil {
+					for _, name := range names {
+						addFamily(families, name)
+					}
+				}
 			}
 			return nil
 		})
@@ -164,6 +195,8 @@ func defaultFontDirectories() []string {
 }
 
 func parseFontFileFamilies(path string) ([]string, error) {
+	// #nosec G304 -- paths are discovered from configured font directories and
+	// filtered by extension before parsing.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

@@ -5,6 +5,7 @@ import {
   quoteFamilyName,
   RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES,
   resolveDefaultFontPrimary,
+  resolveFontPresetOrphan,
   resolveTerminalFontFamily,
   terminalFontPresets,
   withTerminalFontFallback,
@@ -173,6 +174,48 @@ describe("terminalFonts", () => {
       expect(groups.recommendedFonts.map((font) => font.name)).toEqual(["JetBrains Mono", "Fira Code", "Menlo"]);
       expect(groups.recommendedFonts.map((font) => font.value)).toEqual(["jetbrains-mono", "fira-code", "menlo"]);
       expect(groups.otherFonts.map((font) => font.name)).toEqual(["Zed Mono"]);
+    });
+  });
+
+  describe("resolveFontPresetOrphan", () => {
+    it("returns null for the default and custom sentinels (always rendered separately)", () => {
+      expect(resolveFontPresetOrphan("default", [], [])).toBeNull();
+      expect(resolveFontPresetOrphan("custom", [], [])).toBeNull();
+    });
+
+    it("returns null while installed fonts are still loading (undefined)", () => {
+      expect(resolveFontPresetOrphan("fira-code", [], undefined)).toBeNull();
+    });
+
+    it("returns null when the value is already rendered as an option (matched by value)", () => {
+      expect(
+        resolveFontPresetOrphan("fira-code", [{ value: "fira-code", name: "Fira Code" }], ["Fira Code"])
+      ).toBeNull();
+    });
+
+    it("returns null when the value is already rendered (matched by name, family-name selection)", () => {
+      expect(
+        resolveFontPresetOrphan(
+          "JetBrainsMono NFM",
+          [{ value: "JetBrainsMono NFM", name: "JetBrainsMono NFM" }],
+          ["JetBrainsMono NFM"]
+        )
+      ).toBeNull();
+    });
+
+    it("returns the preset display name when a known preset id is not in the rendered options", () => {
+      expect(resolveFontPresetOrphan("fira-code", [], [])).toEqual({ value: "fira-code", name: "Fira Code" });
+    });
+
+    it("returns the raw id when a previously-saved family name is no longer installed", () => {
+      expect(resolveFontPresetOrphan("JetBrainsMono NFM", [], [])).toEqual({
+        value: "JetBrainsMono NFM",
+        name: "JetBrainsMono NFM",
+      });
+    });
+
+    it("returns an orphan even when the font API is unavailable (null) so the Select never goes blank", () => {
+      expect(resolveFontPresetOrphan("ubuntu-mono", [], null)).toEqual({ value: "ubuntu-mono", name: "Ubuntu Mono" });
     });
   });
 

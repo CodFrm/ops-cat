@@ -23,12 +23,14 @@ interface TerminalThemeState {
   customFontFamily: string;
   fontFamily: string;
   scrollback: number;
+  webglEnabled: boolean;
 
   setSelectedThemeId: (id: string) => void;
   setFontSize: (size: number) => void;
   setFontPresetId: (id: string) => void;
   setCustomFontFamily: (fontFamily: string) => void;
   setScrollback: (lines: number) => void;
+  setWebglEnabled: (enabled: boolean) => void;
   addCustomTheme: (theme: TerminalTheme) => void;
   updateCustomTheme: (theme: TerminalTheme) => void;
   removeCustomTheme: (id: string) => void;
@@ -45,8 +47,10 @@ export const useTerminalThemeStore = create<TerminalThemeState>()(
       customFontFamily: "",
       fontFamily: DEFAULT_TERMINAL_FONT_FAMILY,
       scrollback: SCROLLBACK_DEFAULT,
+      webglEnabled: true,
 
       setSelectedThemeId: (id) => set({ selectedThemeId: id }),
+      setWebglEnabled: (enabled) => set({ webglEnabled: enabled }),
 
       setFontSize: (size) => set({ fontSize: Math.max(8, Math.min(32, size)) }),
 

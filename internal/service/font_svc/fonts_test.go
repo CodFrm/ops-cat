@@ -1,6 +1,7 @@
 package font_svc
 
 import (
+	"context"
 	"encoding/binary"
 	"os"
 	"path/filepath"
@@ -8,6 +9,36 @@ import (
 	"testing"
 	"unicode/utf16"
 )
+
+func TestListFamiliesCachesResult(t *testing.T) {
+	InvalidateCache()
+	t.Cleanup(InvalidateCache)
+
+	first, err := ListFamilies(context.Background())
+	if err != nil {
+		t.Fatalf("first ListFamilies: %v", err)
+	}
+
+	// Mutating the cached slice should not affect a fresh call — the cache
+	// returns the same underlying slice, so we instead check that a second
+	// call is identity-equal (no new computation).
+	second, err := ListFamilies(context.Background())
+	if err != nil {
+		t.Fatalf("second ListFamilies: %v", err)
+	}
+	if len(first) > 0 && &first[0] != &second[0] {
+		t.Fatalf("expected cached slice to be reused, got fresh allocation")
+	}
+
+	InvalidateCache()
+	third, err := ListFamilies(context.Background())
+	if err != nil {
+		t.Fatalf("third ListFamilies: %v", err)
+	}
+	if len(third) > 0 && len(second) > 0 && &third[0] == &second[0] {
+		t.Fatalf("expected InvalidateCache to force a re-scan")
+	}
+}
 
 type testNameRecord struct {
 	platformID uint16
@@ -68,24 +99,34 @@ func TestScanFontDirectories(t *testing.T) {
 func makeTestFont(records []testNameRecord) []byte {
 	nameTableHeaderLen := 6
 	nameRecordLen := 12
-	nameTable := make([]byte, nameTableHeaderLen+len(records)*nameRecordLen)
-	binary.BigEndian.PutUint16(nameTable[0:2], 0)
-	binary.BigEndian.PutUint16(nameTable[2:4], uint16(len(records)))
-	binary.BigEndian.PutUint16(nameTable[4:6], uint16(len(nameTable)))
-
-	stringData := make([]byte, 0)
+	nameRecordsLen := len(records) * nameRecordLen
+	stringOffset := nameTableHeaderLen + nameRecordsLen
+	rawStrings := make([][]byte, len(records))
+	stringDataLen := 0
 	for i, record := range records {
 		raw := utf16BE(record.text)
+		rawStrings[i] = raw
+		stringDataLen += len(raw)
+	}
+
+	nameTable := make([]byte, stringOffset+stringDataLen)
+	binary.BigEndian.PutUint16(nameTable[0:2], 0)
+	binary.BigEndian.PutUint16(nameTable[2:4], uint16(len(records)))
+	binary.BigEndian.PutUint16(nameTable[4:6], uint16(stringOffset))
+
+	stringDataOffset := 0
+	for i, record := range records {
+		raw := rawStrings[i]
 		offset := nameTableHeaderLen + i*nameRecordLen
 		binary.BigEndian.PutUint16(nameTable[offset:offset+2], record.platformID)
 		binary.BigEndian.PutUint16(nameTable[offset+2:offset+4], record.encodingID)
 		binary.BigEndian.PutUint16(nameTable[offset+4:offset+6], record.languageID)
 		binary.BigEndian.PutUint16(nameTable[offset+6:offset+8], record.nameID)
 		binary.BigEndian.PutUint16(nameTable[offset+8:offset+10], uint16(len(raw)))
-		binary.BigEndian.PutUint16(nameTable[offset+10:offset+12], uint16(len(stringData)))
-		stringData = append(stringData, raw...)
+		binary.BigEndian.PutUint16(nameTable[offset+10:offset+12], uint16(stringDataOffset))
+		copy(nameTable[stringOffset+stringDataOffset:], raw)
+		stringDataOffset += len(raw)
 	}
-	nameTable = append(nameTable, stringData...)
 
 	nameTableOffset := 12 + 16
 	font := make([]byte, nameTableOffset+len(nameTable))

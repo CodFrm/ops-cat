@@ -48,6 +48,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   const fontSize = useTerminalThemeStore((s) => s.fontSize);
   const fontFamily = useTerminalThemeStore((s) => s.fontFamily);
   const scrollback = useTerminalThemeStore((s) => s.scrollback);
+  const webglEnabled = useTerminalThemeStore((s) => s.webglEnabled);
   const selectedThemeId = useTerminalThemeStore((s) => s.selectedThemeId);
   const customThemes = useTerminalThemeStore((s) => s.customThemes);
   const resolvedTheme = useResolvedTheme();
@@ -91,7 +92,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
 
-    const inst = getOrCreateTerminal(sessionId, { fontSize, fontFamily, theme: xtermTheme, scrollback, transport });
+    const inst = getOrCreateTerminal(sessionId, {
+      fontSize,
+      fontFamily,
+      theme: xtermTheme,
+      scrollback,
+      transport,
+      webglEnabled,
+    });
     termRef.current = inst.term;
     fitAddonRef.current = inst.fitAddon;
     searchAddonRef.current = inst.searchAddon;

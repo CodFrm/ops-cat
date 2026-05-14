@@ -215,10 +215,13 @@ const terminalFontPresetByName = new Map(
     .map((preset) => [preset.name, preset])
 );
 
-const staticTerminalFontOptions: TerminalFontOption[] = RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES.flatMap((name) => {
-  const preset = terminalFontPresetByName.get(name);
-  return preset ? [{ value: preset.id, name: preset.name }] : [];
-});
+// Full curated list, including names that don't map to a hardcoded preset. When
+// both queryLocalFonts() and the Wails backend are unavailable we still want the
+// user to be able to pick a Nerd Font / mono family — selecting an unknown name
+// just stores it as fontFamily and the CSS layer skips it if not actually
+// installed (the fallback chain takes over).
+const staticTerminalFontOptions: TerminalFontOption[] =
+  RECOMMENDED_TERMINAL_FONT_FAMILY_NAMES.map(terminalFontOptionForFamily);
 
 function terminalFontOptionForFamily(name: string): TerminalFontOption {
   const preset = terminalFontPresetByName.get(name);
@@ -246,6 +249,27 @@ export function buildTerminalFontGroups(installedFonts: string[] | null | undefi
   );
   const otherFonts = installedFontNames.filter((name) => !recommendedSet.has(name)).map(terminalFontOptionForFamily);
   return { recommendedFonts, otherFonts };
+}
+
+// Returns the option to render for `fontPresetId` when it is otherwise absent
+// from the rendered groups — e.g. a preset id like "fira-code" saved before the
+// system-font picker existed, or a family name that used to be installed but is
+// gone now. Returning the orphan keeps the Select trigger from showing a blank
+// value. Returns null while installedFonts is still loading and for the
+// default/custom sentinels (which are always rendered separately).
+export function resolveFontPresetOrphan(
+  fontPresetId: string,
+  renderedFonts: TerminalFontOption[],
+  installedFonts: string[] | null | undefined
+): TerminalFontOption | null {
+  if (fontPresetId === CUSTOM_TERMINAL_FONT_PRESET_ID || fontPresetId === DEFAULT_TERMINAL_FONT_PRESET_ID) {
+    return null;
+  }
+  if (installedFonts === undefined) return null;
+  if (renderedFonts.some((opt) => opt.value === fontPresetId || opt.name === fontPresetId)) return null;
+  const preset = terminalFontPresets.find((p) => p.id === fontPresetId);
+  if (preset) return { value: preset.id, name: preset.name };
+  return { value: fontPresetId, name: fontPresetId };
 }
 
 // Quote a family name for use in CSS font-family. Pure identifiers can be
@@ -298,6 +322,7 @@ function normalizeInstalledFontFamilies(fonts: string[]): string[] {
 }
 
 function cleanFamilyName(name: string): string {
+  // eslint-disable-next-line no-control-regex
   return name.replace(/[\u0000-\u001f\u007f]/g, "").trim();
 }
 

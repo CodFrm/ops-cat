@@ -10,6 +10,7 @@ const hoisted = vi.hoisted(() => {
   const webglAddonCtor = vi.fn();
   const webglAddonDisposeSpy = vi.fn();
   const webglContextLossDisposeSpy = vi.fn();
+  const setWebglEnabledSpy = vi.fn();
   const disposeOrder: string[] = [];
   const state: { capturedOnKey: ((e: { key: string }) => void) | null } = {
     capturedOnKey: null,
@@ -24,6 +25,7 @@ const hoisted = vi.hoisted(() => {
     webglAddonCtor,
     webglAddonDisposeSpy,
     webglContextLossDisposeSpy,
+    setWebglEnabledSpy,
     disposeOrder,
     state,
   };
@@ -106,6 +108,14 @@ vi.mock("@/stores/terminalStore", () => ({
   },
 }));
 
+vi.mock("@/stores/terminalThemeStore", () => ({
+  useTerminalThemeStore: {
+    getState: () => ({
+      setWebglEnabled: hoisted.setWebglEnabledSpy,
+    }),
+  },
+}));
+
 vi.mock("@/data/terminalFonts", () => ({ withTerminalFontFallback: (s: string) => s }));
 vi.mock("@/lib/terminalEncode", () => ({ bytesToBase64: () => "" }));
 
@@ -127,6 +137,7 @@ describe("terminalRegistry", () => {
     hoisted.webglAddonCtor.mockClear();
     hoisted.webglAddonDisposeSpy.mockClear();
     hoisted.webglContextLossDisposeSpy.mockClear();
+    hoisted.setWebglEnabledSpy.mockClear();
     hoisted.disposeOrder.length = 0;
   });
 
@@ -194,6 +205,18 @@ describe("terminalRegistry", () => {
     expect(hoisted.webglAddonDisposeSpy).toHaveBeenCalledTimes(1);
     expect(hoisted.webglContextLossDisposeSpy).toHaveBeenCalledTimes(1);
     expect(hoisted.disposeOrder.indexOf("webgl")).toBeLessThan(hoisted.disposeOrder.indexOf("term"));
+  });
+
+  it("skips WebGL when webglEnabled is false", () => {
+    getOrCreateTerminal("sess-no-webgl", {
+      fontSize: 14,
+      fontFamily: "mono",
+      scrollback: 1000,
+      webglEnabled: false,
+    });
+    expect(hoisted.webglAddonCtor).not.toHaveBeenCalled();
+    disposeTerminal("sess-no-webgl");
+    expect(hoisted.webglAddonDisposeSpy).not.toHaveBeenCalled();
   });
 
   it("re-creates a fresh terminal after dispose for the same sessionId", () => {
