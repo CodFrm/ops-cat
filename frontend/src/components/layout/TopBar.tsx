@@ -53,7 +53,7 @@ export function TopBar({
   return (
     <div
       className={cn(
-        "flex h-10 w-full shrink-0 items-center gap-2 border-b border-panel-divider bg-background",
+        "flex h-10 w-full shrink-0 items-center gap-2 border-b border-panel-divider bg-sidebar",
         leftReserve,
         rightReserve
       )}
