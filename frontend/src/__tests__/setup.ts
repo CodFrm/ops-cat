@@ -44,6 +44,65 @@ vi.mock("react-i18next", () => ({
   initReactI18next: { type: "3rdParty", init: vi.fn() },
 }));
 
+// happy-dom 不做 layout —— Element.getBoundingClientRect() 一律 0 ×,IntersectionObserver
+// / ResizeObserver 也不上报真实尺寸。@tanstack/react-virtual 用这两条决定渲染哪些行,
+// 拿到 0 就一行都不渲染,QueryResultTable 的所有测试因此找不到任何 <tr>。
+// 这里给出一个固定可视区尺寸,让虚拟化在测试里始终把"全部行"视为可见。
+const TEST_CONTAINER_HEIGHT = 4000;
+const TEST_CONTAINER_WIDTH = 1200;
+class TestResizeObserver {
+  private callback: ResizeObserverCallback;
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+  }
+  observe(target: Element) {
+    const rect = {
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: TEST_CONTAINER_WIDTH,
+      bottom: TEST_CONTAINER_HEIGHT,
+      width: TEST_CONTAINER_WIDTH,
+      height: TEST_CONTAINER_HEIGHT,
+      toJSON() {
+        return this;
+      },
+    } as DOMRectReadOnly;
+    const box = [{ inlineSize: TEST_CONTAINER_WIDTH, blockSize: TEST_CONTAINER_HEIGHT }];
+    this.callback(
+      [
+        {
+          target,
+          contentRect: rect,
+          borderBoxSize: box,
+          contentBoxSize: box,
+          devicePixelContentBoxSize: box,
+        } as ResizeObserverEntry,
+      ],
+      this as unknown as ResizeObserver
+    );
+  }
+  unobserve() {}
+  disconnect() {}
+}
+vi.stubGlobal("ResizeObserver", TestResizeObserver);
+Element.prototype.getBoundingClientRect = function () {
+  return {
+    x: 0,
+    y: 0,
+    top: 0,
+    left: 0,
+    right: TEST_CONTAINER_WIDTH,
+    bottom: TEST_CONTAINER_HEIGHT,
+    width: TEST_CONTAINER_WIDTH,
+    height: TEST_CONTAINER_HEIGHT,
+    toJSON() {
+      return this;
+    },
+  } as DOMRect;
+};
+
 // Mock localStorage
 const store: Record<string, string> = {};
 vi.stubGlobal("localStorage", {
