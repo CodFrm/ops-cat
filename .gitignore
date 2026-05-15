@@ -29,9 +29,6 @@ coverage.out
 coverage.html
 
 /.workflow/
-/docs/plans/
-/docs/superpowers/plans/
-/docs/superpowers/specs/
 .omc
 
 coverage_new.out
