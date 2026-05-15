@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useEffect, useRef } from "react";
 import { FileManagerPanel } from "../components/terminal/FileManagerPanel";
 import { useTerminalStore, type TerminalDirectorySyncState } from "../stores/terminalStore";
 import { useSFTPStore, type SFTPTransfer } from "../stores/sftpStore";
@@ -73,12 +74,13 @@ vi.mock("@/components/CodeEditor", () => ({
     readOnly?: boolean;
     testId?: string;
   }) => {
-    const editor = {
+    const mountedRef = useRef(false);
+    const editorRef = useRef({
       createDecorationsCollection: vi.fn((decorations: unknown[]) => ({ clear: vi.fn(), decorations })),
       revealLineInCenter: vi.fn(),
       setPosition: vi.fn(),
-    };
-    const monaco = {
+    });
+    const monacoRef = useRef({
       Range: vi.fn(function Range(
         this: unknown,
         startLine: number,
@@ -89,11 +91,13 @@ vi.mock("@/components/CodeEditor", () => ({
         return { startLineNumber: startLine, startColumn, endLineNumber: endLine, endColumn };
       }),
       editor: { OverviewRulerLane: { Full: 7 } },
-    };
-    if (onMount) {
+    });
+    useEffect(() => {
+      if (!onMount || mountedRef.current) return;
+      mountedRef.current = true;
       codeEditorMountMock({ testId, readOnly });
-      onMount(editor, monaco);
-    }
+      onMount(editorRef.current, monacoRef.current);
+    }, [onMount, readOnly, testId]);
     return readOnly ? (
       <pre data-testid={testId}>{value}</pre>
     ) : (

@@ -31,6 +31,7 @@ export function ExternalEditMergeWorkbench({ mergeResult, savingSessionId, onClo
   const [confirmClose, setConfirmClose] = useState(false);
   const [activeBlockIndex, setActiveBlockIndex] = useState(0);
   const [navigationToken, setNavigationToken] = useState(0);
+  const [editorMountVersion, setEditorMountVersion] = useState(0);
 
   const editorRefs = useRef<MergeEditorRefs>({
     local: { editor: null, monaco: null },
@@ -38,6 +39,7 @@ export function ExternalEditMergeWorkbench({ mergeResult, savingSessionId, onClo
     remote: { editor: null, monaco: null },
   });
   const decorationRefs = useRef<MergeDecorationRefs>({ local: null, final: null, remote: null });
+  const revealFrameRef = useRef<number | null>(null);
 
   const conflictBlocks = useMemo(
     () => buildTextDiffBlocks(mergeResult.remoteContent || "", mergeResult.localContent || ""),
@@ -60,20 +62,32 @@ export function ExternalEditMergeWorkbench({ mergeResult, savingSessionId, onClo
       decorationRefs.current[pane]?.clear();
       decorationRefs.current[pane] = editor.createDecorationsCollection(decorations);
     });
-  }, [activeBlockIndex, conflictBlocks]);
+  }, [activeBlockIndex, conflictBlocks, editorMountVersion]);
 
   useEffect(() => {
     if (conflictBlocks.length === 0) return;
     const block = conflictBlocks[Math.min(Math.max(activeBlockIndex, 0), conflictBlocks.length - 1)];
-    (["local", "final", "remote"] as MergePaneRole[]).forEach((pane) => {
-      const editor = editorRefs.current[pane].editor;
-      if (!editor) return;
-      const { startLine } = blockLineRange(block, pane);
-      const lineNumber = Math.max(1, startLine);
-      editor.revealLineInCenter(lineNumber);
-      editor.setPosition({ lineNumber, column: 1 });
+    if (revealFrameRef.current != null) {
+      cancelAnimationFrame(revealFrameRef.current);
+    }
+    revealFrameRef.current = requestAnimationFrame(() => {
+      (["local", "final", "remote"] as MergePaneRole[]).forEach((pane) => {
+        const editor = editorRefs.current[pane].editor;
+        if (!editor) return;
+        const { startLine } = blockLineRange(block, pane);
+        const lineNumber = Math.max(1, startLine);
+        editor.revealLineInCenter(lineNumber);
+        editor.setPosition({ lineNumber, column: 1 });
+      });
+      revealFrameRef.current = null;
     });
-  }, [activeBlockIndex, conflictBlocks, navigationToken]);
+    return () => {
+      if (revealFrameRef.current != null) {
+        cancelAnimationFrame(revealFrameRef.current);
+        revealFrameRef.current = null;
+      }
+    };
+  }, [activeBlockIndex, conflictBlocks, navigationToken, editorMountVersion]);
 
   const navigate = (direction: -1 | 1) => {
     if (conflictTotal === 0) return;
@@ -89,6 +103,7 @@ export function ExternalEditMergeWorkbench({ mergeResult, savingSessionId, onClo
   const handleEditorMount = useCallback(
     (pane: MergePaneRole) => (editor: MonacoNS.editor.IStandaloneCodeEditor, monaco: typeof MonacoNS) => {
       editorRefs.current[pane] = { editor, monaco };
+      setEditorMountVersion((version) => version + 1);
     },
     []
   );
