@@ -347,6 +347,34 @@ func bakeupEntryPaths(t *testing.T, workspaceDir string) []string {
 	return paths
 }
 
+func TestExternalEditOpenRejectsOversizedRemoteFile(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-a"} })
+	oversized := []byte(strings.Repeat("a", int(sftp_svc.MaxReadFileSize)+1))
+	h.remote.SetFile("ssh-a", "/srv/app/big.log", oversized, "/srv/app/big.log")
+
+	_, err := h.svc.Open(context.Background(), OpenRequest{
+		AssetID:    101,
+		SessionID:  "ssh-a",
+		RemotePath: "/srv/app/big.log",
+		EditorID:   "system-text",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "远程文件过大")
+}
+
+func TestExternalEditSaveRejectsOversizedLocalCopy(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-a"} })
+	session := h.openSession(t, "ssh-a", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+
+	markDirtyLocalCopy(t, session, []byte(strings.Repeat("a", int(sftp_svc.MaxReadFileSize)+1)))
+
+	_, err := h.svc.Save(context.Background(), session.ID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "本地副本过大")
+	require.Empty(t, h.remote.writes)
+}
+
 func TestExternalEditSaveRebindsToUniqueCandidateAndPersistsSessionID(t *testing.T) {
 	h := newRebindHarness(t, func(assetID int64) []string {
 		if assetID != 101 {

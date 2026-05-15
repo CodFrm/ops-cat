@@ -262,10 +262,7 @@ export function FileManagerPanel({
   onWidthChange,
 }: FileManagerPanelProps) {
   const { t } = useTranslation();
-  const continueEditLabel = (() => {
-    const label = t("externalEdit.actions.continueEdit");
-    return label === "externalEdit.actions.continueEdit" ? "继续修改" : label;
-  })();
+  const continueEditLabel = t("externalEdit.actions.continueEdit");
   const {
     currentPath,
     currentPathRef,
@@ -644,7 +641,7 @@ export function FileManagerPanel({
       mergeDecorationRefs.current[pane]?.clear();
       mergeDecorationRefs.current[pane] = editor.createDecorationsCollection(decorations);
     });
-  }, [mergeActiveBlockIndex, mergeConflictBlocks, mergeFinalContent]);
+  }, [mergeActiveBlockIndex, mergeConflictBlocks]);
 
   useEffect(() => {
     if (mergeConflictBlocks.length === 0) return;

@@ -1054,6 +1054,7 @@
       "viewError": "View Error",
       "viewRecovery": "View Recovery",
       "reopenLocal": "Reopen Local Draft",
+      "continueEdit": "Continue Editing",
       "merge": "Three-way Merge",
       "saveMerge": "Save Merged Draft",
       "hideRecord": "Close Record (Keep Local Draft)",
@@ -1123,6 +1124,7 @@
       "remoteLeftLocalRight": "Left remote / right local",
       "previous": "Previous difference",
       "next": "Next difference",
+      "loadFailed": "Diff view failed to load",
       "helper": "Remote on the left, local on the right, with line numbers and synced scrolling for inspection."
     },
     "settings": {
@@ -1132,7 +1134,7 @@
       "defaultEditor": "Default Editor",
       "workspaceRoot": "Workspace Root",
       "cleanupRetentionDays": "Cleanup Retention Days",
-      "cleanupRetentionDaysHint": "Defaults to 7 days, range 1-365. Used to clean up non-active drafts and bakeup history copies.",
+      "cleanupRetentionDaysHint": "Defaults to 7 days, range 1-365. Used to clean up non-active drafts and backup history copies.",
       "customEditors": "Custom Editors",
       "addEditor": "Add Custom Editor",
       "addEditorTitle": "Add Custom Editor",

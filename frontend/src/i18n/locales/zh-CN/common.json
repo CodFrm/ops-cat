@@ -1039,6 +1039,7 @@
       "viewError": "查看错误",
       "viewRecovery": "查看恢复",
       "reopenLocal": "重新打开本地副本",
+      "continueEdit": "继续修改",
       "merge": "三栏合并",
       "saveMerge": "保存合并稿",
       "hideRecord": "关闭记录（保留本地副本）",
@@ -1108,6 +1109,7 @@
       "remoteLeftLocalRight": "左远端 / 右本地",
       "previous": "上一处不同点",
       "next": "下一处不同点",
+      "loadFailed": "对比视图加载失败",
       "helper": "左侧远端，右侧本地；支持行号与同步滚动，便于逐段观察差异。"
     },
     "settings": {
@@ -1117,7 +1119,7 @@
       "defaultEditor": "默认外部编辑器",
       "workspaceRoot": "临时工作区",
       "cleanupRetentionDays": "副本清理保留天数",
-      "cleanupRetentionDaysHint": "默认 7 天，允许 1-365 天；用于清理非活动副本和 bakeup 历史副本。",
+      "cleanupRetentionDaysHint": "默认 7 天，允许 1-365 天；用于清理非活动副本和 backup 历史副本。",
       "customEditors": "自定义编辑器",
       "addEditor": "新增自定义编辑器",
       "addEditorTitle": "新增自定义编辑器",

@@ -33,6 +33,8 @@ import {
   selectExternalEditWorkspaceRoot,
 } from "@/lib/externalEditApi";
 
+const errMsg = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
 function normalizeEditors(editors: ExternalEditEditorConfig[]) {
   // 设置页允许新增空白行，真正持久化前再补齐稳定 id 和 args 数组，
   // 这样可以把“表单暂态”与“写入配置的最终结构”分开，避免保存时出现空值分支。
@@ -119,7 +121,7 @@ export function ExternalEditSection() {
         setCleanupRetentionDays(String(data.cleanupRetentionDays || 7));
         setCustomEditors(normalizeEditors(data.customEditors || []));
       })
-      .catch((error) => toast.error(String(error)));
+      .catch((error) => toast.error(errMsg(error)));
   }, []);
 
   const editorOptions = useMemo(
@@ -166,7 +168,7 @@ export function ExternalEditSection() {
       setCustomEditors(normalizeEditors(next.customEditors || []));
       toast.success(t("externalEdit.settings.saved"));
     } catch (error) {
-      toast.error(String(error));
+      toast.error(errMsg(error));
     } finally {
       setSaving(false);
     }
@@ -255,8 +257,12 @@ export function ExternalEditSection() {
               <Button
                 variant="outline"
                 onClick={async () => {
-                  const selected = await selectExternalEditWorkspaceRoot();
-                  if (selected) setWorkspaceRoot(selected);
+                  try {
+                    const selected = await selectExternalEditWorkspaceRoot();
+                    if (selected) setWorkspaceRoot(selected);
+                  } catch (error) {
+                    toast.error(errMsg(error));
+                  }
                 }}
               >
                 {t("action.browse")}
@@ -375,8 +381,12 @@ export function ExternalEditSection() {
                 <Button
                   variant="outline"
                   onClick={async () => {
-                    const selected = await selectExternalEditorExecutable();
-                    if (selected) updateEditorDraft({ path: selected });
+                    try {
+                      const selected = await selectExternalEditorExecutable();
+                      if (selected) updateEditorDraft({ path: selected });
+                    } catch (error) {
+                      toast.error(errMsg(error));
+                    }
                   }}
                 >
                   {t("action.browse")}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
+import { useTranslation } from "react-i18next";
 import type * as MonacoNS from "monaco-editor";
 import { useResolvedTheme } from "./theme-provider";
 import type { CodeEditorLanguage } from "./CodeEditor";
@@ -105,6 +106,7 @@ export function CodeDiffViewer({
   onDiffStatsChange,
   testId,
 }: CodeDiffViewerProps) {
+  const { t } = useTranslation();
   const resolvedTheme = useResolvedTheme();
   const diffEditorRef = useRef<MonacoNS.editor.IStandaloneDiffEditor | null>(null);
   const monacoRef = useRef<typeof MonacoNS | null>(null);
@@ -208,14 +210,14 @@ export function CodeDiffViewer({
       >
         {header}
         <div className="relative flex h-full w-full flex-col items-center justify-center gap-2 p-4 text-xs text-muted-foreground">
-          <div className="text-destructive">对比视图加载失败</div>
+          <div className="text-destructive">{t("externalEdit.compare.loadFailed")}</div>
           <div className="font-mono text-[11px] opacity-70 max-w-full truncate">{message}</div>
           <button
             type="button"
             onClick={handleRetryLoad}
             className="px-2 py-1 text-xs rounded border border-border hover:bg-accent"
           >
-            重试
+            {t("action.retry")}
           </button>
         </div>
       </div>

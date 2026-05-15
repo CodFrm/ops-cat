@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/opskat/opskat/internal/bootstrap"
+	"github.com/opskat/opskat/internal/pkg/executil"
 	"github.com/opskat/opskat/internal/repository/asset_repo"
 	"github.com/opskat/opskat/internal/repository/audit_repo"
 	"github.com/opskat/opskat/internal/service/external_edit_svc"
@@ -62,9 +63,7 @@ type externalEditLauncher struct{}
 
 func (externalEditLauncher) Launch(execPath string, args []string) error {
 	cmd := exec.Command(execPath, args...) //nolint:gosec // path and args are validated by external_edit_svc
-	if runtime.GOOS == "windows" {
-		cmd.SysProcAttr = nil
-	}
+	executil.HideConsoleWindow(cmd)
 	return cmd.Start()
 }
 

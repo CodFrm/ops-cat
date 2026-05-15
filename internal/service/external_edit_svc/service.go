@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -37,6 +38,8 @@ import (
 )
 
 const (
+	// v4 is the first external-edit manifest schema persisted by this PR.
+	// Any post-release schema change must add an explicit migration path.
 	manifestVersion = 4
 
 	// clean / dirty / conflict / remote_missing 描述“当前可继续推进的主会话”；
@@ -106,56 +109,6 @@ var externalEditClipboardResidueMarkers = []string{
 	"clipboard-images",
 	"folder/clipboard",
 	"folder\\clipboard",
-}
-
-var textExtensions = map[string]struct{}{
-	".txt":        {},
-	".md":         {},
-	".markdown":   {},
-	".json":       {},
-	".jsonl":      {},
-	".yaml":       {},
-	".yml":        {},
-	".xml":        {},
-	".svg":        {},
-	".conf":       {},
-	".config":     {},
-	".ini":        {},
-	".log":        {},
-	".sql":        {},
-	".sh":         {},
-	".bash":       {},
-	".zsh":        {},
-	".fish":       {},
-	".ps1":        {},
-	".go":         {},
-	".ts":         {},
-	".tsx":        {},
-	".js":         {},
-	".jsx":        {},
-	".mjs":        {},
-	".cjs":        {},
-	".css":        {},
-	".scss":       {},
-	".html":       {},
-	".htm":        {},
-	".java":       {},
-	".kt":         {},
-	".py":         {},
-	".rb":         {},
-	".rs":         {},
-	".c":          {},
-	".cc":         {},
-	".cpp":        {},
-	".h":          {},
-	".hpp":        {},
-	".toml":       {},
-	".env":        {},
-	".properties": {},
-	".csv":        {},
-	".tsv":        {},
-	".proto":      {},
-	".dockerfile": {},
 }
 
 type RemoteFileService interface {
@@ -746,7 +699,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (*Session, error) {
 	}
 	s.mu.Unlock()
 
-	data, fileInfo, err := s.remote.ReadFile(req.SessionID, req.RemotePath)
+	data, fileInfo, err := readRemoteEditableFile(s.remote, req.SessionID, req.RemotePath)
 	if err != nil {
 		return nil, fmt.Errorf("读取远程文件失败: %w", err)
 	}
@@ -920,7 +873,7 @@ func (s *Service) refreshInternal(sessionID string) (*Session, error) {
 		return nil, err
 	}
 
-	localData, err := os.ReadFile(current.LocalPath)
+	localData, err := readLocalEditableFile(current.LocalPath)
 	if err != nil {
 		return nil, fmt.Errorf("读取本地副本失败: %w", err)
 	}
@@ -935,7 +888,7 @@ func (s *Service) refreshInternal(sessionID string) (*Session, error) {
 		return refreshed, nil
 	}
 
-	remoteData, remoteInfo, err := s.remote.ReadFile(current.SessionID, current.RemotePath)
+	remoteData, remoteInfo, err := readRemoteEditableFile(s.remote, current.SessionID, current.RemotePath)
 	if err != nil {
 		if isRemoteMissingError(err) {
 			refreshed := s.markSessionState(sessionID, sessionStateRemoteMissing, dirty, localHash)
@@ -1020,7 +973,7 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 	}
 	s.clearRecordError(session)
 
-	localData, err := os.ReadFile(session.LocalPath)
+	localData, err := readLocalEditableFile(session.LocalPath)
 	if err != nil {
 		saveErr := fmt.Errorf("读取本地副本失败: %w", err)
 		failed := s.recordError(sessionID, "read_local_copy", saveErr)
@@ -1081,7 +1034,7 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 		}
 
 		if resolution != resolutionOverwrite {
-			remoteData, _, readErr := s.remote.ReadFile(session.SessionID, session.RemotePath)
+			remoteData, _, readErr := readRemoteEditableFile(s.remote, session.SessionID, session.RemotePath)
 			if readErr != nil {
 				if isRemoteMissingError(readErr) {
 					result := s.markSessionState(sessionID, sessionStateRemoteMissing, true, localHash)
@@ -1146,6 +1099,8 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 		}
 	}
 
+	// SFTP 没有 compare-and-swap 原语，前面的 hash 检查与回写仍是两次远端操作。
+	// 若远端在这个窗口内再次变化，只能由 overwrite/recreate/conflict 决策流继续兜底。
 	if err := s.remote.WriteFile(session.SessionID, session.RemotePath, localData); err != nil {
 		if isRemoteMissingError(err) {
 			saveResult := s.markRemoteMissingConflict(sessionID, session, localHash, automatic, resolution, "write_remote_file")
@@ -1387,7 +1342,7 @@ func (s *Service) reconcileLocalCopy(sessionID string) {
 		return
 	}
 
-	data, err := os.ReadFile(session.LocalPath)
+	data, err := readLocalEditableFile(session.LocalPath)
 	if err != nil {
 		return
 	}
@@ -2451,7 +2406,7 @@ func (s *Service) rereadRemoteSession(sessionID string) (*SaveResult, error) {
 		return nil, err
 	}
 
-	if _, _, err := s.remote.ReadFile(current.SessionID, current.RemotePath); err != nil {
+	if _, _, err := readRemoteEditableFile(s.remote, current.SessionID, current.RemotePath); err != nil {
 		if isRemoteMissingError(err) {
 			result := s.markSessionState(sessionID, sessionStateRemoteMissing, true, sessionLocalHash(current))
 			saveResult := &SaveResult{
@@ -2545,7 +2500,7 @@ func (s *Service) compareInternal(sessionID string) (*CompareResult, error) {
 		return nil, err
 	}
 
-	remoteData, remoteInfo, err := s.remote.ReadFile(primary.SessionID, primary.RemotePath)
+	remoteData, remoteInfo, err := readRemoteEditableFile(s.remote, primary.SessionID, primary.RemotePath)
 	if err != nil {
 		if isRemoteMissingError(err) {
 			saveResult := s.markRemoteMissingConflict(primary.ID, primary, sessionLocalHash(primary), false, "", "compare")
@@ -2579,7 +2534,7 @@ func (s *Service) compareInternal(sessionID string) (*CompareResult, error) {
 		return nil, err
 	}
 
-	localData, err := os.ReadFile(primary.LocalPath)
+	localData, err := readLocalEditableFile(primary.LocalPath)
 	if err != nil {
 		return nil, fmt.Errorf("读取本地副本失败: %w", err)
 	}
@@ -2633,7 +2588,7 @@ func (s *Service) prepareMergeInternal(sessionID string) (*MergePrepareResult, e
 		return nil, err
 	}
 
-	remoteData, remoteInfo, err := s.remote.ReadFile(current.SessionID, current.RemotePath)
+	remoteData, remoteInfo, err := readRemoteEditableFile(s.remote, current.SessionID, current.RemotePath)
 	if err != nil {
 		if isRemoteMissingError(err) {
 			saveResult := s.markRemoteMissingConflict(current.ID, current, sessionLocalHash(current), false, "", "merge_prepare")
@@ -2657,7 +2612,7 @@ func (s *Service) prepareMergeInternal(sessionID string) (*MergePrepareResult, e
 		return nil, err
 	}
 
-	localData, err := os.ReadFile(current.LocalPath)
+	localData, err := readLocalEditableFile(current.LocalPath)
 	if err != nil {
 		return nil, fmt.Errorf("读取本地副本失败: %w", err)
 	}
@@ -2740,7 +2695,7 @@ func (s *Service) applyMergeInternal(ctx context.Context, req MergeApplyRequest)
 		return nil, err
 	}
 
-	remoteData, remoteInfo, err := s.remote.ReadFile(session.SessionID, session.RemotePath)
+	remoteData, remoteInfo, err := readRemoteEditableFile(s.remote, session.SessionID, session.RemotePath)
 	if err != nil {
 		if isRemoteMissingError(err) {
 			return s.markRemoteMissingConflict(req.SessionID, session, sessionLocalHash(session), false, "", "merge_apply"), nil
@@ -3171,7 +3126,7 @@ func (s *Service) rebuildDocumentSessionFromRemote(
 	source *Session,
 	auditTool string,
 ) (*Session, error) {
-	data, fileInfo, err := s.remote.ReadFile(req.SessionID, req.RemotePath)
+	data, fileInfo, err := readRemoteEditableFile(s.remote, req.SessionID, req.RemotePath)
 	if err != nil {
 		return nil, fmt.Errorf("读取远程文件失败: %w", err)
 	}
@@ -3334,7 +3289,7 @@ func (s *Service) hydrateSessionEncodingLocked(session *Session) error {
 	if session == nil || strings.TrimSpace(session.OriginalEncoding) != "" {
 		return nil
 	}
-	data, err := os.ReadFile(session.LocalPath)
+	data, err := readLocalEditableFile(session.LocalPath)
 	if err != nil {
 		return fmt.Errorf("读取本地副本失败: %w", err)
 	}
@@ -3893,7 +3848,53 @@ func isRemoteMissingError(err error) bool {
 	return strings.Contains(text, "no such file") || strings.Contains(text, "not found")
 }
 
-func isLikelyText(filename string, data []byte) bool {
+func readRemoteEditableFile(remote RemoteFileService, sessionID, remotePath string) ([]byte, *sftp_svc.RemoteFileInfo, error) {
+	data, info, err := remote.ReadFile(sessionID, remotePath)
+	if err != nil {
+		return nil, nil, err
+	}
+	if info != nil && info.Size > sftp_svc.MaxReadFileSize {
+		return nil, nil, fmt.Errorf("远程文件过大，无法完整读取: %s (%d bytes > %d bytes)", remotePath, info.Size, sftp_svc.MaxReadFileSize)
+	}
+	if int64(len(data)) > sftp_svc.MaxReadFileSize {
+		return nil, nil, fmt.Errorf("远程文件过大，无法完整读取: %s (%d bytes > %d bytes)", remotePath, len(data), sftp_svc.MaxReadFileSize)
+	}
+	return data, info, nil
+}
+
+func readLocalEditableFile(localPath string) ([]byte, error) {
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return nil, err
+	}
+	if info.IsDir() || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("本地副本不是常规文件: %s (mode=%s, perm=%#o, isDir=%t)", localPath, info.Mode(), info.Mode().Perm(), info.IsDir())
+	}
+	if info.Size() > sftp_svc.MaxReadFileSize {
+		return nil, fmt.Errorf("本地副本过大，无法完整读取: %s (%d bytes > %d bytes)", localPath, info.Size(), sftp_svc.MaxReadFileSize)
+	}
+
+	file, err := os.Open(localPath) //nolint:gosec // localPath is a managed external-edit workspace copy
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := file.Close(); err != nil {
+			logger.Default().Warn("close external edit local copy", zap.String("path", localPath), zap.Error(err))
+		}
+	}()
+
+	data, err := io.ReadAll(io.LimitReader(file, sftp_svc.MaxReadFileSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > sftp_svc.MaxReadFileSize {
+		return nil, fmt.Errorf("本地副本读取过程中超过大小上限: %s (%d bytes > %d bytes)", localPath, len(data), sftp_svc.MaxReadFileSize)
+	}
+	return data, nil
+}
+
+func isLikelyText(_ string, data []byte) bool {
 	if len(data) == 0 {
 		return true
 	}
@@ -3914,9 +3915,6 @@ func isLikelyText(filename string, data []byte) bool {
 	}
 	if contentType == "application/json" || contentType == "application/xml" || contentType == "image/svg+xml" || contentType == "application/x-empty" {
 		return true
-	}
-	if _, ok := textExtensions[strings.ToLower(path.Ext(filename))]; ok {
-		return looksLikeText(sample)
 	}
 	return looksLikeText(sample)
 }

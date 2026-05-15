@@ -24,6 +24,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// MaxReadFileSize limits full-file reads used by desktop features such as external edit.
+const MaxReadFileSize int64 = 10 * 1024 * 1024
+
 // TransferProgress 传输进度事件
 type TransferProgress struct {
 	TransferID     string `json:"transferId"`
@@ -230,7 +233,10 @@ func (s *Service) Stat(sessionID, remotePath string) (*RemoteFileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	return statWithClient(sftpClient, remotePath)
+}
 
+func statWithClient(sftpClient *sftp.Client, remotePath string) (*RemoteFileInfo, error) {
 	info, err := sftpClient.Stat(remotePath)
 	if err != nil {
 		return nil, fmt.Errorf("获取远程文件信息失败: %w", err)
@@ -261,9 +267,12 @@ func (s *Service) ReadFile(sessionID, remotePath string) ([]byte, *RemoteFileInf
 		return nil, nil, err
 	}
 
-	info, err := s.Stat(sessionID, remotePath)
+	info, err := statWithClient(sftpClient, remotePath)
 	if err != nil {
 		return nil, nil, err
+	}
+	if info.Size > MaxReadFileSize {
+		return nil, nil, fmt.Errorf("远程文件过大，无法完整读取: %s (%d bytes > %d bytes)", remotePath, info.Size, MaxReadFileSize)
 	}
 
 	remoteFile, err := sftpClient.Open(remotePath)
@@ -276,9 +285,12 @@ func (s *Service) ReadFile(sessionID, remotePath string) ([]byte, *RemoteFileInf
 		}
 	}()
 
-	data, err := io.ReadAll(remoteFile)
+	data, err := io.ReadAll(io.LimitReader(remoteFile, MaxReadFileSize+1))
 	if err != nil {
 		return nil, nil, fmt.Errorf("读取远程文件失败: %w", err)
+	}
+	if int64(len(data)) > MaxReadFileSize {
+		return nil, nil, fmt.Errorf("远程文件读取过程中超过大小上限: %s (%d bytes > %d bytes)", remotePath, len(data), MaxReadFileSize)
 	}
 
 	sum := sha256.Sum256(data)
@@ -853,7 +865,7 @@ func statRemoteRegularFile(client remoteAtomicClient, remotePath string) (os.Fil
 		return 0, false, fmt.Errorf("获取远程文件信息失败: %w", err)
 	}
 	if info.IsDir() || !info.Mode().IsRegular() {
-		return 0, false, fmt.Errorf("远程路径不是常规文件")
+		return 0, false, fmt.Errorf("远程路径不是常规文件: %s (mode=%s, perm=%#o, isDir=%t)", remotePath, info.Mode(), info.Mode().Perm(), info.IsDir())
 	}
 	return info.Mode().Perm(), true, nil
 }
