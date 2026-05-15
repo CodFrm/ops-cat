@@ -81,6 +81,17 @@ Bindings stay thin: parse → service → return. Business rules in `service/`, 
 - **Fix in-scope drift in the same change.** Stale docstring, lying CLAUDE.md line, dead reference, obvious one-line bug under your cursor → fix it now, don't TODO it.
 - **Stay in scope.** Multi-day refactors / hot subsystems / design-discussion territory → flag and ask. Genuine out-of-scope workaround → isolate it in one place with a clear comment and surface it; don't normalize patching as the default.
 
+## No meaningless fallbacks — don't pad code with "just in case"
+
+Defensive code that handles cases that can't happen, swallows errors, or papers over upstream bugs becomes load-bearing noise: future readers can't tell what's real, and the actual bug stays hidden behind the guard.
+
+- **Validate at boundaries, not between trusted layers.** `internal/app/*.go` parses IPC input from the frontend — that's a boundary, check it. A `service` calling its own `repository`, or a `repository` returning to its service, is not — don't `if x == nil` between them. Same for WASM host calls into `pkg/extension/host.go` (boundary) vs. Go-to-Go calls inside `internal/ai/` (trusted).
+- **Don't double-default user-configurable fields.** `Icon` / `Type` / `Color` / `PolicyGroup` resolution already has a canonical helper (`getIconComponent` + `getIconColor`, `getAssetType`, `resolvePolicyGroup`) that handles the empty case. Adding `value || "default"` at the call site overrides the user's intentional empty value and hides bugs in the helper.
+- **Don't swallow errors to keep the flow going.** `if err != nil { return nil }` / `catch { return defaultState }` masks the real failure and lets corrupted state propagate. Surface it (return the error, throw, log+abort the operation) — only catch when you have a concrete recovery for a specific error type.
+- **No runtime compatibility shims for retired data.** Schema/data migrations live in `/migrations/` and run once; don't sprinkle `if legacyField != "" { ... }` at read sites "to be safe." If the field is gone, delete it from the model — no `_renamed` placeholders, no `// removed in v1.x` comments.
+- **Treat "fallback" comments as a smell.** `// fallback for X`, `// just in case`, `// 防止 nil`, `// 兼容老数据` — ask whether X can actually happen. If yes, fix the producer. If no, delete the line. The comment is usually telling you the underlying code is wrong.
+- **Don't catch panics to soldier on.** `recover()` belongs at goroutine boundaries that must not crash the app (e.g. extension WASM dispatch, AI tool execution) and must record the panic. Wrapping a normal function in `defer recover()` to "be robust" hides logic bugs.
+
 ## Reuse first — grep before writing new code
 
 Parallel copies drift within weeks. Before writing any component / hook / util / Go helper, grep for the existing one.

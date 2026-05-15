@@ -33,7 +33,6 @@ func (a *App) getOrDialPanelDB(ctx context.Context, asset *asset_entity.Asset, c
 	if err != nil {
 		return nil, err
 	}
-	a.dbPanelCache.Touch(key)
 	return db, nil
 }
 
@@ -46,14 +45,13 @@ func (a *App) getOrDialPanelRedis(ctx context.Context, asset *asset_entity.Asset
 	if err != nil {
 		return nil, err
 	}
-	a.redisPanelCache.Touch(key)
 	return client, nil
 }
 
 // getOrDialPanelMongo 从面板缓存取 *mongo.Client(经 MongoClientCloser 包装)。
 // MongoDB 单 client 多 db,因此 key 只按 assetID。
 func (a *App) getOrDialPanelMongo(ctx context.Context, asset *asset_entity.Asset, cfg *asset_entity.MongoDBConfig, password string) (*connpool.MongoClientCloser, error) {
-	key := fmt.Sprintf("%d:", asset.ID)
+	key := fmt.Sprintf("%d", asset.ID)
 	wrapped, _, err := a.mongoPanelCache.GetOrDial(key, func() (*connpool.MongoClientCloser, io.Closer, error) {
 		client, closer, derr := connpool.DialMongoDB(ctx, asset, cfg, password, a.sshPool)
 		if derr != nil {
@@ -64,7 +62,6 @@ func (a *App) getOrDialPanelMongo(ctx context.Context, asset *asset_entity.Asset
 	if err != nil {
 		return nil, err
 	}
-	a.mongoPanelCache.Touch(key)
 	return wrapped, nil
 }
 

@@ -87,16 +87,6 @@ func (c *panelConnCache[C]) GetOrDial(key string, dial func() (C, io.Closer, err
 	return v.(C), nil, nil
 }
 
-// Touch 显式刷新 lastUsed。GetOrDial 已经隐式 Touch 命中分支,但成功执行查询后
-// 调用方再 Touch 一次,可以避免"长查询期间被 evictor 误判空闲"。
-func (c *panelConnCache[C]) Touch(key string) {
-	c.mu.Lock()
-	if e, ok := c.entries[key]; ok {
-		e.lastUsed.Store(time.Now().UnixNano())
-	}
-	c.mu.Unlock()
-}
-
 // Drop 关闭并移除指定 key 的连接。
 func (c *panelConnCache[C]) Drop(key string) {
 	c.mu.Lock()

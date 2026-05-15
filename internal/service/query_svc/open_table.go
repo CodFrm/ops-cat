@@ -94,10 +94,12 @@ func queryPrimaryKeys(ctx context.Context, conn *sql.Conn, driver asset_entity.D
 	var sqlText string
 	switch driver {
 	case asset_entity.DriverPostgreSQL:
+		schema, tbl := splitPGSchemaTable(table)
 		sqlText = "SELECT kcu.column_name FROM information_schema.table_constraints tc " +
 			"JOIN information_schema.key_column_usage kcu " +
 			"ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema " +
-			"WHERE tc.table_schema = 'public' AND tc.table_name = " + SQLQuote(table) +
+			"WHERE tc.table_schema = " + SQLQuote(schema) +
+			" AND tc.table_name = " + SQLQuote(tbl) +
 			" AND tc.constraint_type = 'PRIMARY KEY' ORDER BY kcu.ordinal_position"
 	default:
 		sqlText = "SHOW KEYS FROM " + QuoteTableRef(database, table, driver) + " WHERE Key_name = 'PRIMARY'"
@@ -136,9 +138,10 @@ func queryColumns(ctx context.Context, conn *sql.Conn, driver asset_entity.Datab
 	var sqlText string
 	switch driver {
 	case asset_entity.DriverPostgreSQL:
+		schema, tbl := splitPGSchemaTable(table)
 		sqlText = "SELECT column_name, data_type, udt_name, is_nullable, column_default " +
-			"FROM information_schema.columns WHERE table_schema = 'public' AND table_name = " +
-			SQLQuote(table) + " ORDER BY ordinal_position"
+			"FROM information_schema.columns WHERE table_schema = " + SQLQuote(schema) +
+			" AND table_name = " + SQLQuote(tbl) + " ORDER BY ordinal_position"
 	default:
 		sqlText = "SHOW COLUMNS FROM " + QuoteTableRef(database, table, driver)
 	}
@@ -238,6 +241,28 @@ func zipRow(cols []string, values []any) map[string]any {
 		row[col] = val
 	}
 	return row
+}
+
+// splitPGSchemaTable 把可能带 schema 前缀的 PG 表名拆成 (schema, table)。
+// 输入 "events" → ("public", "events");"reporting.events" → ("reporting", "events");
+// 与 QuoteTableRef/quoteQualified 的输入空间保持一致——后者会按点号拆分加引号,
+// 这里也按同样规则提取 information_schema 查询所需的两段。
+func splitPGSchemaTable(table string) (string, string) {
+	parts := strings.Split(table, ".")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	if len(out) >= 2 {
+		return out[0], out[len(out)-1]
+	}
+	if len(out) == 1 {
+		return "public", out[0]
+	}
+	return "public", ""
 }
 
 func pickString(row map[string]any, keys ...string) string {

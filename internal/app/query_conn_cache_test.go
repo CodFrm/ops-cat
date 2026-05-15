@@ -59,7 +59,6 @@ func TestPanelConnCache_GetOrDial_CachesAndReuses(t *testing.T) {
 		So(dialCount.Load(), ShouldEqual, 1)
 	})
 }
-
 func TestPanelConnCache_GetOrDial_ConcurrentSameKeyDialsOnce(t *testing.T) {
 	Convey("同 key 并发首拨经 singleflight 合流为一次", t, func() {
 		c := newPanelConnCache[*fakeClient]("test", time.Minute)
@@ -212,33 +211,5 @@ func TestPanelConnCache_Evictor_EvictsIdle(t *testing.T) {
 
 		// 缓存里应该已经没有这个 key 了
 		So(c.size(), ShouldEqual, 0)
-	})
-}
-
-func TestPanelConnCache_Touch_RefreshesLastUsed(t *testing.T) {
-	Convey("Touch 刷新 lastUsed,延后驱逐", t, func() {
-		c := newPanelConnCache[*fakeClient]("test", 100*time.Millisecond)
-		defer func() { _ = c.Close() }()
-
-		client := &fakeClient{id: 1}
-		_, _, _ = c.GetOrDial("1:db", func() (*fakeClient, io.Closer, error) {
-			return client, nil, nil
-		})
-
-		// 让初始 lastUsed 算"老"
-		oldNow := time.Now().Add(50 * time.Millisecond)
-		c.evictOnce(oldNow) // 50ms 未到 TTL,不该驱逐
-		So(client.closed.Load(), ShouldBeFalse)
-
-		// Touch 把 lastUsed 推到 oldNow + 50ms
-		c.Touch("1:db")
-
-		// 再过 50ms(总 100ms,刚到 TTL),由于刚 Touch 过,不该驱逐
-		c.evictOnce(time.Now().Add(80 * time.Millisecond))
-		So(client.closed.Load(), ShouldBeFalse)
-
-		// 推够远超过 TTL,驱逐
-		c.evictOnce(time.Now().Add(time.Hour))
-		So(client.closed.Load(), ShouldBeTrue)
 	})
 }

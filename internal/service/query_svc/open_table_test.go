@@ -102,6 +102,33 @@ func TestOpenTable_PostgreSQL(t *testing.T) {
 	})
 }
 
+func TestOpenTable_PostgreSQL_SchemaQualified(t *testing.T) {
+	Convey("OpenTable PG 接收 schema.table 时按 schema 拆分查 information_schema", t, func() {
+		db, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(false))
+		So(err, ShouldBeNil)
+		defer func() { _ = db.Close() }()
+		mock.MatchExpectationsInOrder(true)
+
+		// information_schema 查询必须按 schema 拆分:table_schema='reporting' 且 table_name='events',
+		// 而不是把 'reporting.events' 整体塞进 table_name。
+		mock.ExpectQuery(`tc\.table_schema = 'reporting'.*tc\.table_name = 'events'`).
+			WillReturnRows(sqlmock.NewRows([]string{"column_name"}).AddRow("id"))
+		mock.ExpectQuery(`table_schema = 'reporting'.*table_name = 'events'`).
+			WillReturnRows(sqlmock.NewRows([]string{"column_name", "data_type", "udt_name", "is_nullable", "column_default"}).
+				AddRow("id", "integer", "int4", "NO", nil))
+		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM "reporting"."events"`).
+			WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(3))
+		mock.ExpectQuery(`SELECT \* FROM "reporting"."events" LIMIT 10 OFFSET 0`).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+
+		res, err := OpenTable(context.Background(), db, asset_entity.DriverPostgreSQL, "mydb", "reporting.events", 10)
+		So(err, ShouldBeNil)
+		So(res.PrimaryKeys, ShouldResemble, []string{"id"})
+		So(res.TotalCount, ShouldEqual, 3)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+}
+
 func TestOpenTable_PageSizeDefault(t *testing.T) {
 	Convey("pageSize<=0 时回退到 1000", t, func() {
 		db, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(false))
