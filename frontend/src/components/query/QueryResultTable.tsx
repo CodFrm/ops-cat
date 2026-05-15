@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo, useTransition } from "react";
+import { memo, useState, useRef, useEffect, useCallback, useMemo, useTransition } from "react";
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import {
@@ -23,6 +23,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@opskat/ui";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
 import { cellValueToText } from "@/lib/cellValue";
 import type { CellValueFilterOperator } from "@/lib/tableSql";
@@ -224,7 +225,13 @@ function compareValues(a: unknown, b: unknown): number {
   return String(a).localeCompare(String(b));
 }
 
-export function QueryResultTable({
+// 大表(每页可达 1000 行)整表 DOM 量本身就大,父组件每次 commit 都让本组件函数体
+// 重跑会显著拖慢"切 tab / 点筛选下拉 / 改 hover 状态"等无关交互。memo 浅比较截断
+// props 未变的 re-render,把表外状态变更与表内 reconcile 解耦。
+// —— 要求 TableDataTab 把所有 callback / 数组 props 引用稳定。
+export const QueryResultTable = memo(QueryResultTableImpl);
+
+function QueryResultTableImpl({
   columns,
   rows,
   loading,
@@ -434,6 +441,45 @@ export function QueryResultTable({
       return sortDir === "asc" ? cmp : -cmp;
     });
   }, [rows, sortCol, sortDir, isControlledSort, filteredIndices]);
+
+  // 虚拟化:1000 行 × N 列的真实 <td> 会让浏览器的 layout / focus / 选择器匹配 /
+  // Radix Select 打开时的 getBoundingClientRect 全部慢下来 —— 这部分不是 React 重渲,
+  // memo 帮不上,只能把 DOM 节点数砍下来。estimateSize 按 rowDensity 给粗估,真实行高
+  // 由 measureElement 在每行 ResizeObserver 里校准,所以 estimate 不准也不影响最终布局。
+  const rowEstimateSize = rowDensity === "compact" ? 22 : rowDensity === "comfortable" ? 36 : 28;
+  // tab 用 display:none 切走时,浏览器把每个 <tr> 的 offsetHeight / ResizeObserver
+  // borderBoxSize 报成 0;react-virtual 默认 measureElement 拿到 0 后会写回 itemSizeCache,
+  // resizeItem 内的 scrollAdjustments 反向钳位把 DOM scrollTop 一路拉到 0,并通过 scroll
+  // 事件把 virtualizer 的 scrollOffset 同步成 0。切回来视觉就是"表格回到顶部"。
+  // 这里把每行最近一次的非 0 高度缓存到 WeakMap;size=0 时回退到这个值让 delta=0,resizeItem 短路。
+  const lastNonZeroSizesRef = useRef<WeakMap<Element, number>>(new WeakMap());
+  const rowVirtualizer = useVirtualizer({
+    count: sortedIndices.length,
+    getScrollElement: () => containerRef.current,
+    estimateSize: () => rowEstimateSize,
+    overscan: 8,
+    measureElement: (element, entry, instance) => {
+      const horizontal = instance.options.horizontal;
+      let size: number;
+      if (entry?.borderBoxSize) {
+        const box = entry.borderBoxSize[0];
+        size = box
+          ? Math.round(horizontal ? box.inlineSize : box.blockSize)
+          : (element as HTMLElement)[horizontal ? "offsetWidth" : "offsetHeight"];
+      } else {
+        size = (element as HTMLElement)[horizontal ? "offsetWidth" : "offsetHeight"];
+      }
+      if (size === 0) {
+        return lastNonZeroSizesRef.current.get(element) ?? rowEstimateSize;
+      }
+      lastNonZeroSizesRef.current.set(element, size);
+      return size;
+    },
+  });
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  const totalRowSize = rowVirtualizer.getTotalSize();
+  const paddingTop = virtualRows.length > 0 ? virtualRows[0].start : 0;
+  const paddingBottom = virtualRows.length > 0 ? totalRowSize - virtualRows[virtualRows.length - 1].end : 0;
 
   const frozenColumnOffsets = useMemo(() => {
     const offsets: Record<string, number> = {};
@@ -1036,13 +1082,70 @@ export function QueryResultTable({
     ]
   );
 
-  // Scroll the selected cell into view when navigating
+  // 实测:tab 用 display:none 切走时,浏览器原生把 scrollable 容器的 scrollTop 状态归 0
+  // (日志确认 — scrollTop SET hook 没拦到任何 JS 调用,但 measureElement 触发时 scrollTop
+  // 已经从 1995 变成 0)。切回来时浏览器自己派发一次 scroll 事件,react-virtual 的
+  // observeElementOffset 把 scrollOffset 同步成 0,渲染就回到顶部。
+  // 修法:HIDDEN 时(此时 virtualizer 内部 scrollOffset 还保留真值)保存它,SHOWN 后用
+  // raf 把 DOM scrollTop 写回去 —— 浏览器再发一次 scroll 事件,virtualizer 同步过去,
+  // 视觉位置完整恢复。
+  // —— 切回来期间用 visibility:hidden 遮住容器,避免用户看见"先一帧顶部错位 → 再一帧
+  // 正确位置"的闪动。visibility:hidden 不影响 layout / IntersectionObserver,只是不绘制。
+  const savedScrollOffsetRef = useRef(0);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) {
+            const offset = rowVirtualizer.scrollOffset;
+            if (typeof offset === "number" && offset > 0) {
+              savedScrollOffsetRef.current = offset;
+              container.style.visibility = "hidden";
+            }
+          } else if (savedScrollOffsetRef.current > 0 && container.scrollTop === 0) {
+            const target = savedScrollOffsetRef.current;
+            // raf 1:layout 已恢复,写回 scrollTop —— 触发 scroll 事件,virtualizer 同步 scrollOffset
+            // raf 2:virtualizer 这一帧已 render 出正确 virtualItems,放回 visible 给用户看
+            requestAnimationFrame(() => {
+              if (!containerRef.current) return;
+              containerRef.current.scrollTop = target;
+              requestAnimationFrame(() => {
+                if (containerRef.current) containerRef.current.style.visibility = "";
+              });
+            });
+          } else if (container.style.visibility === "hidden") {
+            // 不需要恢复(saved=0 或 scrollTop 没被重置),但 hidden 还在,清掉。
+            container.style.visibility = "";
+          }
+        }
+      },
+      { threshold: 0 }
+    );
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+      if (containerRef.current) containerRef.current.style.visibility = "";
+    };
+    // columns.length 进依赖:首次 mount 时 loading=true,containerRef.current 还是 null,
+    // OpenTable 完成 columns 填充后 effect 才能挂上 observer。
+  }, [rowVirtualizer, columns.length]);
+
+  // Scroll the selected cell into view when navigating.
+  // 虚拟化后,目标行可能根本不在 DOM 里,scrollIntoView 找不到 td。先用 virtualizer
+  // 把目标行索引滚进视口(只动垂直方向),再下一帧用 scrollIntoView 处理水平方向。
   useEffect(() => {
     if (!selectedCell || !containerRef.current) return;
-    const key = cellKey(selectedCell.origIdx, selectedCell.col);
-    const el = containerRef.current.querySelector<HTMLElement>(`[data-cell-key="${CSS.escape(key)}"]`);
-    el?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [selectedCell]);
+    const displayIdx = sortedIndices.indexOf(selectedCell.origIdx);
+    if (displayIdx >= 0) rowVirtualizer.scrollToIndex(displayIdx, { align: "auto" });
+    const rafId = requestAnimationFrame(() => {
+      const key = cellKey(selectedCell.origIdx, selectedCell.col);
+      const el = containerRef.current?.querySelector<HTMLElement>(`[data-cell-key="${CSS.escape(key)}"]`);
+      el?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [selectedCell, sortedIndices, rowVirtualizer]);
 
   if (loading) {
     return (
@@ -1207,11 +1310,24 @@ export function QueryResultTable({
             </tr>
           </thead>
           <tbody>
-            {sortedIndices.map((origIdx, idx) => {
+            {paddingTop > 0 && (
+              <tr aria-hidden="true">
+                <td colSpan={displayColumns.length} style={{ height: paddingTop, padding: 0, border: 0 }} />
+              </tr>
+            )}
+            {virtualRows.map((virtualRow) => {
+              const idx = virtualRow.index;
+              const origIdx = sortedIndices[idx];
               const row = rows[origIdx];
+              if (!row) return null;
               const isRowSelected = selectedRowIdxs.has(origIdx);
               return (
-                <tr key={origIdx} className={idx % 2 === 0 ? "bg-background" : "bg-muted/40"}>
+                <tr
+                  key={origIdx}
+                  data-index={idx}
+                  ref={rowVirtualizer.measureElement}
+                  className={idx % 2 === 0 ? "bg-background" : "bg-muted/40"}
+                >
                   {displayColumns.map((col) => {
                     const ck = cellKey(origIdx, col);
                     const isEdited = edits?.has(ck);
@@ -1316,6 +1432,11 @@ export function QueryResultTable({
                 </tr>
               );
             })}
+            {paddingBottom > 0 && (
+              <tr aria-hidden="true">
+                <td colSpan={displayColumns.length} style={{ height: paddingBottom, padding: 0, border: 0 }} />
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

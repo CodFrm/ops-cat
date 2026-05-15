@@ -730,7 +730,6 @@ function FilterConditionRow({
 }: FilterConditionRowProps) {
   const { t } = useTranslation();
 
-  const suggestions = useMemo(() => distinctValues(rows, item.column), [item.column, rows]);
   const setItem = useCallback(
     (patch: Partial<TableFilterCondition>) => onChange(updateFilterItem(rootItems, item.id, patch)),
     [item.id, onChange, rootItems]
@@ -797,7 +796,12 @@ function FilterConditionRow({
       {operatorNeedsRange ? (
         <FilterRangePicker value={item.value} onChange={(value) => setItem({ value })} />
       ) : operatorNeedsValue ? (
-        <FilterValuePicker value={item.value} suggestions={suggestions} onChange={(value) => setItem({ value })} />
+        <FilterValuePicker
+          value={item.value}
+          rows={rows}
+          column={item.column}
+          onChange={(value) => setItem({ value })}
+        />
       ) : null}
       {isLast && (
         <>
@@ -838,7 +842,8 @@ function FilterConditionRow({
 
 interface FilterValuePickerProps {
   value: unknown;
-  suggestions: DistinctValue[];
+  rows: Record<string, unknown>[];
+  column: string;
   onChange: (value: unknown) => void;
 }
 
@@ -877,12 +882,15 @@ function FilterRangePicker({ value, onChange }: FilterRangePickerProps) {
   );
 }
 
-function FilterValuePicker({ value, suggestions, onChange }: FilterValuePickerProps) {
+function FilterValuePicker({ value, rows, column, onChange }: FilterValuePickerProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [customValue, setCustomValue] = useState("");
   const [search, setSearch] = useState("");
   const label = value === undefined ? "?" : value == null ? "NULL" : cellValueToText(value);
+  // distinctValues 是 O(rows) 全表扫描;只在 popover 打开后才计算,关闭后丢弃。
+  // 否则父组件每次 re-render 都会因 rows 引用变化触发整列重算,大表上 ~几十~几百 ms。
+  const suggestions = useMemo<DistinctValue[]>(() => (open ? distinctValues(rows, column) : []), [open, rows, column]);
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return suggestions;

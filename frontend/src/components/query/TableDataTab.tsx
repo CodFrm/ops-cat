@@ -894,13 +894,32 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
     toast.success(t("query.copied"));
   }, [ddlLoading, ddlSQL, t]);
 
+  // 提到顶层走 useCallback,使 QueryResultTable 的 memo 浅比较生效;
+  // 只依赖 rows.length —— 新增行用它来判断"(Default)"占位。
+  const rowsLength = rows.length;
+  const renderCell = useCallback(
+    (value: unknown, ctx: { rowIdx: number; col: string }) => {
+      if (ctx.rowIdx >= rowsLength && value == null) {
+        return <span className="text-muted-foreground/70 italic">(Default)</span>;
+      }
+      if (value == null) return <span className="text-muted-foreground italic">NULL</span>;
+      return <span className="truncate block">{cellValueToText(value)}</span>;
+    },
+    [rowsLength]
+  );
+
   const hasNext = totalPages != null ? page < totalPages - 1 : rows.length === pageSize;
   const hasPrev = page > 0;
   const tableRows = useMemo(() => [...rows, ...newRows], [newRows, rows]);
   const pendingEditCount = edits.size + newRows.length;
   const hasEdits = pendingEditCount > 0;
   const hasSelectedRow = selectedRowIdx != null && tableRows[selectedRowIdx] != null;
-  const effectiveVisibleColumns = visibleColumns.length > 0 ? visibleColumns : columns;
+  // memo 用 Object.is 比较 props,这里走三元每次会在 visibleColumns 与 columns 间切引用,
+  // 不 useMemo 包的话,父组件任意 re-render 都会让 QueryResultTable 收到"新"数组。
+  const effectiveVisibleColumns = useMemo(
+    () => (visibleColumns.length > 0 ? visibleColumns : columns),
+    [visibleColumns, columns]
+  );
   const hasActiveFilterSort =
     filters.length > 0 || sorts.length > 0 || !!whereClause || !!orderByClause || !!sortColumn || !!sortDir;
 
@@ -990,13 +1009,7 @@ function TableDataTabContent({ tabId, innerTabId, database, table }: TableDataTa
         columnTypes={columnTypes}
         rowDensity={rowDensity}
         focusCellRequest={focusCellRequest}
-        renderCell={(value, ctx) => {
-          if (ctx.rowIdx >= rows.length && value == null) {
-            return <span className="text-muted-foreground/70 italic">(Default)</span>;
-          }
-          if (value == null) return <span className="text-muted-foreground italic">NULL</span>;
-          return <span className="truncate block">{cellValueToText(value)}</span>;
-        }}
+        renderCell={renderCell}
       />
 
       {/* Footer bar */}
