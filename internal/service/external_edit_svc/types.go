@@ -29,7 +29,6 @@ const (
 	saveStatusRemoteMissing = "remote_missing"
 	saveStatusReread        = "reread"
 	saveStatusNoop          = "noop"
-	saveStatusError         = "error"
 
 	resolutionOverwrite = "overwrite"
 	resolutionRecreate  = "recreate"

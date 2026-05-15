@@ -20,7 +20,6 @@ import (
 
 type ExternalEditSettings = external_edit_svc.Settings
 type ExternalEditSettingsInput = external_edit_svc.SettingsInput
-type ExternalEditEditor = external_edit_svc.Editor
 type ExternalEditOpenRequest = external_edit_svc.OpenRequest
 type ExternalEditSession = external_edit_svc.Session
 type ExternalEditSaveResult = external_edit_svc.SaveResult
