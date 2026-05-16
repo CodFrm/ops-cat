@@ -18,7 +18,7 @@ import (
 // 反推出旧 provider 的事件形态，保证前端 ai:event:{convID} 监听者无感知。
 //
 // 翻译是有状态的：thinking → content / tool_start 之间的转移需要插入一条
-// "thinking_done"，与旧 anthropic.go 一致。EventTranslator 实例每个对话每轮 1 个。
+// "thinking_done"，保持前端既有 stream contract。EventTranslator 实例每个对话每轮 1 个。
 //
 // 审批事件（approval_request / approval_result）由 app_ai.go 的 confirmFunc 直接
 // emit，不走 cago event 流，因此不在本适配器范围。

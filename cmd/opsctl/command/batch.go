@@ -29,7 +29,7 @@ type batchInput struct {
 
 type batchCommand struct {
 	Asset   string `json:"asset"`
-	Type    string `json:"type,omitempty"` // "exec"|"sql"|"redis", default "exec"
+	Type    string `json:"type,omitempty"` // "exec"|"sql"|"redis"|"mongo", default "exec"
 	Command string `json:"command"`
 }
 
@@ -52,7 +52,7 @@ type batchOutput struct {
 // resolvedBatchCmd is a batch command with resolved asset info.
 type resolvedBatchCmd struct {
 	asset    *asset_entity.Asset
-	cmdType  string // "exec"|"sql"|"redis"
+	cmdType  string // "exec"|"sql"|"redis"|"mongo"
 	command  string
 	decision *ai.CheckResult // 策略预检结果，用于审计
 }
@@ -329,7 +329,7 @@ func executeBatchExec(ctx context.Context, cmd resolvedBatchCmd) batchResult {
 	return result
 }
 
-// executeBatchHandler runs a sql/redis command via the tool handler.
+// executeBatchHandler runs a data command via the tool handler.
 func executeBatchHandler(ctx context.Context, handlers map[string]ai.ToolHandlerFunc, toolName string, cmd resolvedBatchCmd, params map[string]any) batchResult {
 	result := batchResult{
 		AssetID:   cmd.asset.ID,

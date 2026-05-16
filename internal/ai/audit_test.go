@@ -218,6 +218,3 @@ func TestTruncateString(t *testing.T) {
 		})
 	})
 }
-
-// TestAuditingExecutor 已随 AuditingExecutor 一并下线（M6 cutover）。
-// 等价覆盖参考 cago_audit_test.go 中的 TestRawTool_* 三组用例。

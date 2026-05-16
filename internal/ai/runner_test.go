@@ -397,7 +397,7 @@ func TestBuildGeneralPurposeTools_AllLocalToolsPrefixed(t *testing.T) {
 
 // 回归：subagent 调出的 general-purpose 子 agent 工具集含
 // local_bash/local_write/local_edit（cago 默认 bash/write/edit 经 WrapLocalTool 改名）。
-// 旧实现只把 LocalToolGate 挂在父 agent 上，子 agent 调 local_bash 时绕过审批。
+// LocalToolGate 必须同时挂到子 agent，否则 subagent 调 local_bash 时会绕过审批。
 // 这里通过 providertest 串起一条 parent → subagent → child local_bash 的端到端流，
 // 断言 LocalToolGate.confirm 一定被触发。
 func TestRunner_GPSubagentInheritsLocalToolGate(t *testing.T) {

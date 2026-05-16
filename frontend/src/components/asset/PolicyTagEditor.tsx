@@ -151,5 +151,4 @@ export function PolicyTagEditor({
   );
 }
 
-// Legacy adapter for backward compatibility
 export type { PolicyVariant };

@@ -175,9 +175,7 @@ export const ApprovalBlock = memo(function ApprovalBlock({ block }: ApprovalBloc
             rows={Math.max(2, (editedCommands[0] || "").split("\n").length)}
             placeholder={t("opsctlApproval.patternPlaceholder")}
           />
-          <div className="text-[10px] text-muted-foreground/70">
-            {t("ai.approvalLocalToolPatternHint")}
-          </div>
+          <div className="text-[10px] text-muted-foreground/70">{t("ai.approvalLocalToolPatternHint")}</div>
         </div>
       )}
 

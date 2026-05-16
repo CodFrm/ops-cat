@@ -37,8 +37,7 @@ export const RetryBanner = memo(function RetryBanner({ status }: { status: ChatM
   }, [status, statusTimerKey]);
 
   const attemptLabel = status.attempt > 0 ? t("ai.retry.attempt", { n: status.attempt }) : "";
-  const countdownLabel =
-    remaining > 0 ? t("ai.retry.countdown_seconds", { n: remaining }) : t("ai.retry.now");
+  const countdownLabel = remaining > 0 ? t("ai.retry.countdown_seconds", { n: remaining }) : t("ai.retry.now");
   // 错误归因 + 原始错误：用户在 retry 期间想知道为什么在重试（503 / 网络 / 鉴权 …）。
   // 友好标题走 classifyError(走和 ErrorBlock 同一份分类规则)，原始 cause 紧随其后以
   // monospace 小字呈现，方便复制 request id。

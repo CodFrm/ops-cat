@@ -305,7 +305,7 @@ function loadInitialSidebarState() {
         migratedLegacy: false,
       };
     } catch {
-      // ignore invalid persisted data and fall back to legacy migration
+      // ignore invalid persisted data and fall back to sidebar state migration
     }
   }
 
@@ -319,7 +319,7 @@ function loadInitialSidebarState() {
     legacyLastBound !== null ||
     localStorage.getItem(LEGACY_SIDEBAR_INPUT_DRAFT_KEY) !== null;
 
-  // 从旧版单 sidebar key 平滑迁移到多 tab 模型：
+  // 从单 sidebar key 平滑迁移到多 tab 模型：
   // 只要检测到任意旧 key，就恢复成一个初始侧边 tab，避免升级后直接丢上下文。
   if (!hasLegacyState) {
     return {

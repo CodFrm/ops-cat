@@ -90,7 +90,9 @@ export const ToolBlock = memo(function ToolBlock({ block }: ToolBlockProps) {
         <div className="border-t border-border/40 max-h-96 overflow-auto">
           {hasInput && (
             <div className="px-3 py-2">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">{t("toolBlock.arguments")}</div>
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">
+                {t("toolBlock.arguments")}
+              </div>
               <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-foreground/70 leading-relaxed">
                 {formatToolInput(block.toolInput)}
               </pre>
@@ -99,7 +101,9 @@ export const ToolBlock = memo(function ToolBlock({ block }: ToolBlockProps) {
           {hasOutput && (
             <div className={`px-3 py-2 ${hasInput ? "border-t border-border/40" : ""}`}>
               {hasInput && (
-                <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">{t("toolBlock.output")}</div>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">
+                  {t("toolBlock.output")}
+                </div>
               )}
               <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-muted-foreground leading-relaxed">
                 {block.content}

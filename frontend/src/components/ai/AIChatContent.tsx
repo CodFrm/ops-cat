@@ -583,9 +583,7 @@ export function AIChatContent({
                 <div className="flex items-start justify-between gap-3 border-b px-3 py-2">
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-foreground">{t("ai.editingMessage")}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {t("ai.editResendHint")}
-                    </p>
+                    <p className="text-xs text-muted-foreground">{t("ai.editResendHint")}</p>
                   </div>
                   <Button
                     type="button"
@@ -642,9 +640,7 @@ export function AIChatContent({
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>{t("ai.regenerateTitle")}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {t("ai.regenerateConfirm")}
-              </AlertDialogDescription>
+              <AlertDialogDescription>{t("ai.regenerateConfirm")}</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>{t("action.cancel")}</AlertDialogCancel>

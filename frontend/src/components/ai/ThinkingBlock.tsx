@@ -77,9 +77,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({ block }: ThinkingBloc
   }, []);
 
   const charCount = block.content.length;
-  const summary = isRunning
-    ? t("ai.thinking")
-    : `${t("ai.thinkingProcess")} · ${charCount} ${t("ai.chars")}`;
+  const summary = isRunning ? t("ai.thinking") : `${t("ai.thinkingProcess")} · ${charCount} ${t("ai.chars")}`;
 
   return (
     <div className="my-1.5 rounded-lg border border-purple-500/20 bg-purple-500/5 text-xs overflow-hidden">
