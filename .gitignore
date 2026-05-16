@@ -28,7 +28,6 @@ internal/embedded/opsctl_bin
 coverage.out
 coverage.html
 
-/.workflow/
 .omc
 
 coverage_new.out
@@ -44,6 +43,3 @@ coverage_new.out
 
 .github/pr-assets/
 .gocache/
-
-# Local Golutra team control plane (never commit)
-.golutra/
