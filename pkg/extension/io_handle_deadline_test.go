@@ -15,8 +15,8 @@ func TestIOHandleManagerSetDeadline(t *testing.T) {
 
 		Convey("When registering a net.Conn", func() {
 			serverConn, clientConn := net.Pipe()
-			defer serverConn.Close() //nolint:errcheck
-			defer clientConn.Close() //nolint:errcheck
+			defer func() { _ = serverConn.Close() }()
+			defer func() { _ = clientConn.Close() }()
 			id, err := m.Register(clientConn, clientConn, clientConn, IOMeta{})
 			So(err, ShouldBeNil)
 
@@ -88,7 +88,7 @@ func TestDefaultHostProviderSetDeadline(t *testing.T) {
 	Convey("Given a DefaultHostProvider with a TCP handle", t, func() {
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		So(err, ShouldBeNil)
-		defer ln.Close() //nolint:errcheck
+		defer func() { _ = ln.Close() }()
 
 		accepted := make(chan net.Conn, 1)
 		go func() {
@@ -103,7 +103,7 @@ func TestDefaultHostProviderSetDeadline(t *testing.T) {
 		id, _, err := h.IOOpen(IOOpenParams{Type: "tcp", Addr: ln.Addr().String()})
 		So(err, ShouldBeNil)
 		serverConn := <-accepted
-		defer serverConn.Close() //nolint:errcheck
+		defer func() { _ = serverConn.Close() }()
 
 		Convey("IOSetDeadline with unixNanos=0 clears any existing deadline", func() {
 			// Arm a past deadline via the host interface.

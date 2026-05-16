@@ -483,7 +483,7 @@ function SortCriterionChip({ columns, item, items, onChange }: SortCriterionChip
       >
         <SelectTrigger
           size="sm"
-          className="h-7 min-w-20 gap-1 border-0 bg-transparent px-1.5 py-0 text-sm font-medium text-primary shadow-none hover:bg-accent focus-visible:ring-1 [&>svg]:opacity-60"
+          className="h-7 min-w-20 gap-1 border-0 bg-transparent px-1.5 py-0 text-sm font-medium text-primary shadow-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring/45 [&>svg]:opacity-60"
         >
           <SelectValue />
         </SelectTrigger>
@@ -757,7 +757,7 @@ function FilterConditionRow({
       <Select value={item.column} onValueChange={(value) => setItem({ column: value, value: undefined })}>
         <SelectTrigger
           size="sm"
-          className="h-7 min-w-20 gap-1 border-0 bg-transparent px-1.5 py-0 text-sm font-medium text-primary shadow-none hover:bg-accent focus-visible:ring-1 [&>svg]:opacity-60"
+          className="h-7 min-w-20 gap-1 border-0 bg-transparent px-1.5 py-0 text-sm font-medium text-primary shadow-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring/45 [&>svg]:opacity-60"
         >
           <SelectValue />
         </SelectTrigger>
@@ -781,7 +781,7 @@ function FilterConditionRow({
       >
         <SelectTrigger
           size="sm"
-          className="h-7 min-w-12 gap-1 border-0 bg-transparent px-1.5 py-0 text-sm font-medium text-muted-foreground shadow-none hover:bg-accent focus-visible:ring-1 [&>svg]:opacity-60"
+          className="h-7 min-w-12 gap-1 border-0 bg-transparent px-1.5 py-0 text-sm font-medium text-muted-foreground shadow-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring/45 [&>svg]:opacity-60"
         >
           <SelectValue />
         </SelectTrigger>

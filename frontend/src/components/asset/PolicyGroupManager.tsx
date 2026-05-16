@@ -34,6 +34,10 @@ const tabAliasMap: Record<string, string> = {
   k8s: "command",
 };
 
+function resolveInitialTab(initialTab?: string) {
+  return tabAliasMap[initialTab || ""] || initialTab || "command";
+}
+
 interface EditState {
   id: string;
   name: string;
@@ -79,7 +83,10 @@ function serializePolicy(policy: Record<string, string[]>): string {
 
 export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initialTab }: PolicyGroupManagerProps) {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<string>(tabAliasMap[initialTab || ""] || initialTab || "command");
+  const initialActiveTab = resolveInitialTab(initialTab);
+  const [activeTabState, setActiveTabState] = useState({ initialTab: initialActiveTab, activeTab: initialActiveTab });
+  const activeTab =
+    open && activeTabState.initialTab === initialActiveTab ? activeTabState.activeTab : initialActiveTab;
   const [groups, setGroups] = useState<policy_group_entity.PolicyGroupItem[]>([]);
   const [tabs, setTabs] = useState(builtinTabs);
   const [editState, setEditState] = useState<EditState | null>(null);
@@ -122,14 +129,14 @@ export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initia
   }, []);
 
   useEffect(() => {
-    if (open) {
-      setActiveTab(tabAliasMap[initialTab || ""] || initialTab || "command");
-    }
-  }, [initialTab, open]);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (open) discoverTabs();
+    if (!open) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void discoverTabs();
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [open, discoverTabs]);
 
   const fetchGroups = useCallback(async () => {
@@ -147,8 +154,14 @@ export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initia
   }, [activeTab]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (open) fetchGroups();
+    if (!open) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void fetchGroups();
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [open, fetchGroups]);
 
   const notifyChanged = () => {
@@ -290,7 +303,7 @@ export function PolicyGroupManager({ open, onOpenChange, onGroupsChanged, initia
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
               onClick={() => {
-                setActiveTab(tab.key);
+                setActiveTabState({ initialTab: initialActiveTab, activeTab: tab.key });
                 setEditState(null);
               }}
             >

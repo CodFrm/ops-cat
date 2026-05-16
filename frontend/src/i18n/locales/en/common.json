@@ -5,8 +5,8 @@
     "hint": "Select an asset from the sidebar to get started",
     "hints": {
       "doubleClick": "Open connection",
-      "click": "View details & command policy",
-      "rightClick": "More actions",
+      "click": "Select asset",
+      "rightClick": "View asset details and more actions",
       "doubleClickKey": "Double-click",
       "clickKey": "Click",
       "rightClickKey": "Right-click"
@@ -73,10 +73,17 @@
     "close": "Close",
     "submit": "Submit",
     "openInTab": "Open in New Tab",
-    "editPermission": "Edit Permission",
+    "editPermission": "Asset Details",
     "open": "Open",
     "retry": "Retry",
     "refresh": "Refresh"
+  },
+  "codeEditor": {
+    "loadFailed": "Editor failed to load"
+  },
+  "toolBlock": {
+    "arguments": "Arguments",
+    "output": "Output"
   },
   "tab": {
     "close": "Close",
@@ -128,6 +135,12 @@
     "filterAllTypes": "All types",
     "filterExtensions": "Extensions",
     "filterHideEmptyGroups": "Hide empty folders",
+    "emptyTitle": "No assets yet",
+    "emptyDesc": "Add SSH, database, Redis, and other assets to start connecting.",
+    "noMatchTitle": "No assets found",
+    "noMatchDesc": "Adjust the search or filters and try again.",
+    "clearSearch": "Clear search",
+    "clearTypeFilter": "Clear type filter",
     "icon": "Icon",
     "iconSearch": "Search icons...",
     "iconNoResults": "No matching icons",
@@ -171,6 +184,9 @@
     "parentGroupNone": "Top Level",
     "deleteGroupTitle": "Delete Group",
     "deleteGroupDesc": "This group has {{count}} assets. Choose how to handle them:",
+    "deleteGroupDescDetailed": "This group contains {{assetCount}} direct assets and {{childGroupCount}} child groups. Child groups will move to the parent after deletion. Choose how to handle direct assets:",
+    "deleteGroupDescChildrenOnly": "This group contains {{childGroupCount}} child groups. Child groups will move to the parent after deletion.",
+    "deleteGroupOnly": "Delete Group",
     "deleteAssets": "Delete Assets",
     "moveToUngrouped": "Move to Ungrouped",
     "deleteAssetTitle": "Delete Asset",
@@ -213,6 +229,13 @@
     "testing": "Testing...",
     "cancelTest": "Cancel",
     "testCancelled": "Test cancelled",
+    "formDescription": "Configure asset connection details, authentication, and advanced options.",
+    "formMissingName": "Enter an asset name.",
+    "formMissingHost": "Enter a host address.",
+    "formMissingMongoUri": "Enter a MongoDB connection URI.",
+    "formMissingKafkaBrokers": "Enter Bootstrap Brokers.",
+    "formMissingKubeconfig": "Provide kubeconfig.",
+    "formMissingSerialPort": "Enter a serial port path.",
     "moveUp": "Move Up",
     "moveDown": "Move Down",
     "moveTop": "Move to Top",
@@ -557,8 +580,6 @@
     "password": "Password",
     "terminal": "Terminal",
     "connecting": "Connecting...",
-    "authFailed": "Authentication failed, please re-enter password",
-    "updatePassword": "Update saved password after connecting",
     "connectProgress": {
       "connecting": "Connecting...",
       "connectionFailed": "Connection Failed",
@@ -797,6 +818,7 @@
     "approvalDenied": "Denied",
     "approvalReasonLabel": "Reason: ",
     "approvalLocalToolTitle": "AI wants to run local {{tool}} tool",
+    "approvalPending": "Pending approval",
     "approvalLocalToolContentPreview": "Show content to write",
     "approvalLocalToolEditPreview": "Show edit preview",
     "approvalLocalToolPatternHint": "One pattern per line; * wildcards (local_bash matches commands, local_write/local_edit matches paths).",
@@ -831,6 +853,8 @@
     "regenerateConfirm": "Regenerating will delete this message and all messages after it. Are you sure?",
     "copyMessage": "Copy message",
     "copyMessageFailed": "Copy failed",
+    "copied": "Copied to clipboard",
+    "copyFailed": "Copy failed",
     "tokenUsage": {
       "input": "Input",
       "output": "Output",

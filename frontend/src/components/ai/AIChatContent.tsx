@@ -322,22 +322,35 @@ export function AIChatContent({
     if (sideTabId) return;
     if (previousConversationIdRef.current === conversationId) return;
     previousConversationIdRef.current = conversationId;
-    if (editTarget) {
+    if (!editTarget) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
       resetEditMode({ clearDraft: true });
-    }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [conversationId, editTarget, resetEditMode, sideTabId]);
 
   useEffect(() => {
     // 会话消息被刷新、截断或替换后，如果编辑目标不再匹配当前消息，就立即退出编辑态。
     if (!editTarget) return;
-    if (editTarget.conversationId !== conversationId) {
-      resetEditMode({ clearDraft: true });
-      return;
-    }
     const targetMessage = messages[editTarget.messageIndex];
-    if (!targetMessage || targetMessage.role !== "user" || targetMessage.content !== editTarget.draft.content) {
+    const shouldReset =
+      editTarget.conversationId !== conversationId ||
+      !targetMessage ||
+      targetMessage.role !== "user" ||
+      targetMessage.content !== editTarget.draft.content;
+    if (!shouldReset) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
       resetEditMode({ clearDraft: true });
-    }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [conversationId, editTarget, messages, resetEditMode]);
 
   useEffect(() => {
@@ -527,7 +540,7 @@ export function AIChatContent({
             <div className="max-w-3xl mx-auto">
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-xs text-muted-foreground">
-                  {t("ai.pendingMessages", "等待发送")} ({pendingQueue.length})
+                  {t("ai.pendingMessages")} ({pendingQueue.length})
                 </span>
                 <Button
                   variant="ghost"
@@ -538,7 +551,7 @@ export function AIChatContent({
                   }}
                 >
                   <Trash2 className="h-3 w-3 mr-1" />
-                  {t("ai.clearQueue", "清空")}
+                  {t("ai.clearQueue")}
                 </Button>
               </div>
               <div className="space-y-1">
@@ -569,10 +582,8 @@ export function AIChatContent({
               {editTarget && (
                 <div className="flex items-start justify-between gap-3 border-b px-3 py-2">
                   <div className="min-w-0">
-                    <p className="text-xs font-medium text-foreground">{t("ai.editingMessage", "正在编辑消息")}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {t("ai.editResendHint", "提交后会从这条消息重新发送后续对话。")}
-                    </p>
+                    <p className="text-xs font-medium text-foreground">{t("ai.editingMessage")}</p>
+                    <p className="text-xs text-muted-foreground">{t("ai.editResendHint")}</p>
                   </div>
                   <Button
                     type="button"
@@ -581,7 +592,7 @@ export function AIChatContent({
                     className="h-7 shrink-0 px-2 text-xs"
                     onClick={() => resetEditMode({ clearDraft: true })}
                   >
-                    {t("ai.cancelEdit", "取消编辑")}
+                    {t("ai.cancelEdit")}
                   </Button>
                 </div>
               )}
@@ -628,14 +639,12 @@ export function AIChatContent({
         <AlertDialog open={regenerateTarget !== null} onOpenChange={(open) => !open && setRegenerateTarget(null)}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>{t("ai.regenerateTitle", "重新生成")}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {t("ai.regenerateConfirm", "重新生成将删除此消息及之后的所有对话记录，确定要继续吗？")}
-              </AlertDialogDescription>
+              <AlertDialogTitle>{t("ai.regenerateTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>{t("ai.regenerateConfirm")}</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>{t("common.cancel", "取消")}</AlertDialogCancel>
-              <AlertDialogAction onClick={confirmRegenerate}>{t("common.confirm", "确定")}</AlertDialogAction>
+              <AlertDialogCancel>{t("action.cancel")}</AlertDialogCancel>
+              <AlertDialogAction onClick={confirmRegenerate}>{t("action.confirm")}</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
@@ -693,22 +702,22 @@ const TokenUsageBadge = memo(function TokenUsageBadge({ usage }: { usage: TokenU
         <TooltipContent side="top" align="end" className="text-xs">
           <div className="space-y-0.5 tabular-nums min-w-[120px]">
             <div className="flex justify-between gap-3">
-              <span className="text-muted-foreground">{t("ai.tokenUsage.input", "输入")}</span>
+              <span className="text-muted-foreground">{t("ai.tokenUsage.input")}</span>
               <span>{input.toLocaleString()}</span>
             </div>
             <div className="flex justify-between gap-3">
-              <span className="text-muted-foreground">{t("ai.tokenUsage.output", "输出")}</span>
+              <span className="text-muted-foreground">{t("ai.tokenUsage.output")}</span>
               <span>{output.toLocaleString()}</span>
             </div>
             {cacheWrite > 0 && (
               <div className="flex justify-between gap-3">
-                <span className="text-muted-foreground">{t("ai.tokenUsage.cacheWrite", "缓存写入")}</span>
+                <span className="text-muted-foreground">{t("ai.tokenUsage.cacheWrite")}</span>
                 <span>{cacheWrite.toLocaleString()}</span>
               </div>
             )}
             {cacheRead > 0 && (
               <div className="flex justify-between gap-3">
-                <span className="text-muted-foreground">{t("ai.tokenUsage.cacheRead", "缓存命中")}</span>
+                <span className="text-muted-foreground">{t("ai.tokenUsage.cacheRead")}</span>
                 <span>{cacheRead.toLocaleString()}</span>
               </div>
             )}
@@ -740,9 +749,9 @@ const AssistantToolbar = memo(function AssistantToolbar({
     if (!copyText) return;
     try {
       await navigator.clipboard.writeText(copyText);
-      toast.success(t("ai.copied", "已复制到剪贴板"), { duration: 1500, position: "top-center" });
+      toast.success(t("ai.copied"), { duration: 1500, position: "top-center" });
     } catch {
-      toast.error(t("ai.copyFailed", "复制失败"), { duration: 2000, position: "top-center" });
+      toast.error(t("ai.copyFailed"), { duration: 2000, position: "top-center" });
     }
   }, [copyText, t]);
 
@@ -764,8 +773,8 @@ const AssistantToolbar = memo(function AssistantToolbar({
             type="button"
             className="opacity-0 group-hover/assistant:opacity-100 transition-opacity text-muted-foreground/50 hover:text-primary"
             onClick={handleCopy}
-            title={t("action.copy", "复制")}
-            aria-label={t("action.copy", "复制")}
+            title={t("action.copy")}
+            aria-label={t("action.copy")}
           >
             <Copy className="h-3.5 w-3.5" />
           </button>
@@ -775,8 +784,8 @@ const AssistantToolbar = memo(function AssistantToolbar({
             type="button"
             className="opacity-0 group-hover/assistant:opacity-100 transition-opacity text-muted-foreground/50 hover:text-primary"
             onClick={() => onRegenerate(index)}
-            title={t("ai.regenerate", "重新生成")}
-            aria-label={t("ai.regenerate", "重新生成")}
+            title={t("ai.regenerate")}
+            aria-label={t("ai.regenerate")}
           >
             <RefreshCw className="h-3.5 w-3.5" />
           </button>

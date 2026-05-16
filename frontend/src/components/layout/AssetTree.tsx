@@ -38,6 +38,9 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
 } from "@opskat/ui";
 import { getIconComponent, getIconColor } from "@/components/asset/IconPicker";
 import { filterAssets } from "@/lib/assetSearch";
@@ -130,6 +133,7 @@ export function AssetTree({
   const [deleteConfirm, setDeleteConfirm] = useState<{
     id: number;
     assetCount: number;
+    childGroupCount: number;
   } | null>(null);
   const [deleteAssetConfirm, setDeleteAssetConfirm] = useState<asset_entity.Asset | null>(null);
 
@@ -171,17 +175,33 @@ export function AssetTree({
     return count;
   };
 
+  const hasSearchFilter = filter.trim().length > 0;
+  const hasTypeFilter = selectedTypes.length > 0;
+  const shouldHideEmptyGroups = hideEmptyGroups || hasSearchFilter || hasTypeFilter;
+
   const childGroups = (parentId: number) => {
     const all = rawChildGroups(parentId);
-    return hideEmptyGroups ? all.filter((g) => countAssetsInGroup(g.ID) > 0) : all;
+    return shouldHideEmptyGroups ? all.filter((g) => countAssetsInGroup(g.ID) > 0) : all;
   };
 
   const visibleRootGroups = childGroups(0);
+  const rootAssets = groupedAssets.get(0) || [];
+  const treeIsEmpty = visibleRootGroups.length === 0 && rootAssets.length === 0;
+  const isFilteredEmpty = filteredAssets.length === 0 && (hasSearchFilter || hasTypeFilter);
+
+  const countDescendantGroups = (groupId: number): number => {
+    let count = 0;
+    for (const child of rawChildGroups(groupId)) {
+      count += 1 + countDescendantGroups(child.ID);
+    }
+    return count;
+  };
 
   const handleDeleteGroup = (id: number) => {
     const directAssetCount = (groupedAssets.get(id) || []).length;
-    if (directAssetCount > 0) {
-      setDeleteConfirm({ id, assetCount: directAssetCount });
+    const childGroupCount = countDescendantGroups(id);
+    if (directAssetCount > 0 || childGroupCount > 0) {
+      setDeleteConfirm({ id, assetCount: directAssetCount, childGroupCount });
     } else {
       deleteGroup(id, false).catch((e) => toast.error(String(e)));
     }
@@ -333,24 +353,34 @@ export function AssetTree({
             </span>
           </div>
           <div className="flex gap-0.5">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={() => onAddGroup()}
-              title={t("asset.addGroup")}
-            >
-              <FolderPlus className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={() => onAddAsset()}
-              title={t("asset.addAsset")}
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => onAddGroup()}
+                  aria-label={t("asset.addGroup")}
+                >
+                  <FolderPlus className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t("asset.addGroup")}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => onAddAsset()}
+                  aria-label={t("asset.addAsset")}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t("asset.addAsset")}</TooltipContent>
+            </Tooltip>
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -360,7 +390,7 @@ export function AssetTree({
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder={t("asset.search")}
-              className="h-7 w-full rounded-md border border-sidebar-border bg-sidebar pl-7 pr-2 text-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/50 placeholder:text-muted-foreground/60 transition-colors duration-150"
+              className="h-7 w-full rounded-md border border-sidebar-border bg-sidebar pl-7 pr-2 text-xs outline-none focus-visible:border-ring/70 focus-visible:ring-1 focus-visible:ring-ring/45 placeholder:text-muted-foreground/60 transition-colors duration-150"
             />
           </div>
           <AssetTypeFilterButton
@@ -407,7 +437,7 @@ export function AssetTree({
                       t={t}
                     />
                   ))}
-                  {(groupedAssets.get(0) || []).length > 0 && (
+                  {rootAssets.length > 0 && (
                     <GroupItem
                       group={
                         new group_entity.Group({
@@ -415,10 +445,10 @@ export function AssetTree({
                           Name: t("asset.ungrouped"),
                         })
                       }
-                      assets={groupedAssets.get(0) || []}
+                      assets={rootAssets}
                       allGroupedAssets={groupedAssets}
                       childGroups={() => []}
-                      countAssetsInGroup={() => (groupedAssets.get(0) || []).length}
+                      countAssetsInGroup={() => rootAssets.length}
                       selectedAssetId={selectedAssetId}
                       activeAssetIds={activeAssetIds}
                       connectingAssetIds={connectingAssetIds}
@@ -440,8 +470,39 @@ export function AssetTree({
                       t={t}
                     />
                   )}
-                  {filteredAssets.length === 0 && (
-                    <p className="text-xs text-muted-foreground text-center py-4">{t("asset.addAsset")}</p>
+                  {treeIsEmpty && (
+                    <div className="flex flex-col items-center gap-2 px-3 py-6 text-center">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                        <Server className="h-4 w-4" />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <p className="text-xs font-medium text-sidebar-foreground">
+                          {t(isFilteredEmpty ? "asset.noMatchTitle" : "asset.emptyTitle")}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {t(isFilteredEmpty ? "asset.noMatchDesc" : "asset.emptyDesc")}
+                        </p>
+                      </div>
+                      {isFilteredEmpty ? (
+                        <div className="flex flex-wrap justify-center gap-1">
+                          {hasSearchFilter && (
+                            <Button variant="ghost" size="xs" onClick={() => setFilter("")}>
+                              {t("asset.clearSearch")}
+                            </Button>
+                          )}
+                          {hasTypeFilter && (
+                            <Button variant="ghost" size="xs" onClick={() => setSelectedTypes([])}>
+                              {t("asset.clearTypeFilter")}
+                            </Button>
+                          )}
+                        </div>
+                      ) : (
+                        <Button variant="outline" size="xs" onClick={() => onAddAsset()}>
+                          <Plus className="h-3 w-3" />
+                          {t("asset.addAsset")}
+                        </Button>
+                      )}
+                    </div>
                   )}
                 </div>
               </ContextMenuTrigger>
@@ -464,17 +525,30 @@ export function AssetTree({
           <AlertDialogHeader>
             <AlertDialogTitle>{t("asset.deleteGroupTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t("asset.deleteGroupDesc", { count: deleteConfirm?.assetCount })}
+              {deleteConfirm?.assetCount
+                ? t("asset.deleteGroupDescDetailed", {
+                    assetCount: deleteConfirm.assetCount,
+                    childGroupCount: deleteConfirm.childGroupCount,
+                  })
+                : t("asset.deleteGroupDescChildrenOnly", { childGroupCount: deleteConfirm?.childGroupCount })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("action.cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => handleConfirmDelete(false)}>
-              {t("asset.moveToUngrouped")}
-            </AlertDialogAction>
-            <AlertDialogAction variant="destructive" onClick={() => handleConfirmDelete(true)}>
-              {t("asset.deleteAssets")}
-            </AlertDialogAction>
+            {deleteConfirm?.assetCount ? (
+              <>
+                <AlertDialogAction onClick={() => handleConfirmDelete(false)}>
+                  {t("asset.moveToUngrouped")}
+                </AlertDialogAction>
+                <AlertDialogAction variant="destructive" onClick={() => handleConfirmDelete(true)}>
+                  {t("asset.deleteAssets")}
+                </AlertDialogAction>
+              </>
+            ) : (
+              <AlertDialogAction variant="destructive" onClick={() => handleConfirmDelete(false)}>
+                {t("asset.deleteGroupOnly")}
+              </AlertDialogAction>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -578,7 +652,7 @@ function GroupItem({
       {...(!isUngrouped ? sortable.attributes : {})}
       // eslint-disable-next-line react-hooks/refs
       {...(!isUngrouped ? sortable.listeners : {})}
-      className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium hover:bg-sidebar-accent cursor-pointer transition-colors duration-150"
+      className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium outline-none hover:bg-sidebar-accent focus-visible:ring-1 focus-visible:ring-sidebar-ring/60 cursor-pointer transition-colors duration-150"
       style={groupRowStyle}
       onClick={() => toggleGroupCollapsed(group.ID)}
     >
@@ -768,7 +842,7 @@ function AssetRow({
           {...sortable.attributes}
           // eslint-disable-next-line react-hooks/refs
           {...sortable.listeners}
-          className={`flex items-center gap-1.5 rounded-md pr-2 py-1.5 text-sm cursor-pointer select-none transition-colors duration-150 ${
+          className={`flex items-center gap-1.5 rounded-md pr-2 py-1.5 text-sm outline-none focus-visible:ring-1 focus-visible:ring-sidebar-ring/60 cursor-pointer select-none transition-colors duration-150 ${
             selectedAssetId === asset.ID
               ? "bg-sidebar-accent text-sidebar-accent-foreground"
               : "hover:bg-sidebar-accent"

@@ -4,7 +4,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StartK8sPodLogs, StopK8sPodLogs } from "../../wailsjs/go/app/App";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
-import { K8sLogsPanel, type LogTabState, type LogTabStateUpdate } from "@/components/k8s/K8sLogsPanel";
+import { K8sLogsPanel } from "@/components/k8s/K8sLogsPanel";
+import type { LogTabState, LogTabStateUpdate } from "@/components/k8s/k8sLogState";
 
 const terminalSpies = vi.hoisted(() => ({
   clear: vi.fn(),

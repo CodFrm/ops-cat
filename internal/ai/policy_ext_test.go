@@ -32,19 +32,19 @@ func TestCheckExtensionPolicy(t *testing.T) {
 		})
 
 		Convey("Allow when action is in allow_list", func() {
-			result := checkExtensionPolicy(ctx, []string{"ext:oss:readonly"}, "read", "bucket/file.txt")
+			result := checkExtensionPolicy(ctx, []string{"ext:oss:readonly"}, "read")
 			So(result.Decision, ShouldEqual, Allow)
 			So(result.DecisionSource, ShouldEqual, SourcePolicyAllow)
 		})
 
 		Convey("Deny when action is in deny_list", func() {
-			result := checkExtensionPolicy(ctx, []string{"ext:oss:readonly"}, "delete", "bucket/file.txt")
+			result := checkExtensionPolicy(ctx, []string{"ext:oss:readonly"}, "delete")
 			So(result.Decision, ShouldEqual, Deny)
 			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
 		})
 
 		Convey("NeedConfirm when action not in any list", func() {
-			result := checkExtensionPolicy(ctx, []string{"ext:oss:readonly"}, "upload", "bucket/file.txt")
+			result := checkExtensionPolicy(ctx, []string{"ext:oss:readonly"}, "upload")
 			So(result.Decision, ShouldEqual, NeedConfirm)
 		})
 
@@ -53,18 +53,18 @@ func TestCheckExtensionPolicy(t *testing.T) {
 			// "ext:oss:dangerous-deny" has deny_list with "delete"
 			// Even if one group allows "read", if another group denies it, deny wins.
 			// Here test that "delete" is denied even across groups.
-			result := checkExtensionPolicy(ctx, []string{"ext:oss:readonly", "ext:oss:dangerous-deny"}, "delete", "bucket/file.txt")
+			result := checkExtensionPolicy(ctx, []string{"ext:oss:readonly", "ext:oss:dangerous-deny"}, "delete")
 			So(result.Decision, ShouldEqual, Deny)
 			So(result.DecisionSource, ShouldEqual, SourcePolicyDeny)
 
 			// "read" is only in allow_list, not in any deny_list → Allow
-			result = checkExtensionPolicy(ctx, []string{"ext:oss:readonly", "ext:oss:dangerous-deny"}, "read", "bucket/file.txt")
+			result = checkExtensionPolicy(ctx, []string{"ext:oss:readonly", "ext:oss:dangerous-deny"}, "read")
 			So(result.Decision, ShouldEqual, Allow)
 			So(result.DecisionSource, ShouldEqual, SourcePolicyAllow)
 		})
 
 		Convey("NeedConfirm when no groups configured", func() {
-			result := checkExtensionPolicy(ctx, nil, "read", "bucket/file.txt")
+			result := checkExtensionPolicy(ctx, nil, "read")
 			So(result.Decision, ShouldEqual, NeedConfirm)
 		})
 	})

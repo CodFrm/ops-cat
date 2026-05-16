@@ -142,6 +142,14 @@ export function TreeSelect({
 
   const filteredNodes = searchable ? filterTree(nodes, search) : nodes;
 
+  const setDropdownOpen = (nextOpen: boolean) => {
+    if (nextOpen) {
+      setSearch("");
+      setTimeout(() => searchRef.current?.focus(), 0);
+    }
+    setOpen(nextOpen);
+  };
+
   // Close dropdown when clicking outside
   useEffect(() => {
     if (!open) return;
@@ -154,22 +162,13 @@ export function TreeSelect({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
 
-  // Reset search and focus input when opening
-  useEffect(() => {
-    if (open) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSearch("");
-      setTimeout(() => searchRef.current?.focus(), 0);
-    }
-  }, [open]);
-
   return (
     <div ref={containerRef} className="relative">
       <Button
         type="button"
         variant="outline"
         className={cn("w-full justify-between font-normal", className)}
-        onClick={() => setOpen(!open)}
+        onClick={() => setDropdownOpen(!open)}
       >
         <div className="flex items-center gap-2 truncate">
           {displayIcon && <span className="shrink-0">{displayIcon}</span>}

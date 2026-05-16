@@ -58,16 +58,15 @@ func ExtractSubCommands(command string) ([]string, error) {
 	printer := syntax.NewPrinter()
 
 	var extractFromStmt func(stmt *syntax.Stmt)
-	var extractFromWord func(w *syntax.Word)
 
 	// 通用 word 扫描：递归到 part，发现 CmdSubst/ProcSubst 都把内部 stmts 提取出来；
 	// DblQuoted、ParamExp 的 default value 也要继续往下走。
-	extractFromWord = func(w *syntax.Word) {
+	extractFromWord := func(w *syntax.Word) {
 		if w == nil {
 			return
 		}
 		for _, part := range w.Parts {
-			extractFromWordPart(part, extractFromStmt, extractFromWord)
+			extractFromWordPart(part, extractFromStmt)
 		}
 	}
 
@@ -194,7 +193,6 @@ func printCall(printer *syntax.Printer, cmd *syntax.CallExpr, printWords func([]
 func extractFromWordPart(
 	part syntax.WordPart,
 	extractFromStmt func(*syntax.Stmt),
-	extractFromWord func(*syntax.Word),
 ) {
 	switch p := part.(type) {
 	case *syntax.CmdSubst:
@@ -209,7 +207,7 @@ func extractFromWordPart(
 		}
 	case *syntax.DblQuoted:
 		for _, sp := range p.Parts {
-			extractFromWordPart(sp, extractFromStmt, extractFromWord)
+			extractFromWordPart(sp, extractFromStmt)
 		}
 	case *syntax.ParamExp, *syntax.ArithmExp:
 		// ${VAR:-$(rm -rf /)} 的默认值 / $((expr)) 内的子表达式都可能藏 CmdSubst，

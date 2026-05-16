@@ -25,8 +25,7 @@ type checkResultKey struct{}
 //  3. c.Next() 返回后，从 c.Output 抽出文本 / 错误，组合成 ToolCallInfo，
 //     起 goroutine 异步写入审计仓库。
 //
-// 与旧版 attachCheckResultHook + auditPostHook 双段相比：状态完全闭包局部，
-// 无全局 sync.Map，无 ToolUseID 索引，无 LoadAndDelete 清理。
+// 每次调用的状态都保存在当前 ctx 和闭包内，不通过全局索引跨调用共享。
 func auditMiddleware(c *agent.ToolContext) {
 	slot := &CheckResult{}
 	c.WithContext(context.WithValue(c.Context(), checkResultKey{}, slot))

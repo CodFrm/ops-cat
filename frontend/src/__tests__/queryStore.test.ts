@@ -274,6 +274,28 @@ describe("queryStore redis actions", () => {
     expect(info?.value).toEqual([["name", "Ada"]]);
   });
 
+  it("clears the active redis key when the selected key is cleared", async () => {
+    vi.mocked(RedisGetKeyDetail).mockResolvedValue({
+      key: "user:1",
+      type: "string",
+      ttl: -1,
+      size: 3,
+      total: -1,
+      value: "Ada",
+      valueCursor: "0",
+      valueOffset: 0,
+      hasMoreValues: false,
+    });
+
+    await useQueryStore.getState().selectKey("query-10", "user:1");
+    useQueryStore.getState().clearSelectedKey("query-10", "user:1");
+
+    const state = useQueryStore.getState().redisStates["query-10"];
+    expect(state.selectedKey).toBeNull();
+    expect(state.activeRedisKey).toBeNull();
+    expect(state.openKeyTabs).toEqual(["user:1"]);
+  });
+
   it("ignores stale selected key detail responses", async () => {
     let resolveFirst!: (value: Awaited<ReturnType<typeof RedisGetKeyDetail>>) => void;
     let resolveSecond!: (value: Awaited<ReturnType<typeof RedisGetKeyDetail>>) => void;

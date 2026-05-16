@@ -79,9 +79,9 @@ func (s *Service) Manager() *extension.Manager { return s.manager }
 func (s *Service) Init(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	err := s.loadAndApplyState(ctx)
+	s.loadAndApplyState(ctx)
 	s.initDone.Store(true)
-	return err
+	return nil
 }
 
 // Reload closes all extensions and reinitializes from disk.
@@ -90,9 +90,7 @@ func (s *Service) Reload(ctx context.Context) error {
 	defer s.mu.Unlock()
 
 	s.manager.Close(ctx)
-	if err := s.loadAndApplyState(ctx); err != nil {
-		return err
-	}
+	s.loadAndApplyState(ctx)
 	s.notifyReload()
 	return nil
 }
@@ -440,7 +438,7 @@ func (s *Service) Close(ctx context.Context) {
 }
 
 // loadAndApplyState is the single source of truth: scan, register bridge, apply DB state.
-func (s *Service) loadAndApplyState(ctx context.Context) error {
+func (s *Service) loadAndApplyState(ctx context.Context) {
 	// Unregister old bridge entries from package-global registries before replacing the bridge.
 	if s.bridge != nil {
 		for _, name := range s.bridge.ListNames() {
@@ -466,7 +464,6 @@ func (s *Service) loadAndApplyState(ctx context.Context) error {
 	}
 
 	s.notifyBridgeChanged()
-	return nil
 }
 
 func (s *Service) ensureState(ctx context.Context, name string, enabled bool) {

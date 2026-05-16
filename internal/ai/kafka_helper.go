@@ -153,10 +153,7 @@ func handleKafkaTopic(ctx context.Context, args map[string]any) (string, error) 
 		}
 		return marshalKafkaResult(result)
 	case "increase_partitions":
-		req, err := kafkaIncreasePartitionsRequestFromArgs(assetID, args)
-		if err != nil {
-			return "", err
-		}
+		req := kafkaIncreasePartitionsRequestFromArgs(assetID, args)
 		result, err := svc.IncreasePartitions(ctx, req)
 		if err != nil {
 			return "", err

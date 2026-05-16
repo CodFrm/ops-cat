@@ -41,7 +41,9 @@ func TestE2E_TCP_Roundtrip(t *testing.T) {
 			defer c.Close()
 			buf := make([]byte, 1024)
 			n, _ := c.Read(buf)
-			c.Write(append([]byte("pong:"), buf[:n]...)) //nolint:errcheck
+			if _, err := c.Write(append([]byte("pong:"), buf[:n]...)); err != nil {
+				return
+			}
 		}()
 
 		ctx := context.Background()

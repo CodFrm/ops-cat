@@ -1,4 +1,22 @@
-import { pinyin } from "pinyin-pro";
+// pinyin-pro 完整字典 535KB，首屏不必加载。模块加载时异步预热；加载完成前
+// pinyinMatch 退回纯文本匹配——用户首屏几百毫秒内一般不会立刻输入搜索。
+type PinyinFn = typeof import("pinyin-pro").pinyin;
+let pinyinFn: PinyinFn | null = null;
+let pinyinLoading: Promise<void> | null = null;
+
+function ensurePinyinLoaded(): Promise<void> {
+  if (pinyinFn) return Promise.resolve();
+  if (pinyinLoading) return pinyinLoading;
+  pinyinLoading = import("pinyin-pro").then((m) => {
+    pinyinFn = m.pinyin;
+  });
+  return pinyinLoading;
+}
+
+void ensurePinyinLoaded();
+
+/** 测试或显式预热时使用。 */
+export const __ensurePinyinReady = ensurePinyinLoaded;
 
 /**
  * Check if `text` matches `query` by original text, full pinyin, initials, or mixed pinyin.
@@ -12,9 +30,11 @@ export function pinyinMatch(text: string, query: string): boolean {
   // 1. Original text match
   if (lowerText.includes(lowerQuery)) return true;
 
+  if (!pinyinFn) return false;
+
   // 2. Get pinyin arrays for each character
-  const pinyinArr = pinyin(text, { toneType: "none", type: "array" });
-  const firstArr = pinyin(text, {
+  const pinyinArr = pinyinFn(text, { toneType: "none", type: "array" });
+  const firstArr = pinyinFn(text, {
     pattern: "first",
     toneType: "none",
     type: "array",

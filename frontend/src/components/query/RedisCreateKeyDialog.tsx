@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -112,12 +112,6 @@ export function RedisCreateKeyDialog({
     },
     [db]
   );
-
-  useEffect(() => {
-    if (open) {
-      reset(db);
-    }
-  }, [db, open, reset]);
 
   const close = useCallback(() => {
     reset();

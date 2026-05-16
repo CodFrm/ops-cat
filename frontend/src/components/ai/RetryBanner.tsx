@@ -19,22 +19,25 @@ function computeRemaining(status: ChatMessageRetryStatus): number {
 
 export const RetryBanner = memo(function RetryBanner({ status }: { status: ChatMessageRetryStatus }) {
   const { t } = useTranslation();
-  const [remaining, setRemaining] = useState(() => computeRemaining(status));
+  const statusTimerKey = `${status.startedAt}:${status.delayMs}`;
+  const [remainingState, setRemainingState] = useState(() => ({
+    timerKey: statusTimerKey,
+    value: computeRemaining(status),
+  }));
+  const remaining = remainingState.timerKey === statusTimerKey ? remainingState.value : computeRemaining(status);
 
   useEffect(() => {
-    setRemaining(computeRemaining(status));
     if (status.delayMs <= 0) return;
     const id = window.setInterval(() => {
       const next = computeRemaining(status);
-      setRemaining(next);
+      setRemainingState({ timerKey: statusTimerKey, value: next });
       if (next <= 0) window.clearInterval(id);
     }, 1000);
     return () => window.clearInterval(id);
-  }, [status]);
+  }, [status, statusTimerKey]);
 
-  const attemptLabel = status.attempt > 0 ? t("ai.retry.attempt", "第 {{n}} 次", { n: status.attempt }) : "";
-  const countdownLabel =
-    remaining > 0 ? t("ai.retry.countdown_seconds", "{{n}}s", { n: remaining }) : t("ai.retry.now", "正在重试...");
+  const attemptLabel = status.attempt > 0 ? t("ai.retry.attempt", { n: status.attempt }) : "";
+  const countdownLabel = remaining > 0 ? t("ai.retry.countdown_seconds", { n: remaining }) : t("ai.retry.now");
   // 错误归因 + 原始错误：用户在 retry 期间想知道为什么在重试（503 / 网络 / 鉴权 …）。
   // 友好标题走 classifyError(走和 ErrorBlock 同一份分类规则)，原始 cause 紧随其后以
   // monospace 小字呈现，方便复制 request id。
@@ -48,7 +51,7 @@ export const RetryBanner = memo(function RetryBanner({ status }: { status: ChatM
     >
       <div className="flex items-center gap-1.5">
         <RotateCcw className="h-3 w-3 animate-spin-slow" aria-hidden="true" />
-        <span className="font-medium">{t("ai.retry.retrying", "重试中")}</span>
+        <span className="font-medium">{t("ai.retry.retrying")}</span>
         {attemptLabel && <span className="opacity-70">·</span>}
         {attemptLabel && <span>{attemptLabel}</span>}
         <span className="opacity-70">·</span>

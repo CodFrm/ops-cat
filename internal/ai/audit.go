@@ -156,9 +156,6 @@ func (w *DefaultAuditWriter) WriteToolCall(ctx context.Context, info ToolCallInf
 	}
 }
 
-// AuditingExecutor 已由 tools.go + auditMiddleware 取代——cago 工具调用时同等地
-// 注入 *CheckResult 占位指针 + 异步 WriteToolCall。该类型已于 M6 整体下线。
-
 // --- 会话模式审计 ---
 
 // writeGrantSubmitAudit 记录会话级"始终允许"模式变更（内部使用）
@@ -184,8 +181,7 @@ func writeGrantSubmitAudit(ctx context.Context, assetID int64, assetName string,
 // --- 命令提取 ---
 
 // commandExtractors 工具名 → 命令摘要提取器。
-// 之前从 AllToolDefs().CommandExtractor 字段惰性构建；现在解耦成包级静态 map，
-// 使审计逻辑不再依赖 AllToolDefs（M6 清理旧 ToolDef 时不会破坏 audit）。
+// 审计逻辑直接使用该静态表，不依赖 opsctl 的 ToolDef 派发表。
 var commandExtractors = map[string]CommandExtractorFunc{
 	"run_command": func(a map[string]any) string { return argString(a, "command") },
 	"upload_file": func(a map[string]any) string {

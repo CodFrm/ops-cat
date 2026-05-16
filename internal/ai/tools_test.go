@@ -12,13 +12,13 @@ func TestTools_RegistryShape(t *testing.T) {
 	Convey("Tools 返回的工具集与既定契约一致", t, func() {
 		tools := Tools()
 
-		// spawn_agent 由 cago dispatch_subagent 取代，保持已删；batch_command 恢复，对齐 main 上的并行批量能力。
+		// batch_command 属于桌面端并行批量能力；spawn_agent 不属于 OpsKat 工具集。
 		names := make(map[string]tool.Tool, len(tools))
 		for _, t := range tools {
 			names[t.Name()] = t
 		}
 
-		Convey("spawn_agent 不再出现（cago dispatch_subagent 已取代）", func() {
+		Convey("spawn_agent 不属于工具集", func() {
 			So(names, ShouldNotContainKey, "spawn_agent")
 		})
 

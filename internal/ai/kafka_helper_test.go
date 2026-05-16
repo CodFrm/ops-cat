@@ -157,8 +157,7 @@ func TestAllToolDefsContainsGroupedKafkaTools(t *testing.T) {
 	assert.Contains(t, tools, "kafka_message")
 	assert.NotContains(t, tools, "kafka_topic_delete")
 
-	// 命令摘要提取器在 M6 后改成包级静态表（commandExtractors），
-	// 不再挂在 ToolDef 字段上。这里直接走 ExtractCommandForAudit 验证语义未漂移。
+	// 直接走 ExtractCommandForAudit 验证命令摘要语义。
 	assert.Equal(t, "message.write orders", ExtractCommandForAudit("kafka_message", map[string]any{
 		"operation": "produce",
 		"topic":     "orders",
@@ -185,7 +184,7 @@ func TestAllToolDefsContainsGroupedKafkaTools(t *testing.T) {
 }
 
 func TestKafkaMessageArgs(t *testing.T) {
-	partition, err := argOptionalInt32(map[string]any{"partition": float64(2)}, "partition")
+	partition, err := argOptionalPartition(map[string]any{"partition": float64(2)})
 	require.NoError(t, err)
 	require.NotNil(t, partition)
 	assert.Equal(t, int32(2), *partition)

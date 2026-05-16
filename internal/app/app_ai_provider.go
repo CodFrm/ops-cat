@@ -61,7 +61,7 @@ func normalizeProviderReasoningConfig(providerType string, reasoningEnabled bool
 		return false, ""
 	default:
 		// 老 OpenAI 数据：toggle=true 但 effort 空 → medium。
-		// Anthropic legacy 兜底由 migration 202605070001 一次性处理，这里无需特例。
+		// Anthropic 旧数据由 migration 202605070001 一次性处理，这里无需特例。
 		if reasoningEnabled {
 			return true, "medium"
 		}

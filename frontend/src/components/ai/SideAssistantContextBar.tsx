@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Button, Input } from "@opskat/ui";
 import { Check, Pencil, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -8,61 +8,71 @@ interface SideAssistantContextBarProps {
   conversationId: number | null;
 }
 
+interface RenameState {
+  conversationId: number | null;
+  editing: boolean;
+  draftTitle: string;
+  saving: boolean;
+  session: number;
+}
+
 export function SideAssistantContextBar({ conversationId }: SideAssistantContextBarProps) {
   const { t } = useTranslation();
   const conversations = useAIStore((s) => s.conversations);
   const renameConversation = useAIStore((s) => s.renameConversation);
   const conv = conversationId != null ? conversations.find((c) => c.ID === conversationId) : null;
-  const [editing, setEditing] = useState(false);
-  const [draftTitle, setDraftTitle] = useState("");
-  const [saving, setSaving] = useState(false);
-  const savingRef = useRef(false);
-  const editSessionRef = useRef(0);
+  const conversationTitle = conv?.Title || "";
+  const initialRenameState: RenameState = {
+    conversationId,
+    editing: false,
+    draftTitle: conversationTitle,
+    saving: false,
+    session: 0,
+  };
+  const [renameState, setRenameState] = useState(initialRenameState);
+  const currentRenameState = renameState.conversationId === conversationId ? renameState : initialRenameState;
+  const { editing, draftTitle, saving } = currentRenameState;
 
-  useEffect(() => {
-    editSessionRef.current += 1;
-    setEditing(false);
-    setSaving(false);
-    savingRef.current = false;
-    setDraftTitle(conv?.Title || "");
-  }, [conversationId]);
-
-  useEffect(() => {
-    // 仅在非编辑态同步外部标题，避免乐观更新时把进行中的草稿提前冲掉。
-    if (!editing) {
-      setDraftTitle(conv?.Title || "");
-    }
-  }, [conv?.Title, editing]);
+  const updateRenameState = (patch: Partial<Omit<RenameState, "conversationId">>) => {
+    setRenameState((current) => ({
+      ...(current.conversationId === conversationId ? current : initialRenameState),
+      ...patch,
+      conversationId,
+    }));
+  };
 
   const startRename = () => {
-    if (!conv || savingRef.current) return;
-    editSessionRef.current += 1;
-    setDraftTitle(conv?.Title || "");
-    setEditing(true);
+    if (!conv || saving) return;
+    updateRenameState({
+      draftTitle: conversationTitle,
+      editing: true,
+      session: currentRenameState.session + 1,
+    });
   };
 
   const cancelRename = () => {
-    if (savingRef.current) return;
-    editSessionRef.current += 1;
-    setDraftTitle(conv?.Title || "");
-    setEditing(false);
+    if (saving) return;
+    updateRenameState({
+      draftTitle: conversationTitle,
+      editing: false,
+      session: currentRenameState.session + 1,
+    });
   };
 
   const submitRename = async () => {
-    if (conversationId == null || !conv || savingRef.current) return;
-    const editSession = editSessionRef.current;
-    savingRef.current = true;
-    setSaving(true);
+    if (conversationId == null || !conv || saving) return;
+    const editSession = currentRenameState.session;
+    updateRenameState({ saving: true });
     const renamed = await renameConversation(conversationId, draftTitle);
-    if (editSessionRef.current !== editSession) {
-      return;
-    }
-    savingRef.current = false;
-    setSaving(false);
-    if (renamed) {
-      editSessionRef.current += 1;
-      setEditing(false);
-    }
+    setRenameState((current) => {
+      if (current.conversationId !== conversationId || current.session !== editSession) return current;
+      return {
+        ...current,
+        saving: false,
+        editing: renamed ? false : current.editing,
+        session: renamed ? current.session + 1 : current.session,
+      };
+    });
   };
 
   if (!conversationId) {
@@ -78,7 +88,7 @@ export function SideAssistantContextBar({ conversationId }: SideAssistantContext
       <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs border-b border-panel-divider">
         <Input
           value={draftTitle}
-          onChange={(event) => setDraftTitle(event.target.value)}
+          onChange={(event) => updateRenameState({ draftTitle: event.target.value })}
           onKeyDown={(event) => {
             if ((event.nativeEvent as KeyboardEvent).isComposing) {
               return;
@@ -125,7 +135,7 @@ export function SideAssistantContextBar({ conversationId }: SideAssistantContext
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground border-b border-panel-divider">
       <span className="truncate flex-1 text-foreground" onDoubleClick={startRename}>
-        {conv?.Title || t("ai.newConversation")}
+        {conversationTitle || t("ai.newConversation")}
       </span>
       <Button
         variant="ghost"

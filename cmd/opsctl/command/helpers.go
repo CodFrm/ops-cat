@@ -47,7 +47,7 @@ func parseRemotePathCtx(ctx context.Context, s string) (int64, string, error) {
 	return id, remotePath, nil
 }
 
-// parseRemotePath is the legacy non-context version used by tests.
+// parseRemotePath parses numeric assetID:path strings without repository lookup.
 func parseRemotePath(s string) (int64, string) {
 	idx := strings.Index(s, ":")
 	if idx <= 0 {

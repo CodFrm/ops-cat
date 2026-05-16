@@ -170,10 +170,7 @@ func (s *Server) handleCallTool(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if _, err := w.Write(result); err != nil { //nolint:gosec // dev server, result is from trusted plugin
-		zap.L().Warn("write response", zap.Error(err))
-	}
+	writePluginJSONResult(w, result)
 }
 
 func (s *Server) handleCallAction(w http.ResponseWriter, r *http.Request) {
@@ -188,10 +185,7 @@ func (s *Server) handleCallAction(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if _, err := w.Write(result); err != nil { //nolint:gosec // dev server, result is from trusted plugin
-		zap.L().Warn("write response", zap.Error(err))
-	}
+	writePluginJSONResult(w, result)
 }
 
 func (s *Server) handleCheckPolicy(w http.ResponseWriter, r *http.Request) {
@@ -269,5 +263,19 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		zap.L().Warn("encode json response", zap.Error(err))
+	}
+}
+
+func writePluginJSONResult(w http.ResponseWriter, result []byte) {
+	var payload json.RawMessage
+	if err := json.Unmarshal(result, &payload); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "plugin returned invalid JSON"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		zap.L().Warn("encode plugin response", zap.Error(err))
 	}
 }

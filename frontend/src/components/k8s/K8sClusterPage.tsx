@@ -46,6 +46,7 @@ import { K8sConditionList } from "./K8sConditionList";
 import { K8sTagList } from "./K8sTagList";
 import { K8sCodeBlock } from "./K8sCodeBlock";
 import { K8sLogsPanel } from "./K8sLogsPanel";
+import type { LogTabState, LogTabStateUpdate } from "./k8sLogState";
 import { getK8sStatusColor, getContainerStateColor, statusVariantToClass } from "./utils";
 
 interface NodeInfo {
@@ -234,7 +235,7 @@ interface K8sPageSnapshot {
   namespaceConfigMapList: Record<string, ConfigMapListItem[]>;
   namespaceSecretList: Record<string, SecretListItem[]>;
   podDetails: Record<string, PodDetail>;
-  logTabStates: Record<string, import("./K8sLogsPanel").LogTabState>;
+  logTabStates: Record<string, LogTabState>;
   autoRefreshingItems: string[];
 }
 
@@ -331,9 +332,7 @@ export function K8sClusterPage({ asset }: Props) {
   const [podDetails, setPodDetails] = useState<Record<string, PodDetail>>(initialSnapshot?.podDetails || {});
   const [loadingPodDetails, setLoadingPodDetails] = useState<Set<string>>(new Set());
   const [podDetailErrors, setPodDetailErrors] = useState<Record<string, string>>({});
-  const [logTabStates, setLogTabStates] = useState<Record<string, import("./K8sLogsPanel").LogTabState>>(
-    initialSnapshot?.logTabStates || {}
-  );
+  const [logTabStates, setLogTabStates] = useState<Record<string, LogTabState>>(initialSnapshot?.logTabStates || {});
   const [refreshingItems, setRefreshingItems] = useState<Set<string>>(new Set());
   const [autoRefreshingItems, setAutoRefreshingItems] = useState<Set<string>>(
     new Set(initialSnapshot?.autoRefreshingItems || [])
@@ -1025,7 +1024,7 @@ export function K8sClusterPage({ asset }: Props) {
     [asset.ID, podDetails, loadingPodDetails]
   );
 
-  const updateLogTabState = useCallback((tabId: string, update: import("./K8sLogsPanel").LogTabStateUpdate) => {
+  const updateLogTabState = useCallback((tabId: string, update: LogTabStateUpdate) => {
     setLogTabStates((prev) => {
       const existing = prev[tabId] || {
         logStreamID: null,

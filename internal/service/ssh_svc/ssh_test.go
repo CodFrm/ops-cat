@@ -21,8 +21,8 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func newTestSyncSession(token string) *Session {
-	sess := &Session{syncToken: token}
+func newTestSyncSession() *Session {
+	sess := &Session{syncToken: "real-token"}
 	sess.initSyncState("/bin/bash", shellTypeBash, true)
 	return sess
 }
@@ -194,7 +194,7 @@ func TestNormalizeShellType(t *testing.T) {
 }
 
 func TestSession_FilterOutputCapturesInitMarker(t *testing.T) {
-	sess := newTestSyncSession("real-token")
+	sess := newTestSyncSession()
 	sess.syncBootstrapCh = make(chan struct{})
 
 	raw := []byte("hello" + syncSequencePrefix + "real-token:init:pid:4242" + syncSequenceTerm + "world")
@@ -207,7 +207,7 @@ func TestSession_FilterOutputCapturesInitMarker(t *testing.T) {
 }
 
 func TestSession_FilterOutputAcceptsValidatedPromptProof(t *testing.T) {
-	sess := newTestSyncSession("real-token")
+	sess := newTestSyncSession()
 	sess.promptNonce = "prompt-once"
 	sess.shellPID = 4242
 	sess.probeShellStateFn = func(_ int) (shellProbeResult, error) {
@@ -226,7 +226,7 @@ func TestSession_FilterOutputAcceptsValidatedPromptProof(t *testing.T) {
 }
 
 func TestSession_ProbeMissDoesNotBreakNextPromptProof(t *testing.T) {
-	sess := newTestSyncSession("real-token")
+	sess := newTestSyncSession()
 	sess.promptNonce = "prompt-one"
 	sess.shellPID = 4242
 	promptReady := false
@@ -254,7 +254,7 @@ func TestSession_ProbeMissDoesNotBreakNextPromptProof(t *testing.T) {
 }
 
 func TestSession_OldPromptProofReplayFailsAfterConsumption(t *testing.T) {
-	sess := newTestSyncSession("real-token")
+	sess := newTestSyncSession()
 	sess.promptNonce = "prompt-once"
 	sess.shellPID = 4242
 	sess.probeShellStateFn = func(_ int) (shellProbeResult, error) {
@@ -274,7 +274,7 @@ func TestSession_OldPromptProofReplayFailsAfterConsumption(t *testing.T) {
 }
 
 func TestSession_PrepareDirectoryChangeRequiresCleanPrompt(t *testing.T) {
-	sess := newTestSyncSession("real-token")
+	sess := newTestSyncSession()
 	sess.notePrompt("/srv/app")
 	sess.markUserInput([]byte("ls"))
 
@@ -283,7 +283,7 @@ func TestSession_PrepareDirectoryChangeRequiresCleanPrompt(t *testing.T) {
 }
 
 func TestSession_FilterOutputIgnoresSpoofedMarkers(t *testing.T) {
-	sess := newTestSyncSession("real-token")
+	sess := newTestSyncSession()
 	sess.notePrompt("/srv/app")
 	sess.markUserInput([]byte("ls\r"))
 
@@ -302,7 +302,7 @@ func TestSession_FilterOutputIgnoresSpoofedMarkers(t *testing.T) {
 }
 
 func TestSession_ReplayedReadableMarkerCannotFinishPendingDirectoryChange(t *testing.T) {
-	sess := newTestSyncSession("real-token")
+	sess := newTestSyncSession()
 	sess.notePrompt("/srv/app")
 
 	resultCh := make(chan error, 1)
@@ -330,7 +330,7 @@ func TestSession_ReplayedReadableMarkerCannotFinishPendingDirectoryChange(t *tes
 }
 
 func TestSession_ProbeCwdDoesNotRestoreReadyDuringBuiltinWait(t *testing.T) {
-	sess := newTestSyncSession("real-token")
+	sess := newTestSyncSession()
 	sess.notePrompt("/srv/app")
 	sess.markUserInput([]byte("read foo\r"))
 	sess.noteObservedCwd("/srv/app")
@@ -345,7 +345,7 @@ func TestSession_ProbeCwdDoesNotRestoreReadyDuringBuiltinWait(t *testing.T) {
 }
 
 func TestSession_OrdinaryCommandCanRestoreReadyAgain(t *testing.T) {
-	sess := newTestSyncSession("real-token")
+	sess := newTestSyncSession()
 	sess.promptNonce = "prompt-once"
 	sess.shellPID = 4242
 	sess.probeShellStateFn = func(_ int) (shellProbeResult, error) {
@@ -370,7 +370,7 @@ func TestSession_OrdinaryCommandCanRestoreReadyAgain(t *testing.T) {
 }
 
 func TestSession_OrdinaryOutputCannotSpoofReady(t *testing.T) {
-	sess := newTestSyncSession("real-token")
+	sess := newTestSyncSession()
 	sess.promptNonce = "prompt-once"
 	sess.shellPID = 4242
 	promptReady := true
@@ -395,7 +395,7 @@ func TestSession_OrdinaryOutputCannotSpoofReady(t *testing.T) {
 }
 
 func TestSession_FilterOutputBoundsParserRemainder(t *testing.T) {
-	sess := newTestSyncSession("real-token")
+	sess := newTestSyncSession()
 	firstChunk := []byte(syncSequencePrefix + "real-token:cwd:" + strings.Repeat("x", syncSequenceParserMaxBytes/2))
 	secondChunk := []byte(strings.Repeat("y", syncSequenceParserMaxBytes))
 
@@ -421,7 +421,7 @@ func TestParseShellProbeOutput(t *testing.T) {
 }
 
 func TestSession_PendingDirectoryChangeAcceptsCanonicalCwd(t *testing.T) {
-	sess := newTestSyncSession("real-token")
+	sess := newTestSyncSession()
 	sess.notePrompt("/home/me")
 
 	resultCh := make(chan error, 1)
@@ -453,7 +453,7 @@ func TestSession_ProbeLoopDisablesSyncAfterRepeatedUnusableResults(t *testing.T)
 		syncProbeMaxUnusableResults = oldMax
 	}()
 
-	sess := newTestSyncSession("real-token")
+	sess := newTestSyncSession()
 	sess.shellPID = 4242
 	sess.shared = &sharedClient{client: &ssh.Client{}}
 	sess.syncProbeActive = true
@@ -482,7 +482,7 @@ func TestSession_ProbeLoopDisablesSyncWhenPromptProbeHasNoCwd(t *testing.T) {
 		syncProbeMaxUnusableResults = oldMax
 	}()
 
-	sess := newTestSyncSession("real-token")
+	sess := newTestSyncSession()
 	sess.shellPID = 4242
 	sess.shared = &sharedClient{client: &ssh.Client{}}
 	sess.syncProbeActive = true
@@ -575,7 +575,7 @@ func TestEnableSyncIgnoresLateInitMarkerAfterTimeout(t *testing.T) {
 }
 
 func TestSessionIgnoresPromptAfterDisable(t *testing.T) {
-	sess := newTestSyncSession("real-token")
+	sess := newTestSyncSession()
 	sess.promptNonce = "prompt-one"
 	sess.shellPID = 4242
 	sess.disableDirectorySync(dirSyncErrUnsupported)

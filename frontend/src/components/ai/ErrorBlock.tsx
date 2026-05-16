@@ -13,21 +13,11 @@ import type { ErrorKind } from "@/lib/aiError";
 //
 // 用户明确要求该块纯展示 —— 不带"重试"/"复制"/"已达上限"等按钮。
 // 用户如需重试，可走顶部 AssistantToolbar 的"重新生成"按钮（统一入口）。
-const TITLE_FALLBACK_BY_KIND: Record<ErrorKind, string> = {
-  rate_limit: "请求过于频繁，稍后再试",
-  server: "服务暂时不可用",
-  network: "网络连接不稳定",
-  auth: "鉴权失败，请检查 API Key",
-  interrupted: "对话被中断",
-  unknown: "对话出错",
-};
-
 export const ErrorBlock = memo(function ErrorBlock({ block }: { block: ContentBlock }) {
   const { t } = useTranslation();
   const kind = (block.errorKind as ErrorKind | undefined) ?? "unknown";
-  // 优先用 block.content（落盘时已经是 classifyError 后的友好标题），
-  // 缺失时回落到按 kind 取 i18n。两层兜底避免老数据没 content 字段时空标题。
-  const title = block.content || t(`ai.error.${kind}`, TITLE_FALLBACK_BY_KIND[kind]);
+  // 优先用 block.content（落盘时已经是 classifyError 后的友好标题），缺失时按 kind 取 i18n。
+  const title = block.content || t(`ai.error.${kind}`);
   const detail = block.errorDetail || "";
 
   return (

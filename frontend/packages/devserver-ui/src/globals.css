@@ -79,6 +79,14 @@
   * {
     @apply border-border outline-ring/50;
   }
+  button,
+  [role="button"] {
+    @apply outline-none;
+  }
+  button:focus-visible,
+  [role="button"]:focus-visible {
+    @apply ring-1 ring-ring/45;
+  }
   html {
     transition: background-color 200ms ease, color 200ms ease;
   }

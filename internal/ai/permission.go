@@ -138,7 +138,7 @@ func checkDatabasePermission(ctx context.Context, assetID int64, sqlText string)
 		return groupResult
 	}
 
-	asset, _ := resolveAssetPolicyChain(ctx, assetID)
+	asset := resolveAssetForPolicy(ctx, assetID)
 	mergedPolicy := collectQueryPolicies(ctx, asset)
 	result := CheckQueryPolicy(ctx, mergedPolicy, stmts)
 
@@ -186,7 +186,7 @@ func checkRedisPermission(ctx context.Context, assetID int64, command string) Ch
 	}
 
 	// Redis 策略
-	asset, _ := resolveAssetPolicyChain(ctx, assetID)
+	asset := resolveAssetForPolicy(ctx, assetID)
 	mergedPolicy := collectRedisPolicies(ctx, asset)
 	result := CheckRedisPolicy(ctx, mergedPolicy, command)
 
@@ -228,7 +228,7 @@ func checkK8sPermission(ctx context.Context, assetID int64, command string) Chec
 		return groupResult
 	}
 
-	asset, _ := resolveAssetPolicyChain(ctx, assetID)
+	asset := resolveAssetForPolicy(ctx, assetID)
 	mergedPolicy := collectK8sPolicies(ctx, asset)
 	result := CheckK8sPolicy(ctx, mergedPolicy, command)
 
@@ -263,7 +263,7 @@ func checkMongoDBPermission(ctx context.Context, assetID int64, operation string
 	}
 
 	// MongoDB 策略
-	asset, _ := resolveAssetPolicyChain(ctx, assetID)
+	asset := resolveAssetForPolicy(ctx, assetID)
 	mergedPolicy := collectMongoDBPolicies(ctx, asset)
 	result := CheckMongoDBPolicy(ctx, mergedPolicy, operation)
 
@@ -300,7 +300,7 @@ func checkKafkaPermission(ctx context.Context, assetID int64, command string) Ch
 	}
 
 	// Kafka 策略
-	asset, _ := resolveAssetPolicyChain(ctx, assetID)
+	asset := resolveAssetForPolicy(ctx, assetID)
 	mergedPolicy := collectKafkaPolicies(ctx, asset)
 	result := CheckKafkaPolicy(ctx, mergedPolicy, command)
 

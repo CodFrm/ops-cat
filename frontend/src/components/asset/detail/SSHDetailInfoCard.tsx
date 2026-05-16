@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import type { DetailInfoCardProps } from "@/lib/assetTypes/types";
-import { InfoItem } from "./InfoItem";
+import { DetailGrid, DetailSection, InfoItem } from "./InfoItem";
+import { parseDetailConfig } from "./utils";
 
 interface SSHConfig {
   host: string;
@@ -23,12 +24,7 @@ interface SSHConfig {
 export function SSHDetailInfoCard({ asset, sshTunnelName }: DetailInfoCardProps) {
   const { t } = useTranslation();
 
-  let cfg: SSHConfig | null = null;
-  try {
-    cfg = JSON.parse(asset.Config || "{}");
-  } catch {
-    /* ignore */
-  }
+  const cfg = parseDetailConfig<SSHConfig>(asset.Config);
   if (!cfg) return null;
 
   const jumpHostName = sshTunnelName(cfg.jump_host_id);
@@ -36,9 +32,8 @@ export function SSHDetailInfoCard({ asset, sshTunnelName }: DetailInfoCardProps)
   return (
     <>
       {/* SSH Connection Info */}
-      <div className="rounded-xl border bg-card p-4">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">SSH Connection</h3>
-        <div className="grid grid-cols-2 gap-4 text-sm">
+      <DetailSection title="SSH Connection">
+        <DetailGrid>
           <InfoItem label={t("asset.host")} value={cfg.host} mono />
           <InfoItem label={t("asset.port")} value={String(cfg.port)} mono />
           <InfoItem label={t("asset.username")} value={cfg.username} mono />
@@ -57,47 +52,38 @@ export function SSHDetailInfoCard({ asset, sshTunnelName }: DetailInfoCardProps)
                   : cfg.auth_type
             }
           />
-        </div>
-      </div>
+        </DetailGrid>
+      </DetailSection>
 
       {/* SSH Private Keys */}
       {cfg.private_keys && cfg.private_keys.length > 0 && (
-        <div className="rounded-xl border bg-card p-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-            {t("asset.privateKeys")}
-          </h3>
-          <div className="space-y-1">
+        <DetailSection title={t("asset.privateKeys")}>
+          <div className="flex flex-col gap-1">
             {cfg.private_keys.map((key, i) => (
               <p key={i} className="text-sm font-mono text-muted-foreground">
                 {key}
               </p>
             ))}
           </div>
-        </div>
+        </DetailSection>
       )}
 
       {/* SSH Jump Host */}
       {jumpHostName && (
-        <div className="rounded-xl border bg-card p-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-            {t("asset.jumpHost")}
-          </h3>
+        <DetailSection title={t("asset.jumpHost")}>
           <p className="text-sm font-mono">{jumpHostName}</p>
-        </div>
+        </DetailSection>
       )}
 
       {/* SSH Proxy */}
       {cfg.proxy && (
-        <div className="rounded-xl border bg-card p-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-            {t("asset.proxy")}
-          </h3>
-          <div className="grid grid-cols-2 gap-4 text-sm">
+        <DetailSection title={t("asset.proxy")}>
+          <DetailGrid>
             <InfoItem label={t("asset.proxyType")} value={cfg.proxy.type.toUpperCase()} />
             <InfoItem label={t("asset.proxyHost")} value={`${cfg.proxy.host}:${cfg.proxy.port}`} mono />
             {cfg.proxy.username && <InfoItem label={t("asset.proxyUsername")} value={cfg.proxy.username} />}
-          </div>
-        </div>
+          </DetailGrid>
+        </DetailSection>
       )}
     </>
   );

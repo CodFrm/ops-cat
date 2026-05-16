@@ -981,7 +981,10 @@ func (a *App) registerPlugin(home string) error {
 	kmFile := filepath.Join(pluginsDir, "known_marketplaces.json")
 	km := make(map[string]any)
 	if data, err := os.ReadFile(kmFile); err == nil { //nolint:gosec // path from app data dir
-		json.Unmarshal(data, &km) //nolint:errcheck,gosec // best-effort merge
+		if err := json.Unmarshal(data, &km); err != nil {
+			logger.Default().Warn("parse known_marketplaces.json failed, will overwrite", zap.Error(err))
+			km = make(map[string]any)
+		}
 	}
 	km[pluginRegistryName] = map[string]any{
 		"source":          map[string]any{"source": "directory", "path": mktPath},
@@ -996,7 +999,10 @@ func (a *App) registerPlugin(home string) error {
 	settingsFile := filepath.Join(home, ".claude", "settings.json")
 	sc := make(map[string]any)
 	if data, err := os.ReadFile(settingsFile); err == nil { //nolint:gosec // path from app data dir
-		json.Unmarshal(data, &sc) //nolint:errcheck,gosec // best-effort merge
+		if err := json.Unmarshal(data, &sc); err != nil {
+			logger.Default().Warn("parse settings.json failed, will overwrite plugin settings", zap.Error(err))
+			sc = make(map[string]any)
+		}
 	}
 	ep, _ := sc["enabledPlugins"].(map[string]any)
 	if ep == nil {

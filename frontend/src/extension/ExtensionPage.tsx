@@ -39,12 +39,24 @@ class ExtensionErrorBoundary extends React.Component<
 /** Grace period (ms) before showing "not registered" error. */
 const NOT_REGISTERED_TIMEOUT = 5000;
 
+interface ExtensionPageError {
+  extensionName: string;
+  pageId: string;
+  kind: "not_registered" | "load";
+  message: string;
+}
+
 export function ExtensionPage({ extensionName, pageId, assetId }: ExtensionPageProps) {
   const ready = useExtensionStore((s) => s.ready);
   const entry = useExtensionStore((s) => s.extensions[extensionName]);
   const setLoaded = useExtensionStore((s) => s.setLoaded);
-  const [loaded, setLoadedLocal] = useState<LoadedExtension | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [loadedLocal, setLoadedLocal] = useState<{ extensionName: string; loaded: LoadedExtension } | null>(null);
+  const loaded = entry?.loaded ?? (loadedLocal?.extensionName === extensionName ? loadedLocal.loaded : null);
+  const [error, setError] = useState<ExtensionPageError | null>(null);
+  const currentError =
+    error?.extensionName === extensionName && error.pageId === pageId && (error.kind !== "not_registered" || !entry)
+      ? error.message
+      : null;
 
   useEffect(() => {
     if (!ready) return;
@@ -53,17 +65,17 @@ export function ExtensionPage({ extensionName, pageId, assetId }: ExtensionPageP
       // Extension not registered yet — wait for ext:reload to bring it in.
       // Only show error after a grace period.
       const timer = setTimeout(() => {
-        setError(`Extension "${extensionName}" not registered`);
+        setError({
+          extensionName,
+          pageId,
+          kind: "not_registered",
+          message: `Extension "${extensionName}" not registered`,
+        });
       }, NOT_REGISTERED_TIMEOUT);
       return () => clearTimeout(timer);
     }
 
-    setError(null);
-
-    if (entry.loaded) {
-      setLoadedLocal(entry.loaded);
-      return;
-    }
+    if (entry.loaded) return;
 
     let cancelled = false;
     (async () => {
@@ -72,10 +84,10 @@ export function ExtensionPage({ extensionName, pageId, assetId }: ExtensionPageP
         const result = await loadExtension(extensionName, entry.manifest);
         if (!cancelled) {
           setLoaded(extensionName, result);
-          setLoadedLocal(result);
+          setLoadedLocal({ extensionName, loaded: result });
         }
       } catch (err) {
-        if (!cancelled) setError(String(err));
+        if (!cancelled) setError({ extensionName, pageId, kind: "load", message: String(err) });
       }
     })();
     return () => {
@@ -83,10 +95,10 @@ export function ExtensionPage({ extensionName, pageId, assetId }: ExtensionPageP
     };
   }, [ready, entry, extensionName, pageId, setLoaded]);
 
-  if (error) {
+  if (currentError) {
     return (
       <div className="flex items-center justify-center h-full">
-        <p className="text-destructive">{error}</p>
+        <p className="text-destructive">{currentError}</p>
       </div>
     );
   }

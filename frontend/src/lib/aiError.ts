@@ -18,15 +18,6 @@ const I18N_KEY_BY_KIND: Record<ErrorKind, string> = {
   unknown: "ai.error.unknown",
 };
 
-const FALLBACK_LABEL_BY_KIND: Record<ErrorKind, string> = {
-  rate_limit: "请求过于频繁，稍后再试",
-  server: "服务暂时不可用",
-  network: "网络连接不稳定",
-  auth: "鉴权失败，请检查 API Key",
-  interrupted: "对话被中断",
-  unknown: "对话出错",
-};
-
 // 匹配优先级遵循 README 的从高到低顺序：
 // auth 优先于 rate_limit/server（避免 401 被 5xx 关键字误捞），
 // rate_limit/network 优先于 server（429/timeout 在响应里有时也带 5xx 串）。
@@ -55,6 +46,6 @@ export function classifyError(raw: string | undefined | null, explicitKind?: Err
       }
     }
   }
-  const message = i18n.t(I18N_KEY_BY_KIND[kind], FALLBACK_LABEL_BY_KIND[kind]);
+  const message = i18n.t(I18N_KEY_BY_KIND[kind]);
   return { kind, message };
 }

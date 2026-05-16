@@ -36,7 +36,7 @@
   --panel-divider: oklch(0 0 0 / 8%);
   --success: oklch(0.55 0.19 155);
   --warning: oklch(0.70 0.17 85);
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-sans: system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace;
 }
 
@@ -114,6 +114,14 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+  }
+  button,
+  [role="button"] {
+    @apply outline-none;
+  }
+  button:focus-visible,
+  [role="button"]:focus-visible {
+    @apply ring-1 ring-ring/45;
   }
   html, body {
     @apply h-full overflow-hidden;

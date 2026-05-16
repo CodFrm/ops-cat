@@ -255,8 +255,8 @@ func TestExtractSubCommands(t *testing.T) {
 		})
 
 		Convey("环境变量前缀随命令一起进入子命令文本，由匹配阶段决定是否剥离", func() {
-			// 旧实现在抽取阶段就丢弃了所有 Assigns，导致 `PATH=/tmp/evil ls` 与 `ls *` 误匹配。
-			// 现在保留 Assigns，让 ParseActualCommand 的 stripLeadingAssigns 决定哪些可剥离。
+			// Assigns 必须保留到匹配阶段，否则 `PATH=/tmp/evil ls` 会与 `ls *` 误匹配。
+			// ParseActualCommand 的 stripLeadingAssigns 负责决定哪些可剥离。
 			cmds, err := ExtractSubCommands("DEBIAN_FRONTEND=noninteractive apt-get update -qq && systemctl stop nginx")
 			So(err, ShouldBeNil)
 			So(cmds, ShouldResemble, []string{"DEBIAN_FRONTEND=noninteractive apt-get update -qq", "systemctl stop nginx"})

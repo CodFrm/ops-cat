@@ -16,7 +16,8 @@ function isNearBottom(element: HTMLDivElement) {
 export const ThinkingBlock = memo(function ThinkingBlock({ block }: ThinkingBlockProps) {
   const { t } = useTranslation();
   const isRunning = block.status === "running";
-  const [expanded, setExpanded] = useState(isRunning);
+  const [expansion, setExpansion] = useState(() => ({ status: block.status, expanded: isRunning }));
+  const expanded = expansion.status === block.status ? expansion.expanded : isRunning;
   const contentRef = useRef<HTMLDivElement>(null);
   const followBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
@@ -41,13 +42,6 @@ export const ThinkingBlock = memo(function ThinkingBlock({ block }: ThinkingBloc
       followBottomRef.current = true;
     });
   }, []);
-
-  // Auto-collapse when thinking completes
-  useEffect(() => {
-    if (!isRunning) {
-      setExpanded(false);
-    }
-  }, [isRunning]);
 
   useEffect(() => {
     return () => {
@@ -83,15 +77,18 @@ export const ThinkingBlock = memo(function ThinkingBlock({ block }: ThinkingBloc
   }, []);
 
   const charCount = block.content.length;
-  const summary = isRunning
-    ? t("ai.thinking", "思考中...")
-    : `${t("ai.thinkingProcess", "思考过程")} · ${charCount} ${t("ai.chars", "字")}`;
+  const summary = isRunning ? t("ai.thinking") : `${t("ai.thinkingProcess")} · ${charCount} ${t("ai.chars")}`;
 
   return (
     <div className="my-1.5 rounded-lg border border-purple-500/20 bg-purple-500/5 text-xs overflow-hidden">
       <button
         className="flex items-center gap-2 w-full min-w-0 px-3 py-2 h-[34px] text-left hover:bg-purple-500/10 transition-colors"
-        onClick={() => setExpanded(!expanded)}
+        onClick={() =>
+          setExpansion((current) => ({
+            status: block.status,
+            expanded: !(current.status === block.status ? current.expanded : isRunning),
+          }))
+        }
       >
         <ChevronRight
           className={`h-3 w-3 shrink-0 text-purple-500/60 transition-transform duration-150 ${

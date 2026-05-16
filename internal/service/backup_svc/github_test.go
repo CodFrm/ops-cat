@@ -28,12 +28,30 @@ func withTestServer(handler http.Handler, fn func()) {
 	fn()
 }
 
+func writeJSON(w http.ResponseWriter, v any) {
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		panic(err)
+	}
+}
+
+func writeBytes(w http.ResponseWriter, data []byte) {
+	if _, err := w.Write(data); err != nil {
+		panic(err)
+	}
+}
+
+func parseForm(r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		panic(err)
+	}
+}
+
 func TestPollOnce(t *testing.T) {
 	Convey("pollOnce", t, func() {
 		Convey("授权成功返回 token", func() {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]string{
 					"access_token": "ghu_test_token_123",
 					"token_type":   "bearer",
 				})
@@ -49,7 +67,7 @@ func TestPollOnce(t *testing.T) {
 		Convey("authorization_pending 继续轮询", func() {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]string{
 					"error":             "authorization_pending",
 					"error_description": "The authorization request is still pending.",
 				})
@@ -65,7 +83,7 @@ func TestPollOnce(t *testing.T) {
 		Convey("slow_down 标记减速", func() {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]string{
 					"error": "slow_down",
 				})
 			}), func() {
@@ -80,7 +98,7 @@ func TestPollOnce(t *testing.T) {
 		Convey("expired_token 返回错误", func() {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]string{
 					"error": "expired_token",
 				})
 			}), func() {
@@ -93,7 +111,7 @@ func TestPollOnce(t *testing.T) {
 		Convey("access_denied 返回错误", func() {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]string{
 					"error": "access_denied",
 				})
 			}), func() {
@@ -106,7 +124,7 @@ func TestPollOnce(t *testing.T) {
 		Convey("未知错误返回 error_description", func() {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]string{
 					"error":             "incorrect_client_credentials",
 					"error_description": "The client_id is incorrect.",
 				})
@@ -120,7 +138,7 @@ func TestPollOnce(t *testing.T) {
 		Convey("非 200 状态码返回错误", func() {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte("server error")) //nolint:errcheck,gosec // test HTTP handler
+				writeBytes(w, []byte("server error"))
 			}), func() {
 				_, _, _, err := pollOnce("test-device-code")
 				So(err, ShouldNotBeNil)
@@ -131,7 +149,7 @@ func TestPollOnce(t *testing.T) {
 		Convey("无效 JSON 返回解析错误", func() {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				w.Write([]byte("not valid json")) //nolint:errcheck,gosec // test HTTP handler
+				writeBytes(w, []byte("not valid json"))
 			}), func() {
 				_, _, _, err := pollOnce("test-device-code")
 				So(err, ShouldNotBeNil)
@@ -142,7 +160,7 @@ func TestPollOnce(t *testing.T) {
 		Convey("空 token 返回错误", func() {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]string{
 					"access_token": "",
 				})
 			}), func() {
@@ -159,13 +177,13 @@ func TestPollOnce(t *testing.T) {
 				capturedMethod = r.Method
 				capturedAccept = r.Header.Get("Accept")
 				capturedContentType = r.Header.Get("Content-Type")
-				r.ParseForm() //nolint:errcheck,gosec // test HTTP handler
+				parseForm(r)
 				capturedClientID = r.PostForm.Get("client_id")
 				capturedDeviceCode = r.PostForm.Get("device_code")
 				capturedGrantType = r.PostForm.Get("grant_type")
 
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]string{
 					"error": "authorization_pending",
 				})
 			}), func() {
@@ -190,11 +208,11 @@ func TestPollDeviceAuth(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				n := callCount.Add(1)
 				if n < 3 {
-					json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+					writeJSON(w, map[string]string{
 						"error": "authorization_pending",
 					})
 				} else {
-					json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+					writeJSON(w, map[string]string{
 						"access_token": "ghu_success",
 					})
 				}
@@ -210,7 +228,7 @@ func TestPollDeviceAuth(t *testing.T) {
 		Convey("context 取消时停止轮询", func() {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]string{
 					"error": "authorization_pending",
 				})
 			}), func() {
@@ -225,7 +243,7 @@ func TestPollDeviceAuth(t *testing.T) {
 		Convey("错误立即返回", func() {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]string{
 					"error": "expired_token",
 				})
 			}), func() {
@@ -244,11 +262,11 @@ func TestPollDeviceAuth(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				n := callCount.Add(1)
 				if n == 1 {
-					json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+					writeJSON(w, map[string]string{
 						"error": "slow_down",
 					})
 				} else {
-					json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+					writeJSON(w, map[string]string{
 						"access_token": "ghu_after_slowdown",
 					})
 				}
@@ -273,7 +291,7 @@ func TestStartDeviceFlow(t *testing.T) {
 				capturedPath = r.URL.Path
 				capturedMethod = r.Method
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]any{
 					"device_code":      "dc_abc123",
 					"user_code":        "ABCD-1234",
 					"verification_uri": "https://github.com/login/device",
@@ -296,7 +314,7 @@ func TestStartDeviceFlow(t *testing.T) {
 		Convey("interval 最小为 5 秒", func() {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]any{
 					"device_code":      "dc_abc123",
 					"user_code":        "ABCD-1234",
 					"verification_uri": "https://github.com/login/device",
@@ -313,7 +331,7 @@ func TestStartDeviceFlow(t *testing.T) {
 		Convey("GitHub 返回错误", func() {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]string{
 					"error":             "unauthorized_client",
 					"error_description": "The client is not authorized.",
 				})
@@ -334,7 +352,7 @@ func TestGetGitHubUser(t *testing.T) {
 				capturedPath = r.URL.Path
 				capturedAuth = r.Header.Get("Authorization")
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]string{
 					"login":      "testuser",
 					"avatar_url": "https://avatars.githubusercontent.com/u/123",
 				})
@@ -368,7 +386,7 @@ func TestListBackupGists(t *testing.T) {
 				capturedPath = r.URL.Path
 				capturedAuth = r.Header.Get("Authorization")
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode([]map[string]any{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, []map[string]any{
 					{
 						"id":          "gist-1",
 						"description": "OpsKat Backup",
@@ -402,7 +420,7 @@ func TestListBackupGists(t *testing.T) {
 		Convey("无备份 Gist 返回空列表", func() {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode([]map[string]any{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, []map[string]any{
 					{
 						"id":    "gist-1",
 						"files": map[string]any{"readme.md": map[string]string{"filename": "readme.md"}},
@@ -424,7 +442,7 @@ func TestGetGistContent(t *testing.T) {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				capturedPath = r.URL.Path
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]any{
 					"files": map[string]any{
 						gistBackupFilename: map[string]string{
 							"content": `{"version":1}`,
@@ -442,7 +460,7 @@ func TestGetGistContent(t *testing.T) {
 		Convey("无备份文件返回错误", func() {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]any{
 					"files": map[string]any{
 						"other.txt": map[string]string{"content": "hello"},
 					},
@@ -459,7 +477,7 @@ func TestGetGistContent(t *testing.T) {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				capturedAuth = r.Header.Get("Authorization")
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]any{
 					"files": map[string]any{
 						gistBackupFilename: map[string]string{"content": "data"},
 					},
@@ -483,7 +501,7 @@ func TestCreateOrUpdateGist(t *testing.T) {
 				capturedMethod = r.Method
 				capturedAuth = r.Header.Get("Authorization")
 				w.WriteHeader(http.StatusCreated)
-				json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]string{
 					"id":          "new-gist-id",
 					"description": "OpsKat Backup",
 					"updated_at":  "2025-01-01T00:00:00Z",
@@ -505,7 +523,7 @@ func TestCreateOrUpdateGist(t *testing.T) {
 				capturedPath = r.URL.Path
 				capturedMethod = r.Method
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck,gosec // test HTTP handler
+				writeJSON(w, map[string]string{
 					"id":          "existing-id",
 					"description": "Updated",
 					"updated_at":  "2025-01-02T00:00:00Z",
@@ -523,7 +541,7 @@ func TestCreateOrUpdateGist(t *testing.T) {
 		Convey("API 错误返回详细信息", func() {
 			withTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusForbidden)
-				w.Write([]byte(`{"message":"Forbidden"}`)) //nolint:errcheck,gosec // test HTTP handler
+				writeBytes(w, []byte(`{"message":"Forbidden"}`))
 			}), func() {
 				_, err := CreateOrUpdateGist("test-token", "", []byte("data"))
 				So(err, ShouldNotBeNil)

@@ -30,8 +30,7 @@ type batchResultItem struct {
 
 // handleBatchCommand 并发执行多条命令并聚合返回。
 // 流程：解析 → 策略预检 → 聚合 needConfirm 一次审批 → max 10 并发执行。
-// 与 main 上的语义对齐；refactor 上派发改为直接调 package 内 handler，
-// agentRole 参数随 CommandConfirmFunc 签名简化一并去掉。
+// 与 opsctl batch 的审批/并发流程保持一致；桌面 AI 工具当前派发 exec/sql/redis。
 func handleBatchCommand(ctx context.Context, args map[string]any) (string, error) {
 	commandsRaw, ok := args["commands"]
 	if !ok {

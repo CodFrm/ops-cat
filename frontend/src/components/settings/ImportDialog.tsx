@@ -147,7 +147,7 @@ export function ImportDialog({ open, onOpenChange, preview, title, onImport }: I
             <KeyRound className="h-4 w-4 text-muted-foreground shrink-0" />
             <input
               type="password"
-              className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45"
               placeholder={t("import.vaultPassphrase")}
               value={passphrase}
               onChange={(e) => setPassphrase(e.target.value)}

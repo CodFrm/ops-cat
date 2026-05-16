@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type * as MonacoNS from "monaco-editor";
 import { useResolvedTheme } from "./theme-provider";
@@ -75,6 +76,7 @@ export function CodeEditor({
   dynamicCompletions,
   className,
 }: CodeEditorProps) {
+  const { t } = useTranslation();
   const isControlled = value !== undefined;
   const resolvedTheme = useResolvedTheme();
   const editorRef = useRef<MonacoNS.editor.IStandaloneCodeEditor | null>(null);
@@ -168,14 +170,14 @@ export function CodeEditor({
         className={`relative h-full w-full flex flex-col items-center justify-center gap-2 p-4 text-xs text-muted-foreground ${className ?? ""}`}
         style={{ height }}
       >
-        <div className="text-destructive">编辑器加载失败</div>
+        <div className="text-destructive">{t("codeEditor.loadFailed")}</div>
         <div className="font-mono text-[11px] opacity-70 max-w-full truncate">{message}</div>
         <button
           type="button"
           onClick={handleRetryLoad}
           className="px-2 py-1 text-xs rounded border border-border hover:bg-accent"
         >
-          重试
+          {t("action.retry")}
         </button>
       </div>
     );

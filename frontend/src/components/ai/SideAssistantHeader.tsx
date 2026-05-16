@@ -1,6 +1,6 @@
 import { Bot, History, Plus, PanelRightOpen, ArrowUpRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@opskat/ui";
+import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@opskat/ui";
 
 interface SideAssistantHeaderProps {
   onToggleCollapse: () => void;
@@ -24,40 +24,72 @@ export function SideAssistantHeader({
         <Bot className="h-3.5 w-3.5 text-primary" />
         <span className="text-sm font-medium">{t("ai.sidebar.title")}</span>
       </div>
-      <div className="flex gap-0.5">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6"
-          onClick={onOpenHistory}
-          title={t("ai.sidebar.history")}
-          data-history-trigger=""
-        >
-          <History className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6"
-          onClick={onPromoteToTab}
-          disabled={!canPromote}
-          title={t("ai.sidebar.promoteToTab")}
-        >
-          <ArrowUpRight className="h-3.5 w-3.5" />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onNewChat} title={t("ai.sidebar.newChat")}>
-          <Plus className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6"
-          onClick={onToggleCollapse}
-          title={t("ai.sidebar.collapse")}
-        >
-          <PanelRightOpen className="h-3.5 w-3.5" />
-        </Button>
-      </div>
+      <TooltipProvider>
+        <div className="flex gap-0.5">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={onOpenHistory}
+                aria-label={t("ai.sidebar.history")}
+                title={t("ai.sidebar.history")}
+                data-history-trigger=""
+              >
+                <History className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("ai.sidebar.history")}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={onPromoteToTab}
+                disabled={!canPromote}
+                aria-label={t("ai.sidebar.promoteToTab")}
+                title={t("ai.sidebar.promoteToTab")}
+              >
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("ai.sidebar.promoteToTab")}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={onNewChat}
+                aria-label={t("ai.sidebar.newChat")}
+                title={t("ai.sidebar.newChat")}
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("ai.sidebar.newChat")}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={onToggleCollapse}
+                aria-label={t("ai.sidebar.collapse")}
+                title={t("ai.sidebar.collapse")}
+              >
+                <PanelRightOpen className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("ai.sidebar.collapse")}</TooltipContent>
+          </Tooltip>
+        </div>
+      </TooltipProvider>
     </div>
   );
 }

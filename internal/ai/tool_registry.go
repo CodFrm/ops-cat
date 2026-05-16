@@ -10,10 +10,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// tool_registry.go 的旧自研工具抽象（ParamDef / ToOpenAITools / DefaultToolExecutor）
-// 已在 M6 cutover 删除——OpsKat 桌面端走 cago 原生 tool.Tool（见 tools*.go）。
-//
-// 但 opsctl CLI 仍然直接以 (ctx, args)→(string, error) 的形式调用 handler，
+// opsctl CLI 直接以 (ctx, args)→(string, error) 的形式调用 handler，
 // 因此保留下面三个最小抽象：
 //   - ToolHandlerFunc：handler 通用签名；
 //   - CommandExtractorFunc：审计模块从 args 抽命令摘要的签名（audit.go 用）；
@@ -29,16 +26,15 @@ type ToolHandlerFunc func(ctx context.Context, args map[string]any) (string, err
 // CommandExtractorFunc 从工具参数中提取命令摘要（用于审计日志）。
 type CommandExtractorFunc func(args map[string]any) string
 
-// ToolDef opsctl 派发表条目。
-// 不含 Description/Params/CommandExtractor 字段——那些只用于 OpenAI function calling schema，
-// 已由 tools*.go 的 RawTool schema 处理。opsctl 只需要 (name, handler) 对。
+// ToolDef opsctl 派发表条目，只保留 (name, handler) 对。
 type ToolDef struct {
 	Name    string
 	Handler ToolHandlerFunc
 }
 
-// AllToolDefs 返回 opsctl CLI 派发用的工具列表（与 tools.go 的 Tools 一一对应）。
-// spawn_agent / batch_command 已不再注册（opsctl 也没有调用它们）。
+// AllToolDefs 返回 opsctl CLI 派发用的工具列表。
+// 它不是 Tools() 的镜像：run_serial_command 依赖桌面端已连接的串口 session；
+// batch_command 在 opsctl 中有独立的 batch 子命令入口，不走 name→handler 派发表。
 func AllToolDefs() []ToolDef {
 	return []ToolDef{
 		{"list_assets", handleListAssets},

@@ -65,11 +65,12 @@ func TestPanelConnCache_GetOrDial_ConcurrentSameKeyDialsOnce(t *testing.T) {
 		defer func() { _ = c.Close() }()
 
 		var dialCount atomic.Int32
+		var dialErr error
 		start := make(chan struct{})
 		dial := func() (*fakeClient, io.Closer, error) {
 			dialCount.Add(1)
 			time.Sleep(20 * time.Millisecond)
-			return &fakeClient{id: 1}, &fakeCloser{}, nil
+			return &fakeClient{id: 1}, &fakeCloser{}, dialErr
 		}
 
 		var wg sync.WaitGroup

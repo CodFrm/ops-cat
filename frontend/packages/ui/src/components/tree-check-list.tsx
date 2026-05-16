@@ -176,7 +176,7 @@ export function TreeCheckList({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={searchPlaceholder}
-            className="w-full h-8 pl-7 pr-2 text-xs rounded-md border bg-background outline-none focus:ring-1 focus:ring-ring"
+            className="w-full h-8 pl-7 pr-2 text-xs rounded-md border bg-background outline-none focus-visible:ring-1 focus-visible:ring-ring/45"
           />
         </div>
       )}

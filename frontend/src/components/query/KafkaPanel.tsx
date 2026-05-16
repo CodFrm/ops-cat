@@ -903,13 +903,13 @@ function IncreasePartitionsDialog({
 }) {
   const { t } = useTranslation();
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [nextCount, setNextCount] = useState(currentCount + 1);
+  const [nextCountState, setNextCountState] = useState({
+    currentCount,
+    nextCount: currentCount + 1,
+  });
+  const nextCount = nextCountState.currentCount === currentCount ? nextCountState.nextCount : currentCount + 1;
   const increasePartitions = useKafkaStore((s) => s.increasePartitions);
   const state = useKafkaStore((s) => s.states[tabId]);
-
-  useEffect(() => {
-    if (open) setNextCount(currentCount + 1);
-  }, [currentCount, open]);
 
   const confirm = async () => {
     await increasePartitions(tabId, topic, nextCount);
@@ -925,7 +925,11 @@ function IncreasePartitionsDialog({
         <div className="space-y-3">
           <div className="rounded-md bg-muted/40 px-3 py-2 font-mono text-xs">{topic}</div>
           <Metric label={t("query.kafkaCurrentPartitions")} value={currentCount} />
-          <NumberInput value={nextCount} onChange={setNextCount} placeholder={t("query.kafkaPartitions")} />
+          <NumberInput
+            value={nextCount}
+            onChange={(value) => setNextCountState({ currentCount, nextCount: value })}
+            placeholder={t("query.kafkaPartitions")}
+          />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -2260,6 +2264,26 @@ function CreateConnectorDialog({
   return <ConnectorConfigDialog tabId={tabId} mode="create" open={open} onOpenChange={onOpenChange} />;
 }
 
+interface ConnectorFormState {
+  sourceKey: string;
+  name: string;
+  config: string;
+  formError: string | null;
+}
+
+function getConnectorFormSourceKey(mode: "create" | "update", detail?: KafkaConnectorDetail) {
+  return `${mode}:${detail?.name || ""}:${JSON.stringify(detail?.config || {})}`;
+}
+
+function createConnectorFormState(sourceKey: string, detail?: KafkaConnectorDetail): ConnectorFormState {
+  return {
+    sourceKey,
+    name: detail?.name || "",
+    config: formatConnectorConfig(detail?.config),
+    formError: null,
+  };
+}
+
 function ConnectorConfigDialog({
   tabId,
   detail,
@@ -2278,27 +2302,38 @@ function ConnectorConfigDialog({
   const updateConnectorConfig = useKafkaStore((s) => s.updateConnectorConfig);
   const state = useKafkaStore((s) => s.states[tabId]);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [name, setName] = useState(detail?.name || "");
-  const [config, setConfig] = useState(formatConnectorConfig(detail?.config));
-  const [formError, setFormError] = useState<string | null>(null);
+  const formSourceKey = getConnectorFormSourceKey(mode, detail);
+  const initialForm = createConnectorFormState(formSourceKey, detail);
+  const [formState, setFormState] = useState(initialForm);
+  const form = formState.sourceKey === formSourceKey ? formState : initialForm;
+  const { name, config, formError } = form;
 
-  useEffect(() => {
-    if (!open) return;
-    setName(detail?.name || "");
-    setConfig(formatConnectorConfig(detail?.config));
-    setFormError(null);
-  }, [detail, open]);
+  const updateForm = (patch: Partial<Omit<ConnectorFormState, "sourceKey">>) => {
+    setFormState((current) => ({
+      ...(current.sourceKey === formSourceKey ? current : initialForm),
+      ...patch,
+      sourceKey: formSourceKey,
+    }));
+  };
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setConfirmOpen(false);
+      setFormState(initialForm);
+    }
+    onOpenChange(nextOpen);
+  };
 
   const canSubmit = name.trim() && config.trim();
 
   const submit = async () => {
-    setFormError(null);
+    updateForm({ formError: null });
     let parsedConfig: Record<string, string>;
     try {
       parsedConfig = parseConnectorConfigObject(config);
     } catch (err) {
       setConfirmOpen(false);
-      setFormError(errorMessage(err));
+      updateForm({ formError: errorMessage(err) });
       return;
     }
     const req: KafkaConnectorConfigRequest = {
@@ -2311,15 +2346,15 @@ function ConnectorConfigDialog({
       } else {
         await updateConnectorConfig(tabId, req);
       }
-      onOpenChange(false);
+      handleOpenChange(false);
     } catch (err) {
       setConfirmOpen(false);
-      setFormError(errorMessage(err));
+      updateForm({ formError: errorMessage(err) });
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>
@@ -2330,14 +2365,14 @@ function ConnectorConfigDialog({
           <Input
             className="h-8 font-mono text-xs"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => updateForm({ name: e.target.value })}
             disabled={mode === "update"}
             placeholder={t("query.kafkaConnector")}
           />
           <Textarea
             className="min-h-80 font-mono text-xs"
             value={config}
-            onChange={(e) => setConfig(e.target.value)}
+            onChange={(e) => updateForm({ config: e.target.value })}
             placeholder={t("query.kafkaConnectorConfigPlaceholder")}
           />
           {formError && (
@@ -2348,7 +2383,7 @@ function ConnectorConfigDialog({
           )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => handleOpenChange(false)}>
             {t("action.cancel")}
           </Button>
           <Button disabled={state?.connectAdminLoading || !canSubmit} onClick={() => setConfirmOpen(true)}>

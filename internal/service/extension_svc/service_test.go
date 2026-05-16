@@ -45,7 +45,9 @@ func writeTestExtension(dir, name string) {
 
 // writeTestExtensionWithSnippets writes an extension manifest declaring a single
 // snippet category + seed. assetType is matched so manifest validation passes.
-func writeTestExtensionWithSnippets(dir, name, catID, assetType, seedKey string) {
+func writeTestExtensionWithSnippets(dir, name, assetType, seedKey string) {
+	const catID = "kafka"
+
 	extDir := filepath.Join(dir, name)
 	_ = os.MkdirAll(extDir, 0755)
 	manifest := map[string]any{
@@ -292,7 +294,7 @@ func TestService_SnippetIntegration(t *testing.T) {
 			// Manager points to a persistent target dir; source is separate.
 			targetDir := t.TempDir()
 			sourceDir := t.TempDir()
-			writeTestExtensionWithSnippets(sourceDir, "kafka-ext", "kafka", "kafka", "list-topics")
+			writeTestExtensionWithSnippets(sourceDir, "kafka-ext", "kafka", "list-topics")
 
 			mgr := newTestManager(targetDir)
 			svc := New(mgr, stateRepo, dataRepo, nil, logger,
@@ -318,7 +320,7 @@ func TestService_SnippetIntegration(t *testing.T) {
 
 			targetDir := t.TempDir()
 			// Pre-install an extension that already owns category "kafka".
-			writeTestExtensionWithSnippets(targetDir, "kafka-a", "kafka", "kafka-a", "k1")
+			writeTestExtensionWithSnippets(targetDir, "kafka-a", "kafka-a", "k1")
 
 			mgr := newTestManager(targetDir)
 			svc := New(mgr, stateRepo, dataRepo, nil, logger,
@@ -332,7 +334,7 @@ func TestService_SnippetIntegration(t *testing.T) {
 
 			// Now try to install a second extension that re-declares the same id.
 			sourceDir := t.TempDir()
-			writeTestExtensionWithSnippets(sourceDir, "kafka-b", "kafka", "kafka-b", "k2")
+			writeTestExtensionWithSnippets(sourceDir, "kafka-b", "kafka-b", "k2")
 
 			_, err := svc.Install(ctx, filepath.Join(sourceDir, "kafka-b"))
 			So(err, ShouldNotBeNil)
@@ -352,7 +354,7 @@ func TestService_SnippetIntegration(t *testing.T) {
 			hook := &fakeSnippetHook{}
 
 			targetDir := t.TempDir()
-			writeTestExtensionWithSnippets(targetDir, "kafka-x", "kafka", "kafka-x", "k1")
+			writeTestExtensionWithSnippets(targetDir, "kafka-x", "kafka-x", "k1")
 
 			mgr := newTestManager(targetDir)
 			svc := New(mgr, stateRepo, dataRepo, nil, logger,

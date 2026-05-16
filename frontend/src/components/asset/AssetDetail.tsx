@@ -4,13 +4,14 @@ import { Server, Pencil, Trash2, TerminalSquare, Loader2 } from "lucide-react";
 import Markdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
-import { Button, Separator, ConfirmDialog } from "@opskat/ui";
+import { Button, Separator, ConfirmDialog, Tooltip, TooltipContent, TooltipTrigger } from "@opskat/ui";
 import { toast } from "sonner";
 import { useAssetStore } from "@/stores/assetStore";
 import { useExtensionStore } from "@/extension";
 import { getAssetType, isBuiltinType } from "@/lib/assetTypes";
 import { CommandPolicyCard } from "@/components/asset/CommandPolicyCard";
-import { InfoItem } from "@/components/asset/detail/InfoItem";
+import { DetailGrid, DetailSection, InfoItem } from "@/components/asset/detail/InfoItem";
+import { DISABLED_VALUE, ENABLED_VALUE, MASKED_SECRET, parseDetailConfig } from "@/components/asset/detail/utils";
 import { asset_entity } from "../../../wailsjs/go/models";
 import { GetDefaultPolicy } from "../../../wailsjs/go/app/App";
 
@@ -150,17 +151,28 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
               {t("ssh.connect")}
             </Button>
           )}
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onEdit}>
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-destructive hover:text-destructive"
-            onClick={() => setShowDeleteConfirm(true)}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onEdit} aria-label={t("action.edit")}>
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("action.edit")}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-destructive hover:text-destructive"
+                onClick={() => setShowDeleteConfirm(true)}
+                aria-label={t("action.delete")}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("action.delete")}</TooltipContent>
+          </Tooltip>
         </div>
       </div>
       <ConfirmDialog
@@ -191,18 +203,10 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
             const props = schema.properties ?? {};
             const order = schema.propertyOrder;
             const keys = order ? order.filter((k) => k in props) : Object.keys(props);
-            let parsed: Record<string, unknown> = {};
-            try {
-              parsed = JSON.parse(asset.Config || "{}");
-            } catch {
-              /* ignore */
-            }
+            const parsed = parseDetailConfig<Record<string, unknown>>(asset.Config) ?? {};
             return (
-              <div className="rounded-xl border bg-card p-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-                  {extInfo?.manifest.i18n.displayName || asset.Type}
-                </h3>
-                <div className="grid grid-cols-2 gap-4 text-sm">
+              <DetailSection title={extInfo?.manifest.i18n.displayName || asset.Type}>
+                <DetailGrid>
                   {keys.map((key) => {
                     const prop = props[key];
                     if (!prop) return null;
@@ -214,19 +218,19 @@ export function AssetDetail({ asset, isConnecting, onEdit, onDelete, onConnect }
                         label={prop.title || key}
                         value={
                           prop.format === "password"
-                            ? "●●●●●●"
+                            ? MASKED_SECRET
                             : prop.type === "boolean"
                               ? val
-                                ? "✓"
-                                : "✗"
+                                ? ENABLED_VALUE
+                                : DISABLED_VALUE
                               : String(val)
                         }
                         mono={prop.type !== "boolean"}
                       />
                     );
                   })}
-                </div>
-              </div>
+                </DetailGrid>
+              </DetailSection>
             );
           })()}
 

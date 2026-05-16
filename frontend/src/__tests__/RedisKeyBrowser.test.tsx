@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { RedisKeyBrowser, buildKeyTree, flattenTree, makeLocalKeyMatcher } from "../components/query/RedisKeyBrowser";
+import { RedisKeyBrowser } from "../components/query/RedisKeyBrowser";
+import { buildKeyTree, flattenTree, makeLocalKeyMatcher } from "../lib/redisKeyTree";
 import { useQueryStore } from "../stores/queryStore";
 import { useTabStore } from "../stores/tabStore";
 import {

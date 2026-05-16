@@ -17,7 +17,7 @@ import {
 import { ExecuteSQL } from "../../../wailsjs/go/app/App";
 import { toast } from "sonner";
 import { SqlPreviewDialog } from "./SqlPreviewDialog";
-import { quoteIdent, quoteTableRef, sqlQuote } from "@/lib/tableSql";
+import { buildCreateTableSql } from "@/lib/tableSql";
 
 interface CreateTableDialogProps {
   open: boolean;
@@ -34,34 +34,6 @@ interface ColumnDraft {
   type: string;
   nullable: boolean;
   defaultValue: string;
-}
-
-function formatDefaultValue(value: string): string {
-  const v = value.trim();
-  if (!v) return "";
-  if (/^[-+]?\d+(\.\d+)?$/.test(v)) return v;
-  if (/^(true|false|null)$/i.test(v)) return v.toUpperCase();
-  if (/^(current_timestamp(?:\(\))?|now\(\))$/i.test(v)) return v;
-  return sqlQuote(v);
-}
-
-export interface BuildCreateTableSqlInput {
-  driver?: string;
-  database: string;
-  name: string;
-  columns: { name: string; type: string; nullable: boolean; defaultValue: string }[];
-}
-
-export function buildCreateTableSql({ driver, database, name, columns }: BuildCreateTableSqlInput): string {
-  const tableRef = quoteTableRef(database, name, driver);
-
-  const defs = columns.map((col) => {
-    const nullable = col.nullable ? "" : " NOT NULL";
-    const def = col.defaultValue.trim() ? ` DEFAULT ${formatDefaultValue(col.defaultValue)}` : "";
-    return `${quoteIdent(col.name.trim(), driver)} ${col.type.trim()}${nullable}${def}`;
-  });
-
-  return `CREATE TABLE ${tableRef} (\n  ${defs.join(",\n  ")}\n)`;
 }
 
 function createEmptyColumn(id: number): ColumnDraft {

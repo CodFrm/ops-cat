@@ -1,7 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { pinyinMatch } from "../lib/pinyin";
+import { describe, it, expect, beforeAll } from "vitest";
+import { pinyinMatch, __ensurePinyinReady } from "../lib/pinyin";
 
 describe("pinyinMatch", () => {
+  beforeAll(() => __ensurePinyinReady());
+
   it("returns true for empty query", () => {
     expect(pinyinMatch("anything", "")).toBe(true);
   });

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, lazy, Suspense } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -14,11 +14,13 @@ import { EdgeRevealStrip } from "@/components/layout/EdgeRevealStrip";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { LeftPanel } from "@/components/layout/LeftPanel";
 import { SideTabList } from "@/components/layout/SideTabList";
-import { AssetForm } from "@/components/asset/AssetForm";
-import { GroupDialog } from "@/components/asset/GroupDialog";
 import { PermissionDialog } from "@/components/ai/PermissionDialog";
 import { OpsctlApprovalDialog } from "@/components/approval/OpsctlApprovalDialog";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+
+// 资产表单/分组对话框：用户点"添加/编辑"才会打开，从首屏 bundle 拆出。
+const AssetForm = lazy(() => import("@/components/asset/AssetForm").then((m) => ({ default: m.AssetForm })));
+const GroupDialog = lazy(() => import("@/components/asset/GroupDialog").then((m) => ({ default: m.GroupDialog })));
 
 import { useAssetStore } from "@/stores/assetStore";
 import { useTerminalStore } from "@/stores/terminalStore";
@@ -493,13 +495,19 @@ function App() {
             </div>
           </div>
 
-          <AssetForm
-            open={assetFormOpen}
-            onOpenChange={setAssetFormOpen}
-            editAsset={editingAsset}
-            defaultGroupId={defaultGroupId}
-          />
-          <GroupDialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen} editGroup={editingGroup} />
+          <Suspense fallback={null}>
+            {assetFormOpen && (
+              <AssetForm
+                open={assetFormOpen}
+                onOpenChange={setAssetFormOpen}
+                editAsset={editingAsset}
+                defaultGroupId={defaultGroupId}
+              />
+            )}
+            {groupDialogOpen && (
+              <GroupDialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen} editGroup={editingGroup} />
+            )}
+          </Suspense>
           <PermissionDialog />
           <OpsctlApprovalDialog />
           <Toaster richColors />
