@@ -322,22 +322,35 @@ export function AIChatContent({
     if (sideTabId) return;
     if (previousConversationIdRef.current === conversationId) return;
     previousConversationIdRef.current = conversationId;
-    if (editTarget) {
+    if (!editTarget) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
       resetEditMode({ clearDraft: true });
-    }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [conversationId, editTarget, resetEditMode, sideTabId]);
 
   useEffect(() => {
     // 会话消息被刷新、截断或替换后，如果编辑目标不再匹配当前消息，就立即退出编辑态。
     if (!editTarget) return;
-    if (editTarget.conversationId !== conversationId) {
-      resetEditMode({ clearDraft: true });
-      return;
-    }
     const targetMessage = messages[editTarget.messageIndex];
-    if (!targetMessage || targetMessage.role !== "user" || targetMessage.content !== editTarget.draft.content) {
+    const shouldReset =
+      editTarget.conversationId !== conversationId ||
+      !targetMessage ||
+      targetMessage.role !== "user" ||
+      targetMessage.content !== editTarget.draft.content;
+    if (!shouldReset) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
       resetEditMode({ clearDraft: true });
-    }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [conversationId, editTarget, messages, resetEditMode]);
 
   useEffect(() => {

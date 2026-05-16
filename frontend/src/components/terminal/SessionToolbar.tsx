@@ -9,24 +9,34 @@ interface SessionToolbarProps {
   tabId: string;
 }
 
+function formatUptime(connectedAt: number): string {
+  const secs = Math.floor((Date.now() - connectedAt) / 1000);
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+    : `${m}:${String(s).padStart(2, "0")}`;
+}
+
 function useUptime(connectedAt: number | undefined, connected: boolean, active: boolean): string {
-  const [elapsed, setElapsed] = useState("");
+  const [elapsedState, setElapsedState] = useState<{ connectedAt: number | undefined; elapsed: string }>({
+    connectedAt,
+    elapsed: connectedAt ? formatUptime(connectedAt) : "",
+  });
+  const elapsed =
+    connected && connectedAt
+      ? elapsedState.connectedAt === connectedAt
+        ? elapsedState.elapsed
+        : formatUptime(connectedAt)
+      : "";
+
   useEffect(() => {
     if (!connected || !connectedAt) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setElapsed("");
       return;
     }
     const update = () => {
-      const secs = Math.floor((Date.now() - connectedAt) / 1000);
-      const h = Math.floor(secs / 3600);
-      const m = Math.floor((secs % 3600) / 60);
-      const s = secs % 60;
-      setElapsed(
-        h > 0
-          ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
-          : `${m}:${String(s).padStart(2, "0")}`
-      );
+      setElapsedState({ connectedAt, elapsed: formatUptime(connectedAt) });
     };
     update();
     if (!active) return; // 非活跃 tab 不启动 interval，切回时 effect 会重入并 update 一次

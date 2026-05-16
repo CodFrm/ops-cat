@@ -31,6 +31,13 @@ import { toast } from "sonner";
 import { Button, Input, ConfirmDialog } from "@opskat/ui";
 import { useQueryStore } from "@/stores/queryStore";
 import { useTabStore, type QueryTabMeta } from "@/stores/tabStore";
+import {
+  DEFAULT_REDIS_KEY_SEPARATOR,
+  buildKeyTree,
+  flattenTree,
+  isDefaultRedisKeyFilter,
+  makeLocalKeyMatcher,
+} from "@/lib/redisKeyTree";
 import { RedisDeleteKeys } from "../../../wailsjs/go/app/App";
 import { RedisCreateKeyDialog } from "./RedisCreateKeyDialog";
 
@@ -39,126 +46,8 @@ interface RedisKeyBrowserProps {
 }
 
 const KEY_ROW_HEIGHT = 28;
-const DEFAULT_SEPARATOR = ":";
 const MAX_TREE_PREFETCH_KEYS = 20_000;
-
-// --- Tree logic ---
-
-interface TreeNode {
-  name: string; // segment name (e.g. "user")
-  fullKey: string | null; // non-null = leaf node (actual Redis key)
-  children: Map<string, TreeNode>;
-  keyCount: number; // total leaf keys under this node
-}
-
-export function buildKeyTree(keys: string[], separator: string): TreeNode {
-  const root: TreeNode = { name: "", fullKey: null, children: new Map(), keyCount: 0 };
-  const sep = separator || DEFAULT_SEPARATOR;
-  for (const key of keys) {
-    const parts = key.split(sep);
-    let node = root;
-    for (let i = 0; i < parts.length; i++) {
-      const segment = parts[i];
-      const isLast = i === parts.length - 1;
-      if (isLast) {
-        const existing = node.children.get(segment);
-        if (existing) {
-          if (existing.fullKey === null) {
-            existing.fullKey = key;
-            existing.keyCount++;
-          }
-        } else {
-          node.children.set(segment, { name: segment, fullKey: key, children: new Map(), keyCount: 1 });
-        }
-      } else {
-        if (!node.children.has(segment)) {
-          node.children.set(segment, { name: segment, fullKey: null, children: new Map(), keyCount: 0 });
-        }
-        node = node.children.get(segment)!;
-      }
-    }
-    // Update counts up the path
-    let n = root;
-    for (let i = 0; i < parts.length - 1; i++) {
-      if (n.children.has(parts[i])) {
-        n = n.children.get(parts[i])!;
-        n.keyCount++;
-      }
-    }
-    root.keyCount++;
-  }
-  return root;
-}
-
-interface FlatTreeRow {
-  depth: number;
-  name: string;
-  fullKey: string | null; // null = folder
-  keyCount: number;
-  isExpanded: boolean;
-  hasChildren: boolean;
-  nodeId: string; // unique ID for expansion tracking (prefix path)
-}
-
-export function flattenTree(root: TreeNode, expandedSet: Set<string>, separator: string): FlatTreeRow[] {
-  const result: FlatTreeRow[] = [];
-  const sep = separator || DEFAULT_SEPARATOR;
-  const walk = (node: TreeNode, depth: number, prefix: string) => {
-    // Sort children: folders first, then leaves
-    const entries = Array.from(node.children.values()).sort((a, b) => {
-      const aIsFolder = a.children.size > 0 ? 0 : 1;
-      const bIsFolder = b.children.size > 0 ? 0 : 1;
-      if (aIsFolder !== bIsFolder) return aIsFolder - bIsFolder;
-      return a.name.localeCompare(b.name);
-    });
-    for (const child of entries) {
-      const nodeId = prefix ? `${prefix}${sep}${child.name}` : child.name;
-      const isExpanded = expandedSet.has(nodeId);
-      result.push({
-        depth,
-        name: child.name,
-        fullKey: child.fullKey,
-        keyCount: child.keyCount,
-        isExpanded,
-        hasChildren: child.children.size > 0,
-        nodeId,
-      });
-      if (child.children.size > 0 && isExpanded) {
-        walk(child, depth + 1, nodeId);
-      }
-    }
-  };
-  walk(root, 0, "");
-  return result;
-}
-
-function isDefaultFilter(pattern: string) {
-  const trimmed = pattern.trim();
-  return trimmed === "" || trimmed === "*";
-}
-
-function escapeRegex(value: string) {
-  return value.replace(/[|\\{}()[\]^$+*?.]/g, "\\$&");
-}
-
-export function makeLocalKeyMatcher(pattern: string): (key: string) => boolean {
-  const trimmed = pattern.trim();
-  if (isDefaultFilter(trimmed)) return () => true;
-  if (/[*?]/.test(trimmed)) {
-    const source = trimmed
-      .split("")
-      .map((char) => {
-        if (char === "*") return ".*";
-        if (char === "?") return ".";
-        return escapeRegex(char);
-      })
-      .join("");
-    const re = new RegExp(`^${source}$`, "i");
-    return (key) => re.test(key);
-  }
-  const needle = trimmed.toLocaleLowerCase();
-  return (key) => key.toLocaleLowerCase().includes(needle);
-}
+const EMPTY_REDIS_KEYS: string[] = [];
 
 interface RedisDbSelectorProps {
   currentDb: number;
@@ -337,7 +226,7 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
   const removeKey = useQueryStore((s) => s.removeKey);
   const tab = useTabStore((s) => s.tabs.find((tb) => tb.id === tabId));
   const tabMeta = tab?.meta as QueryTabMeta | undefined;
-  const keySeparator = tabMeta?.redisKeySeparator || DEFAULT_SEPARATOR;
+  const keySeparator = tabMeta?.redisKeySeparator || DEFAULT_REDIS_KEY_SEPARATOR;
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // View mode: "list" or "tree". Redis keys are hierarchical in most real datasets,
@@ -351,6 +240,10 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const committedFilter = state?.keyFilter === "*" ? "" : (state?.keyFilter ?? "");
+  const hasRedisState = state != null;
+  const redisKeys = state?.keys ?? EMPTY_REDIS_KEYS;
+  const redisHasMore = state?.hasMore ?? false;
+  const redisLoadingKeys = state?.loadingKeys ?? false;
   const [draftFilter, setDraftFilter] = useState(committedFilter);
 
   useEffect(() => {
@@ -358,10 +251,10 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
   }, [committedFilter, state?.currentDb, tabId]);
 
   const visibleKeys = useMemo(() => {
-    if (!state) return [];
+    if (!hasRedisState) return [];
     const matcher = makeLocalKeyMatcher(draftFilter);
-    return state.keys.filter(matcher);
-  }, [draftFilter, state?.keys, state]);
+    return redisKeys.filter(matcher);
+  }, [draftFilter, hasRedisState, redisKeys]);
 
   // Build tree data
   const keyTree = useMemo(() => {
@@ -396,13 +289,13 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
           lane: 0,
         }));
   const currentDbTotal = state ? state.dbKeyCounts[state.currentDb] : undefined;
-  const keyFilterIsDefault = !state || isDefaultFilter(state.keyFilter);
-  const draftFilterIsDefault = isDefaultFilter(draftFilter);
+  const keyFilterIsDefault = !state || isDefaultRedisKeyFilter(state.keyFilter);
+  const draftFilterIsDefault = isDefaultRedisKeyFilter(draftFilter);
   const isLocalOnlyFilter = draftFilter.trim() !== committedFilter.trim();
   const treeCountsIncomplete = Boolean(
-    state &&
+    hasRedisState &&
     draftFilterIsDefault &&
-    (state.hasMore || (keyFilterIsDefault && currentDbTotal !== undefined && currentDbTotal > state.keys.length))
+    (redisHasMore || (keyFilterIsDefault && currentDbTotal !== undefined && currentDbTotal > redisKeys.length))
   );
 
   useEffect(() => {
@@ -412,15 +305,15 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
 
   useEffect(() => {
     if (
-      !state ||
+      !hasRedisState ||
       viewMode !== "tree" ||
       !keyFilterIsDefault ||
       !draftFilterIsDefault ||
-      state.loadingKeys ||
-      !state.hasMore
+      redisLoadingKeys ||
+      !redisHasMore
     )
       return;
-    if (currentDbTotal === undefined || currentDbTotal > MAX_TREE_PREFETCH_KEYS || state.keys.length >= currentDbTotal)
+    if (currentDbTotal === undefined || currentDbTotal > MAX_TREE_PREFETCH_KEYS || redisKeys.length >= currentDbTotal)
       return;
     const timer = window.setTimeout(() => {
       scanKeys(tabId, false);
@@ -428,14 +321,15 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
     return () => window.clearTimeout(timer);
   }, [
     currentDbTotal,
+    hasRedisState,
     keyFilterIsDefault,
     draftFilterIsDefault,
+    redisHasMore,
+    redisKeys.length,
+    redisLoadingKeys,
     scanKeys,
     state?.currentDb,
-    state?.hasMore,
-    state?.keys.length,
     state?.keyFilter,
-    state?.loadingKeys,
     state?.scanCursor,
     tabId,
     viewMode,
@@ -768,6 +662,7 @@ export function RedisKeyBrowser({ tabId }: RedisKeyBrowserProps) {
 
       {tabMeta && (
         <RedisCreateKeyDialog
+          key={`${createDialogOpen ? "open" : "closed"}:${state.currentDb}`}
           open={createDialogOpen}
           assetId={tabMeta.assetId}
           db={state.currentDb}

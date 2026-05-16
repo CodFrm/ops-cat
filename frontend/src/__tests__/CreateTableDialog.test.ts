@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCreateTableSql } from "../components/query/CreateTableDialog";
+import { buildCreateTableSql } from "../lib/tableSql";
 
 describe("buildCreateTableSql", () => {
   it("builds mysql CREATE TABLE with db-qualified name and default value formatting", () => {

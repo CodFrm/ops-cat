@@ -46,10 +46,7 @@ export const K8sLogTerminal = forwardRef<K8sLogTerminalHandle>(function K8sLogTe
 
     const term = new XTerminal({
       cursorBlink: false,
-      fontSize,
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
-      theme: xtermTheme,
-      scrollback,
       disableStdin: true,
       convertEol: true,
     });

@@ -13,14 +13,14 @@ func TestIOOpenTCP(t *testing.T) {
 		// Start a trivial TCP echo server
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		So(err, ShouldBeNil)
-		defer ln.Close() //nolint:errcheck
+		defer func() { _ = ln.Close() }()
 
 		go func() {
 			c, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			defer c.Close() //nolint:errcheck
+			defer func() { _ = c.Close() }()
 			buf := make([]byte, 1024)
 			n, _ := c.Read(buf)
 			_, _ = c.Write(buf[:n]) // echo server; write failure is irrelevant in test
@@ -75,7 +75,7 @@ func newFakeTunnelDialer(t *testing.T, wantID int64) *fakeTunnelDialer {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close() //nolint:errcheck
+	defer func() { _ = ln.Close() }()
 
 	dialDone := make(chan net.Conn, 1)
 	go func() {

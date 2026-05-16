@@ -19,18 +19,22 @@ function computeRemaining(status: ChatMessageRetryStatus): number {
 
 export const RetryBanner = memo(function RetryBanner({ status }: { status: ChatMessageRetryStatus }) {
   const { t } = useTranslation();
-  const [remaining, setRemaining] = useState(() => computeRemaining(status));
+  const statusTimerKey = `${status.startedAt}:${status.delayMs}`;
+  const [remainingState, setRemainingState] = useState(() => ({
+    timerKey: statusTimerKey,
+    value: computeRemaining(status),
+  }));
+  const remaining = remainingState.timerKey === statusTimerKey ? remainingState.value : computeRemaining(status);
 
   useEffect(() => {
-    setRemaining(computeRemaining(status));
     if (status.delayMs <= 0) return;
     const id = window.setInterval(() => {
       const next = computeRemaining(status);
-      setRemaining(next);
+      setRemainingState({ timerKey: statusTimerKey, value: next });
       if (next <= 0) window.clearInterval(id);
     }, 1000);
     return () => window.clearInterval(id);
-  }, [status]);
+  }, [status, statusTimerKey]);
 
   const attemptLabel = status.attempt > 0 ? t("ai.retry.attempt", "第 {{n}} 次", { n: status.attempt }) : "";
   const countdownLabel =

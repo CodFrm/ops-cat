@@ -16,7 +16,7 @@ import {
 import { ExecuteSQL } from "../../../wailsjs/go/app/App";
 import { SqlPreviewDialog } from "./SqlPreviewDialog";
 import { toast } from "sonner";
-import { quoteIdent, quoteTableRef, sqlQuote } from "@/lib/tableSql";
+import { buildAlterStatements, quoteIdent, type AlterDraftColumn, type AlterLoadedColumn } from "@/lib/tableSql";
 
 interface AlterTableDialogProps {
   open: boolean;
@@ -32,44 +32,8 @@ interface SQLResult {
   rows?: Record<string, unknown>[];
 }
 
-interface LoadedColumn {
-  name: string;
-  type: string;
-  nullable: boolean;
-  defaultValue: string;
-  comment: string;
-}
-
-interface DraftColumn {
-  id: number;
-  originalName?: string;
-  name: string;
-  type: string;
-  nullable: boolean;
-  defaultValue: string;
-  comment: string;
-  isNew: boolean;
-}
-
 function escapeLiteral(value: string): string {
   return value.replace(/'/g, "''");
-}
-
-function formatDefaultValue(value: string): string {
-  const v = value.trim();
-  if (!v) return "";
-  if (/^[-+]?\d+(\.\d+)?$/.test(v)) return v;
-  if (/^(true|false|null)$/i.test(v)) return v.toUpperCase();
-  if (/^(current_timestamp(?:\(\))?|now\(\))$/i.test(v)) return v;
-  return sqlQuote(v);
-}
-
-function normalizeDefault(value: string): string {
-  return value.trim();
-}
-
-function normalizeComment(value: string): string {
-  return value.trim();
 }
 
 function getByKey(row: Record<string, unknown>, keys: string[]): unknown {
@@ -83,199 +47,7 @@ function getByKey(row: Record<string, unknown>, keys: string[]): unknown {
   return undefined;
 }
 
-function buildColumnDefinition(
-  column: Pick<DraftColumn, "name" | "type" | "nullable" | "defaultValue" | "comment">,
-  driver?: string,
-  forceComment = false
-): string {
-  const nullable = column.nullable ? "" : " NOT NULL";
-  const defaultPart = normalizeDefault(column.defaultValue)
-    ? ` DEFAULT ${formatDefaultValue(column.defaultValue)}`
-    : "";
-  const includeComment = driver !== "postgresql" && (forceComment || !!normalizeComment(column.comment));
-  const commentPart = includeComment ? ` COMMENT ${sqlQuote(column.comment)}` : "";
-  return `${quoteIdent(column.name.trim(), driver)} ${column.type.trim()}${nullable}${defaultPart}${commentPart}`;
-}
-
-export function buildAlterStatements(params: {
-  driver?: string;
-  database: string;
-  table: string;
-  tableNameDraft: string;
-  tableCommentDraft: string;
-  originalTableComment: string;
-  originalColumns: LoadedColumn[];
-  draftColumns: DraftColumn[];
-}): { statements: string[]; nextTableName?: string } {
-  const {
-    driver,
-    database,
-    table,
-    tableNameDraft,
-    tableCommentDraft,
-    originalTableComment,
-    originalColumns,
-    draftColumns,
-  } = params;
-
-  const statements: string[] = [];
-  const nextTableName = tableNameDraft.trim();
-  const hasRenameTable = !!nextTableName && nextTableName !== table;
-
-  const originalTableRef = quoteTableRef(database, table, driver);
-  const targetTable = hasRenameTable ? nextTableName : table;
-  const targetTableRef = quoteTableRef(database, targetTable, driver);
-
-  if (hasRenameTable) {
-    if (driver === "postgresql") {
-      statements.push(`ALTER TABLE ${originalTableRef} RENAME TO ${quoteIdent(nextTableName, driver)}`);
-    } else {
-      statements.push(`RENAME TABLE ${originalTableRef} TO ${quoteTableRef(database, nextTableName, driver)}`);
-    }
-  }
-
-  const originalMap = new Map(originalColumns.map((col) => [col.name, col]));
-  const keptOriginalNames = new Set<string>();
-
-  const additions: string[] = [];
-  const renames: string[] = [];
-  const modifications: string[] = [];
-  const drops: string[] = [];
-  const comments: string[] = [];
-  const tableCommentChanged = normalizeComment(originalTableComment) !== normalizeComment(tableCommentDraft);
-
-  for (const col of draftColumns) {
-    const name = col.name.trim();
-    if (!name) continue;
-
-    if (!col.originalName || col.isNew) {
-      additions.push(buildColumnDefinition(col, driver));
-      if (driver === "postgresql" && normalizeComment(col.comment)) {
-        comments.push(`COMMENT ON COLUMN ${targetTableRef}.${quoteIdent(name, driver)} IS ${sqlQuote(col.comment)}`);
-      }
-      continue;
-    }
-
-    keptOriginalNames.add(col.originalName);
-    const original = originalMap.get(col.originalName);
-    if (!original) continue;
-
-    const typeChanged = original.type.trim().toLowerCase() !== col.type.trim().toLowerCase();
-    const nullableChanged = original.nullable !== col.nullable;
-    const defaultChanged = normalizeDefault(original.defaultValue) !== normalizeDefault(col.defaultValue);
-    const commentChanged = normalizeComment(original.comment) !== normalizeComment(col.comment);
-    const renamed = col.originalName !== name;
-
-    if (driver === "postgresql") {
-      const currentName = renamed ? name : col.originalName;
-
-      if (renamed) {
-        renames.push(
-          `ALTER TABLE ${targetTableRef} RENAME COLUMN ${quoteIdent(col.originalName, driver)} TO ${quoteIdent(name, driver)}`
-        );
-      }
-
-      if (typeChanged) {
-        modifications.push(
-          `ALTER TABLE ${targetTableRef} ALTER COLUMN ${quoteIdent(currentName, driver)} TYPE ${col.type.trim()}`
-        );
-      }
-
-      if (nullableChanged) {
-        modifications.push(
-          col.nullable
-            ? `ALTER TABLE ${targetTableRef} ALTER COLUMN ${quoteIdent(currentName, driver)} DROP NOT NULL`
-            : `ALTER TABLE ${targetTableRef} ALTER COLUMN ${quoteIdent(currentName, driver)} SET NOT NULL`
-        );
-      }
-
-      if (defaultChanged) {
-        modifications.push(
-          normalizeDefault(col.defaultValue)
-            ? `ALTER TABLE ${targetTableRef} ALTER COLUMN ${quoteIdent(currentName, driver)} SET DEFAULT ${formatDefaultValue(
-                col.defaultValue
-              )}`
-            : `ALTER TABLE ${targetTableRef} ALTER COLUMN ${quoteIdent(currentName, driver)} DROP DEFAULT`
-        );
-      }
-
-      if (commentChanged) {
-        comments.push(
-          `COMMENT ON COLUMN ${targetTableRef}.${quoteIdent(currentName, driver)} IS ${
-            normalizeComment(col.comment) ? sqlQuote(col.comment) : "NULL"
-          }`
-        );
-      }
-    } else {
-      if (!renamed && !typeChanged && !nullableChanged && !defaultChanged && !commentChanged) continue;
-
-      if (renamed) {
-        modifications.push(
-          `CHANGE COLUMN ${quoteIdent(col.originalName, driver)} ${buildColumnDefinition(col, driver, commentChanged)}`
-        );
-      } else {
-        modifications.push(`MODIFY COLUMN ${buildColumnDefinition(col, driver, commentChanged)}`);
-      }
-    }
-  }
-
-  for (const original of originalColumns) {
-    if (!keptOriginalNames.has(original.name)) {
-      drops.push(quoteIdent(original.name, driver));
-    }
-  }
-
-  if (driver === "postgresql") {
-    if (additions.length > 0) {
-      for (const definition of additions) {
-        statements.push(`ALTER TABLE ${targetTableRef} ADD COLUMN ${definition}`);
-      }
-    }
-
-    statements.push(...renames);
-    statements.push(...modifications);
-
-    if (drops.length > 0) {
-      for (const dropName of drops) {
-        statements.push(`ALTER TABLE ${targetTableRef} DROP COLUMN ${dropName}`);
-      }
-    }
-
-    if (tableCommentChanged) {
-      statements.push(
-        `COMMENT ON TABLE ${targetTableRef} IS ${
-          normalizeComment(tableCommentDraft) ? sqlQuote(tableCommentDraft) : "NULL"
-        }`
-      );
-    }
-    statements.push(...comments);
-  } else {
-    const clauses: string[] = [];
-    if (additions.length > 0) {
-      for (const definition of additions) {
-        clauses.push(`ADD COLUMN ${definition}`);
-      }
-    }
-    clauses.push(...modifications);
-    if (drops.length > 0) {
-      for (const dropName of drops) {
-        clauses.push(`DROP COLUMN ${dropName}`);
-      }
-    }
-
-    if (tableCommentChanged) {
-      clauses.push(`COMMENT = ${sqlQuote(tableCommentDraft)}`);
-    }
-
-    if (clauses.length > 0) {
-      statements.push(`ALTER TABLE ${targetTableRef} ${clauses.join(", ")}`);
-    }
-  }
-
-  return { statements, nextTableName: hasRenameTable ? nextTableName : undefined };
-}
-
-function createNewDraft(id: number): DraftColumn {
+function createNewDraft(id: number): AlterDraftColumn {
   return {
     id,
     name: "",
@@ -298,8 +70,8 @@ export function AlterTableDialog({
 }: AlterTableDialogProps) {
   const { t } = useTranslation();
 
-  const [columns, setColumns] = useState<DraftColumn[]>([]);
-  const [originalColumns, setOriginalColumns] = useState<LoadedColumn[]>([]);
+  const [columns, setColumns] = useState<AlterDraftColumn[]>([]);
+  const [originalColumns, setOriginalColumns] = useState<AlterLoadedColumn[]>([]);
   const [tableNameDraft, setTableNameDraft] = useState(table);
   const [tableCommentDraft, setTableCommentDraft] = useState("");
   const [originalTableComment, setOriginalTableComment] = useState("");
@@ -378,7 +150,7 @@ export function AlterTableDialog({
               nullable,
               defaultValue,
               comment,
-            } as LoadedColumn;
+            } as AlterLoadedColumn;
           }
 
           const name = String(getByKey(row, ["Field", "field"]) ?? "");
@@ -386,7 +158,7 @@ export function AlterTableDialog({
           const nullable = String(getByKey(row, ["Null", "null"]) ?? "").toUpperCase() === "YES";
           const defaultValue = String(getByKey(row, ["Default", "default"]) ?? "");
           const comment = String(getByKey(row, ["Comment", "comment"]) ?? "");
-          return { name, type, nullable, defaultValue, comment } as LoadedColumn;
+          return { name, type, nullable, defaultValue, comment } as AlterLoadedColumn;
         })
         .filter((col) => col.name);
 
@@ -438,7 +210,7 @@ export function AlterTableDialog({
     return built.statements.length > 0;
   }, [driver, database, table, tableNameDraft, tableCommentDraft, originalTableComment, originalColumns, columns]);
 
-  const updateColumn = useCallback((id: number, patch: Partial<DraftColumn>) => {
+  const updateColumn = useCallback((id: number, patch: Partial<AlterDraftColumn>) => {
     setColumns((prev) => prev.map((col) => (col.id === id ? { ...col, ...patch } : col)));
   }, []);
 

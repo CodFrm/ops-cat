@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Loader2, PlugZap } from "lucide-react";
@@ -51,7 +51,7 @@ export function ExtensionConfigForm({
   const [testing, setTesting] = useState(false);
 
   const properties = configSchema.properties ?? {};
-  const required = new Set(configSchema.required ?? []);
+  const required = useMemo(() => new Set(configSchema.required ?? []), [configSchema.required]);
   const order = configSchema.propertyOrder;
   const fields = order
     ? order.filter((k) => k in properties).map((k) => [k, properties[k]] as const)

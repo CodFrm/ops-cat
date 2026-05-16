@@ -1126,7 +1126,7 @@ function QueryResultTableImpl({
     observer.observe(container);
     return () => {
       observer.disconnect();
-      if (containerRef.current) containerRef.current.style.visibility = "";
+      container.style.visibility = "";
     };
     // columns.length 进依赖:首次 mount 时 loading=true,containerRef.current 还是 null,
     // OpenTable 完成 columns 填充后 effect 才能挂上 observer。

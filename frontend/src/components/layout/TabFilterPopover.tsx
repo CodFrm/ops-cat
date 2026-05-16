@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Popover, PopoverAnchor, PopoverContent } from "@opskat/ui";
@@ -21,16 +21,17 @@ export function TabFilterPopover({ open, onOpenChange, children, tabs }: TabFilt
   const [cursor, setCursor] = useState(0);
   const activateTab = useTabStore((s) => s.activateTab);
 
-  useEffect(() => {
-    if (!open) {
-      setQuery("");
-      setCursor(0);
-    }
-  }, [open]);
-
   const items = useMemo(() => tabs.map((tab) => ({ tab, label: resolveTabLabel(tab, t) })), [tabs, t]);
 
   const matched = useMemo(() => items.filter(({ label }) => filterMatches(label, query)), [items, query]);
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setQuery("");
+      setCursor(0);
+    }
+    onOpenChange(nextOpen);
+  };
 
   const activate = (id: string) => {
     activateTab(id);
@@ -39,7 +40,7 @@ export function TabFilterPopover({ open, onOpenChange, children, tabs }: TabFilt
   };
 
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverAnchor asChild>{children}</PopoverAnchor>
       <PopoverContent
         align="end"

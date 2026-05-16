@@ -1,4 +1,4 @@
-import { useContext, createContext } from "react";
+import { useContext } from "react";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import {
@@ -13,15 +13,9 @@ import {
   TooltipTrigger,
 } from "@opskat/ui";
 import { useTabStore, type Tab } from "@/stores/tabStore";
-import { useTabDragAndDrop, type TabDragContextValue } from "@/hooks/useTabDragAndDrop";
+import { useTabDragAndDrop } from "@/hooks/useTabDragAndDrop";
 import type { HighlightSegment } from "@/lib/highlightMatch";
-
-export interface SideTabDragCtx extends TabDragContextValue {
-  moveTo: (id: string, toIndex: number) => void;
-  tabs: Tab[];
-}
-
-export const SideTabDragContext = createContext<SideTabDragCtx | null>(null);
+import { SideTabDragContext } from "./SideTabDragContext";
 
 interface SideTabItemProps {
   tab: Tab;

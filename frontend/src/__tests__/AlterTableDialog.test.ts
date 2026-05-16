@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAlterStatements } from "../components/query/AlterTableDialog";
+import { buildAlterStatements } from "../lib/tableSql";
 
 describe("buildAlterStatements", () => {
   it("builds mysql alter statements for rename/add/modify/drop with comments", () => {

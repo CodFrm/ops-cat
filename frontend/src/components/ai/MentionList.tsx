@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useMemo, useState, useEffect } from "react";
+import { forwardRef, useImperativeHandle, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Server } from "lucide-react";
@@ -28,7 +28,7 @@ const MAX_ITEMS = 8;
 export const MentionList = forwardRef<MentionListRef, MentionListProps>(function MentionList({ query, command }, ref) {
   const { t } = useTranslation();
   const { assets, groups } = useAssetStore();
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selection, setSelection] = useState({ itemCount: 0, index: 0 });
 
   const items: MentionItem[] = useMemo(() => {
     if (assets.length === 0) return [];
@@ -41,16 +41,26 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(function
     }));
   }, [assets, groups, query]);
 
-  useEffect(() => setSelectedIndex(0), [items.length]);
+  const selectedIndex = selection.itemCount === items.length ? selection.index : 0;
 
   useImperativeHandle(ref, () => ({
     onKeyDown: ({ event }) => {
       if (event.key === "ArrowUp") {
-        flushSync(() => setSelectedIndex((i) => (i + items.length - 1) % Math.max(items.length, 1)));
+        flushSync(() =>
+          setSelection((current) => {
+            const currentIndex = current.itemCount === items.length ? current.index : 0;
+            return { itemCount: items.length, index: (currentIndex + items.length - 1) % Math.max(items.length, 1) };
+          })
+        );
         return true;
       }
       if (event.key === "ArrowDown") {
-        flushSync(() => setSelectedIndex((i) => (i + 1) % Math.max(items.length, 1)));
+        flushSync(() =>
+          setSelection((current) => {
+            const currentIndex = current.itemCount === items.length ? current.index : 0;
+            return { itemCount: items.length, index: (currentIndex + 1) % Math.max(items.length, 1) };
+          })
+        );
         return true;
       }
       if (event.key === "Enter") {

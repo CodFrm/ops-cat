@@ -75,6 +75,8 @@ export interface RedisTabState {
   dbKeyCounts: Record<number, number>;
   scanRequestId?: number;
   keyDetailRequestId?: number;
+  openKeyTabs?: string[];
+  activeRedisKey?: string | null;
   removedKey?: string;
   removedKeySeq?: number;
   error: string | null;
@@ -131,6 +133,9 @@ interface QueryState {
   setKeyFilter: (tabId: string, pattern: string) => void;
   loadDbKeyCounts: (tabId: string) => Promise<void>;
   clearSelectedKey: (tabId: string, key?: string) => void;
+  activateRedisOverview: (tabId: string) => void;
+  activateRedisKeyTab: (tabId: string, key: string) => void;
+  closeRedisKeyTab: (tabId: string, key: string) => void;
   removeKey: (tabId: string, key: string) => void;
 
   // MongoDB actions
@@ -177,8 +182,18 @@ function defaultRedisState(options: { database?: number } = {}): RedisTabState {
     dbKeyCounts: {},
     scanRequestId: 0,
     keyDetailRequestId: 0,
+    openKeyTabs: [],
+    activeRedisKey: null,
     error: null,
   };
+}
+
+function getRedisOpenKeyTabs(state: RedisTabState) {
+  return state.openKeyTabs ?? (state.selectedKey ? [state.selectedKey] : []);
+}
+
+function getRedisActiveKey(state: RedisTabState) {
+  return state.activeRedisKey === undefined ? state.selectedKey : state.activeRedisKey;
 }
 
 function defaultMongoState(): MongoDBTabState {
@@ -718,12 +733,22 @@ export const useQueryStore = create<QueryState>((set, get) => ({
     const db = state.currentDb;
     const requestId = (state.keyDetailRequestId || 0) + 1;
 
-    set((s) => ({
-      redisStates: {
-        ...s.redisStates,
-        [tabId]: { ...s.redisStates[tabId], selectedKey: key, keyInfo: null, keyDetailRequestId: requestId },
-      },
-    }));
+    set((s) => {
+      const openKeyTabs = getRedisOpenKeyTabs(s.redisStates[tabId]);
+      return {
+        redisStates: {
+          ...s.redisStates,
+          [tabId]: {
+            ...s.redisStates[tabId],
+            selectedKey: key,
+            keyInfo: null,
+            keyDetailRequestId: requestId,
+            openKeyTabs: openKeyTabs.includes(key) ? openKeyTabs : [...openKeyTabs, key],
+            activeRedisKey: key,
+          },
+        },
+      };
+    });
 
     try {
       const detail = await RedisGetKeyDetail({
@@ -893,29 +918,109 @@ export const useQueryStore = create<QueryState>((set, get) => ({
   clearSelectedKey: (tabId, key) => {
     const state = get().redisStates[tabId];
     if (!state || (key && state.selectedKey !== key)) return;
+    const selectedKey = state.selectedKey;
+    set((s) => {
+      const current = s.redisStates[tabId];
+      const activeRedisKey = getRedisActiveKey(current);
+      return {
+        redisStates: {
+          ...s.redisStates,
+          [tabId]: {
+            ...current,
+            selectedKey: null,
+            keyInfo: null,
+            activeRedisKey: selectedKey === null || activeRedisKey === selectedKey ? null : activeRedisKey,
+            keyDetailRequestId: (current.keyDetailRequestId || 0) + 1,
+          },
+        },
+      };
+    });
+  },
+
+  activateRedisOverview: (tabId) => {
+    const state = get().redisStates[tabId];
+    if (!state) return;
+    set((s) => ({
+      redisStates: {
+        ...s.redisStates,
+        [tabId]: { ...s.redisStates[tabId], activeRedisKey: null },
+      },
+    }));
+  },
+
+  activateRedisKeyTab: (tabId, key) => {
+    const state = get().redisStates[tabId];
+    if (!state || !getRedisOpenKeyTabs(state).includes(key)) return;
+    if (state.selectedKey !== key) {
+      void get().selectKey(tabId, key);
+      return;
+    }
+    set((s) => ({
+      redisStates: {
+        ...s.redisStates,
+        [tabId]: { ...s.redisStates[tabId], activeRedisKey: key },
+      },
+    }));
+  },
+
+  closeRedisKeyTab: (tabId, key) => {
+    const state = get().redisStates[tabId];
+    if (!state) return;
+
+    const openKeyTabs = getRedisOpenKeyTabs(state);
+    const nextOpenKeyTabs = openKeyTabs.filter((item) => item !== key);
+    const activeRedisKey = getRedisActiveKey(state);
+    const closingActiveKey = activeRedisKey === key;
+    const currentIndex = openKeyTabs.indexOf(key);
+    const fallbackKey = closingActiveKey
+      ? (nextOpenKeyTabs[Math.min(currentIndex, nextOpenKeyTabs.length - 1)] ?? null)
+      : activeRedisKey;
+    const shouldLoadFallbackKey = Boolean(fallbackKey && (closingActiveKey || state.selectedKey === key));
+
     set((s) => ({
       redisStates: {
         ...s.redisStates,
         [tabId]: {
           ...s.redisStates[tabId],
-          selectedKey: null,
-          keyInfo: null,
-          keyDetailRequestId: (s.redisStates[tabId].keyDetailRequestId || 0) + 1,
+          openKeyTabs: nextOpenKeyTabs,
+          activeRedisKey: fallbackKey,
+          selectedKey: s.redisStates[tabId].selectedKey === key ? fallbackKey : s.redisStates[tabId].selectedKey,
+          keyInfo: s.redisStates[tabId].selectedKey === key ? null : s.redisStates[tabId].keyInfo,
+          keyDetailRequestId:
+            s.redisStates[tabId].selectedKey === key
+              ? (s.redisStates[tabId].keyDetailRequestId || 0) + 1
+              : s.redisStates[tabId].keyDetailRequestId,
         },
       },
     }));
+
+    if (fallbackKey && shouldLoadFallbackKey && state.selectedKey !== fallbackKey) {
+      void get().selectKey(tabId, fallbackKey);
+    }
   },
 
   removeKey: (tabId, key) => {
     const state = get().redisStates[tabId];
     if (!state) return;
+    const openKeyTabs = getRedisOpenKeyTabs(state);
+    const nextOpenKeyTabs = openKeyTabs.filter((item) => item !== key);
+    const activeRedisKey = getRedisActiveKey(state);
+    const removingActiveKey = activeRedisKey === key;
+    const currentIndex = openKeyTabs.indexOf(key);
+    const fallbackKey = removingActiveKey
+      ? (nextOpenKeyTabs[Math.min(currentIndex, nextOpenKeyTabs.length - 1)] ?? null)
+      : activeRedisKey;
+    const shouldLoadFallbackKey = Boolean(fallbackKey && (removingActiveKey || state.selectedKey === key));
+
     set((s) => ({
       redisStates: {
         ...s.redisStates,
         [tabId]: {
           ...s.redisStates[tabId],
           keys: s.redisStates[tabId].keys.filter((k) => k !== key),
-          selectedKey: s.redisStates[tabId].selectedKey === key ? null : s.redisStates[tabId].selectedKey,
+          openKeyTabs: nextOpenKeyTabs,
+          activeRedisKey: fallbackKey,
+          selectedKey: s.redisStates[tabId].selectedKey === key ? fallbackKey : s.redisStates[tabId].selectedKey,
           keyInfo: s.redisStates[tabId].selectedKey === key ? null : s.redisStates[tabId].keyInfo,
           keyDetailRequestId:
             s.redisStates[tabId].selectedKey === key
@@ -926,6 +1031,10 @@ export const useQueryStore = create<QueryState>((set, get) => ({
         },
       },
     }));
+
+    if (fallbackKey && shouldLoadFallbackKey && state.selectedKey !== fallbackKey) {
+      void get().selectKey(tabId, fallbackKey);
+    }
   },
 
   // --- MongoDB ---

@@ -230,7 +230,7 @@ func webDAVRequest(cfg WebDAVConfig, method, target string, body []byte, headers
 	if err != nil {
 		return 0, nil, fmt.Errorf("request WebDAV: %w", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer func() { _ = resp.Body.Close() }()
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return 0, nil, fmt.Errorf("read WebDAV response: %w", err)

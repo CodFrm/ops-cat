@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type WheelEvent } from "react";
+import { useRef, type WheelEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Activity, Key, X } from "lucide-react";
 import { useResizeHandle } from "@opskat/ui";
@@ -17,19 +17,16 @@ function getKeyViewId(key: string) {
   return `key:${key}`;
 }
 
-function getKeyFromView(view: string) {
-  return view.startsWith("key:") ? view.slice(4) : null;
-}
-
 export function RedisPanel({ tabId }: RedisPanelProps) {
   const { t } = useTranslation();
-  const selectedKey = useQueryStore((s) => s.redisStates[tabId]?.selectedKey);
-  const removedKey = useQueryStore((s) => s.redisStates[tabId]?.removedKey);
-  const removedKeySeq = useQueryStore((s) => s.redisStates[tabId]?.removedKeySeq);
-  const selectKey = useQueryStore((s) => s.selectKey);
-  const clearSelectedKey = useQueryStore((s) => s.clearSelectedKey);
-  const [activeView, setActiveView] = useState<string>(REDIS_OVERVIEW_VIEW);
-  const [openKeys, setOpenKeys] = useState<string[]>([]);
+  const redisState = useQueryStore((s) => s.redisStates[tabId]);
+  const selectedKey = redisState?.selectedKey ?? null;
+  const openKeys = redisState?.openKeyTabs ?? (selectedKey ? [selectedKey] : []);
+  const activeKey = redisState?.activeRedisKey === undefined ? selectedKey : redisState.activeRedisKey;
+  const activeView = activeKey ? getKeyViewId(activeKey) : REDIS_OVERVIEW_VIEW;
+  const activateRedisOverview = useQueryStore((s) => s.activateRedisOverview);
+  const activateRedisKeyTab = useQueryStore((s) => s.activateRedisKeyTab);
+  const closeRedisKeyTab = useQueryStore((s) => s.closeRedisKeyTab);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const tabStripRef = useRef<HTMLDivElement>(null);
   const { size: sidebarWidth, handleMouseDown } = useResizeHandle({
@@ -39,64 +36,13 @@ export function RedisPanel({ tabId }: RedisPanelProps) {
     targetRef: sidebarRef,
   });
 
-  useEffect(() => {
-    if (selectedKey) {
-      setOpenKeys((prev) => (prev.includes(selectedKey) ? prev : [...prev, selectedKey]));
-      setActiveView(getKeyViewId(selectedKey));
-    }
-  }, [selectedKey]);
-
-  const activeKey = getKeyFromView(activeView);
-
-  useEffect(() => {
-    if (!selectedKey && activeKey) {
-      setActiveView(REDIS_OVERVIEW_VIEW);
-    }
-  }, [activeKey, selectedKey]);
-
   const activateKeyTab = (key: string) => {
-    setActiveView(getKeyViewId(key));
-    if (selectedKey !== key) {
-      selectKey(tabId, key);
-    }
+    activateRedisKeyTab(tabId, key);
   };
 
   const closeKeyTab = (key: string) => {
-    setOpenKeys((prev) => {
-      const next = prev.filter((item) => item !== key);
-      if (activeKey === key) {
-        const currentIndex = prev.indexOf(key);
-        const fallback = next[Math.min(currentIndex, next.length - 1)] ?? null;
-        if (fallback) {
-          setActiveView(getKeyViewId(fallback));
-          selectKey(tabId, fallback);
-        } else {
-          setActiveView(REDIS_OVERVIEW_VIEW);
-          clearSelectedKey(tabId, key);
-        }
-      }
-      return next;
-    });
+    closeRedisKeyTab(tabId, key);
   };
-
-  useEffect(() => {
-    if (!removedKey || !removedKeySeq) return;
-    setOpenKeys((prev) => {
-      if (!prev.includes(removedKey)) return prev;
-      const next = prev.filter((item) => item !== removedKey);
-      if (activeKey === removedKey) {
-        const currentIndex = prev.indexOf(removedKey);
-        const fallback = next[Math.min(currentIndex, next.length - 1)] ?? null;
-        if (fallback) {
-          setActiveView(getKeyViewId(fallback));
-          selectKey(tabId, fallback);
-        } else {
-          setActiveView(REDIS_OVERVIEW_VIEW);
-        }
-      }
-      return next;
-    });
-  }, [activeKey, removedKey, removedKeySeq, selectKey, tabId]);
 
   const handleTabStripWheel = (event: WheelEvent<HTMLDivElement>) => {
     const target = tabStripRef.current;
@@ -137,7 +83,7 @@ export function RedisPanel({ tabId }: RedisPanelProps) {
                 ? "bg-background text-foreground"
                 : "text-muted-foreground hover:bg-background/50 hover:text-foreground"
             }`}
-            onClick={() => setActiveView(REDIS_OVERVIEW_VIEW)}
+            onClick={() => activateRedisOverview(tabId)}
           >
             <Activity className="size-3" />
             {t("query.redisOverview")}
