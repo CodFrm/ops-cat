@@ -71,10 +71,11 @@ export function TopBar({
           <PopoverTrigger asChild>
             <button
               type="button"
+              aria-label={t("topBar.searchPlaceholder")}
               className={cn(
                 "flex h-7 w-full items-center gap-2 rounded-md border border-input/50 bg-background/60 px-2.5 text-xs",
                 "text-muted-foreground transition-colors hover:bg-background hover:text-foreground",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45"
               )}
             >
               <Search className="h-4 w-4 shrink-0" />
@@ -112,6 +113,7 @@ export function TopBar({
                 type="button"
                 onClick={onToggleAssetTree}
                 aria-pressed={!assetTreeCollapsed}
+                aria-label={assetTreeCollapsed ? t("topBar.showAssetTree") : t("topBar.hideAssetTree")}
                 className={cn(
                   "flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent/50",
                   assetTreeCollapsed ? "text-muted-foreground hover:text-foreground" : "text-foreground"
@@ -136,6 +138,7 @@ export function TopBar({
                 type="button"
                 onClick={onToggleAIPanel}
                 aria-pressed={!aiPanelCollapsed}
+                aria-label={aiPanelCollapsed ? t("topBar.showAIPanel") : t("topBar.hideAIPanel")}
                 className={cn(
                   "flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-accent/50",
                   aiPanelCollapsed ? "text-muted-foreground hover:text-foreground" : "text-foreground"

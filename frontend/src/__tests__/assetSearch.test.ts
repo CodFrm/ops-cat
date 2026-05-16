@@ -1,6 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { buildGroupPathMap, filterAssets } from "@/lib/assetSearch";
+import { __ensurePinyinReady } from "@/lib/pinyin";
 import type { asset_entity, group_entity } from "../../wailsjs/go/models";
+
+beforeAll(() => __ensurePinyinReady());
 
 function asset(id: number, name: string, groupId = 0): asset_entity.Asset {
   return { ID: id, Name: name, GroupID: groupId } as asset_entity.Asset;

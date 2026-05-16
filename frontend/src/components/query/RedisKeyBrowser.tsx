@@ -129,7 +129,7 @@ function RedisDbSelector({ currentDb, dbOptions, dbKeyCounts, disabled, onChange
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="flex h-7 min-w-0 flex-1 items-center justify-between gap-2 rounded-md border border-input bg-transparent px-2 text-left text-xs shadow-xs outline-none transition-[color,box-shadow] hover:bg-accent focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex h-7 min-w-0 flex-1 items-center justify-between gap-2 rounded-md border border-input bg-transparent px-2 text-left text-xs shadow-xs outline-none transition-[color,box-shadow] hover:bg-accent focus-visible:border-ring/70 focus-visible:ring-1 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:opacity-50"
         disabled={disabled}
         onClick={() => {
           if (open) {

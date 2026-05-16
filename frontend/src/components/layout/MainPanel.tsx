@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
 import logoLight from "@/assets/images/logo.png";
 import logoDark from "@/assets/images/logo-dark.png";
-import { K8sClusterPage } from "@/components/k8s/K8sClusterPage";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useAssetStore } from "@/stores/assetStore";
 import { useTabStore, type QueryTabMeta, type PageTabMeta, type InfoTabMeta } from "@/stores/tabStore";
@@ -44,6 +43,9 @@ const DatabasePanel = lazy(() =>
 const RedisPanel = lazy(() => import("@/components/query/RedisPanel").then((m) => ({ default: m.RedisPanel })));
 const MongoDBPanel = lazy(() => import("@/components/query/MongoDBPanel").then((m) => ({ default: m.MongoDBPanel })));
 const KafkaPanel = lazy(() => import("@/components/query/KafkaPanel").then((m) => ({ default: m.KafkaPanel })));
+const K8sClusterPage = lazy(() =>
+  import("@/components/k8s/K8sClusterPage").then((m) => ({ default: m.K8sClusterPage }))
+);
 
 interface MainPanelProps {
   onEditAsset: (asset: asset_entity.Asset) => void;

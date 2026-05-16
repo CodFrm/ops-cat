@@ -82,6 +82,8 @@ function TabItem({
           <span className="truncate min-w-0">{label}</span>
           {extra}
           <button
+            type="button"
+            aria-label={t("tab.close")}
             className="ml-auto shrink-0 rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors duration-150"
             onClick={(e) => {
               e.stopPropagation();

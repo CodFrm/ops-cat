@@ -1893,7 +1893,7 @@ function QueryResultTableImpl({
                 <input
                   aria-label="Date"
                   type="date"
-                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring/45"
                   value={dateEditor.date}
                   onChange={(e) => setDateEditor((prev) => (prev ? { ...prev, date: e.target.value } : prev))}
                   onKeyDown={(e) => {
@@ -1909,7 +1909,7 @@ function QueryResultTableImpl({
                   aria-label="Time"
                   type="time"
                   step={1}
-                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring/45"
                   value={dateEditor.time}
                   onChange={(e) => setDateEditor((prev) => (prev ? { ...prev, time: e.target.value } : prev))}
                   onKeyDown={(e) => {
@@ -2046,7 +2046,7 @@ function ColumnValuePanel({ col, entries, selected, onChange }: ColumnValuePanel
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               autoFocus
-              className="w-full h-7 pl-6 pr-2 text-xs rounded border border-input bg-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="w-full h-7 pl-6 pr-2 text-xs rounded border border-input bg-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/45"
             />
           </div>
         )}

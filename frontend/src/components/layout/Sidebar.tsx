@@ -80,6 +80,7 @@ export function Sidebar({ activePage, onPageChange, onHideSidebar }: SidebarProp
                         : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
                     )}
                     onClick={() => onPageChange(item.id)}
+                    aria-label={item.label}
                   >
                     {activePage === item.id && (
                       <span className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[calc(50%+1px)] h-4 w-1 rounded-full bg-primary" />
@@ -136,6 +137,7 @@ export function Sidebar({ activePage, onPageChange, onHideSidebar }: SidebarProp
                   : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
               )}
               onClick={() => onPageChange("settings")}
+              aria-label={t("nav.settings")}
             >
               {activePage === "settings" && (
                 <span className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-[calc(50%+1px)] h-4 w-1 rounded-full bg-primary" />
@@ -150,6 +152,7 @@ export function Sidebar({ activePage, onPageChange, onHideSidebar }: SidebarProp
             <button
               className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors duration-150"
               onClick={onHideSidebar}
+              aria-label={t("panel.hideSidebar")}
             >
               <EyeOff className="h-4 w-4" />
             </button>
