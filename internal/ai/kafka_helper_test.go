@@ -185,7 +185,7 @@ func TestAllToolDefsContainsGroupedKafkaTools(t *testing.T) {
 }
 
 func TestKafkaMessageArgs(t *testing.T) {
-	partition, err := argOptionalInt32(map[string]any{"partition": float64(2)}, "partition")
+	partition, err := argOptionalPartition(map[string]any{"partition": float64(2)})
 	require.NoError(t, err)
 	require.NotNil(t, partition)
 	assert.Equal(t, int32(2), *partition)

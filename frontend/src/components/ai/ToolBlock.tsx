@@ -1,4 +1,5 @@
 import { memo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Terminal,
   FileText,
@@ -39,6 +40,7 @@ function formatToolInput(input?: string): string {
 }
 
 export const ToolBlock = memo(function ToolBlock({ block }: ToolBlockProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const Icon = toolIcons[block.toolName || ""] || Terminal;
   const isRunning = block.status === "running";
@@ -88,7 +90,7 @@ export const ToolBlock = memo(function ToolBlock({ block }: ToolBlockProps) {
         <div className="border-t border-border/40 max-h-96 overflow-auto">
           {hasInput && (
             <div className="px-3 py-2">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">参数</div>
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">{t("toolBlock.arguments")}</div>
               <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-foreground/70 leading-relaxed">
                 {formatToolInput(block.toolInput)}
               </pre>
@@ -97,7 +99,7 @@ export const ToolBlock = memo(function ToolBlock({ block }: ToolBlockProps) {
           {hasOutput && (
             <div className={`px-3 py-2 ${hasInput ? "border-t border-border/40" : ""}`}>
               {hasInput && (
-                <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">输出</div>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">{t("toolBlock.output")}</div>
               )}
               <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-muted-foreground leading-relaxed">
                 {block.content}

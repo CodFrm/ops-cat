@@ -45,12 +45,12 @@ func kafkaAlterTopicConfigRequestFromArgs(assetID int64, args map[string]any) (k
 	}, nil
 }
 
-func kafkaIncreasePartitionsRequestFromArgs(assetID int64, args map[string]any) (kafka_svc.IncreasePartitionsRequest, error) {
+func kafkaIncreasePartitionsRequestFromArgs(assetID int64, args map[string]any) kafka_svc.IncreasePartitionsRequest {
 	return kafka_svc.IncreasePartitionsRequest{
 		AssetID:    assetID,
 		Topic:      argString(args, "topic"),
 		Partitions: argInt(args, "partition_count"),
-	}, nil
+	}
 }
 
 func kafkaDeleteRecordsRequestFromArgs(assetID int64, args map[string]any) (kafka_svc.DeleteRecordsRequest, error) {
@@ -237,7 +237,7 @@ func kafkaRestartConnectorRequestFromArgs(assetID int64, args map[string]any) ka
 // --- Messages ---
 
 func kafkaBrowseRequestFromArgs(assetID int64, args map[string]any) (kafka_svc.BrowseMessagesRequest, error) {
-	partition, err := argOptionalInt32(args, "partition")
+	partition, err := argOptionalPartition(args)
 	if err != nil {
 		return kafka_svc.BrowseMessagesRequest{}, err
 	}
@@ -256,7 +256,7 @@ func kafkaBrowseRequestFromArgs(assetID int64, args map[string]any) (kafka_svc.B
 }
 
 func kafkaInspectRequestFromArgs(assetID int64, args map[string]any) (kafka_svc.BrowseMessagesRequest, error) {
-	partition, err := argOptionalInt32(args, "partition")
+	partition, err := argOptionalPartition(args)
 	if err != nil {
 		return kafka_svc.BrowseMessagesRequest{}, err
 	}
@@ -280,7 +280,7 @@ func kafkaInspectRequestFromArgs(assetID int64, args map[string]any) (kafka_svc.
 }
 
 func kafkaProduceRequestFromArgs(assetID int64, args map[string]any) (kafka_svc.ProduceMessageRequest, error) {
-	partition, err := argOptionalInt32(args, "partition")
+	partition, err := argOptionalPartition(args)
 	if err != nil {
 		return kafka_svc.ProduceMessageRequest{}, err
 	}
@@ -324,8 +324,9 @@ func marshalKafkaResult(result any) (string, error) {
 	return string(data), nil
 }
 
-// argOptionalInt32 解析可选的 int32 参数（kafka_message partition 字段使用）。
-func argOptionalInt32(args map[string]any, key string) (*int32, error) {
+// argOptionalPartition parses the optional kafka_message partition field.
+func argOptionalPartition(args map[string]any) (*int32, error) {
+	const key = "partition"
 	value, ok := args[key]
 	if !ok || value == nil {
 		return nil, nil

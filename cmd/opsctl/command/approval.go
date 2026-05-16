@@ -140,6 +140,19 @@ func formatOfflineDenyMessage(reqType, command string, hints []string) string {
 		sb.WriteString("MongoDB operation did not match any allowed policy")
 	}
 
+	if command = strings.TrimSpace(command); command != "" {
+		label := "Command"
+		switch reqType {
+		case "sql":
+			label = "SQL"
+		case "redis":
+			label = "Redis command"
+		case "mongo":
+			label = "MongoDB operation"
+		}
+		fmt.Fprintf(&sb, "\n%s: %s", label, truncateStr(command, 200))
+	}
+
 	if len(hints) > 0 {
 		switch reqType {
 		case "exec":

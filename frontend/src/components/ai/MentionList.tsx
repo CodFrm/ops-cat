@@ -77,7 +77,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(function
   if (items.length === 0) {
     return (
       <div className="bg-popover text-popover-foreground rounded-md border shadow-md px-3 py-2 text-xs text-muted-foreground">
-        {t("ai.mentionNotFound", "未找到资产")}
+        {t("ai.mentionNotFound")}
       </div>
     );
   }

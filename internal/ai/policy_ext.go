@@ -23,7 +23,7 @@ type ExtensionPolicyRule struct {
 //   - Deny takes precedence: if action in any deny_list → Deny
 //   - Then check allow: if action in any allow_list → Allow
 //   - Otherwise → NeedConfirm
-func checkExtensionPolicy(ctx context.Context, groupIDs []string, action, resource string) CheckResult {
+func checkExtensionPolicy(ctx context.Context, groupIDs []string, action string) CheckResult {
 	if len(groupIDs) == 0 {
 		return CheckResult{Decision: NeedConfirm}
 	}

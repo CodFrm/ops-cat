@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Folder } from "lucide-react";
 import { useAssetStore } from "@/stores/assetStore";
 import { CommandPolicyCard } from "@/components/asset/CommandPolicyCard";
+import { DetailGrid, DetailSection, InfoItem } from "@/components/asset/detail/InfoItem";
 import { group_entity } from "../../../wailsjs/go/models";
 import { UpdateGroup } from "../../../wailsjs/go/app/App";
 import { toast } from "sonner";
@@ -79,28 +80,19 @@ export function GroupDetail({ group }: GroupDetailProps) {
 
       <div className="flex-1 p-4 space-y-4 overflow-y-auto">
         {/* Basic info */}
-        <div className="rounded-xl border bg-card p-4">
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <span className="text-xs text-muted-foreground">{t("asset.name")}</span>
-              <p className="mt-0.5 font-medium">{group.Name}</p>
-            </div>
-            <div>
-              <span className="text-xs text-muted-foreground">{t("asset.parentGroup")}</span>
-              <p className="mt-0.5">{parentGroup?.Name || t("asset.parentGroupNone")}</p>
-            </div>
-            <div>
-              <span className="text-xs text-muted-foreground">{t("asset.groupAssetCount")}</span>
-              <p className="mt-0.5">{assetCount}</p>
-            </div>
-          </div>
+        <DetailSection title={t("asset.groupDetailTitle")}>
+          <DetailGrid>
+            <InfoItem label={t("asset.name")} value={group.Name} />
+            <InfoItem label={t("asset.parentGroup")} value={parentGroup?.Name || t("asset.parentGroupNone")} />
+            <InfoItem label={t("asset.groupAssetCount")} value={String(assetCount)} />
+          </DetailGrid>
           {group.Description && (
-            <div className="mt-3 pt-3 border-t">
+            <div className="mt-3 border-t pt-3">
               <span className="text-xs text-muted-foreground">{t("asset.description")}</span>
               <p className="mt-0.5 text-sm whitespace-pre-wrap">{group.Description}</p>
             </div>
           )}
-        </div>
+        </DetailSection>
 
         {/* Command Policy */}
         <CommandPolicyCard

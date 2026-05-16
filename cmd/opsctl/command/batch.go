@@ -161,7 +161,7 @@ func cmdBatch(ctx context.Context, handlers map[string]ai.ToolHandlerFunc, args 
 			})
 		}
 
-		approvalResult, approvalErr := requireBatchApproval(ctx, batchItems, session)
+		approvalResult, approvalErr := requireBatchApproval(batchItems, session)
 		if approvalErr != nil {
 			// All need-confirm commands are denied — write audit for each
 			for _, b := range needConfirm {
@@ -359,7 +359,7 @@ func executeBatchHandler(ctx context.Context, handlers map[string]ai.ToolHandler
 }
 
 // requireBatchApproval sends a single batch approval request to the desktop app.
-func requireBatchApproval(ctx context.Context, items []approval.BatchItem, session string) (ApprovalResult, error) {
+func requireBatchApproval(items []approval.BatchItem, session string) (ApprovalResult, error) {
 	if session == "" {
 		id := newSessionID()
 		if err := writeActiveSession(id); err != nil {

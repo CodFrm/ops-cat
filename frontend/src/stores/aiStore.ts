@@ -202,7 +202,7 @@ async function createConversationForEmptyHost(
 }
 
 function getDefaultSidebarTitle() {
-  return i18n.t("ai.newConversation", "新对话");
+  return i18n.t("ai.newConversation");
 }
 
 function createSidebarTabId() {
@@ -2054,7 +2054,7 @@ export const useAIStore = create<AIState>((set, get) => {
 
     openNewConversationTab: () => {
       const tabId = `ai-new-${Date.now()}`;
-      const title = i18n.t("ai.newConversation", "新对话");
+      const title = i18n.t("ai.newConversation");
 
       useTabStore.getState().openTab({
         id: tabId,

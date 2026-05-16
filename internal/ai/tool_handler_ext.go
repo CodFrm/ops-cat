@@ -52,12 +52,12 @@ func handleExecTool(ctx context.Context, args map[string]any) (string, error) {
 			return "", fmt.Errorf("exec_tool: %s.%s requires asset_id (extension declares policy type %q)",
 				extName, toolName, ext.Manifest.Policies.Type)
 		}
-		action, resource, err := ext.Plugin.CheckPolicy(ctx, toolName, argsJSON)
+		action, _, err := ext.Plugin.CheckPolicy(ctx, toolName, argsJSON)
 		if err == nil && action != "" {
 			policyGroups := execToolExecutor.GetExtensionPolicyGroups(
 				extName, ext.Manifest.Policies.Type, assetID,
 			)
-			result := checkExtensionPolicy(ctx, policyGroups, action, resource)
+			result := checkExtensionPolicy(ctx, policyGroups, action)
 			switch result.Decision {
 			case Deny:
 				return "", fmt.Errorf("exec_tool: policy denied: %s", result.Message)

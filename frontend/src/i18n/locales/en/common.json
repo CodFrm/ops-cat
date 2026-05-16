@@ -78,6 +78,13 @@
     "retry": "Retry",
     "refresh": "Refresh"
   },
+  "codeEditor": {
+    "loadFailed": "Editor failed to load"
+  },
+  "toolBlock": {
+    "arguments": "Arguments",
+    "output": "Output"
+  },
   "tab": {
     "close": "Close",
     "closeOthers": "Close Others",
@@ -557,8 +564,6 @@
     "password": "Password",
     "terminal": "Terminal",
     "connecting": "Connecting...",
-    "authFailed": "Authentication failed, please re-enter password",
-    "updatePassword": "Update saved password after connecting",
     "connectProgress": {
       "connecting": "Connecting...",
       "connectionFailed": "Connection Failed",
@@ -797,6 +802,7 @@
     "approvalDenied": "Denied",
     "approvalReasonLabel": "Reason: ",
     "approvalLocalToolTitle": "AI wants to run local {{tool}} tool",
+    "approvalPending": "Pending approval",
     "approvalLocalToolContentPreview": "Show content to write",
     "approvalLocalToolEditPreview": "Show edit preview",
     "approvalLocalToolPatternHint": "One pattern per line; * wildcards (local_bash matches commands, local_write/local_edit matches paths).",
@@ -831,6 +837,8 @@
     "regenerateConfirm": "Regenerating will delete this message and all messages after it. Are you sure?",
     "copyMessage": "Copy message",
     "copyMessageFailed": "Copy failed",
+    "copied": "Copied to clipboard",
+    "copyFailed": "Copy failed",
     "tokenUsage": {
       "input": "Input",
       "output": "Output",

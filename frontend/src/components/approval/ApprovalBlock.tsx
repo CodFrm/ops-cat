@@ -79,7 +79,7 @@ export const ApprovalBlock = memo(function ApprovalBlock({ block }: ApprovalBloc
           )}
         </div>
         <span className="inline-flex items-center rounded-full bg-[#F59E0B20] h-5 px-2 text-[10px] font-semibold text-amber-500">
-          {t("ai.approvalPending", "等待确认")}
+          {t("ai.approvalPending")}
         </span>
       </div>
 
@@ -128,8 +128,8 @@ export const ApprovalBlock = memo(function ApprovalBlock({ block }: ApprovalBloc
                 <details className="text-[10px] text-muted-foreground/80">
                   <summary className="cursor-pointer select-none">
                     {item.type === "local_write"
-                      ? t("ai.approvalLocalToolContentPreview", "查看写入内容")
-                      : t("ai.approvalLocalToolEditPreview", "查看修改预览")}
+                      ? t("ai.approvalLocalToolContentPreview")
+                      : t("ai.approvalLocalToolEditPreview")}
                   </summary>
                   <pre className="mt-1.5 max-h-48 overflow-auto rounded bg-[#16120B] px-2 py-1.5 font-mono whitespace-pre-wrap break-all">
                     {item.detail}
@@ -176,10 +176,7 @@ export const ApprovalBlock = memo(function ApprovalBlock({ block }: ApprovalBloc
             placeholder={t("opsctlApproval.patternPlaceholder")}
           />
           <div className="text-[10px] text-muted-foreground/70">
-            {t(
-              "ai.approvalLocalToolPatternHint",
-              "每行一条；* 通配符（local_bash 按命令、local_write/local_edit 按路径）。"
-            )}
+            {t("ai.approvalLocalToolPatternHint")}
           </div>
         </div>
       )}

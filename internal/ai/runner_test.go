@@ -508,14 +508,14 @@ func TestRunner_CancelEmitsStopped(t *testing.T) {
 	})
 }
 
-// queueParentDispatch 把"父 agent 调 subagent(type=explore, prompt=...)"
+// queueParentDispatch 把"父 agent 调 subagent(type=explore, prompt=go)"
 // 那一步流压进 mock 队列。providertest 是 FIFO 共享队列，调用方需自己按
 // 父→子→...→子→父 的顺序把各步压进去（不能用 defer 把父收尾流后置，
 // 否则 child 会拉到 "ok" 那条）。
-func queueParentDispatch(mock *providertest.Mock, toolUseID, prompt string) {
+func queueParentDispatch(mock *providertest.Mock, toolUseID string) {
 	mock.QueueStream(
 		provider.StreamChunk{ToolCallDelta: &provider.ToolCallDelta{Index: 0, ID: toolUseID, Name: "subagent"}},
-		provider.StreamChunk{ToolCallDelta: &provider.ToolCallDelta{Index: 0, ArgsDelta: `{"type":"explore","prompt":` + fmt.Sprintf("%q", prompt) + `}`}},
+		provider.StreamChunk{ToolCallDelta: &provider.ToolCallDelta{Index: 0, ArgsDelta: `{"type":"explore","prompt":"go"}`}},
 		provider.StreamChunk{FinishReason: provider.FinishToolCalls},
 	)
 }
@@ -528,9 +528,8 @@ func queueParentClose(mock *providertest.Mock, text string) {
 	)
 }
 
-// captureSubagentResult 跑一遍 parent.Runner，抓 subagent 那个 tool call 的 *ToolResultBlock。
-// 同时返回从中提取的 text，方便断言。
-func captureSubagentResult(t *testing.T, mock provider.Provider, toolUseID string) (*agent.ToolResultBlock, string) {
+// captureSubagentResultText 跑一遍 parent.Runner，抓 subagent tool result 的文本。
+func captureSubagentResultText(t *testing.T, mock provider.Provider, toolUseID string) string {
 	t.Helper()
 	cfg := SystemConfig{Provider: mock, Cwd: t.TempDir()}
 	sys, err := BuildSystem(context.Background(), cfg)
@@ -567,7 +566,7 @@ func captureSubagentResult(t *testing.T, mock provider.Provider, toolUseID strin
 	mu.Lock()
 	rb := captured
 	mu.Unlock()
-	return rb, toolResultText(rb)
+	return toolResultText(rb)
 }
 
 // toolResultText 抽出 *ToolResultBlock 里的 TextBlock 文本。
@@ -596,7 +595,7 @@ func TestRunner_SubagentExplore_TextPath(t *testing.T) {
 	Convey("explore 子 agent 出文本时，父 tool 结果原文回传", t, func() {
 		mock := providertest.New()
 		// 父 step 1: dispatch
-		queueParentDispatch(mock, "tx1", "go")
+		queueParentDispatch(mock, "tx1")
 		// 子: 直接产文本收尾
 		mock.QueueStream(
 			provider.StreamChunk{ContentDelta: "found three config files"},
@@ -605,7 +604,7 @@ func TestRunner_SubagentExplore_TextPath(t *testing.T) {
 		// 父 step 2: close
 		queueParentClose(mock, "ok")
 
-		_, text := captureSubagentResult(t, mock, "tx1")
+		text := captureSubagentResultText(t, mock, "tx1")
 		So(text, ShouldEqual, "found three config files")
 	})
 }
@@ -620,7 +619,7 @@ func TestRunner_SubagentExplore_TextPath(t *testing.T) {
 func TestRunner_SubagentExplore_ThinkingOnlyFallback(t *testing.T) {
 	Convey("explore 子 agent 只产 thinking 时，父 tool 结果落到 thinking 文本", t, func() {
 		mock := providertest.New()
-		queueParentDispatch(mock, "tt1", "go")
+		queueParentDispatch(mock, "tt1")
 		// 子: 全程 thinking，无 ContentDelta
 		mock.QueueStream(
 			provider.StreamChunk{ThinkingDelta: &provider.ThinkingDelta{Text: "looked at ~/.opskat — three configs found"}},
@@ -628,7 +627,7 @@ func TestRunner_SubagentExplore_ThinkingOnlyFallback(t *testing.T) {
 		)
 		queueParentClose(mock, "ok")
 
-		_, text := captureSubagentResult(t, mock, "tt1")
+		text := captureSubagentResultText(t, mock, "tt1")
 		So(text, ShouldNotEqual, "sub-agent returned no content")
 		So(text, ShouldContainSubstring, "three configs found")
 	})
@@ -647,7 +646,7 @@ func TestRunner_SubagentExplore_ThinkingOnlyFallback(t *testing.T) {
 func TestRunner_SubagentExplore_ChildInheritsParentModel(t *testing.T) {
 	Convey("子 explore agent 的请求里 Model 字段必须与父 agent 一致", t, func() {
 		mock := providertest.New()
-		queueParentDispatch(mock, "im1", "go")
+		queueParentDispatch(mock, "im1")
 		mock.QueueStream(
 			provider.StreamChunk{ContentDelta: "child ok"},
 			provider.StreamChunk{FinishReason: provider.FinishStop},
@@ -690,7 +689,7 @@ func TestRunner_SubagentExplore_ChildInheritsParentModel(t *testing.T) {
 func TestRunner_SubagentExplore_StreamErrorSurfacesAsToolError(t *testing.T) {
 	Convey("child stream 错误必须冒泡成 tool error，而不是被吞成 no content", t, func() {
 		mock := providertest.New()
-		queueParentDispatch(mock, "es1", "go")
+		queueParentDispatch(mock, "es1")
 		// 子 agent: stream 第一个 chunk 直接报错
 		mock.QueueStream(
 			provider.StreamChunk{Err: errors.New("upstream 429 rate limit")},
@@ -744,7 +743,7 @@ func TestRunner_SubagentExplore_StreamErrorSurfacesAsToolError(t *testing.T) {
 func TestRunner_SubagentExplore_NoContentRegression(t *testing.T) {
 	Convey("explore 子 agent 全程无文本无思考时，保留 'no content' 兜底", t, func() {
 		mock := providertest.New()
-		queueParentDispatch(mock, "ta1", "go")
+		queueParentDispatch(mock, "ta1")
 		// 子 step 1: 出一个 ls 工具调用（ReadOnly 工具集里有 ls，cwd=tempdir，
 		// 默认 path="." 会列出空目录——不会报错）
 		mock.QueueStream(
@@ -758,7 +757,7 @@ func TestRunner_SubagentExplore_NoContentRegression(t *testing.T) {
 		)
 		queueParentClose(mock, "ok")
 
-		_, text := captureSubagentResult(t, mock, "ta1")
+		text := captureSubagentResultText(t, mock, "ta1")
 		So(text, ShouldEqual, "sub-agent returned no content")
 	})
 }

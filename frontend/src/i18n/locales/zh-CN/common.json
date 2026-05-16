@@ -78,6 +78,13 @@
     "retry": "重试",
     "refresh": "刷新"
   },
+  "codeEditor": {
+    "loadFailed": "编辑器加载失败"
+  },
+  "toolBlock": {
+    "arguments": "参数",
+    "output": "输出"
+  },
   "tab": {
     "close": "关闭",
     "closeOthers": "关闭其它",
@@ -542,8 +549,6 @@
     "password": "密码",
     "terminal": "终端",
     "connecting": "连接中...",
-    "authFailed": "认证失败，请重新输入密码",
-    "updatePassword": "连接成功后更新保存的密码",
     "connectProgress": {
       "connecting": "连接中...",
       "connectionFailed": "连接失败",
@@ -782,6 +787,7 @@
     "approvalDenied": "已拒绝",
     "approvalReasonLabel": "原因：",
     "approvalLocalToolTitle": "AI 想执行本地 {{tool}} 工具",
+    "approvalPending": "等待确认",
     "approvalLocalToolContentPreview": "查看写入内容",
     "approvalLocalToolEditPreview": "查看修改预览",
     "approvalLocalToolPatternHint": "每行一条；* 通配符（local_bash 按命令、local_write/local_edit 按路径）。",
@@ -816,6 +822,8 @@
     "regenerateConfirm": "重新生成将删除此消息及之后的所有对话记录，确定要继续吗？",
     "copyMessage": "复制消息",
     "copyMessageFailed": "复制失败",
+    "copied": "已复制到剪贴板",
+    "copyFailed": "复制失败",
     "tokenUsage": {
       "input": "输入",
       "output": "输出",

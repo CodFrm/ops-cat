@@ -141,7 +141,7 @@ func TestCheckSQLPolicyForOpsctl(t *testing.T) {
 					AllowTypes: []string{"SELECT", "SHOW"},
 				}),
 			}
-			// CheckGroupGenericPolicy + resolveAssetPolicyChain both call Find
+			// CheckGroupGenericPolicy + resolveAssetForPolicy both call Find
 			mockRepo.EXPECT().Find(gomock.Any(), int64(1)).Return(asset, nil).AnyTimes()
 
 			result := CheckSQLPolicyForOpsctl(ctx, 1, "SELECT * FROM users")

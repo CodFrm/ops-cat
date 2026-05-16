@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 
-// classifyError 内部读取 i18n.t 取友好标题；测试只关心 kind 分类，message 走 fallback。
+// classifyError 内部读取 i18n.t 取友好标题；测试只关心 kind 分类，t 直接回显 key 即可。
 vi.mock("../i18n", () => ({
-  default: { t: (_key: string, fallback: string) => fallback },
+  default: { t: (key: string) => key },
 }));
 
 import { classifyError } from "../lib/aiError";

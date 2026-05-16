@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import type { DetailInfoCardProps } from "@/lib/assetTypes/types";
-import { InfoItem } from "./InfoItem";
+import { DetailGrid, DetailSection, InfoItem, TunnelInfo } from "./InfoItem";
+import { ENABLED_VALUE, MASKED_SECRET, parseDetailConfig } from "./utils";
 
 interface RedisConfig {
   host: string;
@@ -15,29 +16,20 @@ interface RedisConfig {
 export function RedisDetailInfoCard({ asset, sshTunnelName }: DetailInfoCardProps) {
   const { t } = useTranslation();
 
-  let cfg: RedisConfig | null = null;
-  try {
-    cfg = JSON.parse(asset.Config || "{}");
-  } catch {
-    /* ignore */
-  }
+  const cfg = parseDetailConfig<RedisConfig>(asset.Config);
   if (!cfg) return null;
+  const tunnelName = sshTunnelName(cfg.ssh_asset_id);
 
   return (
-    <div className="rounded-xl border bg-card p-4">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Redis</h3>
-      <div className="grid grid-cols-2 gap-4 text-sm">
+    <DetailSection title="Redis">
+      <DetailGrid>
         <InfoItem label={t("asset.host")} value={`${cfg.host}:${cfg.port}`} mono />
         {cfg.username && <InfoItem label={t("asset.username")} value={cfg.username} mono />}
-        {cfg.password && <InfoItem label={t("asset.password")} value={"\u25CF\u25CF\u25CF\u25CF\u25CF\u25CF"} />}
+        {cfg.password && <InfoItem label={t("asset.password")} value={MASKED_SECRET} />}
         <InfoItem label={t("asset.redisDatabase")} value={String(cfg.database || 0)} mono />
-        {cfg.tls && <InfoItem label={t("asset.tls")} value={"\u2713"} />}
-      </div>
-      {sshTunnelName(cfg.ssh_asset_id) && (
-        <div className="mt-3 pt-3 border-t text-sm">
-          <InfoItem label={t("asset.sshTunnel")} value={sshTunnelName(cfg.ssh_asset_id)!} mono />
-        </div>
-      )}
-    </div>
+        {cfg.tls && <InfoItem label={t("asset.tls")} value={ENABLED_VALUE} />}
+      </DetailGrid>
+      {tunnelName && <TunnelInfo label={t("asset.sshTunnel")} name={tunnelName} />}
+    </DetailSection>
   );
 }

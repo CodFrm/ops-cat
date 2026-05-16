@@ -278,7 +278,7 @@ export function ExtensionSection() {
             </div>
           </div>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogCancel>{t("action.cancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={handleUninstall}>{t("extension.uninstall")}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
