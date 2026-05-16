@@ -68,11 +68,15 @@ const (
 )
 
 const (
-	reconcileSettleDelay        = 100 * time.Millisecond
-	autoSaveDebounce            = 500 * time.Millisecond
-	defaultCleanupRetentionDays = 7
-	minCleanupRetentionDays     = 1
-	maxCleanupRetentionDays     = 365
+	reconcileSettleDelay              = 100 * time.Millisecond
+	autoSaveDebounce                  = 500 * time.Millisecond
+	defaultCleanupRetentionDays       = 7
+	minCleanupRetentionDays           = 1
+	maxCleanupRetentionDays           = 365
+	defaultMaxReadFileSizeMB          = 10
+	minMaxReadFileSizeMB              = 1
+	maxMaxReadFileSizeMB              = 1024
+	bytesPerMB                  int64 = 1024 * 1024
 )
 
 const externalEditReconnectHint = "请在同一资产中重新打开该远程文件后再继续同步"
@@ -107,6 +111,7 @@ type Settings struct {
 	DefaultEditorID      string                           `json:"defaultEditorId"`
 	WorkspaceRoot        string                           `json:"workspaceRoot"`
 	CleanupRetentionDays int                              `json:"cleanupRetentionDays"`
+	MaxReadFileSizeMB    int                              `json:"maxReadFileSizeMB"`
 	Editors              []Editor                         `json:"editors"`
 	CustomEditors        []bootstrap.ExternalEditorConfig `json:"customEditors"`
 }
@@ -115,6 +120,7 @@ type SettingsInput struct {
 	DefaultEditorID      string                           `json:"defaultEditorId"`
 	WorkspaceRoot        string                           `json:"workspaceRoot"`
 	CleanupRetentionDays int                              `json:"cleanupRetentionDays"`
+	MaxReadFileSizeMB    int                              `json:"maxReadFileSizeMB"`
 	CustomEditors        []bootstrap.ExternalEditorConfig `json:"customEditors"`
 }
 

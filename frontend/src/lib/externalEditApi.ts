@@ -21,6 +21,7 @@ export interface ExternalEditSettings {
   defaultEditorId: string;
   workspaceRoot: string;
   cleanupRetentionDays: number;
+  maxReadFileSizeMB: number;
   editors: ExternalEditEditor[];
   customEditors: ExternalEditEditorConfig[];
 }
@@ -29,6 +30,7 @@ export interface ExternalEditSettingsInput {
   defaultEditorId: string;
   workspaceRoot: string;
   cleanupRetentionDays: number;
+  maxReadFileSizeMB: number;
   customEditors: ExternalEditEditorConfig[];
 }
 

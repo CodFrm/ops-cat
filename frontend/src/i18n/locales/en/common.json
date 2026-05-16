@@ -1135,6 +1135,8 @@
       "workspaceRoot": "Workspace Root",
       "cleanupRetentionDays": "Cleanup Retention Days",
       "cleanupRetentionDaysHint": "Defaults to 7 days, range 1-365. Used to clean up non-active drafts and backup history copies.",
+      "maxReadFileSizeMB": "Max Read Size (MB)",
+      "maxReadFileSizeMBHint": "Defaults to 10 MB, range 1-1024 MB. Full-file reads above this limit are rejected and should be adjusted in Settings > External Edit.",
       "customEditors": "Custom Editors",
       "addEditor": "Add Custom Editor",
       "addEditorTitle": "Add Custom Editor",

@@ -18,7 +18,7 @@ func (s *Service) hydrateSessionEncodingLocked(session *Session) error {
 	if session == nil || strings.TrimSpace(session.OriginalEncoding) != "" {
 		return nil
 	}
-	data, err := readLocalEditableFile(session.LocalPath)
+	data, err := readLocalEditableFile(session.LocalPath, s.maxReadFileSizeBytes())
 	if err != nil {
 		return fmt.Errorf("读取本地副本失败: %w", err)
 	}

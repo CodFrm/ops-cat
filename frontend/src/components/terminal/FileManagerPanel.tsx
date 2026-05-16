@@ -45,6 +45,18 @@ interface FileManagerPanelProps {
 }
 
 const EXTERNAL_EDIT_SAFE_ERROR_KEY = "externalEdit.error.safeActionFailed";
+const EXTERNAL_EDIT_OVERSIZE_ERROR_KEY =
+  "当前文件超过最大读取阈值，无法继续完整读取。请前往 设置 > External Edit 调整最大读取大小后再重试";
+
+function isExternalEditOversizeError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("远程文件过大") ||
+    message.includes("本地副本过大") ||
+    message.includes("读取过程中超过大小上限") ||
+    message.includes("无法完整读取")
+  );
+}
 
 export function FileManagerPanel({
   assetId,
@@ -260,7 +272,7 @@ export function FileManagerPanel({
           remotePath,
         });
       } catch (error) {
-        setError(String(error));
+        setError(isExternalEditOversizeError(error) ? EXTERNAL_EDIT_OVERSIZE_ERROR_KEY : String(error));
       }
     },
     [assetId, sessionId, setError]

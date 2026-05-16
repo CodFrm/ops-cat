@@ -112,7 +112,7 @@ func (s *Service) Open(ctx context.Context, req OpenRequest) (*Session, error) {
 	}
 	s.mu.Unlock()
 
-	data, fileInfo, err := readRemoteEditableFile(s.remote, req.SessionID, req.RemotePath)
+	data, fileInfo, err := readRemoteEditableFile(s.remote, req.SessionID, req.RemotePath, s.maxReadFileSizeBytes())
 	if err != nil {
 		return nil, fmt.Errorf("读取远程文件失败: %w", err)
 	}
@@ -286,7 +286,7 @@ func (s *Service) refreshInternal(sessionID string) (*Session, error) {
 		return nil, err
 	}
 
-	localData, err := readLocalEditableFile(current.LocalPath)
+	localData, err := readLocalEditableFile(current.LocalPath, s.maxReadFileSizeBytes())
 	if err != nil {
 		return nil, fmt.Errorf("读取本地副本失败: %w", err)
 	}
@@ -301,7 +301,7 @@ func (s *Service) refreshInternal(sessionID string) (*Session, error) {
 		return refreshed, nil
 	}
 
-	remoteData, remoteInfo, err := readRemoteEditableFile(s.remote, current.SessionID, current.RemotePath)
+	remoteData, remoteInfo, err := readRemoteEditableFile(s.remote, current.SessionID, current.RemotePath, s.maxReadFileSizeBytes())
 	if err != nil {
 		if isRemoteMissingError(err) {
 			refreshed := s.markSessionState(sessionID, sessionStateRemoteMissing, dirty, localHash)
@@ -386,7 +386,7 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 	}
 	s.clearRecordError(session)
 
-	localData, err := readLocalEditableFile(session.LocalPath)
+	localData, err := readLocalEditableFile(session.LocalPath, s.maxReadFileSizeBytes())
 	if err != nil {
 		saveErr := fmt.Errorf("读取本地副本失败: %w", err)
 		failed := s.recordError(sessionID, "read_local_copy", saveErr)
@@ -447,7 +447,7 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 		}
 
 		if resolution != resolutionOverwrite {
-			remoteData, _, readErr := readRemoteEditableFile(s.remote, session.SessionID, session.RemotePath)
+			remoteData, _, readErr := readRemoteEditableFile(s.remote, session.SessionID, session.RemotePath, s.maxReadFileSizeBytes())
 			if readErr != nil {
 				if isRemoteMissingError(readErr) {
 					result := s.markSessionState(sessionID, sessionStateRemoteMissing, true, localHash)

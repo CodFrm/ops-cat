@@ -145,6 +145,32 @@ func canonicalRemotePath(info *sftp_svc.RemoteFileInfo, fallback string) string 
 	return fallback
 }
 
+func normalizeMaxReadFileSizeMB(value int) int {
+	if value < minMaxReadFileSizeMB || value > maxMaxReadFileSizeMB {
+		return defaultMaxReadFileSizeMB
+	}
+	return value
+}
+
+func MinMaxReadFileSizeMBForConfig() int {
+	return minMaxReadFileSizeMB
+}
+
+func MaxMaxReadFileSizeMBForConfig() int {
+	return maxMaxReadFileSizeMB
+}
+
+func MaxReadFileSizeBytesForConfig(cfg *bootstrap.AppConfig) int64 {
+	if cfg == nil {
+		return int64(defaultMaxReadFileSizeMB) * bytesPerMB
+	}
+	return int64(normalizeMaxReadFileSizeMB(cfg.ExternalEditMaxReadFileSizeMB)) * bytesPerMB
+}
+
+func (s *Service) maxReadFileSizeBytes() int64 {
+	return MaxReadFileSizeBytesForConfig(s.configProvider())
+}
+
 func buildDocumentKey(assetID int64, canonicalRemoteFile string) string {
 	return fmt.Sprintf("%d:%s", assetID, strings.TrimSpace(canonicalRemoteFile))
 }
@@ -177,21 +203,21 @@ func isRemoteMissingError(err error) bool {
 	return strings.Contains(text, "no such file") || strings.Contains(text, "not found")
 }
 
-func readRemoteEditableFile(remote RemoteFileService, sessionID, remotePath string) ([]byte, *sftp_svc.RemoteFileInfo, error) {
+func readRemoteEditableFile(remote RemoteFileService, sessionID, remotePath string, maxReadBytes int64) ([]byte, *sftp_svc.RemoteFileInfo, error) {
 	data, info, err := remote.ReadFile(sessionID, remotePath)
 	if err != nil {
 		return nil, nil, err
 	}
-	if info != nil && info.Size > sftp_svc.MaxReadFileSize {
-		return nil, nil, fmt.Errorf("远程文件过大，无法完整读取: %s (%d bytes > %d bytes)", remotePath, info.Size, sftp_svc.MaxReadFileSize)
+	if info != nil && info.Size > maxReadBytes {
+		return nil, nil, fmt.Errorf("远程文件过大，无法完整读取: %s (%d bytes > %d bytes)", remotePath, info.Size, maxReadBytes)
 	}
-	if int64(len(data)) > sftp_svc.MaxReadFileSize {
-		return nil, nil, fmt.Errorf("远程文件过大，无法完整读取: %s (%d bytes > %d bytes)", remotePath, len(data), sftp_svc.MaxReadFileSize)
+	if int64(len(data)) > maxReadBytes {
+		return nil, nil, fmt.Errorf("远程文件过大，无法完整读取: %s (%d bytes > %d bytes)", remotePath, len(data), maxReadBytes)
 	}
 	return data, info, nil
 }
 
-func readLocalEditableFile(localPath string) ([]byte, error) {
+func readLocalEditableFile(localPath string, maxReadBytes int64) ([]byte, error) {
 	info, err := os.Stat(localPath)
 	if err != nil {
 		return nil, err
@@ -199,8 +225,8 @@ func readLocalEditableFile(localPath string) ([]byte, error) {
 	if info.IsDir() || !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("本地副本不是常规文件: %s (mode=%s, perm=%#o, isDir=%t)", localPath, info.Mode(), info.Mode().Perm(), info.IsDir())
 	}
-	if info.Size() > sftp_svc.MaxReadFileSize {
-		return nil, fmt.Errorf("本地副本过大，无法完整读取: %s (%d bytes > %d bytes)", localPath, info.Size(), sftp_svc.MaxReadFileSize)
+	if info.Size() > maxReadBytes {
+		return nil, fmt.Errorf("本地副本过大，无法完整读取: %s (%d bytes > %d bytes)", localPath, info.Size(), maxReadBytes)
 	}
 
 	file, err := os.Open(localPath) //nolint:gosec // localPath is a managed external-edit workspace copy
@@ -213,12 +239,12 @@ func readLocalEditableFile(localPath string) ([]byte, error) {
 		}
 	}()
 
-	data, err := io.ReadAll(io.LimitReader(file, sftp_svc.MaxReadFileSize+1))
+	data, err := io.ReadAll(io.LimitReader(file, maxReadBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > sftp_svc.MaxReadFileSize {
-		return nil, fmt.Errorf("本地副本读取过程中超过大小上限: %s (%d bytes > %d bytes)", localPath, len(data), sftp_svc.MaxReadFileSize)
+	if int64(len(data)) > maxReadBytes {
+		return nil, fmt.Errorf("本地副本读取过程中超过大小上限: %s (%d bytes > %d bytes)", localPath, len(data), maxReadBytes)
 	}
 	return data, nil
 }
@@ -264,6 +290,11 @@ func buildErrorSnapshot(step string, err error, nowUnix int64) *ErrorSnapshot {
 			strings.Contains(err.Error(), "文本文件"):
 			summary = "当前本地副本已不满足安全同步条件"
 			suggestion = "请恢复原始编码或重新打开该远程文件后再同步"
+		case strings.Contains(err.Error(), "过大"),
+			strings.Contains(err.Error(), "大小上限"),
+			strings.Contains(err.Error(), "完整读取"):
+			summary = "当前文件超过最大读取阈值，无法继续完整读取"
+			suggestion = "请前往 设置 > External Edit 调整最大读取大小后再重试"
 		case strings.Contains(err.Error(), "删除本地副本失败"):
 			summary = "删除本地副本失败"
 			suggestion = "请先关闭占用该文件的程序后再重试"

@@ -363,11 +363,65 @@ func TestExternalEditOpenRejectsOversizedRemoteFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "远程文件过大")
 }
 
+func TestExternalEditSettingsExposeDefaultMaxReadFileSizeMB(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-a"} })
+
+	settings, err := h.svc.GetSettings()
+	require.NoError(t, err)
+	require.NotNil(t, settings)
+	assert.Equal(t, 10, settings.MaxReadFileSizeMB)
+}
+
+func TestExternalEditSaveSettingsNormalizesMaxReadFileSizeMB(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-a"} })
+
+	settings, err := h.svc.SaveSettings(SettingsInput{
+		DefaultEditorID:      "system-text",
+		WorkspaceRoot:        h.manifest,
+		CleanupRetentionDays: 7,
+		MaxReadFileSizeMB:    0,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, settings)
+	assert.Equal(t, 10, settings.MaxReadFileSizeMB)
+	assert.Equal(t, 10, h.cfg.ExternalEditMaxReadFileSizeMB)
+}
+
+func TestExternalEditOpenRejectsRemoteFileOverConfiguredLimit(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-a"} })
+	h.cfg.ExternalEditMaxReadFileSizeMB = 1
+	oversized := []byte(strings.Repeat("a", 2*1024*1024))
+	h.remote.SetFile("ssh-a", "/srv/app/big.log", oversized, "/srv/app/big.log")
+
+	_, err := h.svc.Open(context.Background(), OpenRequest{
+		AssetID:    101,
+		SessionID:  "ssh-a",
+		RemotePath: "/srv/app/big.log",
+		EditorID:   "system-text",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "远程文件过大")
+}
+
 func TestExternalEditSaveRejectsOversizedLocalCopy(t *testing.T) {
 	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-a"} })
 	session := h.openSession(t, "ssh-a", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
 
 	markDirtyLocalCopy(t, session, []byte(strings.Repeat("a", int(sftp_svc.MaxReadFileSize)+1)))
+
+	_, err := h.svc.Save(context.Background(), session.ID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "本地副本过大")
+	require.Empty(t, h.remote.writes)
+}
+
+func TestExternalEditSaveRejectsLocalCopyOverConfiguredLimit(t *testing.T) {
+	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-a"} })
+	h.cfg.ExternalEditMaxReadFileSizeMB = 1
+	session := h.openSession(t, "ssh-a", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
+
+	markDirtyLocalCopy(t, session, []byte(strings.Repeat("a", 2*1024*1024)))
 
 	_, err := h.svc.Save(context.Background(), session.ID)
 	require.Error(t, err)

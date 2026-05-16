@@ -108,6 +108,7 @@ export function ExternalEditSection() {
   const [defaultEditorId, setDefaultEditorId] = useState("");
   const [workspaceRoot, setWorkspaceRoot] = useState("");
   const [cleanupRetentionDays, setCleanupRetentionDays] = useState("7");
+  const [maxReadFileSizeMB, setMaxReadFileSizeMB] = useState("10");
   const [customEditors, setCustomEditors] = useState<ExternalEditEditorConfig[]>([]);
   const [editorDialog, setEditorDialog] = useState<EditorDialogState>(null);
   const [saving, setSaving] = useState(false);
@@ -119,6 +120,7 @@ export function ExternalEditSection() {
         setDefaultEditorId(data.defaultEditorId);
         setWorkspaceRoot(data.workspaceRoot);
         setCleanupRetentionDays(String(data.cleanupRetentionDays || 7));
+        setMaxReadFileSizeMB(String(data.maxReadFileSizeMB || 10));
         setCustomEditors(normalizeEditors(data.customEditors || []));
       })
       .catch((error) => toast.error(errMsg(error)));
@@ -159,12 +161,14 @@ export function ExternalEditSection() {
         defaultEditorId,
         workspaceRoot,
         cleanupRetentionDays: Number.parseInt(cleanupRetentionDays, 10) || 7,
+        maxReadFileSizeMB: Number.parseInt(maxReadFileSizeMB, 10) || 10,
         customEditors: normalizeEditors(customEditors),
       });
       setSettings(next);
       setDefaultEditorId(next.defaultEditorId);
       setWorkspaceRoot(next.workspaceRoot);
       setCleanupRetentionDays(String(next.cleanupRetentionDays || 7));
+      setMaxReadFileSizeMB(String(next.maxReadFileSizeMB || 10));
       setCustomEditors(normalizeEditors(next.customEditors || []));
       toast.success(t("externalEdit.settings.saved"));
     } catch (error) {
@@ -283,6 +287,19 @@ export function ExternalEditSection() {
               onChange={(event) => setCleanupRetentionDays(event.target.value)}
             />
             <div className="text-xs text-muted-foreground">{t("externalEdit.settings.cleanupRetentionDaysHint")}</div>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="external-edit-max-read-file-size-mb">{t("externalEdit.settings.maxReadFileSizeMB")}</Label>
+            <Input
+              id="external-edit-max-read-file-size-mb"
+              type="number"
+              min={1}
+              max={1024}
+              value={maxReadFileSizeMB}
+              onChange={(event) => setMaxReadFileSizeMB(event.target.value)}
+            />
+            <div className="text-xs text-muted-foreground">{t("externalEdit.settings.maxReadFileSizeMBHint")}</div>
           </div>
 
           <div className="space-y-3">

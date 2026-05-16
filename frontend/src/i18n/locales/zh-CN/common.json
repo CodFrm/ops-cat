@@ -1120,6 +1120,8 @@
       "workspaceRoot": "临时工作区",
       "cleanupRetentionDays": "副本清理保留天数",
       "cleanupRetentionDaysHint": "默认 7 天，允许 1-365 天；用于清理非活动副本和 backup 历史副本。",
+      "maxReadFileSizeMB": "最大读取大小（MB）",
+      "maxReadFileSizeMBHint": "默认 10 MB，允许 1-1024 MB；超过该阈值时会拒绝完整读取，并提示前往 设置 > External Edit 调整。",
       "customEditors": "自定义编辑器",
       "addEditor": "新增自定义编辑器",
       "addEditorTitle": "新增自定义编辑器",

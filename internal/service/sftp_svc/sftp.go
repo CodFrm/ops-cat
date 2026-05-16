@@ -42,15 +42,42 @@ type TransferProgress struct {
 
 // Service SFTP 文件传输服务
 type Service struct {
-	sshManager *ssh_svc.Manager
-	clients    sync.Map // sessionID -> *sftp.Client
-	cancels    sync.Map // transferID -> context.CancelFunc
-	counter    atomic.Int64
+	sshManager              *ssh_svc.Manager
+	clients                 sync.Map // sessionID -> *sftp.Client
+	cancels                 sync.Map // transferID -> context.CancelFunc
+	counter                 atomic.Int64
+	maxReadFileSizeProvider func() int64
 }
 
 // NewService 创建 SFTP 服务
 func NewService(sshManager *ssh_svc.Manager) *Service {
-	return &Service{sshManager: sshManager}
+	return &Service{
+		sshManager: sshManager,
+		maxReadFileSizeProvider: func() int64 {
+			return MaxReadFileSize
+		},
+	}
+}
+
+func (s *Service) SetMaxReadFileSizeProvider(provider func() int64) {
+	if provider == nil {
+		s.maxReadFileSizeProvider = func() int64 {
+			return MaxReadFileSize
+		}
+		return
+	}
+	s.maxReadFileSizeProvider = provider
+}
+
+func (s *Service) maxReadFileSize() int64 {
+	if s == nil || s.maxReadFileSizeProvider == nil {
+		return MaxReadFileSize
+	}
+	limit := s.maxReadFileSizeProvider()
+	if limit <= 0 {
+		return MaxReadFileSize
+	}
+	return limit
 }
 
 // GenerateTransferID 生成唯一传输 ID
@@ -267,12 +294,13 @@ func (s *Service) ReadFile(sessionID, remotePath string) ([]byte, *RemoteFileInf
 		return nil, nil, err
 	}
 
+	limit := s.maxReadFileSize()
 	info, err := statWithClient(sftpClient, remotePath)
 	if err != nil {
 		return nil, nil, err
 	}
-	if info.Size > MaxReadFileSize {
-		return nil, nil, fmt.Errorf("远程文件过大，无法完整读取: %s (%d bytes > %d bytes)", remotePath, info.Size, MaxReadFileSize)
+	if info.Size > limit {
+		return nil, nil, fmt.Errorf("远程文件过大，无法完整读取: %s (%d bytes > %d bytes)", remotePath, info.Size, limit)
 	}
 
 	remoteFile, err := sftpClient.Open(remotePath)
@@ -285,12 +313,12 @@ func (s *Service) ReadFile(sessionID, remotePath string) ([]byte, *RemoteFileInf
 		}
 	}()
 
-	data, err := io.ReadAll(io.LimitReader(remoteFile, MaxReadFileSize+1))
+	data, err := io.ReadAll(io.LimitReader(remoteFile, limit+1))
 	if err != nil {
 		return nil, nil, fmt.Errorf("读取远程文件失败: %w", err)
 	}
-	if int64(len(data)) > MaxReadFileSize {
-		return nil, nil, fmt.Errorf("远程文件读取过程中超过大小上限: %s (%d bytes > %d bytes)", remotePath, len(data), MaxReadFileSize)
+	if int64(len(data)) > limit {
+		return nil, nil, fmt.Errorf("远程文件读取过程中超过大小上限: %s (%d bytes > %d bytes)", remotePath, len(data), limit)
 	}
 
 	sum := sha256.Sum256(data)

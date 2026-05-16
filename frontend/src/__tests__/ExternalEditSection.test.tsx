@@ -43,6 +43,7 @@ function makeSettings(overrides: Partial<Awaited<ReturnType<typeof getExternalEd
     defaultEditorId: "system-text",
     workspaceRoot: "/tmp",
     cleanupRetentionDays: 7,
+    maxReadFileSizeMB: 10,
     editors: [builtInEditor],
     customEditors: [],
     ...overrides,
@@ -58,6 +59,7 @@ describe("ExternalEditSection", () => {
         defaultEditorId: input.defaultEditorId,
         workspaceRoot: input.workspaceRoot,
         cleanupRetentionDays: input.cleanupRetentionDays,
+        maxReadFileSizeMB: input.maxReadFileSizeMB,
         editors: [
           { ...builtInEditor, default: input.defaultEditorId === builtInEditor.id },
           ...(input.customEditors || []).map((editor) => ({
@@ -129,6 +131,7 @@ describe("ExternalEditSection", () => {
       expect(saveExternalEditSettings).toHaveBeenCalledWith(
         expect.objectContaining({
           cleanupRetentionDays: 7,
+          maxReadFileSizeMB: 10,
           customEditors: [
             expect.objectContaining({
               name: "Custom Vim",
@@ -173,6 +176,7 @@ describe("ExternalEditSection", () => {
         expect.objectContaining({
           defaultEditorId: "system-text",
           cleanupRetentionDays: 7,
+          maxReadFileSizeMB: 10,
           customEditors: [],
         })
       );
@@ -192,6 +196,32 @@ describe("ExternalEditSection", () => {
       expect(saveExternalEditSettings).toHaveBeenCalledWith(
         expect.objectContaining({
           cleanupRetentionDays: 14,
+          maxReadFileSizeMB: 10,
+        })
+      );
+    });
+  });
+
+  it("loads and saves max read file size in MB", async () => {
+    vi.mocked(getExternalEditSettings).mockResolvedValueOnce(
+      makeSettings({
+        maxReadFileSizeMB: 32,
+      })
+    );
+
+    const user = userEvent.setup();
+    render(<ExternalEditSection />);
+
+    const input = await screen.findByLabelText("externalEdit.settings.maxReadFileSizeMB");
+    expect(input).toHaveValue(32);
+    await user.clear(input);
+    await user.type(input, "64");
+    await user.click(screen.getByRole("button", { name: "action.save" }));
+
+    await waitFor(() => {
+      expect(saveExternalEditSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          maxReadFileSizeMB: 64,
         })
       );
     });

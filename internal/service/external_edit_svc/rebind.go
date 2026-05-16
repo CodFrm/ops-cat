@@ -316,7 +316,7 @@ func (s *Service) rebuildDocumentSessionFromRemote(
 	source *Session,
 	auditTool string,
 ) (*Session, error) {
-	data, fileInfo, err := readRemoteEditableFile(s.remote, req.SessionID, req.RemotePath)
+	data, fileInfo, err := readRemoteEditableFile(s.remote, req.SessionID, req.RemotePath, s.maxReadFileSizeBytes())
 	if err != nil {
 		return nil, fmt.Errorf("读取远程文件失败: %w", err)
 	}

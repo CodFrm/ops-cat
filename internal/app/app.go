@@ -110,6 +110,9 @@ func NewApp(skill SkillContent) *App {
 		shutdownCh:     make(chan struct{}),
 		flushAckCh:     make(chan struct{}, 1),
 	}
+	a.sftpService.SetMaxReadFileSizeProvider(func() int64 {
+		return external_edit_svc.MaxReadFileSizeBytesForConfig(bootstrap.GetConfig())
+	})
 	a.forwardManager = NewForwardManager(&appPoolDialer{})
 	return a
 }

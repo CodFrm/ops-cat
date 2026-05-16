@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/cago-frame/cago/pkg/logger"
-	"go.uber.org/zap"
 	"github.com/fsnotify/fsnotify"
+	"go.uber.org/zap"
 )
 
 func (s *Service) watchLoop() {
@@ -71,7 +71,7 @@ func (s *Service) reconcileLocalCopy(sessionID string) {
 		return
 	}
 
-	data, err := readLocalEditableFile(session.LocalPath)
+	data, err := readLocalEditableFile(session.LocalPath, s.maxReadFileSizeBytes())
 	if err != nil {
 		return
 	}

@@ -797,6 +797,35 @@ describe("FileManagerPanel", () => {
     expect(screen.queryByText(/AppData\\Local\\OpsKat/)).not.toBeInTheDocument();
   });
 
+  it("sanitizes oversize failures during the first external-edit open", async () => {
+    const user = userEvent.setup();
+    const openExternalEditBinding = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error("读取远程文件失败: 远程文件过大，无法完整读取: /srv/app/secrets.txt (2097152 bytes > 1048576 bytes)")
+      );
+    window.go ??= { app: { App: {} } };
+    window.go.app ??= { App: {} };
+    window.go.app.App ??= {};
+    Object.assign(window.go.app.App, {
+      OpenExternalEdit: openExternalEditBinding,
+    });
+    vi.mocked(SFTPListDir).mockResolvedValueOnce([{ name: "secrets.txt", isDir: false, size: 2097152, modTime: 0 }]);
+
+    render(<FileManagerPanel assetId={101} tabId="tab1" sessionId="s1" isOpen width={280} onWidthChange={vi.fn()} />);
+
+    await user.dblClick(await screen.findByText("secrets.txt"));
+
+    expect(
+      await screen.findByText(
+        "当前文件超过最大读取阈值，无法继续完整读取。请前往 设置 > External Edit 调整最大读取大小后再重试"
+      )
+    ).toBeInTheDocument();
+    expect(openExternalEditBinding).toHaveBeenCalled();
+    expect(screen.queryByText(/\/srv\/app\/secrets\.txt/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/2097152 bytes/)).not.toBeInTheDocument();
+  });
+
   it("sanitizes apply merge failures before showing them in the file view", async () => {
     const user = userEvent.setup();
     useExternalEditStore.setState({

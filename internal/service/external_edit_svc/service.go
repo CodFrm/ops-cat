@@ -173,6 +173,7 @@ func (s *Service) GetSettings() (*Settings, error) {
 		DefaultEditorID:      defaultID,
 		WorkspaceRoot:        workspaceRoot,
 		CleanupRetentionDays: normalizeCleanupRetentionDays(cfg.ExternalEditCleanupRetentionDays),
+		MaxReadFileSizeMB:    normalizeMaxReadFileSizeMB(cfg.ExternalEditMaxReadFileSizeMB),
 		Editors:              editors,
 		CustomEditors:        cloneCustomEditors(cfg.ExternalEditCustomEditors),
 	}, nil
@@ -210,6 +211,7 @@ func (s *Service) SaveSettings(input SettingsInput) (*Settings, error) {
 	cfg.ExternalEditWorkspaceRoot = workspaceRoot
 	cfg.ExternalEditCustomEditors = customEditors
 	cfg.ExternalEditCleanupRetentionDays = normalizeCleanupRetentionDays(input.CleanupRetentionDays)
+	cfg.ExternalEditMaxReadFileSizeMB = normalizeMaxReadFileSizeMB(input.MaxReadFileSizeMB)
 	if err := s.configSaver(cfg); err != nil {
 		return nil, fmt.Errorf("save external edit settings: %w", err)
 	}

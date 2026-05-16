@@ -27,7 +27,7 @@ func (s *Service) rereadRemoteSession(sessionID string) (*SaveResult, error) {
 		return nil, err
 	}
 
-	if _, _, err := readRemoteEditableFile(s.remote, current.SessionID, current.RemotePath); err != nil {
+	if _, _, err := readRemoteEditableFile(s.remote, current.SessionID, current.RemotePath, s.maxReadFileSizeBytes()); err != nil {
 		if isRemoteMissingError(err) {
 			result := s.markSessionState(sessionID, sessionStateRemoteMissing, true, sessionLocalHash(current))
 			saveResult := &SaveResult{
@@ -121,7 +121,7 @@ func (s *Service) compareInternal(sessionID string) (*CompareResult, error) {
 		return nil, err
 	}
 
-	remoteData, remoteInfo, err := readRemoteEditableFile(s.remote, primary.SessionID, primary.RemotePath)
+	remoteData, remoteInfo, err := readRemoteEditableFile(s.remote, primary.SessionID, primary.RemotePath, s.maxReadFileSizeBytes())
 	if err != nil {
 		if isRemoteMissingError(err) {
 			saveResult := s.markRemoteMissingConflict(primary.ID, primary, sessionLocalHash(primary), false, "", "compare")
@@ -155,7 +155,7 @@ func (s *Service) compareInternal(sessionID string) (*CompareResult, error) {
 		return nil, err
 	}
 
-	localData, err := readLocalEditableFile(primary.LocalPath)
+	localData, err := readLocalEditableFile(primary.LocalPath, s.maxReadFileSizeBytes())
 	if err != nil {
 		return nil, fmt.Errorf("读取本地副本失败: %w", err)
 	}
@@ -209,7 +209,7 @@ func (s *Service) prepareMergeInternal(sessionID string) (*MergePrepareResult, e
 		return nil, err
 	}
 
-	remoteData, remoteInfo, err := readRemoteEditableFile(s.remote, current.SessionID, current.RemotePath)
+	remoteData, remoteInfo, err := readRemoteEditableFile(s.remote, current.SessionID, current.RemotePath, s.maxReadFileSizeBytes())
 	if err != nil {
 		if isRemoteMissingError(err) {
 			saveResult := s.markRemoteMissingConflict(current.ID, current, sessionLocalHash(current), false, "", "merge_prepare")
@@ -233,7 +233,7 @@ func (s *Service) prepareMergeInternal(sessionID string) (*MergePrepareResult, e
 		return nil, err
 	}
 
-	localData, err := readLocalEditableFile(current.LocalPath)
+	localData, err := readLocalEditableFile(current.LocalPath, s.maxReadFileSizeBytes())
 	if err != nil {
 		return nil, fmt.Errorf("读取本地副本失败: %w", err)
 	}
@@ -316,7 +316,7 @@ func (s *Service) applyMergeInternal(ctx context.Context, req MergeApplyRequest)
 		return nil, err
 	}
 
-	remoteData, remoteInfo, err := readRemoteEditableFile(s.remote, session.SessionID, session.RemotePath)
+	remoteData, remoteInfo, err := readRemoteEditableFile(s.remote, session.SessionID, session.RemotePath, s.maxReadFileSizeBytes())
 	if err != nil {
 		if isRemoteMissingError(err) {
 			return s.markRemoteMissingConflict(req.SessionID, session, sessionLocalHash(session), false, "", "merge_apply"), nil
