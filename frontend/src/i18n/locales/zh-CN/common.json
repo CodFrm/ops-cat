@@ -827,7 +827,7 @@
     "chars": "字",
     "pendingMessages": "等待发送",
     "clearQueue": "清空",
-    "mentionNotFound": "未找到资产",
+    "mentionNotFound": "未找到资产、库或表",
     "mentionAssetDeleted": "资产已删除",
     "editMessage": "编辑消息",
     "editingMessage": "正在编辑消息",

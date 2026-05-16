@@ -17,7 +17,14 @@ import {
 import { ai, conversation_entity, app } from "../../wailsjs/go/models";
 import { EventsOn, EventsEmit } from "../../wailsjs/runtime/runtime";
 import i18n from "../i18n";
-import { useTabStore, registerTabCloseHook, registerTabRestoreHook, type AITabMeta, type Tab } from "./tabStore";
+import {
+  useTabStore,
+  registerTabCloseHook,
+  registerTabRestoreHook,
+  type AITabMeta,
+  type QueryTabMeta,
+  type Tab,
+} from "./tabStore";
 import { stripMentionTags } from "@/lib/mentionXml";
 import { classifyError, type ErrorKind } from "@/lib/aiError";
 
@@ -1570,14 +1577,14 @@ async function _sendForConversation(convId: number, content: string) {
       (t): t is Tab & { meta: { assetId: number; assetName?: string } } =>
         t.type !== "ai" && t.type !== "page" && t.meta != null && "assetId" in t.meta
     )
-    .map(
-      (t) =>
-        new ai.TabInfo({
-          type: t.type,
-          assetId: t.meta.assetId || 0,
-          assetName: t.meta.assetName || t.label || "",
-        })
-    );
+    .map((t) => {
+      const type = t.type === "query" ? (t.meta as QueryTabMeta).assetType : t.type === "terminal" ? "ssh" : t.type;
+      return new ai.TabInfo({
+        type,
+        assetId: t.meta.assetId || 0,
+        assetName: t.meta.assetName || t.label || "",
+      });
+    });
 
   const aiContext = new ai.AIContext({ openTabs });
 

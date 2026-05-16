@@ -2,9 +2,12 @@
 //
 // 输入文本中只允许出现两类内容：
 //   - 普通文本（< > & 必须按 XML 规则转义为 &lt; &gt; &amp;）
-//   - <mention asset-id="..." [type=...] [host=...] [group=...]>@name</mention>
+//   - <mention asset-id="..." [type=...] [host=...] [group=...] [target=...] [database=...] [table=...]>
+//     @name</mention>
 //
 // 标签 attr 用双引号，名字里的 & < > " 同样转义。
+
+export type MentionTarget = "asset" | "database" | "table";
 
 export interface MentionAttrs {
   assetId: number;
@@ -12,6 +15,10 @@ export interface MentionAttrs {
   type?: string;
   host?: string;
   groupPath?: string;
+  target?: MentionTarget;
+  database?: string;
+  table?: string;
+  driver?: string;
 }
 
 export type MentionSegment = { type: "text"; text: string } | { type: "mention"; text: string; attrs: MentionAttrs };
@@ -37,10 +44,20 @@ function unescapeXml(s: string): string {
 
 export function buildMentionXml(attrs: MentionAttrs): string {
   const parts = [`asset-id="${attrs.assetId}"`];
+  const target = attrs.target ?? (attrs.table ? "table" : attrs.database ? "database" : undefined);
   if (attrs.type) parts.push(`type="${escapeXmlAttr(attrs.type)}"`);
   if (attrs.host) parts.push(`host="${escapeXmlAttr(attrs.host)}"`);
   if (attrs.groupPath) parts.push(`group="${escapeXmlAttr(attrs.groupPath)}"`);
+  if (target && target !== "asset") parts.push(`target="${escapeXmlAttr(target)}"`);
+  if (attrs.database) parts.push(`database="${escapeXmlAttr(attrs.database)}"`);
+  if (attrs.table) parts.push(`table="${escapeXmlAttr(attrs.table)}"`);
+  if (attrs.driver) parts.push(`driver="${escapeXmlAttr(attrs.driver)}"`);
   return `<mention ${parts.join(" ")}>@${escapeXmlText(attrs.name)}</mention>`;
+}
+
+function parseMentionTarget(value: string): MentionTarget | undefined {
+  if (value === "asset" || value === "database" || value === "table") return value;
+  return undefined;
 }
 
 function parseAttrs(raw: string): Partial<MentionAttrs> {
@@ -64,6 +81,18 @@ function parseAttrs(raw: string): Partial<MentionAttrs> {
         break;
       case "group":
         out.groupPath = value;
+        break;
+      case "target":
+        out.target = parseMentionTarget(value);
+        break;
+      case "database":
+        out.database = value;
+        break;
+      case "table":
+        out.table = value;
+        break;
+      case "driver":
+        out.driver = value;
         break;
     }
   }
@@ -95,6 +124,10 @@ export function parseMentionContent(content: string): MentionSegment[] {
           type: attrs.type,
           host: attrs.host,
           groupPath: attrs.groupPath,
+          target: attrs.target ?? (attrs.table ? "table" : attrs.database ? "database" : undefined),
+          database: attrs.database,
+          table: attrs.table,
+          driver: attrs.driver,
         },
       });
     } else {

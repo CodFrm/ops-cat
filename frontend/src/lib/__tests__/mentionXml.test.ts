@@ -25,6 +25,21 @@ describe("mentionXml", () => {
     expect(xml).toBe('<mention asset-id="1">@x</mention>');
   });
 
+  it("buildMentionXml 渲染数据库/表 mention 上下文", () => {
+    const xml = buildMentionXml({
+      assetId: 42,
+      name: "app.users",
+      type: "database",
+      target: "table",
+      database: "app",
+      table: "users",
+      driver: "mysql",
+    });
+    expect(xml).toBe(
+      '<mention asset-id="42" type="database" target="table" database="app" table="users" driver="mysql">@app.users</mention>'
+    );
+  });
+
   it('escapeXmlText 转义 & < >，不动 "', () => {
     expect(escapeXmlText('a < b & c > d"')).toBe('a &lt; b &amp; c &gt; d"');
   });
@@ -50,6 +65,27 @@ describe("mentionXml", () => {
       },
     });
     expect(segs[2]).toEqual({ type: "text", text: " then ls" });
+  });
+
+  it("parseMentionContent 解析数据库/表 mention 上下文", () => {
+    const content =
+      'check <mention asset-id="42" type="database" target="table" database="app" table="users" driver="mysql">@app.users</mention>';
+    const segs = parseMentionContent(content);
+    expect(segs[1]).toEqual({
+      type: "mention",
+      text: "@app.users",
+      attrs: {
+        assetId: 42,
+        name: "app.users",
+        type: "database",
+        host: undefined,
+        groupPath: undefined,
+        target: "table",
+        database: "app",
+        table: "users",
+        driver: "mysql",
+      },
+    });
   });
 
   it("parseMentionContent 对缺 asset-id 的标签当作文本", () => {
@@ -81,8 +117,28 @@ describe("mentionXml", () => {
     const c = '<mention asset-id="1">@a</mention> <mention asset-id="2" type="redis">@b</mention>';
     const mentions = extractMentions(c);
     expect(mentions).toEqual([
-      { assetId: 1, name: "a", type: undefined, host: undefined, groupPath: undefined },
-      { assetId: 2, name: "b", type: "redis", host: undefined, groupPath: undefined },
+      {
+        assetId: 1,
+        name: "a",
+        type: undefined,
+        host: undefined,
+        groupPath: undefined,
+        target: undefined,
+        database: undefined,
+        table: undefined,
+        driver: undefined,
+      },
+      {
+        assetId: 2,
+        name: "b",
+        type: "redis",
+        host: undefined,
+        groupPath: undefined,
+        target: undefined,
+        database: undefined,
+        table: undefined,
+        driver: undefined,
+      },
     ]);
   });
 

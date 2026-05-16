@@ -29,6 +29,10 @@ export interface TipTapMentionNode {
   attrs: {
     id: string;
     label: string;
+    kind?: "asset" | "database" | "table";
+    database?: string;
+    table?: string;
+    driver?: string;
   };
 }
 

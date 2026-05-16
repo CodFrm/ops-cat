@@ -23,6 +23,18 @@ export function extractContentXml(doc: ProseMirrorLikeNode): string {
       return undefined;
     }
   };
+  const driverFromConfig = (cfg: string | undefined) => {
+    if (!cfg) return undefined;
+    try {
+      const parsed = JSON.parse(cfg) as { driver?: string };
+      return parsed.driver || undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const stringAttr = (value: unknown) => (typeof value === "string" && value ? value : undefined);
+  const mentionTarget = (value: unknown) =>
+    value === "database" || value === "table" || value === "asset" ? value : undefined;
 
   let out = "";
   doc.descendants((node) => {
@@ -34,12 +46,17 @@ export function extractContentXml(doc: ProseMirrorLikeNode): string {
       const id = Number(node.attrs.id);
       const label = String(node.attrs.label ?? "");
       const asset = Number.isFinite(id) ? lookupAsset(id) : undefined;
+      const target = mentionTarget(node.attrs.kind);
       out += buildMentionXml({
         assetId: id,
         name: label,
         type: asset?.Type,
         host: asset ? hostFromConfig(asset.Config) : undefined,
         groupPath: asset?.GroupID ? groupPathMap.get(asset.GroupID) : undefined,
+        target,
+        database: stringAttr(node.attrs.database),
+        table: stringAttr(node.attrs.table),
+        driver: stringAttr(node.attrs.driver) ?? (asset ? driverFromConfig(asset.Config) : undefined),
       });
     } else if (node.type.name === "paragraph" && out.length > 0) {
       out += "\n";
@@ -94,6 +111,10 @@ export function buildEditorDocFromMessage(message: string | AIChatInputDraft): T
         attrs: {
           id: String(seg.attrs.assetId),
           label: seg.attrs.name,
+          kind: seg.attrs.target,
+          database: seg.attrs.database,
+          table: seg.attrs.table,
+          driver: seg.attrs.driver,
         },
       });
     }
