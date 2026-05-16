@@ -53,22 +53,25 @@ func (b *PromptBuilder) Build() string {
 		parts = append(parts, tabContext)
 	}
 
-	// 3. 资产知识引导
+	// 3. 内联 mention 引导
+	parts = append(parts, b.buildMentionGuidance())
+
+	// 4. 资产知识引导
 	parts = append(parts, b.buildKnowledgeGuidance())
 
-	// 4. 多资产 / 批量操作引导
+	// 5. 多资产 / 批量操作引导
 	parts = append(parts, b.buildMultiAssetGuidance())
 
-	// 5. 凭据与敏感信息引导
+	// 6. 凭据与敏感信息引导
 	parts = append(parts, b.buildSecretsGuidance())
 
-	// 6. 错误恢复引导
+	// 7. 错误恢复引导
 	parts = append(parts, b.buildErrorRecoveryGuidance())
 
-	// 7. 用户拒绝操作引导
+	// 8. 用户拒绝操作引导
 	parts = append(parts, b.buildUserDenialGuidance())
 
-	// 8. Extension tools guide
+	// 9. Extension tools guide
 	if len(b.extensionSkillMDs) > 0 {
 		names := make([]string, 0, len(b.extensionSkillMDs))
 		for name := range b.extensionSkillMDs {
@@ -116,6 +119,12 @@ func (b *PromptBuilder) buildTabContext() string {
 		lines = append(lines, fmt.Sprintf("- %s: \"%s\" (ID: %d)", typeName, tab.AssetName, tab.AssetID))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (b *PromptBuilder) buildMentionGuidance() string {
+	return `User messages may contain inline XML mention tags such as <mention asset-id="42" type="database" target="table" database="app" table="users" driver="mysql">@app.users</mention>. Treat these tags as authoritative user-selected context, not as prose to quote back verbatim.
+
+Use asset-id for tool calls. When target="database", scope SQL work to the database attribute. When target="table", scope SQL work to both database and table attributes, and qualify table names as needed for the driver. If you execute SQL for a mentioned database or table, keep the exact SQL visible to the user in your response or tool-call explanation so they can verify what ran.`
 }
 
 func (b *PromptBuilder) buildKnowledgeGuidance() string {

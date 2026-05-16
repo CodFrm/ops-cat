@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@opskat/ui";
 import type { ChatMessage } from "@/stores/aiStore";
 import { useCompact } from "@/components/ai/AIChatContentContext";
-import { openAssetInfoTab } from "@/lib/openAssetInfoTab";
+import { openMentionTarget } from "@/lib/openMentionTarget";
 import { parseMentionContent } from "@/lib/mentionXml";
 
 // 单独控制用户消息选中态，保证主色气泡里也能明确看到选区范围。
@@ -68,7 +68,7 @@ export const UserMessage = memo(function UserMessage({ msg, index, onEdit }: Use
                 <button
                   key={i}
                   type="button"
-                  onClick={() => openAssetInfoTab(s.attrs.assetId)}
+                  onClick={() => openMentionTarget(s.attrs)}
                   className="inline-flex items-center rounded bg-primary-foreground/20 px-1 py-0.5 text-xs font-medium hover:bg-primary-foreground/30 hover:underline cursor-pointer"
                 >
                   {s.text}

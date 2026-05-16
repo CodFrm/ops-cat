@@ -74,6 +74,41 @@ describe("aiStore mentions (XML inline)", () => {
     expect(Array.isArray(ctx.openTabs)).toBe(true);
   });
 
+  it("SendAIMessage 的 AIContext 把 query tab 映射成真实资产类型", async () => {
+    useTabStore.setState((state) => ({
+      tabs: [
+        ...state.tabs,
+        {
+          id: "query-42",
+          type: "query",
+          label: "prod-db",
+          meta: {
+            type: "query",
+            assetId: 42,
+            assetName: "prod-db",
+            assetIcon: "mysql",
+            assetType: "database",
+            driver: "mysql",
+          },
+        } as any,
+      ],
+      activeTabId: state.activeTabId,
+    }));
+
+    await useAIStore.getState().sendToTab("t1", `check ${mentionXml}`);
+
+    const [, , ctx] = vi.mocked(SendAIMessage).mock.calls[0] as any[];
+    expect(ctx.openTabs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "database",
+          assetId: 42,
+          assetName: "prod-db",
+        }),
+      ])
+    );
+  });
+
   it("生成中时 sendToTab 把 content 入队并调用 QueueAIMessage(convId, queueId, content)", () => {
     useAIStore.setState((s) => ({
       conversationStreaming: {

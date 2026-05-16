@@ -27,6 +27,14 @@ func TestPromptBuilderBuild(t *testing.T) {
 			So(got, ShouldContainSubstring, "metrics")
 		})
 
+		Convey("输出内联 mention 语义提示", func() {
+			got := NewPromptBuilder("en", AIContext{}).Build()
+			So(got, ShouldContainSubstring, "<mention")
+			So(got, ShouldContainSubstring, "asset-id")
+			So(got, ShouldContainSubstring, "database")
+			So(got, ShouldContainSubstring, "table")
+		})
+
 		Convey("Extension SKILL.md 被注入", func() {
 			b := NewPromptBuilder("en", AIContext{})
 			b.SetExtensionSkillMDs(map[string]string{"k8s": "k8s skill body"})

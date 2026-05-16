@@ -350,6 +350,41 @@ describe("AIChatInput", () => {
     expect(content).toMatch(/check <mention asset-id="42"[^>]*>@prod-db<\/mention> disk/);
   });
 
+  it("提交表 mention 时保留 database/table 上下文属性", async () => {
+    const onSubmit = vi.fn();
+    const editorRef = { current: null as Editor | null };
+    const handleRef = createRef<AIChatInputHandle>();
+    render(<AIChatInput ref={handleRef} onSubmit={onSubmit} sendOnEnter={true} editorRef={editorRef} />);
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
+
+    editorRef
+      .current!.chain()
+      .focus()
+      .insertContent("explain ")
+      .insertContent({
+        type: "mention",
+        attrs: {
+          id: "42",
+          label: "app.users",
+          kind: "table",
+          database: "app",
+          table: "users",
+          driver: "mysql",
+        },
+      })
+      .run();
+
+    handleRef.current?.submit();
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const [content] = onSubmit.mock.calls[0];
+    expect(content).toContain('target="table"');
+    expect(content).toContain('database="app"');
+    expect(content).toContain('table="users"');
+    expect(content).toContain('driver="mysql"');
+    expect(content).toMatch(/@app\.users<\/mention>/);
+  });
+
   it("输入 `/` 打开 snippet 弹窗并请求 prompt 分类的列表", async () => {
     vi.mocked(ListSnippets).mockResolvedValueOnce([
       {

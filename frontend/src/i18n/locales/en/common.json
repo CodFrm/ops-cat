@@ -842,7 +842,7 @@
     "chars": "chars",
     "pendingMessages": "Pending messages",
     "clearQueue": "Clear",
-    "mentionNotFound": "No assets found",
+    "mentionNotFound": "No assets, databases, or tables found",
     "mentionAssetDeleted": "Asset deleted",
     "editMessage": "Edit message",
     "editingMessage": "Editing message",
