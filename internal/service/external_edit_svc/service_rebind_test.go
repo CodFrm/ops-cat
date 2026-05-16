@@ -1202,7 +1202,7 @@ func TestExternalEditReopenAfterCloseRebuildsFromRemoteAndMovesPriorBaseToBakeup
 		s.RecordState = recordStateAbandoned
 		s.Hidden = true
 	}
-	_ = h.svc.saveManifestLocked()
+	require.NoError(t, h.svc.saveManifestLocked())
 	h.svc.mu.Unlock()
 
 	main := h.refreshSession(t, reread.Session.ID)
@@ -1361,7 +1361,7 @@ func TestExternalEditRestoreKeepsSavedDraftVisibleAndAbandonedHidden(t *testing.
 		s.RecordState = recordStateAbandoned
 		s.Hidden = true
 	}
-	_ = h.svc.saveManifestLocked()
+	require.NoError(t, h.svc.saveManifestLocked())
 	h.svc.mu.Unlock()
 
 	require.NoError(t, h.svc.Close())
@@ -1409,7 +1409,7 @@ func TestExternalEditRestoreAbandonedRecordDoesNotReactivateOnLocalChange(t *tes
 		s.RecordState = recordStateAbandoned
 		s.Hidden = true
 	}
-	_ = h.svc.saveManifestLocked()
+	require.NoError(t, h.svc.saveManifestLocked())
 	h.svc.mu.Unlock()
 
 	require.NoError(t, h.svc.Close())
@@ -1457,7 +1457,7 @@ func TestExternalEditAbandonedSessionCancelsPendingAutoSave(t *testing.T) {
 		s.RecordState = recordStateAbandoned
 		s.Hidden = true
 	}
-	_ = h.svc.saveManifestLocked()
+	require.NoError(t, h.svc.saveManifestLocked())
 	h.svc.mu.Unlock()
 
 	time.Sleep(autoSaveDebounce + 200*time.Millisecond)
