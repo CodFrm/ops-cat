@@ -34,18 +34,24 @@ type Service struct {
 	launch         Launcher
 	now            func() time.Time
 
-	mu              sync.RWMutex
-	sessions        map[string]*Session
-	watcher         *fsnotify.Watcher
-	watchedDirs     map[string]int
-	reconcileTimers map[string]*time.Timer
-	autoSaveTimers  map[string]*time.Timer
-	autoSavePaused  map[string]bool
-	autoSaveTried   map[string]string
-	documentRunners map[string]*sync.Mutex
-	cleanupTicker   *time.Ticker
-	closeCh         chan struct{}
-	closeOnce       sync.Once
+	mu               sync.RWMutex
+	sessions         map[string]*Session
+	watcher          *fsnotify.Watcher
+	watchedDirs      map[string]int
+	reconcileTimers  map[string]*time.Timer
+	autoSaveTimers   map[string]*time.Timer
+	autoSavePaused   map[string]bool
+	autoSaveTried    map[string]string
+	documentRunners  map[string]*sync.Mutex
+	autoSaveCounters map[string]*autoSaveCounter
+	cleanupTicker    *time.Ticker
+	closeCh          chan struct{}
+	closeOnce        sync.Once
+}
+
+type autoSaveCounter struct {
+	count  int
+	lastAt int64
 }
 
 func NewService(opts Options) (*Service, error) {
@@ -75,26 +81,27 @@ func NewService(opts Options) (*Service, error) {
 	}
 
 	s := &Service{
-		dataDir:         opts.DataDir,
-		storageDir:      filepath.Join(opts.DataDir, "storage"),
-		manifestPath:    filepath.Join(opts.DataDir, "storage", "manifest.json"),
-		configProvider:  opts.ConfigProvider,
-		configSaver:     opts.ConfigSaver,
-		remote:          opts.Remote,
-		findSessions:    opts.FindSessions,
-		assets:          opts.Assets,
-		auditRepo:       opts.Audit,
-		emit:            opts.Emit,
-		launch:          opts.Launch,
-		now:             opts.Now,
-		sessions:        make(map[string]*Session),
-		watchedDirs:     make(map[string]int),
-		reconcileTimers: make(map[string]*time.Timer),
-		autoSaveTimers:  make(map[string]*time.Timer),
-		autoSavePaused:  make(map[string]bool),
-		autoSaveTried:   make(map[string]string),
-		documentRunners: make(map[string]*sync.Mutex),
-		closeCh:         make(chan struct{}),
+		dataDir:          opts.DataDir,
+		storageDir:       filepath.Join(opts.DataDir, "storage"),
+		manifestPath:     filepath.Join(opts.DataDir, "storage", "manifest.json"),
+		configProvider:   opts.ConfigProvider,
+		configSaver:      opts.ConfigSaver,
+		remote:           opts.Remote,
+		findSessions:     opts.FindSessions,
+		assets:           opts.Assets,
+		auditRepo:        opts.Audit,
+		emit:             opts.Emit,
+		launch:           opts.Launch,
+		now:              opts.Now,
+		sessions:         make(map[string]*Session),
+		watchedDirs:      make(map[string]int),
+		reconcileTimers:  make(map[string]*time.Timer),
+		autoSaveTimers:   make(map[string]*time.Timer),
+		autoSavePaused:   make(map[string]bool),
+		autoSaveTried:    make(map[string]string),
+		documentRunners:  make(map[string]*sync.Mutex),
+		autoSaveCounters: make(map[string]*autoSaveCounter),
+		closeCh:          make(chan struct{}),
 	}
 
 	return s, nil

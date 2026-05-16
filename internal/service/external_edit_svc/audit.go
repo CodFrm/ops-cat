@@ -45,6 +45,39 @@ func (s *Service) writeAudit(session *Session, toolName string, success bool, re
 	}
 }
 
+// recordAutoSaveAudit 对自动保存成功采样：
+// 每 autoSaveAuditWindow 窗口只写一条汇总记录（含窗口内成功次数），
+// 失败由调用方直接走 writeAudit 写详细记录，不经过此函数。
+func (s *Service) recordAutoSaveAudit(session *Session, toolName string, result *SaveResult) {
+	if session == nil {
+		return
+	}
+	key := session.DocumentKey
+	now := s.now().Unix()
+
+	s.mu.Lock()
+	c := s.autoSaveCounters[key]
+	if c == nil {
+		c = &autoSaveCounter{}
+		s.autoSaveCounters[key] = c
+	}
+	c.count++
+	windowExpired := now-c.lastAt >= int64(autoSaveAuditWindow.Seconds())
+	count := c.count
+	if windowExpired {
+		c.count = 0
+		c.lastAt = now
+	}
+	s.mu.Unlock()
+
+	if !windowExpired {
+		return
+	}
+	s.writeAudit(session, toolName, true,
+		map[string]any{"auto": true, "windowSaves": count},
+		result, nil)
+}
+
 func marshalAuditPayload(payload any, limit int) string {
 	if payload == nil {
 		return ""

@@ -70,6 +70,7 @@ const (
 const (
 	reconcileSettleDelay              = 100 * time.Millisecond
 	autoSaveDebounce                  = 500 * time.Millisecond
+	autoSaveAuditWindow               = 5 * time.Minute
 	defaultCleanupRetentionDays       = 7
 	minCleanupRetentionDays           = 1
 	maxCleanupRetentionDays           = 365

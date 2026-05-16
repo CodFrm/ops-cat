@@ -513,7 +513,11 @@ func (s *Service) saveInternal(ctx context.Context, sessionID, resolution string
 	if resolution == resolutionRecreate {
 		toolName = "external_edit_recreate"
 	}
-	s.writeAudit(savedSession, toolName, true, map[string]any{"resolution": resolution, "bytes": len(localData)}, saveResult, nil)
+	if automatic {
+		s.recordAutoSaveAudit(savedSession, toolName, saveResult)
+	} else {
+		s.writeAudit(savedSession, toolName, true, map[string]any{"resolution": resolution, "bytes": len(localData)}, saveResult, nil)
+	}
 	s.emit(Event{Type: eventSessionSaved, Session: savedSession, SaveResult: saveResult})
 	s.resumeAutoSaveForDocument(savedSession.DocumentKey)
 	return saveResult, nil
