@@ -82,13 +82,27 @@ func (s *Service) getSFTPClient(sessionID string) (*sftp.Client, error) {
 	return client, nil
 }
 
-// Getwd 获取远程工作目录（用户 home）
+// sessionCharset 返回 SSH 会话探测到的远端字符集（空 = UTF-8 直通）。
+// 会话不存在时也返回空 — 由调用方继续走 UTF-8 默认路径。
+func (s *Service) sessionCharset(sessionID string) string {
+	sess, ok := s.sshManager.GetSession(sessionID)
+	if !ok {
+		return ""
+	}
+	return sess.Charset()
+}
+
+// Getwd 获取远程工作目录（用户 home），返回值为前端使用的 UTF-8 路径。
 func (s *Service) Getwd(sessionID string) (string, error) {
 	sftpClient, err := s.getSFTPClient(sessionID)
 	if err != nil {
 		return "", err
 	}
-	return sftpClient.Getwd()
+	raw, err := sftpClient.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return decodeName(s.sessionCharset(sessionID), raw), nil
 }
 
 // ResolveDirectory validates that a remote directory exists and returns its canonical path.
@@ -98,7 +112,13 @@ func (s *Service) ResolveDirectory(sessionID, dirPath string) (string, error) {
 		return "", err
 	}
 
-	info, err := sftpClient.Stat(dirPath)
+	cs := s.sessionCharset(sessionID)
+	remotePath, err := encodePath(cs, dirPath)
+	if err != nil {
+		return "", fmt.Errorf("encode dir path: %w", err)
+	}
+
+	info, err := sftpClient.Stat(remotePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", dirsync.Error(dirsync.CodeNotFound)
@@ -109,8 +129,8 @@ func (s *Service) ResolveDirectory(sessionID, dirPath string) (string, error) {
 		return "", dirsync.Error(dirsync.CodeNotDirectory)
 	}
 
-	if realPath, realPathErr := sftpClient.RealPath(dirPath); realPathErr == nil && realPath != "" {
-		return realPath, nil
+	if realPath, realPathErr := sftpClient.RealPath(remotePath); realPathErr == nil && realPath != "" {
+		return decodeName(cs, realPath), nil
 	}
 	return dirPath, nil
 }
@@ -129,14 +149,20 @@ type FileEntry struct {
 	ModTime int64  `json:"modTime"` // Unix timestamp
 }
 
-// ListDir 列出远程目录内容
+// ListDir 列出远程目录内容；入参 dirPath 与返回 entry.Name 都使用前端的 UTF-8。
 func (s *Service) ListDir(sessionID, dirPath string) ([]FileEntry, error) {
 	sftpClient, err := s.getSFTPClient(sessionID)
 	if err != nil {
 		return nil, err
 	}
 
-	infos, err := sftpClient.ReadDir(dirPath)
+	cs := s.sessionCharset(sessionID)
+	remotePath, err := encodePath(cs, dirPath)
+	if err != nil {
+		return nil, fmt.Errorf("encode dir path: %w", err)
+	}
+
+	infos, err := sftpClient.ReadDir(remotePath)
 	if err != nil {
 		return nil, fmt.Errorf("读取远程目录失败: %w", err)
 	}
@@ -145,7 +171,7 @@ func (s *Service) ListDir(sessionID, dirPath string) ([]FileEntry, error) {
 	var dirs, files []FileEntry
 	for _, info := range infos {
 		entry := FileEntry{
-			Name:    info.Name(),
+			Name:    decodeName(cs, info.Name()),
 			Size:    info.Size(),
 			IsDir:   info.IsDir(),
 			ModTime: info.ModTime().Unix(),
@@ -163,7 +189,7 @@ func (s *Service) ListDir(sessionID, dirPath string) ([]FileEntry, error) {
 	return result, nil
 }
 
-// Upload 上传单个文件
+// Upload 上传单个文件。remotePath 是前端 UTF-8 路径，内部按会话字符集编码后再下发。
 func (s *Service) Upload(ctx context.Context, transferID, sessionID, localPath, remotePath string, onProgress func(TransferProgress)) error {
 	ctx, cancel := context.WithCancel(ctx)
 	s.cancels.Store(transferID, cancel)
@@ -175,6 +201,11 @@ func (s *Service) Upload(ctx context.Context, transferID, sessionID, localPath, 
 	sftpClient, err := s.getSFTPClient(sessionID)
 	if err != nil {
 		return err
+	}
+
+	remoteEncoded, err := encodePath(s.sessionCharset(sessionID), remotePath)
+	if err != nil {
+		return fmt.Errorf("encode remote path: %w", err)
 	}
 
 	localFile, err := os.Open(localPath) //nolint:gosec // file path from user config
@@ -192,7 +223,7 @@ func (s *Service) Upload(ctx context.Context, transferID, sessionID, localPath, 
 		return fmt.Errorf("获取文件信息失败: %w", err)
 	}
 
-	remoteFile, err := sftpClient.Create(remotePath)
+	remoteFile, err := sftpClient.Create(remoteEncoded)
 	if err != nil {
 		return fmt.Errorf("创建远程文件失败: %w", err)
 	}
@@ -205,7 +236,7 @@ func (s *Service) Upload(ctx context.Context, transferID, sessionID, localPath, 
 	return s.copyWithProgress(ctx, transferID, remoteFile, localFile, stat.Size(), 1, filepath.Base(remotePath), onProgress)
 }
 
-// Download 下载单个文件
+// Download 下载单个文件。remotePath 是前端 UTF-8 路径，内部按会话字符集编码后再下发。
 func (s *Service) Download(ctx context.Context, transferID, sessionID, remotePath, localPath string, onProgress func(TransferProgress)) error {
 	ctx, cancel := context.WithCancel(ctx)
 	s.cancels.Store(transferID, cancel)
@@ -219,7 +250,12 @@ func (s *Service) Download(ctx context.Context, transferID, sessionID, remotePat
 		return err
 	}
 
-	remoteFile, err := sftpClient.Open(remotePath)
+	remoteEncoded, err := encodePath(s.sessionCharset(sessionID), remotePath)
+	if err != nil {
+		return fmt.Errorf("encode remote path: %w", err)
+	}
+
+	remoteFile, err := sftpClient.Open(remoteEncoded)
 	if err != nil {
 		return fmt.Errorf("打开远程文件失败: %w", err)
 	}
@@ -259,6 +295,11 @@ func (s *Service) UploadDir(ctx context.Context, transferID, sessionID, localDir
 	sftpClient, err := s.getSFTPClient(sessionID)
 	if err != nil {
 		return err
+	}
+	cs := s.sessionCharset(sessionID)
+	remoteDirEncoded, err := encodePath(cs, remoteDir)
+	if err != nil {
+		return fmt.Errorf("encode remote dir: %w", err)
 	}
 
 	// 扫描阶段：统计文件数和总大小
@@ -303,7 +344,11 @@ func (s *Service) UploadDir(ctx context.Context, transferID, sessionID, localDir
 			logger.Default().Warn("compute relative path", zap.String("base", localDir), zap.String("path", path), zap.Error(err))
 			return err
 		}
-		remoteFull := remoteDir + "/" + filepath.ToSlash(relPath)
+		relEncoded, err := encodePath(cs, filepath.ToSlash(relPath))
+		if err != nil {
+			return fmt.Errorf("encode relative path: %w", err)
+		}
+		remoteFull := remoteDirEncoded + "/" + relEncoded
 
 		if d.IsDir() {
 			return sftpClient.MkdirAll(remoteFull)
@@ -387,8 +432,13 @@ func (s *Service) DownloadDir(ctx context.Context, transferID, sessionID, remote
 	if err != nil {
 		return err
 	}
+	cs := s.sessionCharset(sessionID)
+	remoteDirEncoded, err := encodePath(cs, remoteDir)
+	if err != nil {
+		return fmt.Errorf("encode remote dir: %w", err)
+	}
 
-	// 扫描阶段：递归统计远程目录
+	// 扫描阶段：递归统计远程目录（remotePath 在内部保持远端编码字节流）
 	type fileEntry struct {
 		remotePath string
 		size       int64
@@ -427,7 +477,7 @@ func (s *Service) DownloadDir(ctx context.Context, transferID, sessionID, remote
 	if err := os.MkdirAll(localDir, 0755); err != nil {
 		return fmt.Errorf("创建本地目录失败: %w", err)
 	}
-	if err := walk(remoteDir); err != nil {
+	if err := walk(remoteDirEncoded); err != nil {
 		return fmt.Errorf("扫描远程目录失败: %w", err)
 	}
 
@@ -442,8 +492,9 @@ func (s *Service) DownloadDir(ctx context.Context, transferID, sessionID, remote
 			return ctx.Err()
 		}
 
-		// 计算相对路径
-		relPath := entry.remotePath[len(remoteDir):]
+		// 相对路径在远端编码下截取；本地 FS 用 UTF-8，所以再解码一次得到 UTF-8 relPath。
+		relPathRemote := entry.remotePath[len(remoteDirEncoded):]
+		relPath := decodeName(cs, relPathRemote)
 		localFull := filepath.Join(localDir, filepath.FromSlash(relPath))
 
 		if entry.isDir {
@@ -558,7 +609,11 @@ func (s *Service) Remove(sessionID, path string) error {
 	if err != nil {
 		return err
 	}
-	return sftpClient.Remove(path)
+	encoded, err := encodePath(s.sessionCharset(sessionID), path)
+	if err != nil {
+		return fmt.Errorf("encode path: %w", err)
+	}
+	return sftpClient.Remove(encoded)
 }
 
 // RemoveDir 递归删除目录
@@ -567,7 +622,11 @@ func (s *Service) RemoveDir(sessionID, path string) error {
 	if err != nil {
 		return err
 	}
-	return s.removeDirRecursive(sftpClient, path)
+	encoded, err := encodePath(s.sessionCharset(sessionID), path)
+	if err != nil {
+		return fmt.Errorf("encode path: %w", err)
+	}
+	return s.removeDirRecursive(sftpClient, encoded)
 }
 
 func (s *Service) removeDirRecursive(client *sftp.Client, path string) error {

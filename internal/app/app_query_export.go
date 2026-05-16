@@ -6,13 +6,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/opskat/opskat/internal/pkg/charset"
+
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
-	"golang.org/x/text/encoding"
-	"golang.org/x/text/encoding/charmap"
-	"golang.org/x/text/encoding/japanese"
-	"golang.org/x/text/encoding/simplifiedchinese"
-	"golang.org/x/text/encoding/traditionalchinese"
-	"golang.org/x/text/encoding/unicode"
 	"golang.org/x/text/transform"
 )
 
@@ -87,11 +83,8 @@ func writeTableExportFile(filePath, content string, options TableExportWriteOpti
 	return err
 }
 
-func encodeTableExportContent(content, charset string, suppressBOM bool) ([]byte, error) {
-	normalized := strings.ToLower(strings.TrimSpace(charset))
-	if normalized == "" || normalized == "utf-8" || normalized == "utf8" || normalized == "65001" {
-		return []byte(content), nil
-	}
+func encodeTableExportContent(content, name string, suppressBOM bool) ([]byte, error) {
+	normalized := strings.ToLower(strings.TrimSpace(name))
 	if normalized == "utf-8-bom" || normalized == "utf8-bom" {
 		if suppressBOM {
 			return []byte(content), nil
@@ -99,39 +92,29 @@ func encodeTableExportContent(content, charset string, suppressBOM bool) ([]byte
 		return append([]byte{0xef, 0xbb, 0xbf}, []byte(content)...), nil
 	}
 
-	enc, bom := tableExportTextEncoding(normalized)
+	enc, ok := charset.Lookup(name)
+	if !ok {
+		return nil, fmt.Errorf("unsupported export encoding: %s", name)
+	}
 	if enc == nil {
-		return nil, fmt.Errorf("unsupported export encoding: %s", charset)
+		return []byte(content), nil
 	}
 	data, _, err := transform.Bytes(enc.NewEncoder(), []byte(content))
 	if err != nil {
-		return nil, fmt.Errorf("encode export content as %s: %w", charset, err)
+		return nil, fmt.Errorf("encode export content as %s: %w", name, err)
 	}
-	if len(bom) > 0 && !suppressBOM {
+	if bom := tableExportBOM(normalized); len(bom) > 0 && !suppressBOM {
 		data = append(bytes.Clone(bom), data...)
 	}
 	return data, nil
 }
 
-func tableExportTextEncoding(charset string) (encoding.Encoding, []byte) {
-	switch strings.ReplaceAll(charset, "_", "-") {
+func tableExportBOM(normalized string) []byte {
+	switch strings.ReplaceAll(normalized, "_", "-") {
 	case "utf-16le", "utf16le":
-		return unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM), []byte{0xff, 0xfe}
+		return []byte{0xff, 0xfe}
 	case "utf-16be", "utf16be":
-		return unicode.UTF16(unicode.BigEndian, unicode.IgnoreBOM), []byte{0xfe, 0xff}
-	case "gb18030", "54936":
-		return simplifiedchinese.GB18030, nil
-	case "gbk", "cp936", "936":
-		return simplifiedchinese.GBK, nil
-	case "big5", "950":
-		return traditionalchinese.Big5, nil
-	case "shift-jis", "shiftjis", "sjis", "cp932", "932":
-		return japanese.ShiftJIS, nil
-	case "iso-8859-1", "latin1", "latin-1", "28591":
-		return charmap.ISO8859_1, nil
-	case "windows-1252", "cp1252", "1252":
-		return charmap.Windows1252, nil
-	default:
-		return nil, nil
+		return []byte{0xfe, 0xff}
 	}
+	return nil
 }
