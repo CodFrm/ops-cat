@@ -381,6 +381,8 @@ export function OpenExternalEdit(arg1:external_edit_svc.OpenRequest):Promise<ext
 
 export function OpenLogsDir():Promise<void>;
 
+export function OpenTable(arg1:number,arg2:string,arg3:string,arg4:number):Promise<string>;
+
 export function PrepareExternalEditMerge(arg1:string):Promise<external_edit_svc.MergePrepareResult>;
 
 export function PreviewGistBackup(arg1:string,arg2:string,arg3:string):Promise<backup_svc.BackupSummary>;

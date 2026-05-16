@@ -357,7 +357,9 @@ describe("AssetTree double-click → connection flow", () => {
         "session-abc": {
           splitTree: { type: "terminal", sessionId: "session-abc" },
           activePaneId: "session-abc",
-          panes: { "session-abc": { sessionId: "session-abc", connected: true, connectedAt: Date.now() } },
+          panes: {
+            "session-abc": { sessionId: "session-abc", transport: "ssh", connected: true, connectedAt: Date.now() },
+          },
           directoryFollowMode: "off",
         },
       },

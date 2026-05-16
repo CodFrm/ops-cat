@@ -710,6 +710,10 @@ export function OpenLogsDir() {
   return window['go']['app']['App']['OpenLogsDir']();
 }
 
+export function OpenTable(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['OpenTable'](arg1, arg2, arg3, arg4);
+}
+
 export function PrepareExternalEditMerge(arg1) {
   return window['go']['app']['App']['PrepareExternalEditMerge'](arg1);
 }

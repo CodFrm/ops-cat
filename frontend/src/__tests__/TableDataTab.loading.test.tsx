@@ -4,7 +4,25 @@ import userEvent from "@testing-library/user-event";
 import { TableDataTab } from "@/components/query/TableDataTab";
 import { useQueryStore } from "@/stores/queryStore";
 import { useTabStore } from "@/stores/tabStore";
-import { ExecuteSQL } from "../../wailsjs/go/app/App";
+import { ExecuteSQL, OpenTable } from "../../wailsjs/go/app/App";
+
+// 构造 OpenTable 返回的 JSON 字符串(与后端 query_svc.OpenTableResult 对齐)。
+function openTablePayload(opts: {
+  columns?: string[];
+  rows?: Record<string, unknown>[];
+  totalCount?: number;
+  primaryKeys?: string[];
+}) {
+  return JSON.stringify({
+    columns: opts.columns ?? [],
+    columnTypes: {},
+    columnRules: [],
+    primaryKeys: opts.primaryKeys ?? [],
+    totalCount: opts.totalCount ?? 0,
+    firstPage: opts.rows ?? [],
+    pageSize: 1000,
+  });
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -52,34 +70,26 @@ function setupStores(driver = "mysql", table = "users") {
 describe("TableDataTab loading cancellation", () => {
   beforeEach(() => {
     vi.mocked(ExecuteSQL).mockReset();
+    vi.mocked(OpenTable).mockReset();
     setupStores();
   });
 
   it("does not let a stopped request overwrite the next refresh result", async () => {
     const user = userEvent.setup();
-    const firstPk = deferred<string>();
-    const firstColumns = deferred<string>();
-    const firstCount = deferred<string>();
-    const firstRows = deferred<string>();
-    const secondCount = deferred<string>();
+    const firstOpen = deferred<string>();
     const secondRows = deferred<string>();
+    const secondCount = deferred<string>();
 
-    vi.mocked(ExecuteSQL)
-      .mockReturnValueOnce(firstPk.promise)
-      .mockReturnValueOnce(firstColumns.promise)
-      .mockReturnValueOnce(firstCount.promise)
-      .mockReturnValueOnce(firstRows.promise)
-      .mockReturnValueOnce(secondRows.promise)
-      .mockReturnValueOnce(secondCount.promise);
+    vi.mocked(OpenTable).mockReturnValueOnce(firstOpen.promise);
+    vi.mocked(ExecuteSQL).mockReturnValueOnce(secondRows.promise).mockReturnValueOnce(secondCount.promise);
 
     render(<TableDataTab tabId="query-1" innerTabId="table-1" database="appdb" table="users" />);
 
+    // 首次 OpenTable 还在 pending 时点击 stop:把当前 requestId 标记为取消。
     await user.click(screen.getByTitle("query.stopLoading"));
-    firstPk.resolve(JSON.stringify({ rows: [] }));
-    firstColumns.resolve(JSON.stringify({ rows: [] }));
-    firstCount.resolve(JSON.stringify({ rows: [{ cnt: 1 }] }));
-    firstRows.resolve(JSON.stringify({ columns: ["id", "name"], rows: [{ id: 1, name: "old" }] }));
+    firstOpen.resolve(openTablePayload({ columns: ["id", "name"], rows: [{ id: 1, name: "old" }], totalCount: 1 }));
 
+    // 刷新走 fetchData + fetchCount 两个 ExecuteSQL(顺序与 useEffect 触发顺序相关)。
     await user.click(screen.getByTitle(/^query\.refreshTable/));
     secondRows.resolve(JSON.stringify({ columns: ["id", "name"], rows: [{ id: 2, name: "new" }] }));
     secondCount.resolve(JSON.stringify({ rows: [{ cnt: 1 }] }));
@@ -107,6 +117,10 @@ describe("TableDataTab loading cancellation", () => {
 
   it("uses a default table limit of 1000 and refetches when the footer limit changes", async () => {
     const user = userEvent.setup();
+    // 首屏走 OpenTable;footer 改 pageSize 后才走 ExecuteSQL 重取。
+    vi.mocked(OpenTable).mockResolvedValue(
+      openTablePayload({ columns: ["id", "name"], rows: [{ id: 1, name: "ada" }], totalCount: 1 })
+    );
     vi.mocked(ExecuteSQL).mockResolvedValue(
       JSON.stringify({ columns: ["id", "name"], rows: [{ id: 1, name: "ada" }] })
     );
@@ -114,7 +128,7 @@ describe("TableDataTab loading cancellation", () => {
     render(<TableDataTab tabId="query-1" innerTabId="table-1" database="appdb" table="users" />);
 
     await waitFor(() =>
-      expect(vi.mocked(ExecuteSQL).mock.calls.some(([, sql]) => String(sql).includes("LIMIT 1000 OFFSET 0"))).toBe(true)
+      expect(vi.mocked(OpenTable).mock.calls.some(([, , , size]) => Number(size) === 1000)).toBe(true)
     );
 
     await user.click(screen.getByTitle("query.tableFooterSettings"));
@@ -127,10 +141,11 @@ describe("TableDataTab loading cancellation", () => {
     );
   });
 
-  it("escapes postgresql table identifiers when loading data", async () => {
+  it("forwards postgresql table identifiers to OpenTable verbatim (backend quotes)", async () => {
     setupStores("postgresql", 'audit"logs');
-    vi.mocked(ExecuteSQL).mockResolvedValue(
-      JSON.stringify({ columns: ['id"part', "name"], rows: [{ 'id"part': 1, name: "ada" }] })
+    // PG quote/escape 现在由 backend 的 query_svc.QuoteTableRef 处理,前端只透传 table 名。
+    vi.mocked(OpenTable).mockResolvedValue(
+      openTablePayload({ columns: ['id"part', "name"], rows: [{ 'id"part': 1, name: "ada" }] })
     );
 
     render(<TableDataTab tabId="query-1" innerTabId="table-1" database="appdb" table={'audit"logs'} />);
@@ -138,8 +153,8 @@ describe("TableDataTab loading cancellation", () => {
     await waitFor(() =>
       expect(
         vi
-          .mocked(ExecuteSQL)
-          .mock.calls.some(([, sql]) => String(sql).includes(`SELECT * FROM "audit""logs" LIMIT 1000 OFFSET 0`))
+          .mocked(OpenTable)
+          .mock.calls.some(([assetId, db, table]) => assetId === 1 && db === "appdb" && table === 'audit"logs')
       ).toBe(true)
     );
   });
