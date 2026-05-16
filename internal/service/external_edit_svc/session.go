@@ -218,45 +218,6 @@ func (s *Service) Save(ctx context.Context, sessionID string) (*SaveResult, erro
 	return result, err
 }
 
-func (s *Service) DeleteSession(sessionID string, removeLocal bool) (*DeleteResult, error) {
-	var result *DeleteResult
-	err := s.withDocumentRunner(sessionID, func() error {
-		session := s.getSession(sessionID)
-		if session == nil {
-			return fmt.Errorf("外部编辑会话不存在")
-		}
-		if removeLocal {
-			if err := s.deleteDocumentFamilyAndWorkspace(session.DocumentKey); err != nil {
-				failed := s.recordError(sessionID, "delete_local_copy", err)
-				if failed != nil {
-					s.emit(Event{Type: eventSessionChanged, Session: failed})
-				}
-				return err
-			}
-			result = &DeleteResult{
-				Status:  "deleted_with_local_file",
-				Message: "已删除记录并清理本地副本",
-				Session: &Session{ID: sessionID, DocumentKey: session.DocumentKey},
-			}
-			s.emit(Event{Type: eventSessionCleaned, Session: result.Session})
-			return nil
-		}
-
-		updated := s.retireDocumentFamilyRecord(session.DocumentKey, session.ID)
-		if updated == nil {
-			return fmt.Errorf("外部编辑会话不存在")
-		}
-		result = &DeleteResult{
-			Status:  "deleted_record_only",
-			Message: "已关闭记录，本地副本保留以便后续排查",
-			Session: updated,
-		}
-		s.emit(Event{Type: eventSessionChanged, Session: updated})
-		return nil
-	})
-	return result, err
-}
-
 func (s *Service) Refresh(sessionID string) (*Session, error) {
 	var result *Session
 	err := s.withDocumentRunner(sessionID, func() error {
@@ -830,50 +791,4 @@ func (s *Service) saveManifestLocked() error {
 		return manifest.Sessions[i].UpdatedAt > manifest.Sessions[j].UpdatedAt
 	})
 	return s.writeManifest(manifest)
-}
-
-func (s *Service) retireDocumentFamilyRecord(documentKey, primarySessionID string) *Session {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	documentKey = strings.TrimSpace(documentKey)
-	if documentKey == "" {
-		return nil
-	}
-	family := s.documentFamilySessionsLocked(documentKey)
-	if len(family) == 0 {
-		return nil
-	}
-
-	nowUnix := s.now().Unix()
-	primary := s.sessions[strings.TrimSpace(primarySessionID)]
-	if primary == nil || primary.DocumentKey != documentKey {
-		primary = pickVisibleFamilyPrimarySession(family)
-	}
-	if primary == nil {
-		return nil
-	}
-
-	for _, session := range family {
-		if session == nil {
-			continue
-		}
-		session.RecordState = recordStateAbandoned
-		session.Hidden = true
-		session.ResumeRequired = false
-		session.UpdatedAt = nowUnix
-		if session.ID == primary.ID {
-			session.SourceSessionID = ""
-			session.SupersededBySessionID = ""
-			primary = session
-			continue
-		}
-		if session.SourceSessionID == "" && session.SupersededBySessionID == "" {
-			session.SourceSessionID = primary.ID
-		}
-	}
-	if err := s.saveManifestLocked(); err != nil {
-		logger.Default().Warn("persist external edit manifest after closing family record", zap.Error(err))
-	}
-	return cloneSession(primary)
 }

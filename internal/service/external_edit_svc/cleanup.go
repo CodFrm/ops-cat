@@ -6,7 +6,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -69,61 +68,6 @@ func (s *Service) runRetentionCleanup() {
 	}
 }
 
-func (s *Service) deleteDocumentFamilyAndWorkspace(documentKey string) error {
-	s.mu.Lock()
-	documentKey = strings.TrimSpace(documentKey)
-	if documentKey == "" {
-		s.mu.Unlock()
-		return fmt.Errorf("外部编辑会话不存在")
-	}
-	family := s.documentFamilySessionsLocked(documentKey)
-	if len(family) == 0 {
-		s.mu.Unlock()
-		return fmt.Errorf("外部编辑会话不存在")
-	}
-	type workspaceTarget struct {
-		root string
-		dir  string
-	}
-	targets := make([]workspaceTarget, 0, len(family))
-	seen := make(map[string]struct{})
-	for _, session := range family {
-		if session == nil || session.WorkspaceDir == "" {
-			continue
-		}
-		if _, ok := seen[session.WorkspaceDir]; ok {
-			continue
-		}
-		seen[session.WorkspaceDir] = struct{}{}
-		targets = append(targets, workspaceTarget{root: session.WorkspaceRoot, dir: session.WorkspaceDir})
-	}
-	s.mu.Unlock()
-
-	for _, target := range targets {
-		if err := cleanupWorkspace(target.root, target.dir); err != nil {
-			return fmt.Errorf("删除本地副本失败，请先关闭编辑器或手动清理后再重试")
-		}
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, session := range family {
-		if session == nil {
-			continue
-		}
-		s.removeWatchLocked(session.WorkspaceDir)
-		delete(s.sessions, session.ID)
-		if timer, ok := s.reconcileTimers[session.ID]; ok {
-			timer.Stop()
-			delete(s.reconcileTimers, session.ID)
-		}
-	}
-	if err := s.saveManifestLocked(); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (s *Service) workspaceDirInUseLocked(workspaceDir string) bool {
 	workspaceDir = strings.TrimSpace(workspaceDir)
 	if workspaceDir == "" {
@@ -178,24 +122,6 @@ func (s *Service) cleanupBakeupRetention(targets []workspaceTarget, cutoff time.
 			)
 		}
 	}
-}
-
-func (s *Service) documentFamilySessionsLocked(documentKey string) []*Session {
-	documentKey = strings.TrimSpace(documentKey)
-	if documentKey == "" {
-		return nil
-	}
-	sessions := make([]*Session, 0, 4)
-	for _, session := range s.sessions {
-		if session == nil || session.DocumentKey != documentKey || isExternalEditClipboardResidueSession(session) {
-			continue
-		}
-		sessions = append(sessions, session)
-	}
-	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].UpdatedAt > sessions[j].UpdatedAt
-	})
-	return sessions
 }
 
 func buildWorkspacePaths(workspaceRoot string, assetID int64, remotePath string) (string, string, error) {

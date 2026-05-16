@@ -100,12 +100,6 @@ export interface ExternalEditSaveResult {
   automatic?: boolean;
 }
 
-export interface ExternalEditDeleteResult {
-  status: string;
-  message?: string;
-  session?: ExternalEditSession;
-}
-
 export interface ExternalEditEvent {
   type: string;
   session?: ExternalEditSession;
@@ -173,10 +167,6 @@ declare global {
           ApplyExternalEditMerge?: (req: ExternalEditMergeApplyRequest) => MaybePromise<ExternalEditSaveResult>;
           RecoverExternalEditSession?: (sessionId: string) => MaybePromise<ExternalEditSession>;
           ContinueExternalEditSession?: (sessionId: string) => MaybePromise<ExternalEditSession>;
-          DeleteExternalEditSession?: (
-            sessionId: string,
-            removeLocal: boolean
-          ) => MaybePromise<ExternalEditDeleteResult>;
         };
       };
     };
@@ -247,8 +237,4 @@ export function recoverExternalEditSession(sessionId: string) {
 
 export function continueExternalEditSession(sessionId: string) {
   return appBindings().ContinueExternalEditSession!(sessionId);
-}
-
-export function deleteExternalEditSession(sessionId: string, removeLocal: boolean) {
-  return appBindings().DeleteExternalEditSession!(sessionId, removeLocal);
 }

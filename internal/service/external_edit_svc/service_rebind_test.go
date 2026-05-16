@@ -1194,10 +1194,16 @@ func TestExternalEditReopenAfterCloseRebuildsFromRemoteAndMovesPriorBaseToBakeup
 	require.Equal(t, saveStatusReread, reread.Status)
 	require.Equal(t, session.ID, reread.Session.ID)
 
-	closed, err := h.svc.DeleteSession(reread.Session.ID, false)
-	require.NoError(t, err)
-	require.Equal(t, "deleted_record_only", closed.Status)
-	require.Equal(t, reread.Session.ID, closed.Session.ID)
+	// 关闭会话：直接操作 manifest 将 session 标记为 abandoned+hidden，
+	// 模拟 retireDocumentFamilyRecord 的效果（该方法已随 Delete 链一起移除）。
+	h.svc.mu.Lock()
+	s := h.svc.sessions[reread.Session.ID]
+	if s != nil {
+		s.RecordState = recordStateAbandoned
+		s.Hidden = true
+	}
+	_ = h.svc.saveManifestLocked()
+	h.svc.mu.Unlock()
 
 	main := h.refreshSession(t, reread.Session.ID)
 	require.Equal(t, recordStateAbandoned, main.RecordState)
@@ -1339,42 +1345,6 @@ func TestExternalEditManualRestoredDraftDoesNotAutoSave(t *testing.T) {
 	require.False(t, manual.Session.Hidden)
 }
 
-func TestExternalEditDeleteRecordOnlyMarksAbandonedAndHidden(t *testing.T) {
-	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
-	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
-
-	result, err := h.svc.DeleteSession(session.ID, false)
-	require.NoError(t, err)
-	require.Equal(t, "deleted_record_only", result.Status)
-	require.NotNil(t, result.Session)
-	require.Equal(t, recordStateAbandoned, result.Session.RecordState)
-	require.True(t, result.Session.Hidden)
-
-	stored := h.refreshSession(t, session.ID)
-	require.Equal(t, recordStateAbandoned, stored.RecordState)
-	require.True(t, stored.Hidden)
-}
-
-func TestExternalEditDeleteWithLocalFailureFallsBackToError(t *testing.T) {
-	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
-	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
-
-	require.NoError(t, os.MkdirAll(filepath.Join(session.WorkspaceDir, "nested"), 0o700))
-	require.NoError(t, os.WriteFile(filepath.Join(session.WorkspaceDir, "nested", "child.txt"), []byte("busy"), 0o600))
-	// 删除目录失败不容易在测试环境稳定复现，直接制造越界路径来触发 cleanup 保护分支。
-	h.svc.mu.Lock()
-	h.svc.sessions[session.ID].WorkspaceDir = filepath.Join(h.manifest, "..", "escape")
-	h.svc.mu.Unlock()
-
-	_, err := h.svc.DeleteSession(session.ID, true)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "删除本地副本失败")
-
-	stored := h.refreshSession(t, session.ID)
-	require.Equal(t, recordStateError, stored.RecordState)
-	require.NotNil(t, stored.LastError)
-	require.Equal(t, "delete_local_copy", stored.LastError.Step)
-}
 
 func TestExternalEditRestoreKeepsSavedDraftVisibleAndAbandonedHidden(t *testing.T) {
 	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
@@ -1385,8 +1355,14 @@ func TestExternalEditRestoreKeepsSavedDraftVisibleAndAbandonedHidden(t *testing.
 	require.False(t, saved.Session.Hidden)
 
 	abandoned := h.openSession(t, "ssh-b", "/srv/app/abandoned.txt", "/srv/app/abandoned.txt", []byte("draft\n"))
-	_, err = h.svc.DeleteSession(abandoned.ID, false)
-	require.NoError(t, err)
+	// 直接操作 manifest 将 session 标记为 abandoned+hidden
+	h.svc.mu.Lock()
+	if s := h.svc.sessions[abandoned.ID]; s != nil {
+		s.RecordState = recordStateAbandoned
+		s.Hidden = true
+	}
+	_ = h.svc.saveManifestLocked()
+	h.svc.mu.Unlock()
 
 	require.NoError(t, h.svc.Close())
 
@@ -1427,8 +1403,14 @@ func TestExternalEditRestoreKeepsSavedDraftVisibleAndAbandonedHidden(t *testing.
 func TestExternalEditRestoreAbandonedRecordDoesNotReactivateOnLocalChange(t *testing.T) {
 	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
 	abandoned := h.openSession(t, "ssh-b", "/srv/app/abandoned.txt", "/srv/app/abandoned.txt", []byte("draft\n"))
-	_, err := h.svc.DeleteSession(abandoned.ID, false)
-	require.NoError(t, err)
+	// 直接操作 manifest 将 session 标记为 abandoned+hidden
+	h.svc.mu.Lock()
+	if s := h.svc.sessions[abandoned.ID]; s != nil {
+		s.RecordState = recordStateAbandoned
+		s.Hidden = true
+	}
+	_ = h.svc.saveManifestLocked()
+	h.svc.mu.Unlock()
 
 	require.NoError(t, h.svc.Close())
 
@@ -1462,15 +1444,21 @@ func TestExternalEditRestoreAbandonedRecordDoesNotReactivateOnLocalChange(t *tes
 	require.True(t, abandonedCurrent.Hidden)
 }
 
-func TestExternalEditDeleteRecordOnlyCancelsPendingAutoSave(t *testing.T) {
+func TestExternalEditAbandonedSessionCancelsPendingAutoSave(t *testing.T) {
 	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
 	session := h.openSession(t, "ssh-b", "/srv/app/demo.txt", "/srv/app/demo.txt", []byte("hello\n"))
 
 	markDirtyLocalCopy(t, session, []byte("autosave pending\n"))
 	h.svc.reconcileLocalCopy(session.ID)
 
-	_, err := h.svc.DeleteSession(session.ID, false)
-	require.NoError(t, err)
+	// 直接操作 manifest 将 session 标记为 abandoned+hidden，模拟 UI 关闭会话
+	h.svc.mu.Lock()
+	if s := h.svc.sessions[session.ID]; s != nil {
+		s.RecordState = recordStateAbandoned
+		s.Hidden = true
+	}
+	_ = h.svc.saveManifestLocked()
+	h.svc.mu.Unlock()
 
 	time.Sleep(autoSaveDebounce + 200*time.Millisecond)
 	require.Empty(t, h.remote.writes)

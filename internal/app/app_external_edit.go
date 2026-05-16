@@ -26,7 +26,6 @@ type ExternalEditSaveResult = external_edit_svc.SaveResult
 type ExternalEditCompareResult = external_edit_svc.CompareResult
 type ExternalEditMergePrepareResult = external_edit_svc.MergePrepareResult
 type ExternalEditMergeApplyRequest = external_edit_svc.MergeApplyRequest
-type ExternalEditDeleteResult = external_edit_svc.DeleteResult
 
 func (a *App) initExternalEdit() {
 	// Wails 绑定层只负责把运行时依赖接到 service：
@@ -201,14 +200,6 @@ func (a *App) ContinueExternalEditSession(sessionID string) (*ExternalEditSessio
 		return nil, err
 	}
 	return svc.Continue(sessionID)
-}
-
-func (a *App) DeleteExternalEditSession(sessionID string, removeLocal bool) (*ExternalEditDeleteResult, error) {
-	svc, err := a.externalEditService()
-	if err != nil {
-		return nil, err
-	}
-	return svc.DeleteSession(sessionID, removeLocal)
 }
 
 func (a *App) externalEditDialogTitle(kind string) string {

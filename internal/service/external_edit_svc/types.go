@@ -248,12 +248,6 @@ type SaveResult struct {
 	Automatic bool      `json:"automatic,omitempty"`
 }
 
-type DeleteResult struct {
-	Status  string   `json:"status"`
-	Message string   `json:"message,omitempty"`
-	Session *Session `json:"session,omitempty"`
-}
-
 type CompareResult struct {
 	DocumentKey             string    `json:"documentKey"`
 	PrimaryDraftSessionID   string    `json:"primaryDraftSessionId"`
