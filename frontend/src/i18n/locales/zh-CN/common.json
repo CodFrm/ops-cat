@@ -72,6 +72,7 @@
     "copy": "复制",
     "close": "关闭",
     "submit": "提交",
+    "browse": "选择",
     "openInTab": "在新标签打开",
     "editPermission": "编辑权限",
     "open": "打开",
@@ -1004,6 +1005,135 @@
       "brightMagenta": "亮品红",
       "brightCyan": "亮青",
       "brightWhite": "亮白"
+    }
+  },
+  "externalEdit": {
+    "panel": {
+      "title": "外部编辑",
+      "conflicts": "冲突文件",
+      "errors": "待恢复文件",
+      "recoveries": "恢复入口",
+      "attentionCount": "{{count}} 项待处理",
+      "remoteSnapshotReady": "已获取远端新副本",
+      "currentDraft": "当前冲突稿",
+      "retainedDraft": "保留旧稿",
+      "rereadDraft": "重读后新稿",
+      "rereadDraftHint": "继续修改后会沿当前同步链路保存或重新进入冲突区",
+      "rereadBaselineHint": "读取远程新版本后，将以远程新版本为基线进行修改。",
+      "autoSavePending": "准备自动同步",
+      "autoSaveRunning": "正在自动同步",
+      "recreateReadyHint": "当前活动主稿可直接重新创建缺失的远程文件。",
+      "recreateUnavailableState": "只有当前活动主稿处于“远程文件不存在”时，才能重新创建远程文件。",
+      "recreateUnavailableBusy": "请先等待当前保存动作结束，再重新创建远程文件。",
+      "recreateUnavailableActiveDraft": "当前已经有更新的活动稿，请改在该稿上继续处理。"
+    },
+    "actions": {
+      "open": "外部编辑",
+      "sync": "保存到远程",
+      "refresh": "刷新远程状态",
+      "compare": "比对差异",
+      "acceptRemote": "接收远程",
+      "reread": "读取远程新版本",
+      "overwrite": "覆盖远程",
+      "saveAgain": "重新创建远程文件",
+      "viewError": "查看错误",
+      "viewRecovery": "查看恢复",
+      "reopenLocal": "重新打开本地副本",
+      "continueEdit": "继续修改",
+      "merge": "三栏合并",
+      "saveMerge": "保存合并稿",
+      "hideRecord": "关闭记录（保留本地副本）",
+      "deleteLocal": "删除记录并删除本地副本"
+    },
+    "pending": {
+      "entry": "外部编辑待处理",
+      "title": "外部编辑待处理文件",
+      "description": "冲突、错误和恢复文件统一在这里处理。关闭窗口不会丢失记录。",
+      "empty": "当前没有待处理文件。"
+    },
+    "state": {
+      "clean": "已同步",
+      "dirty": "本地已修改",
+      "conflict": "远程已变更",
+      "remote_missing": "远程文件不存在",
+      "stale": "冲突副本",
+      "expired": "会话已过期"
+    },
+    "recordState": {
+      "active": "编辑中",
+      "conflict": "待处理冲突",
+      "error": "待恢复",
+      "completed": "已完成",
+      "abandoned": "已隐藏"
+    },
+    "conflict": {
+      "remoteChangedTitle": "远程文件已变更",
+      "remoteMissingTitle": "远程文件不存在"
+    },
+    "error": {
+      "title": "同步失败详情",
+      "summaryLabel": "失败摘要",
+      "stepLabel": "失败步骤",
+      "suggestionLabel": "建议动作",
+      "safeActionFailed": "外部编辑操作失败，请在待处理入口查看状态后重试。"
+    },
+    "recovery": {
+      "title": "恢复外部编辑",
+      "summary": "检测到异常关闭前的本地副本，可重新打开继续处理。",
+      "description": "恢复只会重新打开本地副本，不会自动上传远端；确认内容后请手动保存。"
+    },
+    "merge": {
+      "title": "三栏合并",
+      "localDraft": "本地草稿（只读）",
+      "finalDraft": "最终稿（可编辑）",
+      "remoteDraft": "远端新版本（只读）",
+      "helper": "左本地、中最终稿、右远端；保存前会再次确认远端未变化。",
+      "changelist": "冲突文件",
+      "readOnlySide": "只读",
+      "editableCenter": "可编辑",
+      "status": "三栏合并工作台",
+      "localCenterRemote": "左本地 / 中最终 / 右远端",
+      "previous": "上一处冲突",
+      "next": "下一处冲突",
+      "closeDirtyTitle": "放弃未提交的合并稿？",
+      "closeDirtyDesc": "关闭合并窗口不会删除冲突记录，但当前未保存的最终稿编辑会丢失。",
+      "closeDirtyConfirm": "放弃并关闭"
+    },
+    "compare": {
+      "title": "只读差异比对",
+      "localDraft": "本地草稿",
+      "remoteSnapshot": "远端快照",
+      "readOnly": "只读",
+      "projectView": "冲突文件",
+      "status": "只读差异工作台",
+      "remoteLeftLocalRight": "左远端 / 右本地",
+      "previous": "上一处不同点",
+      "next": "下一处不同点",
+      "loadFailed": "对比视图加载失败",
+      "helper": "左侧远端，右侧本地；支持行号与同步滚动，便于逐段观察差异。"
+    },
+    "settings": {
+      "tab": "外部编辑",
+      "title": "外部编辑器",
+      "desc": "配置默认外部编辑器、本地工作区和自定义编辑器。",
+      "defaultEditor": "默认外部编辑器",
+      "workspaceRoot": "临时工作区",
+      "cleanupRetentionDays": "副本清理保留天数",
+      "cleanupRetentionDaysHint": "默认 7 天，允许 1-365 天；用于清理非活动副本和 backup 历史副本。",
+      "maxReadFileSizeMB": "最大读取大小（MB）",
+      "maxReadFileSizeMBHint": "默认 10 MB，允许 1-1024 MB；超过该阈值时会拒绝完整读取，并提示前往 设置 > External Edit 调整。",
+      "customEditors": "自定义编辑器",
+      "addEditor": "新增自定义编辑器",
+      "addEditorTitle": "新增自定义编辑器",
+      "editEditorTitle": "编辑自定义编辑器",
+      "editorDialogDesc": "每次只编辑一条自定义编辑器配置，确认后再统一保存设置。",
+      "editorPath": "编辑器路径",
+      "editorArgs": "启动参数",
+      "emptyCustomEditors": "暂未添加自定义编辑器。",
+      "defaultBadge": "默认",
+      "noArgs": "无启动参数",
+      "editorUnavailable": "可执行路径修复前暂不可用",
+      "saved": "外部编辑设置已保存"
     }
   },
   "integration": {

@@ -27,6 +27,21 @@ type AppConfig struct {
 	DebugMode       bool   `json:"debug_mode,omitempty"`        // 开启后日志级别降为 debug
 	WindowWidth     int    `json:"window_width,omitempty"`      // 上次正常窗口宽度
 	WindowHeight    int    `json:"window_height,omitempty"`     // 上次正常窗口高度
+
+	// 外部编辑配置。仅持久化用户自定义编辑器；内置候选由运行时探测生成。
+	ExternalEditDefaultEditorID      string                 `json:"external_edit_default_editor_id,omitempty"`
+	ExternalEditWorkspaceRoot        string                 `json:"external_edit_workspace_root,omitempty"`
+	ExternalEditCustomEditors        []ExternalEditorConfig `json:"external_edit_custom_editors,omitempty"`
+	ExternalEditCleanupRetentionDays int                    `json:"external_edit_cleanup_retention_days,omitempty"`
+	ExternalEditMaxReadFileSizeMB    int                    `json:"external_edit_max_read_file_size_mb,omitempty"`
+}
+
+// ExternalEditorConfig 是用户自定义外部编辑器配置。
+type ExternalEditorConfig struct {
+	ID   string   `json:"id"`
+	Name string   `json:"name"`
+	Path string   `json:"path"`
+	Args []string `json:"args,omitempty"`
 }
 
 var (

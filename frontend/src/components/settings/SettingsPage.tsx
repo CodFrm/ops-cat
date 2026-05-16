@@ -10,7 +10,18 @@ import {
   TabsList,
   TabsTrigger,
 } from "@opskat/ui";
-import { Bot, Palette, HardDrive, Import, Keyboard, MonitorDot, Info, Activity, Puzzle } from "lucide-react";
+import {
+  Bot,
+  Palette,
+  HardDrive,
+  Import,
+  Keyboard,
+  MonitorDot,
+  Info,
+  Activity,
+  Puzzle,
+  PencilLine,
+} from "lucide-react";
 import { ShortcutSettings } from "@/components/settings/ShortcutSettings";
 import { AISettingsSection } from "@/components/settings/AISettingsSection";
 import { ImportSection } from "@/components/settings/ImportSection";
@@ -19,6 +30,7 @@ import { AppearanceSection, TerminalSection } from "@/components/settings/Appear
 import { UpdateSection } from "@/components/settings/UpdateSection";
 import { SystemStatusSection } from "@/components/settings/SystemStatusSection";
 import { ExtensionSection } from "@/components/settings/ExtensionSection";
+import { ExternalEditSection } from "@/components/settings/ExternalEditSection";
 import { useSettingsUiStore, type SettingsTab } from "@/stores/settingsUiStore";
 
 export function SettingsPage() {
@@ -57,6 +69,10 @@ export function SettingsPage() {
             <TabsTrigger value="terminal" className="gap-1">
               <MonitorDot className="h-3.5 w-3.5" />
               {t("terminal.title")}
+            </TabsTrigger>
+            <TabsTrigger value="external-edit" className="gap-1">
+              <PencilLine className="h-3.5 w-3.5" />
+              {t("externalEdit.settings.tab")}
             </TabsTrigger>
             <TabsTrigger value="appearance" className="gap-1">
               <Palette className="h-3.5 w-3.5" />
@@ -107,6 +123,10 @@ export function SettingsPage() {
           {/* Terminal */}
           <TabsContent value="terminal" className="space-y-4">
             <TerminalSection />
+          </TabsContent>
+
+          <TabsContent value="external-edit" className="space-y-4">
+            <ExternalEditSection />
           </TabsContent>
 
           {/* Appearance and Language */}

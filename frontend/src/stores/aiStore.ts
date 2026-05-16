@@ -58,6 +58,11 @@ export interface ContentBlock {
   errorDetail?: string;
 }
 
+type PersistedConversationContentBlock = conversation_entity.ContentBlock & {
+  errorKind?: ErrorKind;
+  errorDetail?: string;
+};
+
 // Assistant 消息累计 token 使用量；单次用户 turn 可能跨多轮 LLM 调用，前端按 usage 事件累加。
 export interface TokenUsage {
   inputTokens?: number;
@@ -539,26 +544,36 @@ function toDisplayMessages(msgs: ChatMessage[], includeStreaming = false): app.C
   const prepared = includeStreaming ? msgs.map(materializeRetryStatusAsError) : msgs;
   return prepared
     .filter((m) => includeStreaming || !m.streaming)
-    .map(
-      (m) =>
-        new app.ConversationDisplayMessage({
-          role: m.role,
-          content: m.content,
-          blocks: m.blocks.map(
-            (b) =>
-              new conversation_entity.ContentBlock({
-                type: b.type,
-                content: b.content,
-                toolName: b.toolName,
-                toolInput: b.toolInput,
-                status: includeStreaming ? normalizeSnapshotStatus(b.status) : b.status,
-                errorKind: b.errorKind,
-                errorDetail: b.errorDetail,
-              })
-          ),
-          tokenUsage: m.tokenUsage ? new conversation_entity.TokenUsage(m.tokenUsage) : undefined,
-        })
-    );
+    .map((m) => {
+      const displayMessage = new app.ConversationDisplayMessage({
+        role: m.role,
+        content: m.content,
+        blocks: m.blocks.map(
+          (b) =>
+            new conversation_entity.ContentBlock({
+              type: b.type,
+              content: b.content,
+              toolName: b.toolName,
+              toolInput: b.toolInput,
+              status: includeStreaming ? normalizeSnapshotStatus(b.status) : b.status,
+              ...(b.errorKind ? { errorKind: b.errorKind } : {}),
+              ...(b.errorDetail ? { errorDetail: b.errorDetail } : {}),
+            })
+        ),
+        tokenUsage: m.tokenUsage ? new conversation_entity.TokenUsage(m.tokenUsage) : undefined,
+      });
+
+      // Wails 当前生成的 ContentBlock TS 类还没声明 errorKind/errorDetail；
+      // 重新构造后需要把这两个持久化字段补回实例本身，保证 save/load round-trip 不丢。
+      m.blocks.forEach((b, index) => {
+        const persistedBlock = displayMessage.blocks[index] as PersistedConversationContentBlock | undefined;
+        if (!persistedBlock) return;
+        if (b.errorKind) persistedBlock.errorKind = b.errorKind;
+        if (b.errorDetail) persistedBlock.errorDetail = b.errorDetail;
+      });
+
+      return displayMessage;
+    });
 }
 
 function convertDisplayMessages(displayMsgs: app.ConversationDisplayMessage[]): ChatMessage[] {
@@ -566,15 +581,18 @@ function convertDisplayMessages(displayMsgs: app.ConversationDisplayMessage[]): 
     id: crypto.randomUUID(),
     role: dm.role as "user" | "assistant" | "tool",
     content: dm.content,
-    blocks: (dm.blocks || []).map((b: conversation_entity.ContentBlock) => ({
-      type: b.type as ContentBlock["type"],
-      content: b.content,
-      toolName: b.toolName,
-      toolInput: b.toolInput,
-      status: b.status as ContentBlock["status"],
-      errorKind: b.errorKind as ErrorKind | undefined,
-      errorDetail: b.errorDetail,
-    })),
+    blocks: (dm.blocks || []).map((rawBlock: conversation_entity.ContentBlock) => {
+      const b = rawBlock as PersistedConversationContentBlock;
+      return {
+        type: b.type as ContentBlock["type"],
+        content: b.content,
+        toolName: b.toolName,
+        toolInput: b.toolInput,
+        status: b.status as ContentBlock["status"],
+        errorKind: b.errorKind,
+        errorDetail: b.errorDetail,
+      };
+    }),
     tokenUsage: dm.tokenUsage
       ? {
           inputTokens: dm.tokenUsage.inputTokens,

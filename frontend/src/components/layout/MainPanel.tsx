@@ -246,6 +246,7 @@ export function MainPanel({ onEditAsset, onDeleteAsset, onConnectAsset }: MainPa
                   </div>
                   {data?.activePaneId && (
                     <FileManagerPanel
+                      assetId={tab.meta.type === "terminal" ? tab.meta.assetId : 0}
                       tabId={tab.id}
                       sessionId={data.activePaneId}
                       isActive={isActive}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -744,6 +745,29 @@ func (m *Manager) GetSession(id string) (*Session, bool) {
 		return nil, false
 	}
 	return v.(*Session), true
+}
+
+// ListActiveSessionIDsByAsset 返回指定资产当前仍处于活跃态的 SSH 会话 ID。
+// external edit 只允许在“同一资产且候选唯一”时做受限重绑，因此这里刻意只暴露最小会话列表，
+// 不把终端层的更多运行态细节泄漏到上层业务。
+func (m *Manager) ListActiveSessionIDsByAsset(assetID int64) []string {
+	if assetID <= 0 {
+		return nil
+	}
+
+	ids := make([]string, 0, 4)
+	m.sessions.Range(func(key, value any) bool {
+		sess, ok := value.(*Session)
+		if !ok || sess == nil || sess.AssetID != assetID || sess.IsClosed() {
+			return true
+		}
+		if id, ok := key.(string); ok && id != "" {
+			ids = append(ids, id)
+		}
+		return true
+	})
+	sort.Strings(ids)
+	return ids
 }
 
 // GetSessionSyncState 获取会话目录同步状态。

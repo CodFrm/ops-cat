@@ -35,6 +35,7 @@ export interface CodeEditorProps {
    */
   dynamicCompletions?: DynamicCompletionGetter;
   className?: string;
+  testId?: string;
 }
 
 const DEFAULT_OPTIONS: MonacoNS.editor.IStandaloneEditorConstructionOptions = {
@@ -74,6 +75,7 @@ export function CodeEditor({
   onMount,
   dynamicCompletions,
   className,
+  testId,
 }: CodeEditorProps) {
   const isControlled = value !== undefined;
   const resolvedTheme = useResolvedTheme();
@@ -186,7 +188,7 @@ export function CodeEditor({
   }
 
   return (
-    <div className={`relative h-full w-full ${className ?? ""}`}>
+    <div className={`relative h-full w-full ${className ?? ""}`} data-testid={testId}>
       <Editor
         height={height}
         language={language}

@@ -1,10 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
-import { Upload } from "lucide-react";
-import { cn, ConfirmDialog } from "@opskat/ui";
+import { AlertTriangle, Upload } from "lucide-react";
+import {
+  Button,
+  cn,
+  ConfirmDialog,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@opskat/ui";
 import { SFTPDelete, SFTPGetwd } from "../../../wailsjs/go/app/App";
 import { sftp_svc } from "../../../wailsjs/go/models";
+import { openExternalEdit, type ExternalEditMergePrepareResult, type ExternalEditSession } from "@/lib/externalEditApi";
+import {
+  buildExternalEditAttentionItems,
+  isExternalEditClipboardResidueSession,
+  useExternalEditStore,
+} from "@/stores/externalEditStore";
 import { useSFTPStore } from "@/stores/sftpStore";
+import { ExternalEditCompareWorkbench } from "./external-edit/CompareWorkbench";
+import { ExternalEditMergeWorkbench } from "./external-edit/MergeWorkbench";
+import { ExternalEditPendingDialog, type ExternalEditPendingItem } from "./external-edit/PendingDialog";
 import { FileList } from "./file-manager/FileList";
 import { FloatingMenu } from "./file-manager/FloatingMenu";
 import { PathToolbar } from "./file-manager/PathToolbar";
@@ -17,6 +35,7 @@ import { useTerminalDirectorySync } from "./file-manager/useTerminalDirectorySyn
 import { getEntryPath, getParentPath, HANDLE_PX } from "./file-manager/utils";
 
 interface FileManagerPanelProps {
+  assetId?: number;
   tabId: string;
   sessionId: string;
   isActive?: boolean;
@@ -25,7 +44,22 @@ interface FileManagerPanelProps {
   onWidthChange: (width: number) => void;
 }
 
+const EXTERNAL_EDIT_SAFE_ERROR_KEY = "externalEdit.error.safeActionFailed";
+const EXTERNAL_EDIT_OVERSIZE_ERROR_KEY =
+  "当前文件超过最大读取阈值，无法继续完整读取。请前往 设置 > External Edit 调整最大读取大小后再重试";
+
+function isExternalEditOversizeError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("远程文件过大") ||
+    message.includes("本地副本过大") ||
+    message.includes("读取过程中超过大小上限") ||
+    message.includes("无法完整读取")
+  );
+}
+
 export function FileManagerPanel({
+  assetId,
   tabId,
   sessionId,
   isActive = true,
@@ -34,6 +68,7 @@ export function FileManagerPanel({
   onWidthChange,
 }: FileManagerPanelProps) {
   const { t } = useTranslation();
+  const continueEditLabel = t("externalEdit.actions.continueEdit");
   const {
     currentPath,
     currentPathRef,
@@ -69,6 +104,9 @@ export function FileManagerPanel({
   const loadedRef = useRef(false);
   const lastSessionRef = useRef<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const [mergePrepareErrors, setMergePrepareErrors] = useState<Record<string, string>>({});
+  const [preparedMergeResult, setPreparedMergeResult] = useState<ExternalEditMergePrepareResult | null>(null);
+  const [pendingDialogOpen, setPendingDialogOpen] = useState(false);
 
   const startUpload = useSFTPStore((s) => s.startUpload);
   const startUploadDir = useSFTPStore((s) => s.startUploadDir);
@@ -76,13 +114,64 @@ export function FileManagerPanel({
   const startDownload = useSFTPStore((s) => s.startDownload);
   const startDownloadDir = useSFTPStore((s) => s.startDownloadDir);
   const allTransfers = useSFTPStore((s) => s.transfers);
+  const allExternalSessions = useExternalEditStore((s) => s.sessions);
+  const pendingConflict = useExternalEditStore((s) => s.pendingConflict);
+  const dismissCompare = useExternalEditStore((s) => s.dismissCompare);
+  const dismissMerge = useExternalEditStore((s) => s.dismissMerge);
+  const dismissErrorDetail = useExternalEditStore((s) => s.dismissErrorDetail);
+  const compareResult = useExternalEditStore((s) => s.compareResult);
+  const mergeResult = useExternalEditStore((s) => s.mergeResult);
+  const selectedError = useExternalEditStore((s) => s.selectedError);
+  const openErrorDetail = useExternalEditStore((s) => s.openErrorDetail);
+  const prepareMerge = useExternalEditStore((s) => s.prepareMerge);
+  const resolveConflict = useExternalEditStore((s) => s.resolveConflict);
+  const continuePendingSession = useExternalEditStore((s) => s.continuePendingSession);
+  const savingSessionId = useExternalEditStore((s) => s.savingSessionId);
+  const safePendingConflict = isExternalEditClipboardResidueSession(pendingConflict?.session) ? null : pendingConflict;
+  const safeCompareResult = isExternalEditClipboardResidueSession(compareResult?.session) ? null : compareResult;
+  const safeStoreMergeResult = isExternalEditClipboardResidueSession(mergeResult?.session) ? null : mergeResult;
+  const safePreparedMergeResult = isExternalEditClipboardResidueSession(preparedMergeResult?.session)
+    ? null
+    : preparedMergeResult;
+  const safeMergeResult = safeStoreMergeResult || safePreparedMergeResult;
+  const safeSelectedError = isExternalEditClipboardResidueSession(selectedError) ? null : selectedError;
 
   const transferTarget = useMemo(() => ({ tabId, sessionId }), [tabId, sessionId]);
   const tabTransfers = useMemo(
     () => Object.values(allTransfers).filter((transfer) => transfer.tabId === tabId),
     [allTransfers, tabId]
   );
-
+  const attentionItems = useMemo(
+    () => buildExternalEditAttentionItems(allExternalSessions).filter((entry) => entry.session.assetId === assetId),
+    [allExternalSessions, assetId]
+  );
+  const pendingItems = useMemo(() => {
+    const items: ExternalEditPendingItem[] = [...attentionItems];
+    const pendingSession = safePendingConflict?.session;
+    if (pendingSession && pendingSession.assetId === assetId) {
+      const runtimeType =
+        safePendingConflict?.status === "remote_missing"
+          ? "remote_missing"
+          : safePendingConflict?.status === "conflict_remote_changed"
+            ? "conflict"
+            : null;
+      if (!runtimeType) {
+        return items.filter((item) => !isExternalEditClipboardResidueSession(item.session));
+      }
+      const decisionType = runtimeType === "remote_missing" ? undefined : runtimeType;
+      const exists = items.some((item) => item.session.id === pendingSession.id && item.type === runtimeType);
+      if (!exists) {
+        items.unshift({
+          id: `${runtimeType}:${pendingSession.id}`,
+          type: runtimeType,
+          session: pendingSession,
+          decisionType,
+          sourceType: "runtime",
+        });
+      }
+    }
+    return items.filter((item) => !isExternalEditClipboardResidueSession(item.session));
+  }, [assetId, attentionItems, safePendingConflict]);
   const isDragOver = useNativeFileDrop({
     currentPathRef,
     isActive,
@@ -124,6 +213,12 @@ export function FileManagerPanel({
     void loadDir(sessionSync.cwd);
   }, [currentPath, directoryFollowMode, isOpen, loadDir, sessionSync?.cwd, sessionSync?.cwdKnown]);
 
+  useEffect(() => {
+    if (safePendingConflict) {
+      setPendingDialogOpen(true);
+    }
+  }, [safePendingConflict]);
+
   const doneUploadCount = tabTransfers.filter((transfer) => {
     return transfer.status === "done" && transfer.direction === "upload";
   }).length;
@@ -161,6 +256,117 @@ export function FileManagerPanel({
     }
   }, [currentPathRef, deleteTarget, loadDir, sessionId, setError]);
 
+  const canExternalEdit = useCallback((entry: sftp_svc.FileEntry) => !entry.isDir, []);
+
+  const handleOpenExternalEdit = useCallback(
+    async (remotePath: string) => {
+      // 兼容旧调用方：只有终端页真正绑定资产后才允许进入外部编辑链路，
+      // 这样可以让历史测试和非终端场景继续复用组件，而不需要把 assetId 适配带回测试侧。
+      if (!assetId) {
+        return;
+      }
+      try {
+        await openExternalEdit({
+          assetId,
+          sessionId,
+          remotePath,
+        });
+      } catch (error) {
+        setError(isExternalEditOversizeError(error) ? EXTERNAL_EDIT_OVERSIZE_ERROR_KEY : String(error));
+      }
+    },
+    [assetId, sessionId, setError]
+  );
+
+  const handlePrepareMerge = useCallback(
+    async (session: ExternalEditSession) => {
+      setMergePrepareErrors((current) => {
+        const { [session.id]: _ignored, ...rest } = current;
+        return rest;
+      });
+      try {
+        const result = await prepareMerge(session.id);
+        const acceptedResult = useExternalEditStore.getState().mergeResult;
+        setPreparedMergeResult(
+          acceptedResult?.primaryDraftSessionId === result.primaryDraftSessionId ? acceptedResult : null
+        );
+        return true;
+      } catch (error) {
+        const safeMessage = t(EXTERNAL_EDIT_SAFE_ERROR_KEY);
+        setError(safeMessage);
+        setMergePrepareErrors((current) => ({ ...current, [session.id]: safeMessage }));
+        return false;
+      }
+    },
+    [prepareMerge, setError, t]
+  );
+
+  const handlePendingMerge = useCallback(
+    async (session: ExternalEditSession) => {
+      const opened = await handlePrepareMerge(session);
+      if (opened) {
+        setPendingDialogOpen(false);
+      }
+    },
+    [handlePrepareMerge]
+  );
+
+  const handlePendingAcceptRemote = useCallback(
+    async (session: ExternalEditSession) => {
+      try {
+        await resolveConflict(session.id, "reread");
+      } catch (error) {
+        setError(t(EXTERNAL_EDIT_SAFE_ERROR_KEY));
+      }
+    },
+    [resolveConflict, setError, t]
+  );
+
+  const handlePendingOverwrite = useCallback(
+    async (session: ExternalEditSession) => {
+      try {
+        await resolveConflict(session.id, session.state === "remote_missing" ? "recreate" : "overwrite");
+      } catch (error) {
+        setError(t(EXTERNAL_EDIT_SAFE_ERROR_KEY));
+      }
+    },
+    [resolveConflict, setError, t]
+  );
+
+  const handlePendingContinueEdit = useCallback(
+    async (session: ExternalEditSession, sourceType?: "runtime" | "recovery") => {
+      try {
+        await continuePendingSession(session.id, sourceType);
+        setPendingDialogOpen((open) => {
+          if (!open) return open;
+          const latestSessions = useExternalEditStore.getState().sessions;
+          const latestPendingConflict = useExternalEditStore.getState().pendingConflict;
+          const latestAttentionItems = buildExternalEditAttentionItems(latestSessions).filter(
+            (entry) => entry.session.assetId === assetId
+          );
+          const latestPendingSession = latestPendingConflict?.session;
+          const latestRuntimeType =
+            latestPendingConflict?.status === "remote_missing"
+              ? "remote_missing"
+              : latestPendingConflict?.status === "conflict_remote_changed"
+                ? "conflict"
+                : null;
+          const hasRuntimeItem =
+            !!latestPendingSession &&
+            latestPendingSession.assetId === assetId &&
+            latestRuntimeType !== null &&
+            !latestAttentionItems.some(
+              (item) => item.session.id === latestPendingSession.id && item.type === latestRuntimeType
+            );
+          return latestAttentionItems.length > 0 || hasRuntimeItem;
+        });
+      } catch (error) {
+        setError(t(EXTERNAL_EDIT_SAFE_ERROR_KEY));
+      }
+    },
+    [assetId, continuePendingSession, setError, t]
+  );
+
   const handleCtxAction = useCallback(
     (action: string) => {
       if (!ctxMenu) return;
@@ -173,6 +379,11 @@ export function FileManagerPanel({
           break;
         case "download":
           if (entry) startDownload(transferTarget, getFullPath(entry));
+          break;
+        case "externalEdit":
+          if (entry) {
+            void handleOpenExternalEdit(getFullPath(entry));
+          }
           break;
         case "downloadDir":
           if (entry) startDownloadDir(transferTarget, getFullPath(entry));
@@ -201,6 +412,7 @@ export function FileManagerPanel({
       ctxMenu,
       currentPath,
       currentPathRef,
+      handleOpenExternalEdit,
       getFullPath,
       loadDir,
       navigateToPath,
@@ -267,14 +479,38 @@ export function FileManagerPanel({
               pathInput={pathInput}
             />
 
+            {pendingItems.length > 0 && (
+              <div className="border-b bg-amber-500/5 px-3 py-2">
+                <Button
+                  className="w-full justify-between"
+                  data-testid="external-edit-pending-entry"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setPendingDialogOpen(true)}
+                >
+                  <span className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    {t("externalEdit.pending.entry")}
+                  </span>
+                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
+                    {pendingItems.length}
+                  </span>
+                </Button>
+              </div>
+            )}
+
             <FileList
+              canExternalEdit={canExternalEdit}
               currentPath={currentPath}
               entries={entries}
               error={error}
               loading={loading}
+              onExternalOpen={handleOpenExternalEdit}
               onGoUp={goUp}
               onNavigate={(path) => void navigateToPath(path)}
-              onOpenContextMenu={(x, y, entry) => setCtxMenu({ x, y, entry })}
+              onOpenContextMenu={(x, y, entry) =>
+                setCtxMenu({ x, y, entry, canExternalEdit: entry ? canExternalEdit(entry) : false })
+              }
               onRetry={() => void loadDir(currentPathRef.current)}
               selected={selected}
               setSelected={setSelected}
@@ -286,6 +522,59 @@ export function FileManagerPanel({
       </div>
 
       {ctxMenu && <FloatingMenu ctx={ctxMenu} onAction={handleCtxAction} onClose={() => setCtxMenu(null)} />}
+
+      <ExternalEditPendingDialog
+        open={pendingDialogOpen}
+        onOpenChange={setPendingDialogOpen}
+        pendingItems={pendingItems}
+        savingSessionId={savingSessionId}
+        mergePrepareErrors={mergePrepareErrors}
+        continueEditLabel={continueEditLabel}
+        onOpenErrorDetail={openErrorDetail}
+        onMerge={handlePendingMerge}
+        onAcceptRemote={handlePendingAcceptRemote}
+        onOverwrite={handlePendingOverwrite}
+        onContinueEdit={handlePendingContinueEdit}
+      />
+
+      {safeCompareResult && (
+        <ExternalEditCompareWorkbench compareResult={safeCompareResult} onDismiss={dismissCompare} />
+      )}
+
+      {safeMergeResult && (
+        <ExternalEditMergeWorkbench
+          mergeResult={safeMergeResult}
+          savingSessionId={savingSessionId}
+          onClose={() => {
+            setPreparedMergeResult(null);
+            dismissMerge();
+          }}
+          onError={() => setError(t(EXTERNAL_EDIT_SAFE_ERROR_KEY))}
+        />
+      )}
+
+      <Dialog open={!!safeSelectedError} onOpenChange={(open) => !open && dismissErrorDetail()}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{t("externalEdit.error.title")}</DialogTitle>
+            <DialogDescription>{safeSelectedError ? `${safeSelectedError.remotePath}` : ""}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div>
+              <div className="text-xs text-muted-foreground">{t("externalEdit.error.summaryLabel")}</div>
+              <div>{safeSelectedError?.lastError?.summary || ""}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">{t("externalEdit.error.stepLabel")}</div>
+              <div>{safeSelectedError?.lastError?.step || ""}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">{t("externalEdit.error.suggestionLabel")}</div>
+              <div>{safeSelectedError?.lastError?.suggestion || ""}</div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={!!deleteTarget}

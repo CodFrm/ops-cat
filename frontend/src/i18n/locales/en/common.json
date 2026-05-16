@@ -72,6 +72,7 @@
     "copy": "Copy",
     "close": "Close",
     "submit": "Submit",
+    "browse": "Browse",
     "openInTab": "Open in New Tab",
     "editPermission": "Edit Permission",
     "open": "Open",
@@ -1019,6 +1020,135 @@
       "brightMagenta": "Bright Magenta",
       "brightCyan": "Bright Cyan",
       "brightWhite": "Bright White"
+    }
+  },
+  "externalEdit": {
+    "panel": {
+      "title": "External Edit",
+      "conflicts": "Conflicting Files",
+      "errors": "Recoverable Files",
+      "recoveries": "Recovery Entries",
+      "attentionCount": "{{count}} pending",
+      "remoteSnapshotReady": "remote snapshot ready",
+      "currentDraft": "Current Conflict Draft",
+      "retainedDraft": "Retained Draft",
+      "rereadDraft": "Reread Draft",
+      "rereadDraftHint": "Further edits keep using the current save/compare/conflict chain.",
+      "rereadBaselineHint": "After reading the remote version, edits will use that remote version as the baseline.",
+      "autoSavePending": "auto-save pending",
+      "autoSaveRunning": "auto-save running",
+      "recreateReadyHint": "The current active draft can recreate the missing remote file.",
+      "recreateUnavailableState": "Only available when the current active draft is in the Remote Missing state.",
+      "recreateUnavailableBusy": "Finish the current save first before recreating the remote file.",
+      "recreateUnavailableActiveDraft": "A newer active draft already exists. Continue from that draft instead."
+    },
+    "actions": {
+      "open": "Edit Externally",
+      "sync": "Save to Remote",
+      "refresh": "Refresh Remote State",
+      "compare": "Compare",
+      "acceptRemote": "Accept Remote",
+      "reread": "Read Remote Version",
+      "overwrite": "Overwrite Remote",
+      "saveAgain": "Recreate Remote File",
+      "viewError": "View Error",
+      "viewRecovery": "View Recovery",
+      "reopenLocal": "Reopen Local Draft",
+      "continueEdit": "Continue Editing",
+      "merge": "Three-way Merge",
+      "saveMerge": "Save Merged Draft",
+      "hideRecord": "Close Record (Keep Local Draft)",
+      "deleteLocal": "Delete Record and Local Draft"
+    },
+    "pending": {
+      "entry": "External Edit Pending",
+      "title": "External Edit Pending Files",
+      "description": "Conflicts, errors, and recovery files are handled here. Closing this dialog does not drop records.",
+      "empty": "No pending external edit files."
+    },
+    "state": {
+      "clean": "Synced",
+      "dirty": "Local Changes",
+      "conflict": "Remote Changed",
+      "remote_missing": "Remote Missing",
+      "stale": "Conflict Copy",
+      "expired": "Session Expired"
+    },
+    "recordState": {
+      "active": "Editing",
+      "conflict": "Conflict Pending",
+      "error": "Needs Recovery",
+      "completed": "Completed",
+      "abandoned": "Hidden"
+    },
+    "conflict": {
+      "remoteChangedTitle": "Remote File Changed",
+      "remoteMissingTitle": "Remote File Missing"
+    },
+    "error": {
+      "title": "Sync Failure Details",
+      "summaryLabel": "Summary",
+      "stepLabel": "Failed Step",
+      "suggestionLabel": "Suggested Action",
+      "safeActionFailed": "External edit action failed. Review the pending entry and retry."
+    },
+    "recovery": {
+      "title": "Recover External Edit",
+      "summary": "A local draft from the previous app session is available for recovery.",
+      "description": "Recovery only reopens the local draft and never uploads automatically. Save manually after checking the content."
+    },
+    "merge": {
+      "title": "Three-way Merge",
+      "localDraft": "Local Draft (read-only)",
+      "finalDraft": "Final Draft (editable)",
+      "remoteDraft": "Remote Version (read-only)",
+      "helper": "Local on the left, final draft in the middle, remote on the right. Remote freshness is checked again before saving.",
+      "changelist": "Conflict Files",
+      "readOnlySide": "Read-only",
+      "editableCenter": "Editable",
+      "status": "Three-way merge workbench",
+      "localCenterRemote": "Left local / center final / right remote",
+      "previous": "Previous conflict",
+      "next": "Next conflict",
+      "closeDirtyTitle": "Discard unsaved merge draft?",
+      "closeDirtyDesc": "Closing keeps the conflict record, but the unsaved final draft edits in this dialog will be lost.",
+      "closeDirtyConfirm": "Discard and Close"
+    },
+    "compare": {
+      "title": "Read-only Diff",
+      "localDraft": "Local Draft",
+      "remoteSnapshot": "Remote Snapshot",
+      "readOnly": "Read-only",
+      "projectView": "Conflict Files",
+      "status": "Read-only diff workbench",
+      "remoteLeftLocalRight": "Left remote / right local",
+      "previous": "Previous difference",
+      "next": "Next difference",
+      "loadFailed": "Diff view failed to load",
+      "helper": "Remote on the left, local on the right, with line numbers and synced scrolling for inspection."
+    },
+    "settings": {
+      "tab": "External Edit",
+      "title": "External Editors",
+      "desc": "Configure the default editor, local workspace, and custom editor entries.",
+      "defaultEditor": "Default Editor",
+      "workspaceRoot": "Workspace Root",
+      "cleanupRetentionDays": "Cleanup Retention Days",
+      "cleanupRetentionDaysHint": "Defaults to 7 days, range 1-365. Used to clean up non-active drafts and backup history copies.",
+      "maxReadFileSizeMB": "Max Read Size (MB)",
+      "maxReadFileSizeMBHint": "Defaults to 10 MB, range 1-1024 MB. Full-file reads above this limit are rejected and should be adjusted in Settings > External Edit.",
+      "customEditors": "Custom Editors",
+      "addEditor": "Add Custom Editor",
+      "addEditorTitle": "Add Custom Editor",
+      "editEditorTitle": "Edit Custom Editor",
+      "editorDialogDesc": "Edit one custom editor entry at a time, then save the whole settings snapshot.",
+      "editorPath": "Editor Path",
+      "editorArgs": "Launch Args",
+      "emptyCustomEditors": "No custom editors yet.",
+      "defaultBadge": "Default",
+      "noArgs": "No launch args",
+      "editorUnavailable": "Unavailable until the executable path is fixed",
+      "saved": "External edit settings saved"
     }
   },
   "integration": {
