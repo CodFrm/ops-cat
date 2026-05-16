@@ -66,7 +66,11 @@ vi.mock("@/components/CodeEditor", () => ({
       onMount?.(editor, monaco);
     };
     codeEditorMountController.mounts.push(mount);
-    return readOnly ? <pre data-testid={testId}>{value}</pre> : <textarea data-testid={testId} value={value || ""} readOnly />;
+    return readOnly ? (
+      <pre data-testid={testId}>{value}</pre>
+    ) : (
+      <textarea data-testid={testId} value={value || ""} readOnly />
+    );
   },
 }));
 
