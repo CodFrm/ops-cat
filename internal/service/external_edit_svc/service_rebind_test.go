@@ -1345,7 +1345,6 @@ func TestExternalEditManualRestoredDraftDoesNotAutoSave(t *testing.T) {
 	require.False(t, manual.Session.Hidden)
 }
 
-
 func TestExternalEditRestoreKeepsSavedDraftVisibleAndAbandonedHidden(t *testing.T) {
 	h := newRebindHarness(t, func(int64) []string { return []string{"ssh-b"} })
 	completed := h.openSession(t, "ssh-b", "/srv/app/completed.txt", "/srv/app/completed.txt", []byte("hello\n"))
